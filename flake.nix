@@ -412,13 +412,15 @@
                   last=$(( (k + 1) * per ))
                   offset=$(( k * per ))
                   echo "wiki-train: planning shard $k/$shards (articles $first..$last)"
-                  awk -v a="$first" -v b="$last" 'NR>b{exit} NR>=a' "$data" \
-                    | jq -j '.id, "\u0000", .text, "\u0000"' \
-                    | if [ "$size" = bpe10m ]; then
-                        ${cli} prepare-bpe-stdin "$tokenizer" "$corpus"
-                      else
-                        ${cli} prepare-stdin "$corpus"
-                      fi
+                  if [ ! -f "$corpus" ]; then
+                    awk -v a="$first" -v b="$last" 'NR>b{exit} NR>=a' "$data" \
+                      | jq -j '.id, "\u0000", .text, "\u0000"' \
+                      | if [ "$size" = bpe10m ]; then
+                          ${cli} prepare-bpe-stdin "$tokenizer" "$corpus"
+                        else
+                          ${cli} prepare-stdin "$corpus"
+                        fi
+                  fi
                   record="$(${cli} plan-segment "$corpus" "$offset" "$TRAIN_BATCH" "$size")"
                   read -r tag planned_offset documents corpus_id train_windows validation_windows steps <<< "$record"
                   if [ "$tag" != segment ] || [ "$planned_offset" != "$offset" ]; then

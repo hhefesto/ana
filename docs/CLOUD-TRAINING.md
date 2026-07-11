@@ -95,8 +95,10 @@ WIKI_KEEP_CORPORA=1 \
 nix run .#wiki-train
 ```
 
-This is CPU-intensive and resumable only after the plan is atomically
-published. Do not run a second planner against the same `WIKI_RUN_DIR`.
+This is CPU-intensive. Retained completed corpus shards are reused if planning
+is restarted, while the final plan itself is published only after every shard
+record has been validated. Do not run two planners against the same
+`WIKI_RUN_DIR` concurrently.
 
 Transfer the repository, the 6.6 GB compressed Wikipedia JSONL (or its
 decompressed source), the BPE artifact, the plan, and retained corpora to a
