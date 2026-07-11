@@ -1,0 +1,216 @@
+{-# LANGUAGE DeriveGeneric #-}
+
+module FormalTransformer.Artifact
+  ( Identity (..)
+  , PRNGState (..)
+  , Manifest (..)
+  , Checkpoint (..)
+  , artifactVersion
+  , validateCheckpoint
+  , saveCheckpointAtomic
+  , loadCheckpoint
+  , CorpusArtifact (..)
+  , corpusArtifactVersion
+  , datasetFingerprint
+  , validateCorpusArtifact
+  , saveCorpusAtomic
+  , loadCorpus
+  ) where
+
+import Control.Exception (IOException, bracketOnError, try)
+import Control.Monad (unless)
+import Data.Bits (xor)
+import Data.Binary (Binary, decodeOrFail, encode)
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as LBS
+import Data.List (sortOn)
+import Data.Word (Word32, Word64)
+import FormalTransformer.Config
+import FormalTransformer.Data (Document (..))
+import FormalTransformer.Layout (canonicalLayoutIdentity, canonicalLayoutVersion)
+import FormalTransformer.Optimizer
+import FormalTransformer.Tokenizer (byteTokenizerIdentity, validateByteTokens)
+import GHC.Generics (Generic)
+import Numeric (showHex)
+import System.Directory (doesFileExist, removeFile, renameFile)
+import System.FilePath (takeDirectory, takeFileName)
+import System.IO (hClose, hFlush, openBinaryTempFile)
+
+data Identity = Identity
+  { modelIdentity :: !String
+  , tokenizerIdentity :: !String
+  , datasetIdentity :: !String
+  } deriving (Eq, Show, Generic)
+
+instance Binary Identity
+
+data PRNGState = PRNGState !Word64 !Word64 !Word64 !Word64
+  deriving (Eq, Show, Generic)
+
+instance Binary PRNGState
+
+data Manifest = Manifest
+  { manifestVersion :: !Word32
+  , manifestConfig :: !Config
+  , manifestParameterCount :: !Int
+  , manifestLayoutIdentity :: !String
+  , manifestLayoutVersion :: !Word32
+  , manifestOptimizerConfig :: !AdamWConfig
+  , manifestIdentity :: !Identity
+  } deriving (Eq, Show, Generic)
+
+instance Binary Manifest
+
+data Checkpoint = Checkpoint
+  { checkpointManifest :: !Manifest
+  , checkpointParameters :: ![Double]
+  , checkpointOptimizer :: !AdamWState
+  , checkpointBestValidationLoss :: !(Maybe Double)
+  , checkpointPRNG :: !PRNGState
+  } deriving (Eq, Show, Generic)
+
+instance Binary Checkpoint
+
+data CorpusArtifact = CorpusArtifact
+  { corpusVersion :: !Word32
+  , corpusTokenizerIdentity :: !String
+  , corpusDatasetIdentity :: !String
+  , corpusDocuments :: ![Document]
+  } deriving (Eq, Show, Generic)
+
+instance Binary CorpusArtifact
+
+artifactVersion :: Word32
+artifactVersion = 1
+
+validateCheckpoint :: Checkpoint -> Either String Checkpoint
+validateCheckpoint checkpoint = do
+  let manifest = checkpointManifest checkpoint
+      cfg = manifestConfig manifest
+      expected = paramCount cfg
+      optimizer = checkpointOptimizer checkpoint
+      optimizerConfig = manifestOptimizerConfig manifest
+  _ <- validateConfig cfg
+  _ <- validateAdamWConfig optimizerConfig
+  unless (manifestVersion manifest == artifactVersion) (Left "unsupported checkpoint version")
+  unless (manifestParameterCount manifest == expected) (Left "manifest parameter count does not match config")
+  unless (not (null (manifestLayoutIdentity manifest))) (Left "checkpoint layout identity must be non-empty")
+  unless (manifestLayoutIdentity manifest == canonicalLayoutIdentity) (Left "unsupported checkpoint model layout identity")
+  unless (manifestLayoutVersion manifest == canonicalLayoutVersion) (Left "unsupported checkpoint model layout version")
+  unless (length (checkpointParameters checkpoint) == expected) (Left "checkpoint parameter vector has wrong length")
+  unless (length (firstMoment optimizer) == expected && length (secondMoment optimizer) == expected)
+    (Left "checkpoint optimizer vectors have wrong length")
+  unless (adamStep optimizer >= 0) (Left "checkpoint optimizer step is negative")
+  unless (adamStep optimizer <= totalSteps optimizerConfig) (Left "checkpoint optimizer step exceeds configured total steps")
+  unless (all finite (checkpointParameters checkpoint ++ firstMoment optimizer ++ secondMoment optimizer))
+    (Left "checkpoint contains non-finite numbers")
+  let identity = manifestIdentity manifest
+  unless (all (not . null) [modelIdentity identity, tokenizerIdentity identity, datasetIdentity identity])
+    (Left "checkpoint identities must be non-empty")
+  case checkpointBestValidationLoss checkpoint of
+    Nothing -> pure ()
+    Just value -> unless (finite value && value >= 0) (Left "best validation loss must be finite and nonnegative")
+  pure checkpoint
+  where finite x = not (isNaN x || isInfinite x)
+
+saveCheckpointAtomic :: FilePath -> Checkpoint -> IO (Either String ())
+saveCheckpointAtomic path checkpoint = case validateCheckpoint checkpoint of
+  Left message -> pure (Left message)
+  Right valid -> do
+    let directory = takeDirectory path
+        template = takeFileName path ++ ".tmp"
+    bracketOnError
+      (openBinaryTempFile directory template)
+      (\(temporary, handle) -> hClose handle >> removeFile temporary)
+      (\(temporary, handle) -> do
+        LBS.hPut handle (encode valid)
+        hFlush handle
+        hClose handle
+        renameFile temporary path)
+    pure (Right ())
+
+loadCheckpoint :: FilePath -> IO (Either String Checkpoint)
+loadCheckpoint path = readArtifactFile "checkpoint" hint path decode
+  where
+    hint = "train writes one, for example: formal-transformer-gpu train CORPUS "
+      ++ path ++ " STEPS [tiny|small]"
+    decode bytes = case decodeOrFail bytes of
+      Left (_, _, message) -> Left ("checkpoint decode failed: " ++ message
+        ++ " (is " ++ path ++ " really a checkpoint written by train?)")
+      Right (remaining, _, checkpoint)
+        | not (LBS.null remaining) -> Left "checkpoint has trailing bytes"
+        | otherwise -> validateCheckpoint checkpoint
+
+corpusArtifactVersion :: Word32
+corpusArtifactVersion = 1
+
+datasetFingerprint :: [(FilePath, BS.ByteString)] -> String
+datasetFingerprint inputs = "fnv1a64-noncryptographic:" ++ pad16 (showHex digest "")
+  where
+    canonicalBytes = LBS.toStrict (encode (sortOn fst inputs))
+    digest :: Word64
+    digest = BS.foldl' (\hash byte -> (hash `xor` fromIntegral byte) * 1099511628211) 14695981039346656037 canonicalBytes
+    pad16 value = replicate (16 - length value) '0' ++ value
+
+validateCorpusArtifact :: CorpusArtifact -> Either String CorpusArtifact
+validateCorpusArtifact corpus = do
+  unless (corpusVersion corpus == corpusArtifactVersion) (Left "unsupported corpus artifact version")
+  unless (corpusTokenizerIdentity corpus == byteTokenizerIdentity) (Left "corpus tokenizer identity is not the fixed byte tokenizer")
+  unless (not (null (corpusDatasetIdentity corpus))) (Left "corpus dataset identity must be non-empty")
+  let documents = corpusDocuments corpus
+      identifiers = map documentId documents
+  unless (all (not . null) identifiers) (Left "corpus document IDs must be non-empty")
+  unless (unique identifiers) (Left "corpus document IDs must be unique")
+  mapM_ (validateByteTokens . documentTokens) documents
+  pure corpus
+  where
+    unique [] = True
+    unique (value : remaining) = value `notElem` remaining && unique remaining
+
+saveCorpusAtomic :: FilePath -> CorpusArtifact -> IO (Either String ())
+saveCorpusAtomic path corpus = case validateCorpusArtifact corpus of
+  Left message -> pure (Left message)
+  Right valid -> saveBinaryAtomic path valid >> pure (Right ())
+
+loadCorpus :: FilePath -> IO (Either String CorpusArtifact)
+loadCorpus path = readArtifactFile "corpus" hint path decode
+  where
+    hint = "create one from text files with: formal-transformer prepare-bytes "
+      ++ path ++ " INPUT.txt ..."
+    decode bytes = case decodeOrFail bytes of
+      Left (_, _, message) -> Left ("corpus decode failed: " ++ message
+        ++ " (is " ++ path ++ " really a corpus written by prepare-bytes?)")
+      Right (remaining, _, corpus)
+        | not (LBS.null remaining) -> Left "corpus artifact has trailing bytes"
+        | otherwise -> validateCorpusArtifact corpus
+
+-- Artifact reads fail with an actionable message instead of a bare
+-- IOException: a missing path names the command that creates the artifact.
+readArtifactFile
+  :: String -> String -> FilePath
+  -> (LBS.ByteString -> Either String a) -> IO (Either String a)
+readArtifactFile kind hint path decode = do
+  exists <- doesFileExist path
+  if not exists
+    then pure (Left (kind ++ " file not found: " ++ path ++ "\n  " ++ hint))
+    else do
+      -- A strict read keeps every IO failure inside this try; a lazy read
+      -- would defer errors into the pure decoder.
+      contents <- try (BS.readFile path)
+      pure $ case contents of
+        Left exception -> Left ("could not read " ++ kind ++ " file " ++ path
+          ++ ": " ++ show (exception :: IOException))
+        Right bytes -> decode (LBS.fromStrict bytes)
+
+saveBinaryAtomic :: Binary a => FilePath -> a -> IO ()
+saveBinaryAtomic path value = do
+  let directory = takeDirectory path
+      template = takeFileName path ++ ".tmp"
+  bracketOnError
+    (openBinaryTempFile directory template)
+    (\(temporary, handle) -> hClose handle >> removeFile temporary)
+    (\(temporary, handle) -> do
+      LBS.hPut handle (encode value)
+      hFlush handle
+      hClose handle
+      renameFile temporary path)

@@ -1,0 +1,14 @@
+.direnv/
+dist-newstyle/
+result
+result-*
+*.agdai
+MAlonzo/
+backend/futhark/kernels.c
+backend/futhark/kernels.h
+backend/futhark/kernels.json
+backend/futhark/kernels
+*.checkpoint
+*.tmp
+/data/
+/run/
