@@ -72,6 +72,11 @@ disabled. There are no global postulates.
 - Futhark OpenCL source and GPU host compile-link successfully.
 - The sequential-C host completed 1,000 real updates of the 123,328-parameter
   `small` model with periodic exact checkpoints.
+- Offset-indexed shard splitting is tested equal to monolithic splitting, and
+  a two-segment smoke run preserved one global AdamW step/moment trajectory.
+- Full and reduced Futhark programs typecheck with on-device global-norm
+  clipping; the CUDA host compile-links without a GPU and rejects driver-stub
+  runtime RPATHs.
 
 ## Not Proved
 

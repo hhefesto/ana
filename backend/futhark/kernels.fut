@@ -81,6 +81,13 @@ entry micro_batch_loss_grad [batch] [sequence]
   let (partial_loss, gradient) = vjp2 partial params 1.0f32
   in (partial_loss, map2 (+) accumulator gradient)
 
+entry clip_global_norm [p] (max_norm: f32) (gradient: [p]f32)
+    : (f32, [p]f32) =
+  let checked = assert (max_norm > 0.0f32) gradient
+  let norm = f32.sqrt (f32.sum (map (\g -> g*g) checked))
+  let scale = if norm > max_norm then max_norm/(norm + 1.0e-12f32) else 1.0f32
+  in (norm, map (*scale) checked)
+
 -- One AdamW update.  decay_mask[i] selects decoupled weight decay for
 -- params[i]; moments never include the decay term.  step is one-based.
 entry adamw_step [p]

@@ -52,6 +52,7 @@ v*d + layers*(4*d*d + 3*f*d + 2*d) + d
   language-model projects.
 - `docs/PARALLEL-SCALING.md`: where linearity licenses parallelism, and the
   plan for scaling beyond this machine.
+- `docs/CLOUD-TRAINING.md`: budgeted CUDA deployment and rental procedure.
 - `docs/RUN-2026-07-10.md`: first live training report and GPU reset diagnosis.
 
 ## Verification
@@ -104,23 +105,20 @@ nix run .#wiki-generate   # generate text from the latest weights
 
 `wiki-train` with no arguments consumes the **entire local Wikipedia
 dataset** (`~/datasets/wikipedia-en/enwiki-natural-language.jsonl`, one
-article per line; override with `WIKI_DATA`). It walks the dump in shards
-of `WIKI_SHARD_ARTICLES` (default 4000) articles: each shard is prepared
-into a corpus on the fly, trained for one full epoch — enough steps that
-every training window of the shard has been consumed, in a deterministic
-full-coverage order over non-overlapping windows — with parameters
-warm-started from the previous shard's final weights, then marked done
-under `run/wiki/`. The newest weights are always at
-`run/wiki-latest.checkpoint`. The loop is resumable at every level
-(mid-shard via checkpoint snapshots, across shards via done markers) and
-it stops for exactly one reason: **all possible training material has
-been used**. Re-running after completion just reports that and exits.
+article per line; override with `WIKI_DATA`). Before step one it makes an
+atomic plan over bounded article shards. The plan fixes the complete dataset
+identity, exact update count, batch size, offset-invariant document split,
+and cumulative shard endpoints. Training then uses one checkpoint, one AdamW
+state, and one cosine schedule across every shard. Physical sharding is a
+bounded-memory implementation detail, not 1,465 fresh optimizer runs.
 
 ```bash
 nix run .#wiki-train                       # consume all of Wikipedia
 WIKI_SHARD_ARTICLES=16000 nix run .#wiki-train
 TRAIN_BATCH=8 nix run .#wiki-train
 WIKI_BACKEND=opencl nix run .#wiki-train   # GPU (see below)
+WIKI_BACKEND=cuda nix run .#wiki-train     # NVIDIA CUDA
+WIKI_SIZE=bpe10m WIKI_PLAN_ONLY=1 WIKI_KEEP_CORPORA=1 nix run .#wiki-train
 WIKI_CORPUS=my.corpus nix run .#wiki-train # single-corpus mode
 ```
 
@@ -128,17 +126,20 @@ With `WIKI_CORPUS` set, the old single-corpus behavior applies:
 one run into `WIKI_CHECKPOINT` (default `run/wiki-small.checkpoint`)
 toward `WIKI_STEPS` (default `epoch`).
 
-Contract notes: a run's schedule is anchored at creation, so a shard or
-single-corpus run must be resumed with the same corpus and `TRAIN_BATCH`
-it started with (see "Continuing Training"); warm starts copy parameters
-only — each shard is a new run with a fresh schedule, optimizer state, and
-its own bigram gate.
+Contract notes: a run's schedule is anchored at creation. Whole-dataset mode
+includes `TRAIN_BATCH` in its global plan identity; single-corpus epoch mode
+anchors the same value through its total step count. `MICRO_BATCH` and
+checkpoint cadence may change on resume.
 
 `wiki-train` defaults to `WIKI_BACKEND=multicore`: Futhark's multicore C
 backend runs every kernel data-parallel across all CPU cores, produces
 step-for-step identical losses to the sequential backend, and shares the
 same checkpoint format as every other backend. `WIKI_BACKEND=sequential`
 keeps the single-core oracle backend.
+
+`WIKI_BACKEND=cuda` uses the Nix-built Futhark CUDA host. It links the CUDA
+runtime and NVRTC from pinned Nixpkgs while resolving `libcuda.so.1` from the
+machine's NVIDIA driver. See `docs/CLOUD-TRAINING.md` before renting hardware.
 
 `WIKI_BACKEND=opencl` opts into the GPU: measured on the display-attached
 RX 580, the OpenCL program builds on the host CPU (about a minute cold;
@@ -174,6 +175,7 @@ The `inspect` command does not initialize OpenCL. `train` and `generate` do.
 nix run .#formal-transformer-gpu -- inspect tiny
 nix run .#formal-transformer-gpu -- train corpus.bin model.checkpoint 100 tiny
 nix run .#formal-transformer-gpu -- generate model.checkpoint "A formal language" 128
+nix run .#formal-transformer-cuda -- inspect bpe10m
 ```
 
 `STEPS` is the target completed step, not an additional step count. Optimizer
@@ -183,6 +185,8 @@ steps; both values can be changed through `TRAIN_BATCH` and `CHECKPOINT_EVERY`.
 `MICRO_BATCH` (default: `TRAIN_BATCH`) splits each effective batch into
 watchdog-sized accumulation chunks without changing what a step means (see
 `docs/TRAINING.md`).
+`GRAD_CLIP` defaults to global norm 1.0. Checkpoints and corpus documents use
+packed `f32` and `u16` wire arrays while legacy artifacts remain readable.
 
 ### Continuing Training
 

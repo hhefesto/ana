@@ -12,15 +12,20 @@ module FormalTransformer.Artifact
   , CorpusArtifact (..)
   , corpusArtifactVersion
   , datasetFingerprint
+  , datasetFingerprintDocuments
   , validateCorpusArtifact
+  , validateCorpusForTokenizer
   , saveCorpusAtomic
   , loadCorpus
+  , loadCorpusWithTokenizer
   ) where
 
 import Control.Exception (IOException, bracketOnError, try)
-import Control.Monad (unless)
+import Control.Monad (replicateM, unless)
 import Data.Bits (xor)
-import Data.Binary (Binary, decodeOrFail, encode)
+import Data.Binary (Binary, decodeOrFail, encode, get, put)
+import Data.Binary.Get (getFloatbe, getWord16be, getWord32be, getWord64be, runGetOrFail)
+import Data.Binary.Put (putFloatbe, putWord16be, putWord32be, putWord64be, runPut)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
 import Data.List (sortOn)
@@ -29,7 +34,14 @@ import FormalTransformer.Config
 import FormalTransformer.Data (Document (..))
 import FormalTransformer.Layout (canonicalLayoutIdentity, canonicalLayoutVersion)
 import FormalTransformer.Optimizer
-import FormalTransformer.Tokenizer (byteTokenizerIdentity, validateByteTokens)
+import FormalTransformer.Tokenizer
+  ( Tokenizer
+  , byteTokenizerIdentity
+  , tokenizerIdentityOf
+  , tokenizerVocabularyFromIdentity
+  , validateOrdinaryTokens
+  , validateByteTokens
+  )
 import GHC.Generics (Generic)
 import Numeric (showHex)
 import System.Directory (doesFileExist, removeFile, renameFile)
@@ -69,7 +81,11 @@ data Checkpoint = Checkpoint
   , checkpointPRNG :: !PRNGState
   } deriving (Eq, Show, Generic)
 
-instance Binary Checkpoint
+data LegacyCheckpoint = LegacyCheckpoint
+  !Manifest ![Double] !AdamWState !(Maybe Double) !PRNGState
+  deriving (Generic)
+
+instance Binary LegacyCheckpoint
 
 data CorpusArtifact = CorpusArtifact
   { corpusVersion :: !Word32
@@ -78,7 +94,11 @@ data CorpusArtifact = CorpusArtifact
   , corpusDocuments :: ![Document]
   } deriving (Eq, Show, Generic)
 
-instance Binary CorpusArtifact
+data LegacyCorpusArtifact = LegacyCorpusArtifact
+  !Word32 !String !String ![Document]
+  deriving (Generic)
+
+instance Binary LegacyCorpusArtifact
 
 artifactVersion :: Word32
 artifactVersion = 1
@@ -123,7 +143,7 @@ saveCheckpointAtomic path checkpoint = case validateCheckpoint checkpoint of
       (openBinaryTempFile directory template)
       (\(temporary, handle) -> hClose handle >> removeFile temporary)
       (\(temporary, handle) -> do
-        LBS.hPut handle (encode valid)
+        LBS.hPut handle (encodeCheckpointCompact valid)
         hFlush handle
         hClose handle
         renameFile temporary path)
@@ -134,15 +154,59 @@ loadCheckpoint path = readArtifactFile "checkpoint" hint path decode
   where
     hint = "train writes one, for example: formal-transformer-gpu train CORPUS "
       ++ path ++ " STEPS [tiny|small]"
-    decode bytes = case decodeOrFail bytes of
-      Left (_, _, message) -> Left ("checkpoint decode failed: " ++ message
-        ++ " (is " ++ path ++ " really a checkpoint written by train?)")
-      Right (remaining, _, checkpoint)
-        | not (LBS.null remaining) -> Left "checkpoint has trailing bytes"
-        | otherwise -> validateCheckpoint checkpoint
+    decode bytes
+      | LBS.take 4 bytes == runPut (putWord32be checkpointCompactMagic) =
+          decodeCheckpointCompact bytes >>= validateCheckpoint
+      | otherwise = case decodeOrFail bytes of
+          Left (_, _, message) -> Left ("checkpoint decode failed: " ++ message
+            ++ " (is " ++ path ++ " really a checkpoint written by train?)")
+          Right (remaining, _, LegacyCheckpoint manifest params optimizer best rng)
+            | not (LBS.null remaining) -> Left "checkpoint has trailing bytes"
+            | otherwise -> validateCheckpoint (Checkpoint manifest params optimizer best rng)
+
+checkpointCompactMagic :: Word32
+checkpointCompactMagic = 0x46544332
+
+encodeCheckpointCompact :: Checkpoint -> LBS.ByteString
+encodeCheckpointCompact checkpoint = runPut $ do
+  putWord32be checkpointCompactMagic
+  put (checkpointManifest checkpoint)
+  putF32List (checkpointParameters checkpoint)
+  let optimizer = checkpointOptimizer checkpoint
+  put (adamStep optimizer)
+  putF32List (firstMoment optimizer)
+  putF32List (secondMoment optimizer)
+  put (checkpointBestValidationLoss checkpoint)
+  put (checkpointPRNG checkpoint)
+  where
+    putF32List values = do
+      putWord64be (fromIntegral (length values))
+      mapM_ (putFloatbe . realToFrac) values
+
+decodeCheckpointCompact :: LBS.ByteString -> Either String Checkpoint
+decodeCheckpointCompact bytes = case runGetOrFail getCheckpoint bytes of
+  Left (_, _, message) -> Left ("compact checkpoint decode failed: " ++ message)
+  Right (remaining, _, checkpoint)
+    | not (LBS.null remaining) -> Left "checkpoint has trailing bytes"
+    | otherwise -> Right checkpoint
+  where
+    getCheckpoint = do
+      magic <- getWord32be
+      unless (magic == checkpointCompactMagic) (fail "wrong compact checkpoint magic")
+      manifest <- get
+      params <- getF32List
+      step <- get
+      first <- getF32List
+      second <- getF32List
+      best <- get
+      rng <- get
+      pure (Checkpoint manifest params (AdamWState step first second) best rng)
+    getF32List = do
+      count <- getWord64be
+      replicateM (fromIntegral count) (realToFrac <$> getFloatbe)
 
 corpusArtifactVersion :: Word32
-corpusArtifactVersion = 1
+corpusArtifactVersion = 2
 
 datasetFingerprint :: [(FilePath, BS.ByteString)] -> String
 datasetFingerprint inputs = "fnv1a64-noncryptographic:" ++ pad16 (showHex digest "")
@@ -152,37 +216,113 @@ datasetFingerprint inputs = "fnv1a64-noncryptographic:" ++ pad16 (showHex digest
     digest = BS.foldl' (\hash byte -> (hash `xor` fromIntegral byte) * 1099511628211) 14695981039346656037 canonicalBytes
     pad16 value = replicate (16 - length value) '0' ++ value
 
+datasetFingerprintDocuments :: String -> [Document] -> String
+datasetFingerprintDocuments tokenizer documents =
+  "fnv1a64-token-documents-v1:" ++ pad16 (showHex digest "")
+  where
+    digest :: Word64
+    digest = LBS.foldlChunks hashChunk 14695981039346656037 (encode (tokenizer, documents))
+    hashChunk :: Word64 -> BS.ByteString -> Word64
+    hashChunk = BS.foldl' (\hash byte -> (hash `xor` fromIntegral byte) * 1099511628211)
+    pad16 value = replicate (16 - length value) '0' ++ value
+
 validateCorpusArtifact :: CorpusArtifact -> Either String CorpusArtifact
 validateCorpusArtifact corpus = do
-  unless (corpusVersion corpus == corpusArtifactVersion) (Left "unsupported corpus artifact version")
-  unless (corpusTokenizerIdentity corpus == byteTokenizerIdentity) (Left "corpus tokenizer identity is not the fixed byte tokenizer")
+  unless (corpusVersion corpus == 1 || corpusVersion corpus == corpusArtifactVersion)
+    (Left "unsupported corpus artifact version")
   unless (not (null (corpusDatasetIdentity corpus))) (Left "corpus dataset identity must be non-empty")
   let documents = corpusDocuments corpus
       identifiers = map documentId documents
   unless (all (not . null) identifiers) (Left "corpus document IDs must be non-empty")
   unless (unique identifiers) (Left "corpus document IDs must be unique")
-  mapM_ (validateByteTokens . documentTokens) documents
+  if corpusVersion corpus == 1
+    then do
+      unless (corpusTokenizerIdentity corpus == byteTokenizerIdentity)
+        (Left "version-1 corpus tokenizer identity is not the fixed byte tokenizer")
+      mapM_ (validateByteTokens . documentTokens) documents
+    else case tokenizerVocabularyFromIdentity (corpusTokenizerIdentity corpus) of
+      Nothing -> Left "version-2 corpus has an unknown tokenizer identity"
+      Just vocabulary -> mapM_ (validateBounds vocabulary . documentTokens) documents
   pure corpus
   where
+    validateBounds vocabulary tokens = unless
+      (all (\token -> token >= 2 && token < vocabulary) tokens)
+      (Left ("corpus tokens must lie in [2," ++ show (vocabulary - 1) ++ "]"))
     unique [] = True
     unique (value : remaining) = value `notElem` remaining && unique remaining
+
+validateCorpusForTokenizer :: Tokenizer -> CorpusArtifact -> Either String CorpusArtifact
+validateCorpusForTokenizer tokenizer corpus = do
+  valid <- validateCorpusArtifact corpus
+  unless (corpusTokenizerIdentity valid == tokenizerIdentityOf tokenizer)
+    (Left "corpus tokenizer identity does not match the supplied tokenizer")
+  mapM_ (validateOrdinaryTokens tokenizer . documentTokens) (corpusDocuments valid)
+  pure valid
 
 saveCorpusAtomic :: FilePath -> CorpusArtifact -> IO (Either String ())
 saveCorpusAtomic path corpus = case validateCorpusArtifact corpus of
   Left message -> pure (Left message)
-  Right valid -> saveBinaryAtomic path valid >> pure (Right ())
+  Right valid -> saveLazyAtomic path (encodeCorpusCompact valid) >> pure (Right ())
 
 loadCorpus :: FilePath -> IO (Either String CorpusArtifact)
 loadCorpus path = readArtifactFile "corpus" hint path decode
   where
     hint = "create one from text files with: formal-transformer prepare-bytes "
       ++ path ++ " INPUT.txt ..."
-    decode bytes = case decodeOrFail bytes of
-      Left (_, _, message) -> Left ("corpus decode failed: " ++ message
-        ++ " (is " ++ path ++ " really a corpus written by prepare-bytes?)")
-      Right (remaining, _, corpus)
-        | not (LBS.null remaining) -> Left "corpus artifact has trailing bytes"
-        | otherwise -> validateCorpusArtifact corpus
+    decode bytes
+      | LBS.take 4 bytes == runPut (putWord32be corpusCompactMagic) =
+          decodeCorpusCompact bytes >>= validateCorpusArtifact
+      | otherwise = case decodeOrFail bytes of
+          Left (_, _, message) -> Left ("corpus decode failed: " ++ message
+            ++ " (is " ++ path ++ " really a corpus written by prepare-bytes?)")
+          Right (remaining, _, LegacyCorpusArtifact version tokenizer dataset documents)
+            | not (LBS.null remaining) -> Left "corpus artifact has trailing bytes"
+            | otherwise -> validateCorpusArtifact
+                (CorpusArtifact version tokenizer dataset documents)
+
+loadCorpusWithTokenizer :: Tokenizer -> FilePath -> IO (Either String CorpusArtifact)
+loadCorpusWithTokenizer tokenizer path = do
+  result <- loadCorpus path
+  pure (result >>= validateCorpusForTokenizer tokenizer)
+
+corpusCompactMagic :: Word32
+corpusCompactMagic = 0x46544343
+
+encodeCorpusCompact :: CorpusArtifact -> LBS.ByteString
+encodeCorpusCompact corpus = runPut $ do
+  putWord32be corpusCompactMagic
+  put (corpusVersion corpus)
+  put (corpusTokenizerIdentity corpus)
+  put (corpusDatasetIdentity corpus)
+  putWord64be (fromIntegral (length (corpusDocuments corpus)))
+  mapM_ putDocument (corpusDocuments corpus)
+  where
+    putDocument document = do
+      put (documentId document)
+      putWord64be (fromIntegral (length (documentTokens document)))
+      mapM_ (putWord16be . fromIntegral) (documentTokens document)
+
+decodeCorpusCompact :: LBS.ByteString -> Either String CorpusArtifact
+decodeCorpusCompact bytes = case runGetOrFail getCorpus bytes of
+  Left (_, _, message) -> Left ("compact corpus decode failed: " ++ message)
+  Right (remaining, _, corpus)
+    | not (LBS.null remaining) -> Left "corpus artifact has trailing bytes"
+    | otherwise -> Right corpus
+  where
+    getCorpus = do
+      magic <- getWord32be
+      unless (magic == corpusCompactMagic) (fail "wrong compact corpus magic")
+      version <- get
+      tokenizer <- get
+      dataset <- get
+      documentCount <- getWord64be
+      documents <- replicateM (fromIntegral documentCount) getDocument
+      pure (CorpusArtifact version tokenizer dataset documents)
+    getDocument = do
+      identifier <- get
+      tokenCount <- getWord64be
+      tokens <- replicateM (fromIntegral tokenCount) (fromIntegral <$> getWord16be)
+      pure (Document identifier tokens)
 
 -- Artifact reads fail with an actionable message instead of a bare
 -- IOException: a missing path names the command that creates the artifact.
@@ -202,15 +342,15 @@ readArtifactFile kind hint path decode = do
           ++ ": " ++ show (exception :: IOException))
         Right bytes -> decode (LBS.fromStrict bytes)
 
-saveBinaryAtomic :: Binary a => FilePath -> a -> IO ()
-saveBinaryAtomic path value = do
+saveLazyAtomic :: FilePath -> LBS.ByteString -> IO ()
+saveLazyAtomic path bytes = do
   let directory = takeDirectory path
       template = takeFileName path ++ ".tmp"
   bracketOnError
     (openBinaryTempFile directory template)
     (\(temporary, handle) -> hClose handle >> removeFile temporary)
     (\(temporary, handle) -> do
-      LBS.hPut handle (encode value)
+      LBS.hPut handle bytes
       hFlush handle
       hClose handle
       renameFile temporary path)

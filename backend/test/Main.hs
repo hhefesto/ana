@@ -3,6 +3,7 @@ module Main (main) where
 import Control.Exception (Exception, SomeException, displayException, finally, throwIO, try)
 import Control.Monad (forM_, unless)
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BSC
 import Data.Monoid (Sum (..))
 import FormalTransformer.AD
 import FormalTransformer.Artifact
@@ -26,6 +27,7 @@ main = do
 tests :: [(String, IO ())]
 tests =
   [ ("parameter count and layout coverage", testLayout)
+  , ("10M BPE preset has exact dimensions", testBpePreset)
   , ("invalid configurations are rejected", testConfigRejection)
   , ("causal prefix logits are invariant", testCausalPrefix)
   , ("weighted-language residual laws", testResidualLaws)
@@ -36,9 +38,11 @@ tests =
   , ("AdamW one-step equation", testAdamW)
   , ("document split is non-overlapping", testSplit)
   , ("byte tokenizer is lossless", testByteTokenizer)
+  , ("FastBPE artifact is strict and lossless", testFastBpe)
   , ("corpus artifact exact roundtrip", testCorpusArtifact)
   , ("corpus rejects malformed byte tokens", testMalformedCorpus)
   , ("document split is deterministic", testDeterministicSplit)
+  , ("offset shard splits equal monolithic split", testOffsetSplit)
   , ("checkpoint exact roundtrip", testCheckpoint)
   , ("checkpoint rejects malformed metadata", testCheckpointMetadata)
   , ("bigram exact counts and smoothing", testBigramCounts)
@@ -93,6 +97,15 @@ testLayout = do
   assert (paramCount config == vocabSize config * modelDim config
     + layerCount config * (4 * modelDim config ^ (2 :: Int) + 3 * ffDim config * modelDim config + 2 * modelDim config)
     + modelDim config) "parameter count formula differs"
+
+testBpePreset :: IO ()
+testBpePreset = do
+  _ <- expectRight (validateConfig bpe10mPreset)
+  layout <- expectRight (namedLayout bpe10mPreset)
+  assert (bpe10mPreset == Config 8192 256 320 864 6 5) "10M BPE preset dimensions differ"
+  assert (headDim bpe10mPreset == 64) "10M BPE head dimension differs"
+  assert (paramCount bpe10mPreset == 10059840) "10M BPE parameter count differs"
+  assert (sum (map sliceLength layout) == 10059840) "10M BPE layout does not cover parameters"
 
 testConfigRejection :: IO ()
 testConfigRejection = forM_ invalid $ \cfg ->
@@ -209,6 +222,30 @@ testByteTokenizer = do
   assert (tokens == [2 .. 257]) "byte token mapping is not byte+2"
   assert (byteVocabSize == 258 && bosToken == 0 && eosToken == 1) "fixed tokenizer constants differ"
 
+testFastBpe :: IO ()
+testFastBpe = do
+  temporaryDirectory <- getTemporaryDirectory
+  let path = temporaryDirectory </> "formal-transformer-test.bpe"
+      malformed = temporaryDirectory </> "formal-transformer-malformed.bpe"
+      cleanup file = do exists <- doesFileExist file; if exists then removeFile file else pure ()
+      cleanupAll = cleanup path >> cleanup malformed
+  cleanupAll
+  (do
+      BSC.writeFile path (BSC.pack "BPE 260\n34 118 258\n258 106 259\n")
+      bpe <- loadFastBpe path >>= expectRight
+      let tokenizer = FastBpeTokenizer bpe
+          bytes = BSC.pack " th\n th"
+          tokens = encodeWith tokenizer bytes
+      decoded <- expectRight (decodeWith tokenizer tokens)
+      assert (decoded == bytes) "FastBPE byte sequence did not roundtrip"
+      assert (tokens == [259, 12, 259]) "FastBPE rank-greedy encoding differs"
+      assert (tokenizerVocabSize tokenizer == 260) "FastBPE vocabulary differs"
+      assert (tokenizerVocabularyFromIdentity (tokenizerIdentityOf tokenizer) == Just 260)
+        "FastBPE identity does not expose its vocabulary"
+      BSC.writeFile malformed (BSC.pack "BPE 259\n34 300 258\n")
+      invalid <- loadFastBpe malformed
+      assert (isLeft invalid) "FastBPE accepted a future merge operand") `finally` cleanupAll
+
 testCorpusArtifact :: IO ()
 testCorpusArtifact = do
   temporaryDirectory <- getTemporaryDirectory
@@ -241,6 +278,23 @@ testDeterministicSplit = do
   let sources = [("b", BS.pack [2, 1]), ("a", BS.pack [0])]
   assert (datasetFingerprint sources == datasetFingerprint (reverse sources)) "dataset fingerprint depends on input ordering"
 
+testOffsetSplit :: IO ()
+testOffsetSplit = do
+  let documents = [Document ("doc-" ++ show i) [2 + (i + j) `mod` 250 | j <- [0 .. 8]]
+        | i <- [0 :: Int .. 36]]
+      chunks = [take 7 documents, take 11 (drop 7 documents), drop 18 documents]
+      offsets = [0, 7, 18]
+  whole <- expectRight (splitDocuments trainerSplitSeed trainerValidationFraction documents)
+  parts <- mapM (expectRight . uncurry (\offset ->
+    splitDocumentsFrom offset trainerSplitSeed trainerValidationFraction)) (zip offsets chunks)
+  assert (concatMap training parts == training whole) "sharded training document split differs"
+  assert (concatMap validation parts == validation whole) "sharded validation document split differs"
+  wholeWindows <- expectRight (trainerWindowSplit 4 documents)
+  partWindows <- mapM (expectRight . uncurry (\offset -> trainerWindowSplitFrom offset 4))
+    (zip offsets chunks)
+  assert (concatMap training partWindows == training wholeWindows) "sharded training windows differ"
+  assert (concatMap validation partWindows == validation wholeWindows) "sharded validation windows differ"
+
 testCheckpoint :: IO ()
 testCheckpoint = do
   temporaryDirectory <- getTemporaryDirectory
@@ -255,7 +309,12 @@ testCheckpoint = do
       saved <- saveCheckpointAtomic path checkpoint
       _ <- expectRight saved
       loaded <- loadCheckpoint path >>= expectRight
-      assert (loaded == checkpoint) "checkpoint did not roundtrip exactly"
+      let quantize = map (realToFrac . (realToFrac :: Double -> Float))
+      assert (checkpointManifest loaded == manifest) "checkpoint manifest did not roundtrip exactly"
+      assert (checkpointParameters loaded == quantize params) "checkpoint parameters did not roundtrip as f32"
+      assert (checkpointOptimizer loaded == initAdamW (paramCount config)) "checkpoint optimizer did not roundtrip"
+      assert (checkpointBestValidationLoss loaded == Just 1.2345) "checkpoint best loss did not roundtrip"
+      assert (checkpointPRNG loaded == PRNGState 1 2 3 4) "checkpoint PRNG did not roundtrip"
       assert (manifestOptimizerConfig (checkpointManifest loaded) == optimizerConfig) "changed optimizer configuration did not survive roundtrip") `finally` cleanup
 
 testCheckpointMetadata :: IO ()

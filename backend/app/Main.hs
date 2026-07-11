@@ -14,6 +14,7 @@ import FormalTransformer.Model
 import FormalTransformer.Optimizer
 import FormalTransformer.Tokenizer
 import System.Environment (getArgs)
+import System.IO (stdin)
 import Text.Read (readMaybe)
 
 main :: IO ()
@@ -28,11 +29,20 @@ main = do
     ["train-smoke"] -> trainSmoke
     ("prepare-bytes" : output : inputs@(_ : _)) -> prepareBytes output inputs
     ["prepare-stdin", output] -> prepareStdin output
+    ("prepare-bpe" : tokenizerPath : output : inputs@(_ : _)) ->
+      withFastBpe tokenizerPath (\tokenizer -> prepareFiles tokenizer output inputs)
+    ["prepare-bpe-stdin", tokenizerPath, output] ->
+      withFastBpe tokenizerPath (\tokenizer -> prepareStdinWith tokenizer output)
     ["inspect-corpus", path] -> inspectCorpus path
+    ["inspect-checkpoint", path] -> inspectCheckpoint path
+    ["compact-checkpoint", input, output] -> compactCheckpoint input output
+    ["plan-segment", path, offsetText, batchText, size] ->
+      planSegment path offsetText batchText size
     ["bigram-gate", path] -> bigramGateCommand path tinyPreset
     ["bigram-gate", path, "tiny"] -> bigramGateCommand path tinyPreset
     ["bigram-gate", path, "small"] -> bigramGateCommand path smallPreset
-    _ -> putStrLn "usage: formal-transformer (inspect | logits TOKENS | gradcheck | train-smoke | prepare-bytes OUTPUT INPUT... | prepare-stdin OUTPUT | inspect-corpus PATH | bigram-gate CORPUS [tiny|small])"
+    ["bigram-gate", path, "bpe10m"] -> bigramGateCommand path bpe10mPreset
+    _ -> putStrLn "usage: formal-transformer (inspect | logits TOKENS | gradcheck | train-smoke | prepare-bytes OUTPUT INPUT... | prepare-stdin OUTPUT | prepare-bpe TOKENIZER OUTPUT INPUT... | prepare-bpe-stdin TOKENIZER OUTPUT | inspect-corpus PATH | inspect-checkpoint PATH | compact-checkpoint INPUT OUTPUT | plan-segment CORPUS DOCUMENT_OFFSET TRAIN_BATCH SIZE | bigram-gate CORPUS [tiny|small|bpe10m])"
 
 tinyConfig :: Config
 tinyConfig = Config 5 6 4 6 2 2
@@ -98,52 +108,90 @@ trainSmoke = do
       adamWStep cfg mask state params gradient
 
 prepareBytes :: FilePath -> [FilePath] -> IO ()
-prepareBytes output paths = do
+prepareBytes = prepareFiles ByteTokenizer
+
+prepareFiles :: Tokenizer -> FilePath -> [FilePath] -> IO ()
+prepareFiles tokenizer output paths = do
   missing <- filterM (fmap not . doesFileExist) paths
   case missing of
     (_ : _) -> putStrLn ("prepare-bytes: input file(s) not found: " ++ unwords missing
       ++ "\n  every INPUT must be an existing text file; the corpus is written to " ++ output)
-    [] -> prepareBytesExisting output paths
+    [] -> do
+      contents <- mapM BS.readFile paths
+      writeSources tokenizer output (zip paths contents)
 
 -- Reads NUL-delimited (identifier, text) pairs from stdin and writes one
 -- corpus artifact with one document per pair.  Intended producer:
 --   jq -j '.id, "\u0000", .text, "\u0000"' articles.jsonl | \
 --     formal-transformer prepare-stdin shard.corpus
 prepareStdin :: FilePath -> IO ()
-prepareStdin output = do
-  input <- BS.getContents
-  let fields = BS.split 0 input
-      pair (identifier : text : rest) = (identifier, text) : pair rest
-      pair _ = []
-      sources =
-        [ ("curid-" ++ BSC.unpack identifier, bytes)
-        | (identifier, bytes) <- pair fields
-        , not (BS.null identifier)
-        ]
-  if null sources
-    then putStrLn "prepare-stdin: no documents on stdin (expected NUL-delimited id/text pairs)"
-    else writeCorpus output sources
+prepareStdin = prepareStdinWith ByteTokenizer
 
-prepareBytesExisting :: FilePath -> [FilePath] -> IO ()
-prepareBytesExisting output paths = do
-  contents <- mapM BS.readFile paths
-  writeCorpus output (zip paths contents)
+prepareStdinWith :: Tokenizer -> FilePath -> IO ()
+prepareStdinWith tokenizer output = do
+  result <- readNulDocuments tokenizer
+  case result of
+    Left message -> putStrLn ("prepare-stdin: " ++ message)
+    Right [] -> putStrLn "prepare-stdin: no documents on stdin (expected NUL-delimited id/text pairs)"
+    Right documents -> writeDocuments tokenizer output documents
 
-writeCorpus :: FilePath -> [(String, BS.ByteString)] -> IO ()
-writeCorpus output sources = do
+readNulDocuments :: Tokenizer -> IO (Either String [Document])
+readNulDocuments tokenizer = readMore BS.empty Nothing []
+  where
+    readMore pending identifier documents = do
+      chunk <- BS.hGetSome stdin 65536
+      if BS.null chunk
+        then if BS.null pending && maybe True (const False) identifier
+          then pure (Right (reverse documents))
+          else pure (Left "incomplete final NUL-delimited id/text pair")
+        else consume (pending <> chunk) identifier documents
+
+    consume bytes identifier documents = case BS.elemIndex 0 bytes of
+      Nothing -> readMore bytes identifier documents
+      Just index ->
+        let field = BS.take index bytes
+            remaining = BS.drop (index + 1) bytes
+        in case identifier of
+          Nothing
+            | BS.null field -> pure (Left "document id must not be empty")
+            | otherwise -> consume remaining (Just field) documents
+          Just documentIdBytes ->
+            let document = Document
+                  ("curid-" ++ BSC.unpack documentIdBytes)
+                  (encodeWith tokenizer field)
+            in consume remaining Nothing (document : documents)
+
+writeSources :: Tokenizer -> FilePath -> [(String, BS.ByteString)] -> IO ()
+writeSources tokenizer output sources = writeArtifact tokenizer output identity documents
+  where
+    identity = datasetFingerprint sources
+    documents = [Document name (encodeWith tokenizer bytes) | (name, bytes) <- sources]
+
+writeDocuments :: Tokenizer -> FilePath -> [Document] -> IO ()
+writeDocuments tokenizer output documents =
+  writeArtifact tokenizer output
+    (datasetFingerprintDocuments (tokenizerIdentityOf tokenizer) documents) documents
+
+writeArtifact :: Tokenizer -> FilePath -> String -> [Document] -> IO ()
+writeArtifact tokenizer output datasetFingerprintValue documents = do
   let corpus = CorpusArtifact
         { corpusVersion = corpusArtifactVersion
-        , corpusTokenizerIdentity = byteTokenizerIdentity
-        , corpusDatasetIdentity = datasetFingerprint sources
-        , corpusDocuments = [Document name (encodeBytes bytes) | (name, bytes) <- sources]
+        , corpusTokenizerIdentity = tokenizerIdentityOf tokenizer
+        , corpusDatasetIdentity = datasetFingerprintValue
+        , corpusDocuments = documents
         }
   result <- saveCorpusAtomic output corpus
   case result of
     Left message -> putStrLn message
     Right () -> do
       putStrLn ("wrote corpus: " ++ output)
-      putStrLn ("documents: " ++ show (length sources))
+      putStrLn ("documents: " ++ show (length documents))
       putStrLn ("dataset fingerprint: " ++ corpusDatasetIdentity corpus)
+
+withFastBpe :: FilePath -> (Tokenizer -> IO ()) -> IO ()
+withFastBpe path action = do
+  result <- loadFastBpe path
+  either putStrLn (action . FastBpeTokenizer) result
 
 inspectCorpus :: FilePath -> IO ()
 inspectCorpus path = do
@@ -153,9 +201,70 @@ inspectCorpus path = do
     Right corpus -> do
       putStrLn ("version: " ++ show (corpusVersion corpus))
       putStrLn ("tokenizer: " ++ corpusTokenizerIdentity corpus)
+      putStrLn ("vocabulary: " ++ maybe "unknown" show
+        (tokenizerVocabularyFromIdentity (corpusTokenizerIdentity corpus)))
       putStrLn ("dataset fingerprint: " ++ corpusDatasetIdentity corpus)
       putStrLn ("documents: " ++ show (length (corpusDocuments corpus)))
       putStrLn ("ordinary tokens: " ++ show (sum (map (length . documentTokens) (corpusDocuments corpus))))
+
+inspectCheckpoint :: FilePath -> IO ()
+inspectCheckpoint path = do
+  result <- loadCheckpoint path
+  case result of
+    Left message -> putStrLn message
+    Right checkpoint -> do
+      let manifest = checkpointManifest checkpoint
+          identity = manifestIdentity manifest
+      putStrLn ("artifact version: " ++ show (manifestVersion manifest))
+      putStrLn ("config: " ++ show (manifestConfig manifest))
+      putStrLn ("parameters: " ++ show (manifestParameterCount manifest))
+      putStrLn ("completed step: " ++ show (adamStep (checkpointOptimizer checkpoint)))
+      putStrLn ("total steps: " ++ show (totalSteps (manifestOptimizerConfig manifest)))
+      putStrLn ("model: " ++ modelIdentity identity)
+      putStrLn ("tokenizer: " ++ tokenizerIdentity identity)
+      putStrLn ("dataset: " ++ datasetIdentity identity)
+      putStrLn ("best validation loss: " ++ show (checkpointBestValidationLoss checkpoint))
+
+compactCheckpoint :: FilePath -> FilePath -> IO ()
+compactCheckpoint input output = do
+  checkpoint <- loadCheckpoint input
+  case checkpoint of
+    Left message -> putStrLn message
+    Right value -> do
+      saved <- saveCheckpointAtomic output value
+      case saved of
+        Left message -> putStrLn message
+        Right () -> putStrLn ("wrote compact checkpoint: " ++ output)
+
+planSegment :: FilePath -> String -> String -> String -> IO ()
+planSegment path offsetText batchText size = case (readMaybe offsetText, readMaybe batchText) of
+  (Just offset, Just batch) | batch > 0 -> do
+    result <- loadCorpus path
+    case result of
+      Left message -> putStrLn message
+      Right corpus -> case configFor size of
+        Nothing -> putStrLn "unknown model size (expected tiny, small, or bpe10m)"
+        Just cfg -> case trainerWindowSplitFrom offset (contextSize cfg) (corpusDocuments corpus) of
+          Left message -> putStrLn message
+          Right split -> do
+            let trainCount = length (training split)
+                validationCount = length (validation split)
+                steps = (trainCount + batch - 1) `div` batch
+            putStrLn (unwords
+              [ "segment"
+              , show offset
+              , show (length (corpusDocuments corpus))
+              , corpusDatasetIdentity corpus
+              , show trainCount
+              , show validationCount
+              , show steps
+              ])
+  _ -> putStrLn "DOCUMENT_OFFSET must be nonnegative and TRAIN_BATCH must be positive"
+  where
+    configFor "tiny" = Just tinyPreset
+    configFor "small" = Just smallPreset
+    configFor "bpe10m" = Just bpe10mPreset
+    configFor _ = Nothing
 
 bigramGateCommand :: FilePath -> Config -> IO ()
 bigramGateCommand path cfg = do

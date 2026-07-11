@@ -368,4 +368,24 @@ state and ..." forever, and what separates this model from GPT-2 level.
    (vocab ~8k) + context ≥256 + ~10M params on the GPU path — needs the
    watchdog reboot, then the kernel-split/matmul-shaped rewrite with the
    same-seed-identical-loss proof, then the KV cache; (e) only then the
-   GPT-2-small config (12L/d768/n1024, 124M) on rented or new hardware.
+    GPT-2-small config (12L/d768/n1024, 124M) on rented or new hardware.
+
+## Continuation: Rental-Ready Intermediate (2026-07-11)
+
+- Created root commit `2fb4a08` after `nix flake check` passed all seven checks.
+- Found and eliminated two concurrent writers to `run/wiki/shard-0.checkpoint`;
+  the canonical CPU trajectory was resumed as one process from the immutable
+  root commit.
+- Added strict FastBPE loading and semantic SHA-256 identity for the existing
+  `enwiki-8k.bpe`, compact `u16` corpus artifacts, BPE prompt generation, and
+  preset `Config 8192 256 320 864 6 5` (10,059,840 parameters).
+- Replaced parameter-only shard warm starts with a planned `train-segment`
+  protocol: one global checkpoint, AdamW state, schedule, and dataset identity;
+  global-offset split and segment-local epoch order.
+- Added compact `f32` checkpoints with legacy decoding, on-device gradient norm
+  clipping, and tokenizer-aware bits-per-byte validation logging.
+- Added the Nix `formal-transformer-cuda` package/app. CUDA 12.9 runtime and
+  NVRTC come from Nix; `libcuda.so.1` comes from the provider driver; the build
+  verifies no linker stub remains in runtime RPATH.
+- Selected one Verda spot RTX 6000 Ada as the first benchmark target under a
+  USD 50 cap. See `docs/CLOUD-TRAINING.md` and `deploy/`.

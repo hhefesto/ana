@@ -131,7 +131,7 @@ accepts the same variables; checkpoints are interchangeable between hosts.
 Raise `MICRO_BATCH` only after timing shows a chunk finishes well inside
 the watchdog on the actual device.
 
-### Tier 1 — one larger GPU (single dedicated device)
+### Tier 1 — one larger GPU (single dedicated device) — IMPLEMENTED FOR CUDA
 
 Goal: larger presets and contexts, same semantics, no code changes to the
 training contract.
@@ -141,8 +141,9 @@ training contract.
    hardware). For better schedulers, Futhark also compiles the same
    `kernels.fut` to CUDA (`futhark cuda`) and HIP (`futhark hip`); adding
    flake packages `formal-transformer-cuda`/`-hip` mirrors the existing
-   OpenCL derivation with only the compile line changed. The generated C
-   API is identical, so `FutharkKernels.hs` and both hosts need no edits.
+   OpenCL derivation with only the compile line changed. The CUDA package and
+   app now exist as `formal-transformer-cuda`, built from pinned Nix CUDA
+   runtime/NVRTC components while using the host's kernel driver.
    The conformance oracle must be run once against each new backend before
    it is trusted (it executes at build time in the `conformance` check).
 2. **Headless device = no watchdog pressure.** On a compute-only device,

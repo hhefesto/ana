@@ -1,6 +1,11 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
 
+#if defined(OPENCL_BACKEND) || defined(CUDA_BACKEND)
+#define REDUCED_GPU_BACKEND
+#define GPU_BACKEND
+#endif
+
 module FutharkKernels
   ( Context
   , F32Array
@@ -16,13 +21,14 @@ module FutharkKernels
   , withBool
   , downloadF32
   , freeF32
-#ifndef OPENCL_BACKEND
+#ifndef REDUCED_GPU_BACKEND
   , batchLossGrad
   , lossGrad
 #endif
   , batchMeanLoss
   , microBatchLossGrad
   , zeroVector
+  , clipGlobalNorm
   , futharkParameterCount
   , logits
   , adamwStep
@@ -34,7 +40,7 @@ import Control.Monad (when)
 import Data.Int (Int64)
 import Data.Word (Word8)
 import Foreign
-import Foreign.C.String (CString, newCString, peekCString)
+import Foreign.C.String (CString, peekCString, withCString)
 import Foreign.C.Types
 import FormalTransformer.Config (Config (..), validateConfig)
 import System.Environment (lookupEnv)
@@ -75,16 +81,34 @@ withContext action = bracket c_config_new c_config_free $ \cfg -> do
   let group = maybe 64 id (groupSize >>= readMaybe)
   when (group <= 0) (throwIO (userError "FUT_GROUP must be a positive integer"))
   c_config_group_size cfg group
+#endif
+#ifdef CUDA_BACKEND
+  blockSize <- lookupEnv "FUT_BLOCK_SIZE"
+  case blockSize of
+    Nothing -> pure ()
+    Just value -> case readMaybe value of
+      Just block | block > 0 -> c_config_block_size cfg block
+      _ -> throwIO (userError "FUT_BLOCK_SIZE must be a positive integer")
+#endif
+#ifdef GPU_BACKEND
   -- rusticl compiles the whole program on the host CPU at context
-  -- creation (~1 minute even for the reduced entry set); a cache file
-  -- stores the built binary so later contexts load it in seconds.
+  -- creation; CUDA likewise compiles embedded source with NVRTC.  Both
+  -- backends can persist their device-specific compiled program.
   cachePath <- lookupEnv "FUT_CACHE"
   case cachePath of
     Nothing -> pure ()
-    Just path -> newCString path >>= c_config_set_cache_file cfg
+    Just path -> withCString path (c_config_set_cache_file cfg)
+  device <- lookupEnv "FUT_DEVICE"
+  case device of
+    Nothing -> pure ()
+    Just value -> withCString value (c_config_set_device cfg)
 #endif
   bracket (c_context_new cfg) freeContext $ \ctx -> do
     when (ctx == nullPtr) (throwIO (userError "Futhark context creation failed"))
+    contextError <- c_context_get_error ctx
+    when (contextError /= nullPtr) $ do
+      detail <- peekCString contextError
+      throwIO (userError ("Futhark context creation failed: " ++ detail))
     action (Context ctx)
   where
     freeContext ctx = when (ctx /= nullPtr) (c_context_free ctx)
@@ -128,7 +152,7 @@ freeF32 (Context ctx) (F32Array arr) = c_free_f32_1d ctx arr >>= check ctx "free
 -- The full-batch and single-sequence gradient entries exist only in the
 -- full kernels.fut program (sequential C: conformance oracle); the OpenCL
 -- trainer program keeps micro_batch_loss_grad as its one vjp entry.
-#ifndef OPENCL_BACKEND
+#ifndef REDUCED_GPU_BACKEND
 batchLossGrad :: Context -> GpuConfig -> F32Array -> Ptr CI64_2d -> IO (Float, F32Array)
 batchLossGrad (Context ctx) cfg (F32Array params) tokens = alloca $ \loss -> alloca $ \gradient -> do
   status <- entry_batch_loss_grad ctx loss gradient (gpuVocab cfg) (gpuModelDim cfg) (gpuFfDim cfg) (gpuHeads cfg) (gpuLayers cfg) params tokens
@@ -154,6 +178,13 @@ zeroVector (Context ctx) count = alloca $ \out -> do
   check ctx "zero_vector sync" =<< c_context_sync ctx
   F32Array <$> peek out
 
+clipGlobalNorm :: Context -> Float -> F32Array -> IO (Float, F32Array)
+clipGlobalNorm (Context ctx) maxNorm (F32Array gradient) =
+  alloca $ \norm -> alloca $ \clipped -> do
+    check ctx "clip_global_norm" =<< entry_clip_global_norm ctx norm clipped maxNorm gradient
+    check ctx "clip_global_norm sync" =<< c_context_sync ctx
+    (,) <$> peek norm <*> (F32Array <$> peek clipped)
+
 batchMeanLoss :: Context -> GpuConfig -> F32Array -> Ptr CI64_2d -> IO Float
 batchMeanLoss (Context ctx) cfg (F32Array params) tokens = alloca $ \loss -> do
   check ctx "batch_mean_loss" =<< entry_batch_mean_loss ctx loss (gpuVocab cfg) (gpuModelDim cfg) (gpuFfDim cfg) (gpuHeads cfg) (gpuLayers cfg) params tokens
@@ -176,7 +207,7 @@ logits (Context ctx) cfg sequenceLength (F32Array params) (I64Array tokens) = al
       c_values_f32_2d ctx p values >>= check ctx "download f32[2]"
       rowsOf (fromIntegral (gpuVocab cfg)) <$> peekArray (sequenceLength * fromIntegral (gpuVocab cfg)) values
 
-#ifndef OPENCL_BACKEND
+#ifndef REDUCED_GPU_BACKEND
 lossGrad :: Context -> GpuConfig -> F32Array -> I64Array -> IO (Float, F32Array)
 lossGrad (Context ctx) cfg (F32Array params) (I64Array tokens) = alloca $ \loss -> alloca $ \gradient -> do
   check ctx "loss_grad" =<< entry_loss_grad ctx loss gradient (gpuVocab cfg) (gpuModelDim cfg) (gpuFfDim cfg) (gpuHeads cfg) (gpuLayers cfg) params tokens
@@ -219,7 +250,13 @@ foreign import ccall unsafe "futhark_context_config_new" c_config_new :: IO (Ptr
 foreign import ccall unsafe "futhark_context_config_free" c_config_free :: Ptr CContextConfig -> IO ()
 #ifdef OPENCL_BACKEND
 foreign import ccall unsafe "futhark_context_config_set_default_group_size" c_config_group_size :: Ptr CContextConfig -> Int -> IO ()
+#endif
+#ifdef CUDA_BACKEND
+foreign import ccall unsafe "futhark_context_config_set_default_thread_block_size" c_config_block_size :: Ptr CContextConfig -> Int -> IO ()
+#endif
+#ifdef GPU_BACKEND
 foreign import ccall unsafe "futhark_context_config_set_cache_file" c_config_set_cache_file :: Ptr CContextConfig -> CString -> IO ()
+foreign import ccall unsafe "futhark_context_config_set_device" c_config_set_device :: Ptr CContextConfig -> CString -> IO ()
 #endif
 foreign import ccall safe "futhark_context_new" c_context_new :: Ptr CContextConfig -> IO (Ptr CContext)
 foreign import ccall safe "futhark_context_free" c_context_free :: Ptr CContext -> IO ()
@@ -236,13 +273,14 @@ foreign import ccall safe "futhark_new_i64_2d" c_new_i64_2d :: Ptr CContext -> P
 foreign import ccall safe "futhark_free_i64_2d" c_free_i64_2d :: Ptr CContext -> Ptr CI64_2d -> IO CInt
 foreign import ccall safe "futhark_new_bool_1d" c_new_bool_1d :: Ptr CContext -> Ptr Word8 -> Int64 -> IO (Ptr CBool_1d)
 foreign import ccall safe "futhark_free_bool_1d" c_free_bool_1d :: Ptr CContext -> Ptr CBool_1d -> IO CInt
-#ifndef OPENCL_BACKEND
+#ifndef REDUCED_GPU_BACKEND
 foreign import ccall safe "futhark_entry_batch_loss_grad" entry_batch_loss_grad :: Ptr CContext -> Ptr Float -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CI64_2d -> IO CInt
 foreign import ccall safe "futhark_entry_loss_grad" entry_loss_grad :: Ptr CContext -> Ptr Float -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CI64_1d -> IO CInt
 #endif
 foreign import ccall safe "futhark_entry_batch_mean_loss" entry_batch_mean_loss :: Ptr CContext -> Ptr Float -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CI64_2d -> IO CInt
 foreign import ccall safe "futhark_entry_micro_batch_loss_grad" entry_micro_batch_loss_grad :: Ptr CContext -> Ptr Float -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CI64_2d -> IO CInt
 foreign import ccall safe "futhark_entry_zero_vector" entry_zero_vector :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> IO CInt
+foreign import ccall safe "futhark_entry_clip_global_norm" entry_clip_global_norm :: Ptr CContext -> Ptr Float -> Ptr (Ptr CF32_1d) -> Float -> Ptr CF32_1d -> IO CInt
 foreign import ccall safe "futhark_entry_n_params" entry_n_params :: Ptr CContext -> Ptr Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> IO CInt
 foreign import ccall safe "futhark_entry_logits" entry_logits :: Ptr CContext -> Ptr (Ptr CF32_2d) -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CI64_1d -> IO CInt
 foreign import ccall safe "futhark_entry_adamw_step" entry_adamw_step :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Int64 -> Float -> Float -> Float -> Float -> Float -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CBool_1d -> IO CInt

@@ -16,11 +16,13 @@ module FormalTransformer.Bigram
   , windowCrossEntropy
   , BigramGateReport (..)
   , bigramGate
+  , bigramGateFrom
   ) where
 
 import Control.Monad (when)
 import qualified Data.Map.Strict as Map
 import Data.Monoid (Sum (..))
+import Data.Word (Word64)
 
 import FormalTransformer.Config
 import FormalTransformer.Data
@@ -89,8 +91,11 @@ data BigramGateReport = BigramGateReport
 -- windows) plus the full validation split, so the report survives a
 -- change of sampling policy.
 bigramGate :: Config -> [Document] -> Either String BigramGateReport
-bigramGate cfg documents = do
-  docs <- splitDocuments trainerSplitSeed trainerValidationFraction documents
+bigramGate = bigramGateFrom 0
+
+bigramGateFrom :: Word64 -> Config -> [Document] -> Either String BigramGateReport
+bigramGateFrom offset cfg documents = do
+  docs <- splitDocumentsFrom offset trainerSplitSeed trainerValidationFraction documents
   let width = contextSize cfg
       trainWindows = concatMap (fullWindows width) (training docs)
       valWindows = concatMap (fullWindows width) (validation docs)

@@ -16,11 +16,20 @@
       packages = forAllSystems (
         system:
         let
-          pkgs = import nixpkgs { inherit system; };
+          pkgs = import nixpkgs {
+            inherit system;
+            config.allowUnfree = true;
+          };
           haskellPackage = pkgs.haskellPackages.callCabal2nix "formal-transformer" ./. { };
           futharkKernels = self.packages.${system}.futhark-kernels;
+          futharkKernelsCuda = self.packages.${system}.futhark-kernels-cuda;
+          cudaCudart = pkgs.cudaPackages.cuda_cudart;
+          cudaCccl = pkgs.cudaPackages.cccl;
+          cudaNvcc = pkgs.cudaPackages.cuda_nvcc;
+          cudaNvrtc = pkgs.cudaPackages.cuda_nvrtc;
           gpuGhc = pkgs.haskellPackages.ghcWithPackages (p: [
             p.binary
+            p.cryptohash-sha256
             p.text
             p.vector
           ]);
@@ -43,6 +52,25 @@
               # with vjp-generated code, so the OpenCL trainer program keeps
               # a single differentiated entry (micro_batch_loss_grad).
               futhark opencl --library backend/futhark/kernels-opencl.fut -o kernels
+              runHook postBuild
+            '';
+            installPhase = ''
+              runHook preInstall
+              mkdir -p $out/lib $out/include $out/share/formal-transformer
+              cp kernels.c $out/lib/
+              cp kernels.h $out/include/
+              cp kernels.json $out/share/formal-transformer/
+              runHook postInstall
+            '';
+          };
+          futhark-kernels-cuda = pkgs.stdenv.mkDerivation {
+            pname = "formal-transformer-futhark-kernels-cuda";
+            version = "0.1.0";
+            src = ./.;
+            nativeBuildInputs = [ pkgs.futhark ];
+            buildPhase = ''
+              runHook preBuild
+              futhark cuda --library backend/futhark/kernels-opencl.fut -o kernels
               runHook postBuild
             '';
             installPhase = ''
@@ -81,6 +109,54 @@
               cp formal-transformer-gpu $out/bin/
               runHook postInstall
             '';
+          };
+          formal-transformer-cuda = pkgs.stdenv.mkDerivation {
+            pname = "formal-transformer-cuda";
+            version = "0.1.0";
+            src = ./.;
+            __structuredAttrs = true;
+            strictDeps = true;
+            nativeBuildInputs = [
+              gpuGhc
+              pkgs.cudaPackages.removeStubsFromRunpathHook
+              pkgs.patchelf
+            ];
+            buildInputs = [
+              cudaCccl
+              cudaCudart
+              cudaNvcc
+              cudaNvrtc
+            ];
+            buildPhase = ''
+              runHook preBuild
+              $CC -O2 -c ${futharkKernelsCuda}/lib/kernels.c \
+                -I${futharkKernelsCuda}/include \
+                -I${cudaCudart}/include -I${cudaCccl}/include \
+                -I${cudaNvcc}/include \
+                -I${cudaNvrtc.include}/include \
+                -o kernels.o
+              ghc -O2 -threaded -DCUDA_BACKEND \
+                -ibackend/gpu -ibackend/src \
+                backend/gpu/Main.hs backend/gpu/FutharkKernels.hs kernels.o \
+                -optl-L${cudaCudart}/lib/stubs \
+                -optl-L${cudaCudart}/lib -optl-L${cudaNvrtc.lib}/lib \
+                -optl-lcuda -optl-lcudart -optl-lnvrtc -optl-lm -optl-lpthread \
+                -o formal-transformer-cuda
+              runHook postBuild
+            '';
+            installPhase = ''
+              runHook preInstall
+              mkdir -p $out/bin
+              cp formal-transformer-cuda $out/bin/
+              runHook postInstall
+            '';
+            postFixup = ''
+              removeStubsFromRunpath $out/bin/formal-transformer-cuda
+              case "$(patchelf --print-rpath $out/bin/formal-transformer-cuda)" in
+                *stubs*) echo "CUDA driver stubs leaked into runtime RPATH" >&2; exit 1 ;;
+              esac
+            '';
+            meta.platforms = [ "x86_64-linux" ];
           };
           formal-transformer-sequential = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-sequential";
@@ -169,7 +245,10 @@
       checks = forAllSystems (
         system:
         let
-          pkgs = import nixpkgs { inherit system; };
+          pkgs = import nixpkgs {
+            inherit system;
+            config.allowUnfree = true;
+          };
           agda = pkgs.agda.withPackages (p: [ p.standard-library ]);
         in
         {
@@ -202,6 +281,7 @@
                 touch $out
               '';
           gpu-host = self.packages.${system}.formal-transformer-gpu;
+          cuda-host = self.packages.${system}.formal-transformer-cuda;
           sequential-host = self.packages.${system}.formal-transformer-sequential;
           conformance = self.packages.${system}.conformance;
         }
@@ -210,11 +290,15 @@
       apps = forAllSystems (
         system:
         let
-          pkgs = import nixpkgs { inherit system; };
+          pkgs = import nixpkgs {
+            inherit system;
+            config.allowUnfree = true;
+          };
           cli = "${self.packages.${system}.formal-transformer}/bin/formal-transformer";
           sequential = "${self.packages.${system}.formal-transformer-sequential}/bin/formal-transformer-sequential";
           multicore = "${self.packages.${system}.formal-transformer-multicore}/bin/formal-transformer-multicore";
           gpu = "${self.packages.${system}.formal-transformer-gpu}/bin/formal-transformer-gpu";
+          cuda = "${self.packages.${system}.formal-transformer-cuda}/bin/formal-transformer-cuda";
           # Zero-argument Wikipedia training: starts a fresh run or resumes
           # the checkpoint it wrote last time.  Every default is an env
           # override, but the schedule is anchored to WIKI_STEPS at run
@@ -244,6 +328,10 @@
                   # One sequence per launch keeps each kernel watchdog-sized.
                   export MICRO_BATCH="''${MICRO_BATCH:-1}"
                   trainer=${gpu} ;;
+                cuda)
+                  export MICRO_BATCH="''${MICRO_BATCH:-$TRAIN_BATCH}"
+                  export FUT_CACHE="''${FUT_CACHE:-run/futhark-cuda.cache}"
+                  trainer=${cuda} ;;
                 multicore)
                   export MICRO_BATCH="''${MICRO_BATCH:-$TRAIN_BATCH}"
                   trainer=${multicore} ;;
@@ -251,7 +339,7 @@
                   export MICRO_BATCH="''${MICRO_BATCH:-$TRAIN_BATCH}"
                   trainer=${sequential} ;;
                 *)
-                  echo "wiki-train: unknown WIKI_BACKEND '$backend' (expected multicore, sequential, or opencl)" >&2
+                  echo "wiki-train: unknown WIKI_BACKEND '$backend' (expected cuda, multicore, sequential, or opencl)" >&2
                   exit 1 ;;
               esac
               if [ "$backend" = opencl ]; then
@@ -282,8 +370,16 @@
               fi
               rundir="''${WIKI_RUN_DIR:-run/wiki}"
               per="''${WIKI_SHARD_ARTICLES:-4000}"
+              tokenizer="''${WIKI_TOKENIZER:-$HOME/datasets/wikipedia-en/enwiki-8k.bpe}"
+              if [ "$size" = bpe10m ] && [ ! -f "$tokenizer" ]; then
+                echo "wiki-train: BPE tokenizer not found: $tokenizer" >&2
+                echo "  set WIKI_TOKENIZER to the versioned 8192-token .bpe artifact" >&2
+                exit 1
+              fi
+              if [ "$size" = bpe10m ]; then
+                export TOKENIZER_FILE="$tokenizer"
+              fi
               mkdir -p "$rundir"
-              latest="run/wiki-latest.checkpoint"
               counted="$rundir/article-count"
               if [ ! -f "$counted" ]; then
                 echo "wiki-train: counting articles in $data (one-time pass)..."
@@ -292,32 +388,104 @@
               total="$(cat "$counted")"
               shards=$(( (total + per - 1) / per ))
               echo "wiki-train: $total articles, $per per shard -> $shards shards, size=$size backend=$backend"
-              k=0
-              while [ "$k" -lt "$shards" ]; do
-                marker="$rundir/shard-$k.done"
-                if [ -f "$marker" ]; then k=$((k + 1)); continue; fi
-                corpus="$rundir/shard-$k.corpus"
-                checkpoint="$rundir/shard-$k.checkpoint"
-                start=$(( k * per + 1 ))
-                end=$(( (k + 1) * per ))
-                if [ ! -f "$corpus" ]; then
-                  echo "wiki-train: preparing shard $k (articles $start..$end)"
-                  awk -v a="$start" -v b="$end" 'NR>b{exit} NR>=a' "$data" \
+              data_hash="$(sha256sum "$data" | cut -d ' ' -f 1)"
+              if [ "$size" = bpe10m ]; then
+                tokenizer_hash="$(sha256sum "$tokenizer" | cut -d ' ' -f 1)"
+              else
+                tokenizer_hash=lossless-byte-v1
+              fi
+              global_id="wikipedia-global-v1:sha256=$data_hash:articles=$total:shard=$per:batch=$TRAIN_BATCH:size=$size:tokenizer=$tokenizer_hash"
+              plan="$rundir/plan-$size-b$TRAIN_BATCH-s$per.tsv"
+
+              # The cosine schedule must know its global total before step 1.
+              # Plan one bounded shard at a time using the trainer's exact
+              # split/window semantics, then atomically publish the plan.
+              if [ ! -f "$plan" ]; then
+                segments="$plan.segments.tmp"
+                pending="$plan.tmp"
+                rm -f "$segments" "$pending"
+                cumulative=0
+                k=0
+                while [ "$k" -lt "$shards" ]; do
+                  corpus="$rundir/shard-$k-$size.corpus"
+                  first=$(( k * per + 1 ))
+                  last=$(( (k + 1) * per ))
+                  offset=$(( k * per ))
+                  echo "wiki-train: planning shard $k/$shards (articles $first..$last)"
+                  awk -v a="$first" -v b="$last" 'NR>b{exit} NR>=a' "$data" \
                     | jq -j '.id, "\u0000", .text, "\u0000"' \
-                    | ${cli} prepare-stdin "$corpus"
+                    | if [ "$size" = bpe10m ]; then
+                        ${cli} prepare-bpe-stdin "$tokenizer" "$corpus"
+                      else
+                        ${cli} prepare-stdin "$corpus"
+                      fi
+                  record="$(${cli} plan-segment "$corpus" "$offset" "$TRAIN_BATCH" "$size")"
+                  read -r tag planned_offset documents corpus_id train_windows validation_windows steps <<< "$record"
+                  if [ "$tag" != segment ] || [ "$planned_offset" != "$offset" ]; then
+                    echo "wiki-train: invalid segment plan output: $record" >&2
+                    exit 1
+                  fi
+                  segment_start=$cumulative
+                  cumulative=$(( cumulative + steps ))
+                  printf 'segment %s %s %s %s %s %s %s %s %s\n' \
+                    "$k" "$offset" "$documents" "$corpus_id" "$train_windows" \
+                    "$validation_windows" "$steps" "$segment_start" "$cumulative" >> "$segments"
+                  if [ "''${WIKI_KEEP_CORPORA:-0}" != 1 ]; then
+                    rm -f "$corpus"
+                  fi
+                  k=$((k + 1))
+                done
+                printf 'plan 1 %s %s %s %s %s %s %s %s\n' \
+                  "$cumulative" "$global_id" "$data_hash" "$total" "$per" \
+                  "$TRAIN_BATCH" "$size" "$tokenizer_hash" > "$pending"
+                cat "$segments" >> "$pending"
+                mv "$pending" "$plan"
+                rm -f "$segments"
+              fi
+
+              read -r plan_tag plan_version global_total planned_global_id \
+                planned_data_hash planned_total planned_per planned_batch \
+                planned_size planned_tokenizer_hash < "$plan"
+              if [ "$plan_tag" != plan ] || [ "$plan_version" != 1 ] \
+                || [ "$planned_global_id" != "$global_id" ] \
+                || [ "$planned_data_hash" != "$data_hash" ] \
+                || [ "$planned_total" != "$total" ] || [ "$planned_per" != "$per" ] \
+                || [ "$planned_batch" != "$TRAIN_BATCH" ] || [ "$planned_size" != "$size" ] \
+                || [ "$planned_tokenizer_hash" != "$tokenizer_hash" ]; then
+                echo "wiki-train: existing plan does not match this dataset/run configuration" >&2
+                exit 1
+              fi
+              if [ "''${WIKI_PLAN_ONLY:-0}" = 1 ]; then
+                echo "wiki-train: plan complete: $plan ($global_total global steps)"
+                exit 0
+              fi
+
+              checkpoint="''${WIKI_CHECKPOINT:-run/wiki-$size-global.checkpoint}"
+              unset TRAIN_INIT
+              while read -r tag k offset documents corpus_id train_windows \
+                validation_windows steps segment_start segment_end; do
+                if [ "$tag" != segment ]; then continue; fi
+                marker="$rundir/shard-$k-$size.done"
+                if [ -f "$marker" ]; then continue; fi
+                corpus="$rundir/shard-$k-$size.corpus"
+                first=$(( offset + 1 ))
+                last=$(( offset + documents ))
+                if [ ! -f "$corpus" ]; then
+                  echo "wiki-train: preparing shard $k (articles $first..$last)"
+                  awk -v a="$first" -v b="$last" 'NR>b{exit} NR>=a' "$data" \
+                    | jq -j '.id, "\u0000", .text, "\u0000"' \
+                    | if [ "$size" = bpe10m ]; then
+                        ${cli} prepare-bpe-stdin "$tokenizer" "$corpus"
+                      else
+                        ${cli} prepare-stdin "$corpus"
+                      fi
                 fi
-                if [ -f "$latest" ] && [ ! -f "$checkpoint" ]; then
-                  export TRAIN_INIT="$latest"
-                else
-                  unset TRAIN_INIT
-                fi
-                echo "wiki-train: shard $k/$shards"
-                "$trainer" train "$corpus" "$checkpoint" epoch "$size"
-                cp "$checkpoint" "$latest"
+                echo "wiki-train: shard $k/$shards global steps $segment_start..$segment_end/$global_total"
+                "$trainer" train-segment "$corpus" "$checkpoint" "$global_total" \
+                  "$segment_start" "$segment_end" "$offset" "$global_id" "$corpus_id" "$size"
                 touch "$marker"
-                rm -f "$corpus" "$checkpoint"
-                k=$((k + 1))
-              done
+                rm -f "$corpus"
+              done < "$plan"
               echo "wiki-train: all $shards shards complete - the entire dataset has been consumed"
             '';
           };
@@ -330,6 +498,8 @@
               tokens="''${WIKI_TOKENS:-128}"
               if [ -n "''${WIKI_CHECKPOINT:-}" ]; then
                 checkpoint="$WIKI_CHECKPOINT"
+              elif [ -f run/wiki-bpe10m-global.checkpoint ]; then
+                checkpoint=run/wiki-bpe10m-global.checkpoint
               elif [ -f run/wiki-latest.checkpoint ]; then
                 checkpoint=run/wiki-latest.checkpoint
               elif [ -f run/wiki-small.checkpoint ]; then
@@ -343,6 +513,7 @@
                 echo "  train first: nix run .#wiki-train" >&2
                 exit 1
               fi
+              export TOKENIZER_FILE="''${WIKI_TOKENIZER:-$HOME/datasets/wikipedia-en/enwiki-8k.bpe}"
               echo "wiki-generate: checkpoint=$checkpoint tokens=$tokens" >&2
               exec ${sequential} generate "$checkpoint" "$prompt" "$tokens"
             '';
@@ -369,6 +540,11 @@
           program = "${self.packages.${system}.formal-transformer-gpu}/bin/formal-transformer-gpu";
           meta.description = "Train and generate with the Futhark OpenCL backend";
         };
+        formal-transformer-cuda = {
+          type = "app";
+          program = "${self.packages.${system}.formal-transformer-cuda}/bin/formal-transformer-cuda";
+          meta.description = "Train and generate with the Futhark CUDA backend";
+        };
         formal-transformer-sequential = {
           type = "app";
           program = "${
@@ -381,7 +557,10 @@
       devShells = forAllSystems (
         system:
         let
-          pkgs = import nixpkgs { inherit system; };
+          pkgs = import nixpkgs {
+            inherit system;
+            config.allowUnfree = true;
+          };
           agda = pkgs.agda.withPackages (p: [ p.standard-library ]);
         in
         {

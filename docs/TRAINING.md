@@ -2,9 +2,11 @@
 
 ## Corpus
 
-`prepare-bytes` creates a versioned binary corpus with one document per input
-file. It records the fixed tokenizer identity and a deterministic labeled FNV-1a
-fingerprint. The fingerprint is not cryptographic.
+`prepare-bytes` creates a versioned byte corpus. `prepare-bpe` and
+`prepare-bpe-stdin` create version-2 corpora using a strict 8192-token FastBPE
+artifact. BPE identity covers pretokenization semantics and a SHA-256 digest of
+the canonical merge table. Dataset fingerprints remain labeled noncryptographic
+FNV-1a values.
 
 The GPU host assigns whole documents to train or validation before constructing
 windows. Every window remains within one document. Streams are
@@ -30,6 +32,8 @@ by hand.
 AdamW uses bias-corrected first and second moments. Decoupled weight decay is
 selected by the canonical layout mask. The learning rate has linear warmup and
 cosine decay to the checkpointed total target step.
+The accumulated gradient is clipped on device to `GRAD_CLIP` (default 1.0)
+before the single AdamW update.
 
 The desktop-safe default batch is one sequence. `TRAIN_BATCH` can raise it after
 the backend is known to stay below the GPU watchdog. `CHECKPOINT_EVERY` controls
@@ -76,6 +80,13 @@ same `TRAIN_BATCH`, or resume validation rejects the optimizer schedule.
 The epoch order is a pure function of the step, so resume needs no
 additional state.
 
+Whole-dataset mode first plans every bounded shard, then invokes
+`train-segment` with one global total and cumulative segment endpoints. The
+checkpoint's Adam step and both moments cross shard boundaries unchanged.
+Document splitting uses each shard's global document offset, and epoch sampling
+uses a segment-local step, so physical shard boundaries do not change the
+denoted document split or omit examples.
+
 ## Resume
 
 Resume validates all of the following before creating an OpenCL context:
@@ -89,9 +100,9 @@ Resume validates all of the following before creating an OpenCL context:
 
 `STEPS` is a target completed step. It is never interpreted as additional work.
 
-The `formal-transformer-sequential` and `formal-transformer-gpu` applications
-interpret the same Futhark source and checkpoint identity. Sequential C is the
-safe fallback when the OpenCL device also drives the desktop.
+The sequential, multicore, OpenCL, and CUDA applications interpret the same
+Futhark source and checkpoint identity. Sequential C is the safe fallback when
+the OpenCL device also drives the desktop.
 
 ## Current Scaling Limits
 
@@ -99,5 +110,6 @@ safe fallback when the OpenCL device also drives the desktop.
 - Batches have uniform lengths and no padding mask.
 - Attention is quadratic in context length.
 - Parameters and optimizer state are `f32`; there is no mixed precision.
+- CUDA currently uses one device; multi-device gradient reduction is planned.
 - Validation samples at most eight windows every ten steps.
 - Generation is greedy and recomputes the context instead of using a KV cache.

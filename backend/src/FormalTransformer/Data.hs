@@ -5,12 +5,14 @@ module FormalTransformer.Data
   , Example (..)
   , Split (..)
   , splitDocuments
+  , splitDocumentsFrom
   , windowDocument
   , prepareSplit
   , trainerSplitSeed
   , trainerValidationFraction
   , fullWindows
   , trainerWindowSplit
+  , trainerWindowSplitFrom
   ) where
 
 import Data.Bits (shiftR, xor)
@@ -39,12 +41,17 @@ data Split a = Split
   } deriving (Eq, Show)
 
 splitDocuments :: Word64 -> Double -> [Document] -> Either String (Split Document)
-splitDocuments seed validationFraction documents
+splitDocuments = splitDocumentsFrom 0
+
+splitDocumentsFrom :: Word64 -> Word64 -> Double -> [Document] -> Either String (Split Document)
+splitDocumentsFrom offset seed validationFraction documents
   | validationFraction < 0 || validationFraction > 1 = Left "validation fraction must be in [0,1]"
   | otherwise = Right (Split train valid)
   where
     threshold = floor (validationFraction * 1000000) :: Word64
-    tagged = zipWith (\i doc -> (mix (seed + fromIntegral i) `mod` 1000000 < threshold, doc)) [0 :: Int ..] documents
+    tagged = zipWith (\i doc ->
+      (mix (seed + offset + fromIntegral i) `mod` 1000000 < threshold, doc))
+      [0 :: Int ..] documents
     valid = [doc | (True, doc) <- tagged]
     train = [doc | (False, doc) <- tagged]
 
@@ -84,8 +91,11 @@ fullWindows width doc =
   where stream = bosToken : documentTokens doc ++ [eosToken]
 
 trainerWindowSplit :: Int -> [Document] -> Either String (Split [Int])
-trainerWindowSplit width documents = do
-  docs <- splitDocuments trainerSplitSeed trainerValidationFraction documents
+trainerWindowSplit = trainerWindowSplitFrom 0
+
+trainerWindowSplitFrom :: Word64 -> Int -> [Document] -> Either String (Split [Int])
+trainerWindowSplitFrom offset width documents = do
+  docs <- splitDocumentsFrom offset trainerSplitSeed trainerValidationFraction documents
   let convert = concatMap (fullWindows width)
       result = Split (convert (training docs)) (convert (validation docs))
   if null (training result)
