@@ -46,10 +46,17 @@ kernels and does not silently switch to mixed-precision tensor cores.
 
 ## Nix On The VM
 
-Use Verda's Ubuntu NVIDIA image. Keep its kernel driver, install Nix for all
-userspace dependencies, and build the pinned CUDA 12.9 closure from this flake.
-This is safer than replacing a cloud VM's working driver with a NixOS driver
-before the first benchmark.
+Use Verda's `Ubuntu 24.04 + CUDA 12.6` image (not Minimal, which ships no
+driver; the `+ Docker` variant is unnecessary). Keep its kernel driver, install
+Nix for all userspace dependencies, and build the pinned CUDA closure from this
+flake. This is safer than replacing a cloud VM's working driver with a NixOS
+driver before the first benchmark.
+
+`flake.nix` pins the CUDA userspace to **12.6** (`cudaPackages_12_6`) so the
+NVRTC that JIT-compiles the kernel PTX targets an ISA the CUDA-12.6 image driver
+accepts. The step-by-step minimum-cost runbook is `deploy/verda-fast-path.md`;
+`deploy/verda-init.sh` brings an instance up and `deploy/train-cloud.sh` trains
+per-shard from the pre-built plan without needing the source JSONL on the VM.
 
 The CUDA package links against the toolkit's `libcuda` stub only during the Nix
 build. Its runtime RPATH contains `/run/opengl-driver/lib` for NixOS plus the
@@ -60,10 +67,12 @@ Nix CUDA runtime/NVRTC libraries, but no stub directory. On Ubuntu,
 ./deploy/bootstrap-ubuntu-nvidia.sh
 ```
 
-The provider driver must support CUDA 12.9-era PTX because Futhark compiles its
-embedded CUDA through NVRTC at context creation. If context creation rejects
-the PTX, choose a newer VM image or pin an older compatible CUDA package set;
-do not bundle a mismatched kernel driver into the flake.
+The provider driver must support CUDA 12.6-era PTX because Futhark compiles its
+embedded CUDA through NVRTC at context creation. The CUDA-12.6 image satisfies
+this. If a benchmark still rejects the PTX (older driver than the image name
+implies), pin lower — `cudaPackages_12_4` is available in this nixpkgs — rebuild,
+and re-run the conformance oracle before trusting the new backend build; do not
+bundle a mismatched kernel driver into the flake.
 
 ## Whole-Dataset Contract
 

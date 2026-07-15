@@ -69,9 +69,35 @@ data Manifest = Manifest
   , manifestLayoutVersion :: !Word32
   , manifestOptimizerConfig :: !AdamWConfig
   , manifestIdentity :: !Identity
+  , manifestClipNorm :: !Double
   } deriving (Eq, Show, Generic)
 
-instance Binary Manifest
+-- Version 1 manifests predate the gradient-clip field.  Every historical
+-- run trained with the GRAD_CLIP default of 1.0, so a version-1 manifest
+-- decodes with that clip and upgrades to the current version in memory;
+-- saves always write the current version.
+instance Binary Manifest where
+  put manifest = do
+    put (manifestVersion manifest)
+    put (manifestConfig manifest)
+    put (manifestParameterCount manifest)
+    put (manifestLayoutIdentity manifest)
+    put (manifestLayoutVersion manifest)
+    put (manifestOptimizerConfig manifest)
+    put (manifestIdentity manifest)
+    put (manifestClipNorm manifest)
+  get = do
+    version <- get
+    unless (version == 1 || version == artifactVersion)
+      (fail ("unsupported checkpoint manifest version: " ++ show (version :: Word32)))
+    cfg <- get
+    count <- get
+    layoutIdentity <- get
+    layoutVersion <- get
+    optimizer <- get
+    identity <- get
+    clip <- if version == 1 then pure 1.0 else get
+    pure (Manifest artifactVersion cfg count layoutIdentity layoutVersion optimizer identity clip)
 
 data Checkpoint = Checkpoint
   { checkpointManifest :: !Manifest
@@ -101,7 +127,7 @@ data LegacyCorpusArtifact = LegacyCorpusArtifact
 instance Binary LegacyCorpusArtifact
 
 artifactVersion :: Word32
-artifactVersion = 1
+artifactVersion = 2
 
 validateCheckpoint :: Checkpoint -> Either String Checkpoint
 validateCheckpoint checkpoint = do
@@ -113,6 +139,8 @@ validateCheckpoint checkpoint = do
   _ <- validateConfig cfg
   _ <- validateAdamWConfig optimizerConfig
   unless (manifestVersion manifest == artifactVersion) (Left "unsupported checkpoint version")
+  unless (finite (manifestClipNorm manifest) && manifestClipNorm manifest > 0)
+    (Left "manifest gradient clip must be finite and positive")
   unless (manifestParameterCount manifest == expected) (Left "manifest parameter count does not match config")
   unless (not (null (manifestLayoutIdentity manifest))) (Left "checkpoint layout identity must be non-empty")
   unless (manifestLayoutIdentity manifest == canonicalLayoutIdentity) (Left "unsupported checkpoint model layout identity")

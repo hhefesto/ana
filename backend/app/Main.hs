@@ -97,7 +97,7 @@ trainSmoke = do
             print loss
             let identity = Identity "smoke-model" "synthetic-token-v1" "synthetic-documents-v1"
                 manifest = Manifest artifactVersion tinyConfig (paramCount tinyConfig)
-                  canonicalLayoutIdentity canonicalLayoutVersion cfg identity
+                  canonicalLayoutIdentity canonicalLayoutVersion cfg identity 1
                 checkpoint = Checkpoint manifest params finalState (Just loss) (PRNGState 1 2 3 4)
             case validateCheckpoint checkpoint of
               Left message -> putStrLn message
@@ -275,7 +275,7 @@ bigramGateCommand path cfg = do
       putStrLn ("tokenizer: " ++ corpusTokenizerIdentity corpus)
       putStrLn ("dataset fingerprint: " ++ corpusDatasetIdentity corpus)
       putStrLn ("context: " ++ show (contextSize cfg) ++ " vocab: " ++ show (vocabSize cfg))
-      case bigramGate cfg (corpusDocuments corpus) of
+      case bigramGate 256 cfg (corpusDocuments corpus) of
         Left message -> putStrLn message
         Right report -> do
           putStrLn ("documents: train=" ++ show (gateTrainDocuments report)

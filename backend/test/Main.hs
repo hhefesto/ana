@@ -301,7 +301,7 @@ testCheckpoint = do
   let path = temporaryDirectory </> "formal-transformer-roundtrip.bin"
       identity = Identity "tiny-model" "integer-v1" "synthetic-v1"
       optimizerConfig = AdamWConfig 0.0025 0.8 0.95 1e-7 0.025 3 37
-      manifest = Manifest artifactVersion config (paramCount config) canonicalLayoutIdentity canonicalLayoutVersion optimizerConfig identity
+      manifest = Manifest artifactVersion config (paramCount config) canonicalLayoutIdentity canonicalLayoutVersion optimizerConfig identity 0.75
       checkpoint = Checkpoint manifest params (initAdamW (paramCount config)) (Just 1.2345) (PRNGState 1 2 3 4)
       cleanup = do exists <- doesFileExist path; if exists then removeFile path else pure ()
   cleanup
@@ -321,7 +321,7 @@ testCheckpointMetadata :: IO ()
 testCheckpointMetadata = do
   let identity = Identity "tiny-model" "integer-v1" "synthetic-v1"
       optimizerConfig = AdamWConfig 1e-3 0.9 0.999 1e-8 0.01 2 10
-      manifest = Manifest artifactVersion config (paramCount config) canonicalLayoutIdentity canonicalLayoutVersion optimizerConfig identity
+      manifest = Manifest artifactVersion config (paramCount config) canonicalLayoutIdentity canonicalLayoutVersion optimizerConfig identity 1
       checkpoint = Checkpoint manifest params (initAdamW (paramCount config)) Nothing (PRNGState 1 2 3 4)
       withManifest update = checkpoint { checkpointManifest = update manifest }
   assert (isLeft (validateCheckpoint (withManifest (\m -> m { manifestOptimizerConfig = optimizerConfig { warmupSteps = 11 } }))))

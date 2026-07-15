@@ -135,7 +135,9 @@ checkpoint cadence may change on resume.
 backend runs every kernel data-parallel across all CPU cores, produces
 step-for-step identical losses to the sequential backend, and shares the
 same checkpoint format as every other backend. `WIKI_BACKEND=sequential`
-keeps the single-core oracle backend.
+keeps the single-core oracle backend. The Haskell host driver also runs on
+all RTS capabilities and indexes the epoch window order in O(1) per step,
+so cores are spent in kernels rather than in the driver between launches.
 
 `WIKI_BACKEND=cuda` uses the Nix-built Futhark CUDA host. It links the CUDA
 runtime and NVRTC from pinned Nixpkgs while resolving `libcuda.so.1` from the
@@ -153,14 +155,20 @@ rusticl submits to — after a rebuild and reboot with that setting, OpenCL
 becomes viable for `small` on this machine (see
 `docs/PARALLEL-SCALING.md`).
 
-`wiki-generate` picks the newest available weights automatically: an
-explicit `WIKI_CHECKPOINT` if set, else `run/wiki-small.checkpoint` (what
-`wiki-train` writes), else the committed `run/wiki-small-1000.checkpoint`.
-`WIKI_PROMPT` and `WIKI_TOKENS` override the prompt and budget:
+`wiki-generate` picks the newest available weights automatically: an explicit
+`WIKI_CHECKPOINT` if set, otherwise the most recently modified
+`run/*.checkpoint`. This follows whichever model `wiki-train` is actively
+updating instead of assuming a model-specific filename. It asks for the
+prompt at the terminal; `WIKI_PROMPT` skips the question (and is required
+when stdin is not a terminal), and `WIKI_TOKENS` overrides the budget:
 
 ```bash
 WIKI_PROMPT="The theory of" WIKI_TOKENS=256 nix run .#wiki-generate
 ```
+
+Decoding samples the model's next-token distribution: `TEMPERATURE`
+(default 0.8) and `TOP_K` (default 40) shape the observation, `SAMPLE_SEED`
+makes it reproducible, and `TEMPERATURE=0` recovers exact greedy argmax.
 
 It generates on the sequential-C backend, which is safe on a display GPU;
 checkpoints are interchangeable between backends. Both apps resolve their

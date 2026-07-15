@@ -20,6 +20,7 @@ module FormalTransformer.Bigram
   ) where
 
 import Control.Monad (when)
+import Control.Parallel.Strategies (parList, rdeepseq, using)
 import qualified Data.Map.Strict as Map
 import Data.Monoid (Sum (..))
 import Data.Word (Word64)
@@ -35,15 +36,26 @@ data BigramModel = BigramModel
   , bigramContextTotals :: !(Map.Map Int Int)
   } deriving (Eq, Show)
 
--- One streaming pass over the training document streams: exact counts.
+-- Exact counts over the training document streams.  Documents are counted
+-- in chunks evaluated in parallel and merged with (+); because (+) on Int
+-- is associative and commutative, the merged counts equal the single
+-- streaming fold, so parallelism changes evaluation order only.
 trainBigram :: Int -> [Document] -> BigramModel
 trainBigram vocab documents = BigramModel vocab pairs totals
   where
-    streams = [bosToken : documentTokens doc ++ [eosToken] | doc <- documents]
-    pairs = Map.fromListWith (+)
-      [((prev, next), 1 :: Int) | stream <- streams, (prev, next) <- zip stream (drop 1 stream)]
+    chunkCounts docs = Map.fromListWith (+)
+      [ ((prev, next), 1 :: Int)
+      | doc <- docs
+      , let stream = bosToken : documentTokens doc ++ [eosToken]
+      , (prev, next) <- zip stream (drop 1 stream)
+      ]
+    pairs = Map.unionsWith (+)
+      (map chunkCounts (chunksOf 64 documents) `using` parList rdeepseq)
     totals = Map.fromListWith (+)
       [(prev, count) | ((prev, _), count) <- Map.toList pairs]
+    chunksOf n xs = case splitAt n xs of
+      (chunk, []) -> [chunk]
+      (chunk, rest) -> chunk : chunksOf n rest
 
 bigramLogProbability :: BigramModel -> Int -> Int -> Double
 bigramLogProbability model prev next =
@@ -87,14 +99,14 @@ data BigramGateReport = BigramGateReport
   } deriving (Eq, Show)
 
 -- The gate trains on exactly the trainer's training documents and scores
--- exactly the trainer's validation comparison set (the first eight
--- windows) plus the full validation split, so the report survives a
--- change of sampling policy.
-bigramGate :: Config -> [Document] -> Either String BigramGateReport
-bigramGate = bigramGateFrom 0
+-- exactly the trainer's validation comparison set (the first
+-- `sampleCount` windows, the trainer's VALIDATION_WINDOWS) plus the full
+-- validation split, so the report survives a change of sampling policy.
+bigramGate :: Int -> Config -> [Document] -> Either String BigramGateReport
+bigramGate sampleCount = bigramGateFrom sampleCount 0
 
-bigramGateFrom :: Word64 -> Config -> [Document] -> Either String BigramGateReport
-bigramGateFrom offset cfg documents = do
+bigramGateFrom :: Int -> Word64 -> Config -> [Document] -> Either String BigramGateReport
+bigramGateFrom sampleCount offset cfg documents = do
   docs <- splitDocumentsFrom offset trainerSplitSeed trainerValidationFraction documents
   let width = contextSize cfg
       trainWindows = concatMap (fullWindows width) (training docs)
@@ -102,7 +114,7 @@ bigramGateFrom offset cfg documents = do
   when (null trainWindows) (Left "training split has no full context sequences")
   when (null valWindows) (Left "validation split has no full context sequences")
   let model = trainBigram (vocabSize cfg) (training docs)
-      sample = take 8 valWindows
+      sample = take sampleCount valWindows
   sampleCE <- windowCrossEntropy model sample
   fullCE <- windowCrossEntropy model valWindows
   pure BigramGateReport

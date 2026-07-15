@@ -23,16 +23,26 @@
           haskellPackage = pkgs.haskellPackages.callCabal2nix "formal-transformer" ./. { };
           futharkKernels = self.packages.${system}.futhark-kernels;
           futharkKernelsCuda = self.packages.${system}.futhark-kernels-cuda;
-          cudaCudart = pkgs.cudaPackages.cuda_cudart;
-          cudaCccl = pkgs.cudaPackages.cccl;
-          cudaNvcc = pkgs.cudaPackages.cuda_nvcc;
-          cudaNvrtc = pkgs.cudaPackages.cuda_nvrtc;
+          # CUDA is pinned to 12.6 to match Verda's "Ubuntu 24.04 + CUDA 12.6"
+          # image. Only the host's *kernel driver* is used at runtime (see
+          # docs/CLOUD-TRAINING.md); Futhark JIT-compiles its kernel PTX through
+          # NVRTC at context creation, so NVRTC must not emit PTX newer than the
+          # host driver accepts. 12.6 NVRTC targets a PTX ISA that the CUDA-12.6
+          # image driver accepts. If an instance reports a newer driver
+          # (nvidia-smi), bumping this back to pkgs.cudaPackages is safe.
+          cudaPackages = pkgs.cudaPackages_12_6;
+          cudaCudart = cudaPackages.cuda_cudart;
+          cudaCccl = cudaPackages.cccl;
+          cudaNvcc = cudaPackages.cuda_nvcc;
+          cudaNvrtc = cudaPackages.cuda_nvrtc;
           gpuGhc = pkgs.haskellPackages.ghcWithPackages (p: [
-            p.binary
-            p.cryptohash-sha256
-            p.text
-            p.vector
-          ]);
+           p.binary
+           p.cryptohash-sha256
+           p.text
+           p.parallel
+           p.time
+           p.vector
+         ]);
           conformanceGhc = pkgs.haskellPackages.ghcWithPackages (p: [
             p.ad
             p.binary
@@ -97,7 +107,7 @@
             buildPhase = ''
               runHook preBuild
               $CC -O2 -c ${futharkKernels}/lib/kernels.c -I${futharkKernels}/include -o kernels.o
-              ghc -O2 -threaded -DOPENCL_BACKEND \
+              ghc -O2 -threaded -rtsopts "-with-rtsopts=-N" -DOPENCL_BACKEND \
                 -ibackend/gpu -ibackend/src \
                 backend/gpu/Main.hs backend/gpu/FutharkKernels.hs kernels.o \
                 -optl-lOpenCL -o formal-transformer-gpu
@@ -118,7 +128,7 @@
             strictDeps = true;
             nativeBuildInputs = [
               gpuGhc
-              pkgs.cudaPackages.removeStubsFromRunpathHook
+              cudaPackages.removeStubsFromRunpathHook
               pkgs.patchelf
             ];
             buildInputs = [
@@ -135,7 +145,7 @@
                 -I${cudaNvcc}/include \
                 -I${cudaNvrtc.include}/include \
                 -o kernels.o
-              ghc -O2 -threaded -DCUDA_BACKEND \
+              ghc -O2 -threaded -rtsopts "-with-rtsopts=-N" -DCUDA_BACKEND \
                 -ibackend/gpu -ibackend/src \
                 backend/gpu/Main.hs backend/gpu/FutharkKernels.hs kernels.o \
                 -optl-L${cudaCudart}/lib/stubs \
@@ -170,7 +180,7 @@
               runHook preBuild
               futhark c --library backend/futhark/kernels.fut -o kernels
               $CC -O2 -c kernels.c -o kernels.o
-              ghc -O2 -threaded \
+              ghc -O2 -threaded -rtsopts "-with-rtsopts=-N" \
                 -ibackend/gpu -ibackend/src \
                 backend/gpu/Main.hs backend/gpu/FutharkKernels.hs kernels.o \
                 -optl-lm -o formal-transformer-sequential
@@ -199,7 +209,7 @@
               runHook preBuild
               futhark multicore --library backend/futhark/kernels.fut -o kernels
               $CC -O2 -c kernels.c -o kernels.o
-              ghc -O2 -threaded \
+              ghc -O2 -threaded -rtsopts "-with-rtsopts=-N" \
                 -ibackend/gpu -ibackend/src \
                 backend/gpu/Main.hs backend/gpu/FutharkKernels.hs kernels.o \
                 -optl-lm -optl-lpthread -o formal-transformer-multicore
@@ -491,26 +501,41 @@
               echo "wiki-train: all $shards shards complete - the entire dataset has been consumed"
             '';
           };
-          # Zero-argument generation: prefers the training app's checkpoint,
-          # falls back to the committed 1000-step run.
+          # Zero-argument generation: use an explicit checkpoint or discover
+          # the most recently updated checkpoint in the run directory.
           wikiGenerate = pkgs.writeShellApplication {
             name = "wiki-generate";
+            runtimeInputs = [ pkgs.coreutils ];
             text = ''
-              prompt="''${WIKI_PROMPT:-A formal language}"
+              if [ -n "''${WIKI_PROMPT:-}" ]; then
+                prompt="$WIKI_PROMPT"
+              elif [ -t 0 ]; then
+                printf 'prompt> ' >&2
+                IFS= read -r prompt || {
+                  echo "wiki-generate: no prompt entered" >&2
+                  exit 1
+                }
+              else
+                echo "wiki-generate: WIKI_PROMPT is not set and stdin is not a terminal" >&2
+                echo "  set WIKI_PROMPT=... or run interactively to type a prompt" >&2
+                exit 1
+              fi
               tokens="''${WIKI_TOKENS:-128}"
               if [ -n "''${WIKI_CHECKPOINT:-}" ]; then
                 checkpoint="$WIKI_CHECKPOINT"
-              elif [ -f run/wiki-bpe10m-global.checkpoint ]; then
-                checkpoint=run/wiki-bpe10m-global.checkpoint
-              elif [ -f run/wiki-latest.checkpoint ]; then
-                checkpoint=run/wiki-latest.checkpoint
-              elif [ -f run/wiki-small.checkpoint ]; then
-                checkpoint=run/wiki-small.checkpoint
-              elif [ -f run/wiki-small-5000.checkpoint ]; then
-                checkpoint=run/wiki-small-5000.checkpoint
-              elif [ -f run/wiki-small-1000.checkpoint ]; then
-                checkpoint=run/wiki-small-1000.checkpoint
               else
+                checkpoint=
+                newest_mtime=
+                for candidate in run/*.checkpoint; do
+                  if [ ! -f "$candidate" ]; then continue; fi
+                  mtime="$(stat -L --format=%Y -- "$candidate")"
+                  if [ -z "$checkpoint" ] || [ "$mtime" -gt "$newest_mtime" ]; then
+                    checkpoint="$candidate"
+                    newest_mtime="$mtime"
+                  fi
+                done
+              fi
+              if [ -z "$checkpoint" ]; then
                 echo "wiki-generate: no checkpoint found under run/" >&2
                 echo "  train first: nix run .#wiki-train" >&2
                 exit 1

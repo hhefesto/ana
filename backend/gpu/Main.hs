@@ -2,13 +2,16 @@ module Main (main) where
 
 import Control.Exception (bracket)
 import Control.Monad (foldM, when)
+import Control.Parallel.Strategies (parListChunk, rdeepseq, using)
 import qualified Data.ByteString as BS
 import Data.Bits (rotateL, shiftL, shiftR, xor)
 import Data.Int (Int64)
 import Data.List (foldl', sortOn)
+import Data.Time (defaultTimeLocale, formatTime, getZonedTime)
 import Data.Word (Word64)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
+import qualified Data.Vector as V
 import FormalTransformer.Artifact
 import FormalTransformer.Bigram
 import FormalTransformer.Config
@@ -18,9 +21,10 @@ import FormalTransformer.Optimizer
 import FormalTransformer.Tokenizer
 import FutharkKernels
 import System.Directory (doesFileExist)
-import System.Environment (getArgs, lookupEnv)
+import System.Environment (getArgs, lookupEnv, setEnv)
 import System.Exit (die)
-import System.IO (BufferMode (LineBuffering), hSetBuffering, stdout)
+import System.IO (BufferMode (LineBuffering), hPutStrLn, hSetBuffering, stderr, stdout)
+import Text.Printf (printf)
 import Text.Read (readMaybe)
 
 modelId :: Config -> String
@@ -32,6 +36,7 @@ optimizerFor steps = AdamWConfig 3e-4 0.9 0.999 1e-8 0.01 (min 100 steps) steps
 main :: IO ()
 main = do
   hSetBuffering stdout LineBuffering
+  setEnv "TZ" "America/Mexico_City"
   args <- getArgs
   case args of
     ["inspect"] -> inspect tinyPreset
@@ -75,6 +80,12 @@ data TrainingMode
   = Standalone TargetSpec
   | Segment Int Int Int Word64 String String
 
+data TrainingProgress = TrainingProgress
+  { progressTrainLossEma :: !(Maybe Float)
+  , progressPreviousValidationLoss :: !(Maybe Float)
+  , progressBestValidationLoss :: !(Maybe Double)
+  }
+
 parseTarget :: String -> IO TargetSpec
 parseTarget "epoch" = pure EpochSteps
 parseTarget value = ExplicitSteps <$> parsePositive "STEPS" value
@@ -84,7 +95,9 @@ train corpusPath checkpointPath mode cfg = do
   batchSize <- positiveEnv "TRAIN_BATCH" 1
   microSize <- positiveEnv "MICRO_BATCH" batchSize
   when (microSize > batchSize) (die "MICRO_BATCH must not exceed TRAIN_BATCH")
-  checkpointEvery <- positiveEnv "CHECKPOINT_EVERY" 10
+  checkpointEvery <- positiveEnv "CHECKPOINT_EVERY" 500
+  validateEvery <- positiveEnv "VALIDATE_EVERY" 500
+  validationWindows <- positiveEnv "VALIDATION_WINDOWS" 256
   clipNorm <- positiveDoubleEnv "GRAD_CLIP" 1
   corpus <- loadCorpus corpusPath >>= either die pure
   corpusVocab <- maybe (die "corpus has an unsupported tokenizer identity") pure
@@ -100,13 +113,17 @@ train corpusPath checkpointPath mode cfg = do
     Standalone _ -> pure ()
     Segment _ _ _ _ _ expected -> when (corpusDatasetIdentity corpus /= expected)
       (die "segment corpus identity does not match the run plan")
-  split <- either die pure (trainingSequencesFrom documentOffset cfg (corpusDocuments corpus))
+  fullSplit <- either die pure (trainingSequencesFrom documentOffset cfg (corpusDocuments corpus))
+  -- The validation comparison set is the first VALIDATION_WINDOWS windows;
+  -- the same sample feeds the loss, the bits-per-byte scale, and the
+  -- bigram gate, so all three observe the same denotation.
+  let split = fullSplit { validation = take validationWindows (validation fullSplit) }
   bpbScale <- if null (validation split)
     then pure Nothing
-    else Just <$> either die pure (bitsPerByteScale tokenizer (take 8 (validation split)))
+    else Just <$> either die pure (bitsPerByteScale tokenizer (validation split))
   gate <- if null (validation split)
     then pure Nothing
-    else either die (pure . Just) (bigramGateFrom documentOffset cfg (corpusDocuments corpus))
+    else either die (pure . Just) (bigramGateFrom validationWindows documentOffset cfg (corpusDocuments corpus))
   let windowCount = length (training split)
       epochSteps = (windowCount + batchSize - 1) `div` batchSize
   (target, scheduleTotal, segmentStart, sampler, runDatasetIdentity) <- case mode of
@@ -125,7 +142,7 @@ train corpusPath checkpointPath mode cfg = do
         segmentSampler start (epochSampler batchSize (training split)), globalIdentity)
   case mode of
     Standalone (ExplicitSteps _) -> pure ()
-    _ -> putStrLn ("epoch segment: " ++ show windowCount
+    _ -> logTraining ("epoch segment: " ++ show windowCount
       ++ " training windows / batch " ++ show batchSize
       ++ " = " ++ show epochSteps ++ " steps, global "
       ++ show segmentStart ++ ".." ++ show target ++ "/" ++ show scheduleTotal)
@@ -133,10 +150,10 @@ train corpusPath checkpointPath mode cfg = do
       optCfg = optimizerFor scheduleTotal
   existing <- doesFileExist checkpointPath
   checkpoint <- if existing
-    then loadCheckpoint checkpointPath >>= either die (validateResume cfg identity optCfg)
+    then loadCheckpoint checkpointPath >>= either die (validateResume cfg identity optCfg clipNorm)
     else do
       when (segmentStart /= 0) (die "cannot begin a nonzero segment without the global checkpoint")
-      fresh <- pure (newCheckpoint cfg identity optCfg)
+      fresh <- pure (newCheckpoint cfg identity optCfg clipNorm)
       initFrom <- lookupEnv "TRAIN_INIT"
       case initFrom of
         Nothing -> pure fresh
@@ -152,7 +169,7 @@ train corpusPath checkpointPath mode cfg = do
           when (modelIdentity previousIdentity /= modelId cfg
             || tokenizerIdentity previousIdentity /= corpusTokenizerIdentity corpus)
             (die ("TRAIN_INIT checkpoint has a different model or tokenizer identity: " ++ source))
-          putStrLn ("warm start: parameters initialized from " ++ source
+          logTraining ("warm start: parameters initialized from " ++ source
             ++ " (completed step " ++ show (adamStep (checkpointOptimizer previous)) ++ ")")
           pure fresh { checkpointParameters = checkpointParameters previous }
   when (adamStep (checkpointOptimizer checkpoint) < segmentStart)
@@ -164,17 +181,19 @@ train corpusPath checkpointPath mode cfg = do
   let params0 = map realToFrac (checkpointParameters checkpoint)
       state0 = checkpointOptimizer checkpoint
       n = paramCount cfg
-  putStrLn ("training config=" ++ show cfg
+  logTraining ("training config=" ++ show cfg
     ++ " target=" ++ show target
     ++ " schedule_total=" ++ show scheduleTotal
     ++ " completed=" ++ show (adamStep state0)
     ++ " batch=" ++ show batchSize
     ++ " micro=" ++ show microSize
     ++ " grad_clip=" ++ show clipNorm
-    ++ " checkpoint_every=" ++ show checkpointEvery)
+    ++ " checkpoint_every=" ++ show checkpointEvery
+    ++ " validate_every=" ++ show validateEvery
+    ++ " validation_windows=" ++ show (length (validation split)))
   case gate of
     Nothing -> pure ()
-    Just g -> putStrLn ("bigram gate: sample=" ++ show (gateSampleCrossEntropy g)
+    Just g -> logTraining ("bigram gate: sample=" ++ show (gateSampleCrossEntropy g)
       ++ " nats full=" ++ show (gateFullCrossEntropy g) ++ " nats")
   withContext $ \ctx -> do
     params <- uploadF32 ctx params0
@@ -193,15 +212,20 @@ train corpusPath checkpointPath mode cfg = do
                   }
             saved <- saveCheckpointAtomic checkpointPath snapshot
             either die pure saved
-            putStrLn ("checkpoint step=" ++ show step ++ " path=" ++ checkpointPath)
-      (paramsFinal, mFinal, vFinal, rngFinal, bestFinal) <-
+            logTraining ("checkpoint step=" ++ show step ++ " path=" ++ checkpointPath)
+      let resumedBest = checkpointBestValidationLoss checkpoint
+          segmentBest = case mode of
+            Segment _ start _ _ _ _ | adamStep state0 == start -> Nothing
+            _ -> resumedBest
+          progress0 = TrainingProgress Nothing Nothing segmentBest
+      (paramsFinal, mFinal, vFinal, rngFinal, progressFinal) <-
         loop ctx gpuCfg n optCfg split sampler target (adamStep state0) microSize checkpointEvery
-          clipNorm bpbScale
+          validateEvery clipNorm bpbScale
           (gateSampleCrossEntropy <$> gate)
           saveSnapshot params m v deviceMask (checkpointPRNG checkpoint)
-          (checkpointBestValidationLoss checkpoint)
-      saveSnapshot target rngFinal bestFinal paramsFinal mFinal vFinal
-      putStrLn ("saved checkpoint at completed step " ++ show target ++ ": " ++ checkpointPath)
+          progress0
+      saveSnapshot target rngFinal (progressBestValidationLoss progressFinal) paramsFinal mFinal vFinal
+      logTraining ("saved checkpoint at completed step " ++ show target ++ ": " ++ checkpointPath)
       mapM_ (freeF32 ctx) [paramsFinal, mFinal, vFinal]
 
 -- Given the one-based step and the PRNG, a sampler yields that step's
@@ -218,11 +242,11 @@ randomSampler batchSize windows _ rng = sampleBatch batchSize rng windows
 epochSampler :: Int -> [[Int64]] -> Sampler
 epochSampler batchSize windows = \step rng ->
   let start = (step - 1) * batchSize `mod` count
-      batch = [permuted !! ((start + i) `mod` count) | i <- [0 .. batchSize - 1]]
+      batch = [permuted V.! ((start + i) `mod` count) | i <- [0 .. batchSize - 1]]
   in (batch, rng)
   where
-    count = length windows
-    permuted = map snd (sortOn fst (zipWith tag [0 ..] windows))
+    count = V.length permuted
+    permuted = V.fromList (map snd (sortOn fst (zipWith tag [0 ..] windows)))
     tag index window = (hashIndex index, window)
     hashIndex :: Word64 -> Word64
     hashIndex x0 = x3 `xor` (x3 `shiftR` 31)
@@ -245,6 +269,7 @@ loop
   -> Int
   -> Int
   -> Int
+  -> Int
   -> Float
   -> Maybe Double
   -> Maybe Double
@@ -254,10 +279,10 @@ loop
   -> F32Array
   -> BoolArray
   -> PRNGState
-  -> Maybe Double
-  -> IO (F32Array, F32Array, F32Array, PRNGState, Maybe Double)
-loop ctx gpuCfg n optCfg split sampler target completed microSize checkpointEvery clipNorm bpbScale gate saveSnapshot params m v mask rng best
-  | completed >= target = pure (params, m, v, rng, best)
+  -> TrainingProgress
+  -> IO (F32Array, F32Array, F32Array, PRNGState, TrainingProgress)
+loop ctx gpuCfg n optCfg split sampler target completed microSize checkpointEvery validateEvery clipNorm bpbScale gate saveSnapshot params m v mask rng progress
+  | completed >= target = pure (params, m, v, rng, progress)
   | otherwise = do
       let step = completed + 1
           (batch, rng') = sampler step rng
@@ -271,10 +296,14 @@ loop ctx gpuCfg n optCfg split sampler target completed microSize checkpointEver
       freeF32 ctx params
       freeF32 ctx m
       freeF32 ctx v
-      best' <- if null (validation split) || (step `mod` 10 /= 0 && step /= target)
-        then pure best
+      let ema = case progressTrainLossEma progress of
+            Nothing -> loss
+            Just previous -> trainLossEmaDecay * previous + (1 - trainLossEmaDecay) * loss
+          progressWithLoss = progress { progressTrainLossEma = Just ema }
+      (progress', validationText) <- if null (validation split) || (step `mod` validateEvery /= 0 && step /= target)
+        then pure (progressWithLoss, "")
         else do
-          let val = take 8 (validation split)
+          let val = validation split
           when (null val) (die "internal error: selected an empty validation batch")
           valLoss <- chunkedMeanLoss ctx gpuCfg microSize val params'
           let gateText = case gate of
@@ -282,18 +311,56 @@ loop ctx gpuCfg n optCfg split sampler target completed microSize checkpointEver
                 Just g -> " gate=" ++ show g
                   ++ (if realToFrac valLoss < g then " beats-gate" else " behind-gate")
               bpbText = maybe "" (\scale -> " bits_per_byte="
-                ++ show (realToFrac valLoss * scale)) bpbScale
-          putStrLn ("step " ++ show step ++ " train_loss=" ++ show loss
-            ++ " gradient_norm=" ++ show gradientNorm
-            ++ " validation_loss=" ++ show valLoss ++ bpbText ++ gateText)
-          pure (Just (maybe (realToFrac valLoss) (min (realToFrac valLoss)) best))
-      when (step `mod` 10 /= 0 && step /= target) (putStrLn ("step " ++ show step
-        ++ " train_loss=" ++ show loss ++ " gradient_norm=" ++ show gradientNorm))
+                ++ formatDouble (realToFrac valLoss * scale)) bpbScale
+              valDouble = realToFrac valLoss
+              previousBest = progressBestValidationLoss progressWithLoss
+              best' = maybe valDouble (min valDouble) previousBest
+              deltaText = maybe "na" (formatSignedFloat . (valLoss -))
+                (progressPreviousValidationLoss progressWithLoss)
+              newBest = maybe True (valDouble <) previousBest
+              validation = " validation_loss=" ++ formatFloat valLoss
+                ++ " validation_delta=" ++ deltaText
+                ++ " best_validation_loss=" ++ formatFloat (realToFrac best')
+                ++ " new_best=" ++ boolText newBest
+                ++ bpbText ++ gateText
+          pure (progressWithLoss
+            { progressPreviousValidationLoss = Just valLoss
+            , progressBestValidationLoss = Just best'
+            }, validation)
+      logTraining ("step=" ++ show step ++ "/" ++ show (totalSteps optCfg)
+        ++ " progress=" ++ printf "%.3f%%" (100 * fromIntegral step / fromIntegral (totalSteps optCfg) :: Double)
+        ++ " lr=" ++ formatFloat lr
+        ++ " train_loss=" ++ formatFloat loss
+        ++ " train_loss_ema=" ++ formatFloat ema
+        ++ " gradient_norm=" ++ formatFloat gradientNorm
+        ++ " clipped=" ++ boolText (gradientNorm > clipNorm)
+        ++ validationText)
       when (step `mod` checkpointEvery == 0 && step /= target) $
-        saveSnapshot step rng' best' params' m' v'
-      loop ctx gpuCfg n optCfg split sampler target step microSize checkpointEvery clipNorm bpbScale gate saveSnapshot
-        params' m' v' mask rng' best'
+        saveSnapshot step rng' (progressBestValidationLoss progress') params' m' v'
+      loop ctx gpuCfg n optCfg split sampler target step microSize checkpointEvery validateEvery clipNorm bpbScale gate saveSnapshot
+        params' m' v' mask rng' progress'
   where f field = realToFrac (field optCfg)
+
+logTraining :: String -> IO ()
+logTraining message = do
+  timestamp <- formatTime defaultTimeLocale "%Y-%m-%d %H:%M %Z" <$> getZonedTime
+  putStrLn ("[" ++ timestamp ++ "] " ++ message)
+
+formatFloat :: Float -> String
+formatFloat = printf "%.7g"
+
+formatDouble :: Double -> String
+formatDouble = printf "%.7g"
+
+formatSignedFloat :: Float -> String
+formatSignedFloat = printf "%+.7g"
+
+trainLossEmaDecay :: Float
+trainLossEmaDecay = 0.98
+
+boolText :: Bool -> String
+boolText True = "true"
+boolText False = "false"
 
 -- Micro-batched gradient of the effective-batch mean loss.  Each chunk's
 -- adjoints are seeded with 1/effective-batch inside the kernel, so the
@@ -350,23 +417,25 @@ trainingSequencesFrom offset cfg documents = do
   split <- trainerWindowSplitFrom offset (contextSize cfg) documents
   pure (Split (convert (training split)) (convert (validation split)))
   where
-    convert = map (map fromIntegral)
+    -- A pure map forced in parallel chunks: the value is unchanged, only
+    -- where and when it is evaluated.
+    convert windows = map (map fromIntegral) windows `using` parListChunk 4096 rdeepseq
     validateDocument document = when
       (any (\token -> token < 2 || token >= vocabSize cfg) (documentTokens document))
       (Left ("document " ++ documentId document ++ " contains a token outside model vocabulary"))
 
-newCheckpoint :: Config -> Identity -> AdamWConfig -> Checkpoint
-newCheckpoint cfg identity optCfg = Checkpoint manifest params (initAdamW count) Nothing initialPRNG
+newCheckpoint :: Config -> Identity -> AdamWConfig -> Float -> Checkpoint
+newCheckpoint cfg identity optCfg clipNorm = Checkpoint manifest params (initAdamW count) Nothing initialPRNG
   where
     count = paramCount cfg
-    manifest = Manifest artifactVersion cfg count canonicalLayoutIdentity canonicalLayoutVersion optCfg identity
+    manifest = Manifest artifactVersion cfg count canonicalLayoutIdentity canonicalLayoutVersion optCfg identity (realToFrac clipNorm)
     params = either error (concatMap initialize) (namedLayout cfg)
     initialize slice
       | sliceDecay slice = [0.02 * sin (fromIntegral (sliceOffset slice + i + 1) * 12.9898) | i <- [0 .. sliceLength slice - 1]]
       | otherwise = replicate (sliceLength slice) 1
 
-validateResume :: Config -> Identity -> AdamWConfig -> Checkpoint -> IO Checkpoint
-validateResume cfg identity optCfg checkpoint = do
+validateResume :: Config -> Identity -> AdamWConfig -> Float -> Checkpoint -> IO Checkpoint
+validateResume cfg identity optCfg clipNorm checkpoint = do
   let manifest = checkpointManifest checkpoint
   when (manifestConfig manifest /= cfg) (die "checkpoint config does not match requested model size")
   when (manifestIdentity manifest /= identity) (die "checkpoint model/tokenizer/dataset identity mismatch")
@@ -377,6 +446,12 @@ validateResume cfg identity optCfg checkpoint = do
       ++ "  the schedule is anchored at run creation; to train with a"
       ++ " different target (or a different TRAIN_BATCH for an epoch"
       ++ " target), start a new CHECKPOINT path"))
+  when (manifestClipNorm manifest /= realToFrac clipNorm) (die
+    ("checkpoint gradient clip does not match this run\n"
+      ++ "  checkpoint: " ++ show (manifestClipNorm manifest) ++ "\n"
+      ++ "  this run:   " ++ show clipNorm ++ " (GRAD_CLIP)\n"
+      ++ "  the clip is part of the training trajectory; resume with the"
+      ++ " same GRAD_CLIP or start a new CHECKPOINT path"))
   when (manifestLayoutIdentity manifest /= canonicalLayoutIdentity || manifestLayoutVersion manifest /= canonicalLayoutVersion) (die "checkpoint layout identity mismatch")
   pure checkpoint
 
@@ -391,11 +466,20 @@ generate checkpointPath text budget = do
   when (tokenizerVocabSize tokenizer /= vocabSize cfg)
     (die "checkpoint tokenizer vocabulary does not match its model configuration")
   gpuCfg <- either die pure (gpuConfig cfg)
+  temperature <- nonnegativeDoubleEnv "TEMPERATURE" 0.8
+  topK <- positiveEnv "TOP_K" 40
+  seedText <- lookupEnv "SAMPLE_SEED"
+  rng <- case seedText of
+    Nothing -> pure (checkpointPRNG checkpoint)
+    Just value -> seededPRNG <$> parseWord64 "SAMPLE_SEED" value
+  hPutStrLn stderr ("generate: temperature=" ++ show temperature
+    ++ " top_k=" ++ show topK
+    ++ " seed=" ++ maybe "checkpoint-prng" id seedText)
   let promptBytes = Text.encodeUtf8 (Text.pack text)
       prompt = bosToken : encodeWith tokenizer promptBytes
       n = paramCount cfg
   generated <- withContext $ \ctx -> withF32 ctx (map realToFrac (checkpointParameters checkpoint)) $ \params ->
-    generateLoop ctx gpuCfg cfg params budget prompt []
+    generateLoop ctx gpuCfg cfg params (pickToken temperature topK) budget rng prompt []
   bytes <- either die pure (decodeWith tokenizer generated)
   BS.putStr (promptBytes <> bytes)
   putStrLn ""
@@ -412,17 +496,60 @@ tokenizerForIdentity identity
         (die "TOKENIZER_FILE identity does not match the checkpoint")
       pure tokenizer
 
-generateLoop :: Context -> GpuConfig -> Config -> F32Array -> Int -> [Int] -> [Int] -> IO [Int]
-generateLoop _ _ _ _ 0 _ output = pure output
-generateLoop ctx gpuCfg cfg params remaining state output = do
+generateLoop
+  :: Context -> GpuConfig -> Config -> F32Array
+  -> ([Float] -> PRNGState -> (Int, PRNGState))
+  -> Int -> PRNGState -> [Int] -> [Int] -> IO [Int]
+generateLoop _ _ _ _ _ 0 _ _ output = pure output
+generateLoop ctx gpuCfg cfg params pick remaining rng state output = do
   let context = takeEnd (contextSize cfg) state
   logits <- withI64_1d ctx (map fromIntegral context) $ \tokens ->
     bracket (lastLogits ctx gpuCfg params tokens) (freeF32 ctx) (downloadF32 ctx (vocabSize cfg))
-  let token = argmax logits
+  let (token, rng') = pick logits rng
   if token == eosToken then pure output
   else if token == bosToken
-    then generateLoop ctx gpuCfg cfg params (remaining - 1) (state ++ [token]) output
-    else generateLoop ctx gpuCfg cfg params (remaining - 1) (state ++ [token]) (output ++ [token])
+    then generateLoop ctx gpuCfg cfg params pick (remaining - 1) rng' (state ++ [token]) output
+    else generateLoop ctx gpuCfg cfg params pick (remaining - 1) rng' (state ++ [token]) (output ++ [token])
+
+-- Observation of the model's next-token distribution.  TEMPERATURE=0 is
+-- the degenerate greedy observation (the exact argmax path); otherwise the
+-- top-K logits are softmaxed at the given temperature and sampled by
+-- inverse CDF.  The denotation being observed is unchanged either way.
+pickToken :: Float -> Int -> [Float] -> PRNGState -> (Int, PRNGState)
+pickToken temperature topK logits rng
+  | temperature <= 0 = (argmax logits, rng)
+  | otherwise = (select (unitInterval word * total) weights, rng')
+  where
+    top = take topK (sortOn (negate . snd) (zip [0 ..] logits))
+    peak = maximum (map snd top)
+    weights =
+      [ (index, exp (realToFrac ((logit - peak) / temperature) :: Double))
+      | (index, logit) <- top ]
+    total = sum (map snd weights)
+    (word, rng') = nextWord rng
+    select _ [] = argmax logits
+    select remaining ((index, weight) : rest)
+      | remaining < weight || null rest = index
+      | otherwise = select (remaining - weight) rest
+
+-- The high 53 bits of a PRNG word as a Double in [0, 1).
+unitInterval :: Word64 -> Double
+unitInterval word = fromIntegral (word `shiftR` 11) / 9007199254740992
+
+-- SplitMix64 expansion of one seed word into a full xoshiro256** state:
+-- the generator authors' recommended seeding procedure.
+seededPRNG :: Word64 -> PRNGState
+seededPRNG seed = PRNGState a b c d
+  where
+    (a, s1) = splitmix seed
+    (b, s2) = splitmix s1
+    (c, s3) = splitmix s2
+    (d, _) = splitmix s3
+    splitmix s = (z2 `xor` (z2 `shiftR` 31), s')
+      where
+        s' = s + 0x9e3779b97f4a7c15
+        z1 = (s' `xor` (s' `shiftR` 30)) * 0xbf58476d1ce4e5b9
+        z2 = (z1 `xor` (z1 `shiftR` 27)) * 0x94d049bb133111eb
 
 sampleBatch :: Int -> PRNGState -> [a] -> ([a], PRNGState)
 sampleBatch count state values = foldl' pick ([], state) [1 .. count]
@@ -482,3 +609,12 @@ positiveDoubleEnv name fallback = do
     Just text -> case readMaybe text of
       Just number | number > 0 -> pure number
       _ -> die (name ++ " must be a positive number")
+
+nonnegativeDoubleEnv :: String -> Double -> IO Float
+nonnegativeDoubleEnv name fallback = do
+  value <- lookupEnv name
+  case value of
+    Nothing -> pure (realToFrac fallback)
+    Just text -> case readMaybe text of
+      Just number | number >= 0 -> pure number
+      _ -> die (name ++ " must be a nonnegative number")
