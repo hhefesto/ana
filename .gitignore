@@ -8,6 +8,9 @@ backend/futhark/kernels.c
 backend/futhark/kernels.h
 backend/futhark/kernels.json
 backend/futhark/kernels
+backend/futhark/bench.c
+backend/futhark/bench.json
+backend/futhark/bench
 *.checkpoint
 *.tmp
 /data/

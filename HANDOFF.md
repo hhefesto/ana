@@ -420,3 +420,40 @@ state and ..." forever, and what separates this model from GPT-2 level.
   earlier rc=124 message blaming the GPU arch has been corrected.
 - The local `wiki-small-global` run is retired (user decision 2026-07-16), so
   model.fut may change freely; bpe10m has no trajectory yet.
+
+## Baseline measurements: the pathology is the GPU codegen of the vjp (2026-07-16)
+
+`backend/futhark/bench.fut` (new) benchmarks the differentiated step
+(`bench_grad`, mirrors `micro_batch_loss_grad`) and the undifferentiated loss
+(`bench_forward`) over a config ladder from tiny/small toward bpe10m, one axis
+per dataset. Pre-fix numbers, batch=1 (`futhark bench`, local 16-core CPU and
+Radeon RX 580 via rusticl):
+
+| dataset (v/d/f/h/L/n)          | multicore grad | multicore fwd | opencl grad | opencl fwd |
+|--------------------------------|---------------:|--------------:|------------:|-----------:|
+| tiny   258/16/48/2/1/16        |              — |             — |      247 ms |     8.1 ms |
+| small  258/64/192/4/2/64       |        24.0 ms |        3.3 ms |  WATCHDOG (>10 s) | 77.7 ms |
+| vocab  8192/64/192/4/2/64      |        59.0 ms |        6.2 ms |           — |     273 ms |
+| context 258/64/192/4/2/256     |         184 ms |       17.6 ms |           — |     104 ms |
+| dim    258/320/192/5/2/64      |         211 ms |       14.2 ms |           — |     605 ms |
+| ff     258/64/864/4/2/64       |        38.2 ms |        2.9 ms |           — |     182 ms |
+| layers 258/64/192/4/6/64       |        69.3 ms |        9.7 ms |           — |     211 ms |
+| bpe10m 8192/320/864/5/6/256    |        7.20 s  |        507 ms |           — |    4.74 s  |
+
+Readings:
+- The 16-core CPU does the full bpe10m gradient micro-batch in 7.2 s, while an
+  RTX 3090 could not finish it in >17.5 min: the pathology is specific to the
+  GPU code generated for the vjp, not to the model or the arithmetic.
+- Even the SMALL gradient (24 ms on CPU) trips the Polaris 10 s watchdog; the
+  debug log shows the generated code allocating `withacc_locks_mem` — the AD
+  adjoint accumulations compile to lock-guarded (spinlock) updates, and the
+  per-component `causal_attention` makes every shared q/k slice element receive
+  on the order of n^2*d*hd locked updates per layer (~10^9-10^10 at bpe10m).
+- Superlinear grad axes on CPU: context (x4 -> x7.7) and dim/hd (x5 -> x8.8);
+  vocab x32 -> x2.5, ff x4.5 -> x1.6, layers x3 -> x2.9 (linear).
+- grad/forward: 7.3x (small, CPU) -> 14.2x (bpe10m, CPU) -> 30x (tiny, GPU)
+  -> >128x (small, GPU, watchdog-killed).
+
+Fix direction: compute attention once per head (removes the xhd redundant
+softmax and cuts the locked adjoint updates by xhd), then re-measure this
+ladder; GPU grad must at minimum pass small under the watchdog.

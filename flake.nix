@@ -293,6 +293,7 @@
                 futhark check backend/futhark/kernels.fut
                 futhark check backend/futhark/kernels-opencl.fut
                 futhark check backend/futhark/tests.fut
+                futhark check backend/futhark/bench.fut
                 touch $out
               '';
           gpu-host = self.packages.${system}.formal-transformer-gpu;
