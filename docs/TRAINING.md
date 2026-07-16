@@ -76,6 +76,15 @@ and checkpoint semantics are unchanged. Validation likewise evaluates in
 purpose is the display-GPU watchdog: each kernel launch stays near the
 known-safe single-chunk cost while the effective batch grows.
 
+Two further execution-only GPU knobs (like `FUT_DEVICE`/`FUT_CACHE`, they
+change scheduling, never the equations): `FUT_TUNING` names a
+futhark-autotune-style `NAME=VALUE` file applied to the kernel context, and
+`FUT_REJECT_INTRA=1` rejects the compiler's intra-workgroup kernel versions,
+whose one-workgroup-per-inner-dimension launches exceed per-kernel workgroup
+limits on register-poor devices (`CL_INVALID_WORK_GROUP_SIZE` on
+Polaris/rusticl) and whose fully-flattened fallback suits this model's
+shapes. The cloud deploy scripts default `FUT_REJECT_INTRA` to `1`.
+
 ## Baseline Gate
 
 A bigram language model is the minimal finite state algebra over the

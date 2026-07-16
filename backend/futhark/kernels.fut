@@ -65,6 +65,14 @@ entry zero_vector (count: i64): [count]f32 =
 -- batch_loss_grad on the whole effective batch.  Summing the returned
 -- partial losses and gradients over a partition of the effective batch
 -- therefore equals the full-batch result up to f32 summation order only.
+--
+-- The vjp is applied per sample inside a sequential loop (not to the
+-- batch-summed objective): equal by the same linearity, but a vjp under a
+-- batch map compiles to a single batch-parallel kernel that runs a whole
+-- reverse sweep on one GPU thread per sample, while the per-sample vjp
+-- distributes into kernels parallel over sequence/dim/vocab.  Kept
+-- textually identical to kernels-opencl.fut so the conformance oracle
+-- (which builds this file) validates the formulation the GPU trainers run.
 entry micro_batch_loss_grad [batch] [sequence]
     (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
     (effective_batch: i64)
@@ -74,12 +82,13 @@ entry micro_batch_loss_grad [batch] [sequence]
     : (f32, [parameter_count v d f n_layers]f32) =
   let checked = assert (batch > 0 && sequence >= 2 &&
                         effective_batch >= batch) tokens
-  let partial candidate =
-    f32.sum (map (\sample -> next_token_loss v d f h n_layers sample candidate)
-                 checked)
-      / f32.i64 effective_batch
-  let (partial_loss, gradient) = vjp2 partial params 1.0f32
-  in (partial_loss, map2 (+) accumulator gradient)
+  let seed = 1.0f32 / f32.i64 effective_batch
+  let (loss_sum, accumulated) =
+    loop (loss_sum, acc) = (0.0f32, accumulator) for b < batch do
+      let (sample_loss, gradient) =
+        vjp2 (next_token_loss v d f h n_layers checked[b]) params seed
+      in (loss_sum + sample_loss, map2 (+) acc gradient)
+  in (loss_sum / f32.i64 effective_batch, accumulated)
 
 entry clip_global_norm [p] (max_norm: f32) (gradient: [p]f32)
     : (f32, [p]f32) =

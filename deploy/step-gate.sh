@@ -42,6 +42,7 @@ echo "step-gate: one training step, hard-capped at ${timeout_s}s (includes NVRTC
 rc=0
 TOKENIZER_FILE="$tokenizer" TRAIN_BATCH="${TRAIN_BATCH:-8}" MICRO_BATCH="${MICRO_BATCH:-1}" \
 CHECKPOINT_EVERY=1 FUT_CACHE="${FUT_CACHE:-run/futhark-cuda.cache}" \
+FUT_REJECT_INTRA="${FUT_REJECT_INTRA:-1}" \
   timeout "$timeout_s" stdbuf -oL -eL "$trainer" train "$corpus" "$ckpt" 1 "${SIZE:-bpe10m}" || rc=$?
 
 if [ "$rc" -eq 0 ]; then

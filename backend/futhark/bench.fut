@@ -39,18 +39,20 @@ entry mk_tokens (v: i64) (batch: i64) (n: i64): [][]i64 =
   tabulate_2d batch n (\b i -> (b * 7919 + i * 104729 + 12345) % v)
 
 -- Mirrors micro_batch_loss_grad's differentiated body (one micro-batch, the
--- cloud trainer's hot path). Summing the gradient keeps it live in the result.
+-- cloud trainer's hot path): a per-sample vjp under a sequential batch loop.
+-- Summing the gradient keeps it live in the result.
 entry bench_grad [batch] [sequence]
     (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
     (params: []f32) (tokens: [batch][sequence]i64): f32 =
   let p = parameter_count v d f n_layers
   let candidate0 = params :> [p]f32
-  let partial candidate =
-    f32.sum (map (\sample -> next_token_loss v d f h n_layers sample candidate)
-                 tokens)
-      / f32.i64 batch
-  let (loss, gradient) = vjp2 partial candidate0 1.0f32
-  in loss + f32.sum gradient
+  let seed = 1.0f32 / f32.i64 batch
+  let (loss_sum, accumulated) =
+    loop (loss_sum, acc) = (0.0f32, replicate p 0.0f32) for b < batch do
+      let (sample_loss, gradient) =
+        vjp2 (next_token_loss v d f h n_layers tokens[b]) candidate0 seed
+      in (loss_sum + sample_loss, map2 (+) acc gradient)
+  in loss_sum / f32.i64 batch + f32.sum accumulated
 
 -- ==
 -- entry: bench_grad

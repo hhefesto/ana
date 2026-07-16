@@ -36,8 +36,9 @@ module FutharkKernels
   ) where
 
 import Control.Exception (bracket, throwIO)
-import Control.Monad (when)
+import Control.Monad (forM_, when)
 import Data.Int (Int64)
+import Data.List (isInfixOf)
 import Data.Word (Word8)
 import Foreign
 import Foreign.C.String (CString, peekCString, withCString)
@@ -102,6 +103,33 @@ withContext action = bracket c_config_new c_config_free $ \cfg -> do
   case device of
     Nothing -> pure ()
     Just value -> withCString value (c_config_set_device cfg)
+  -- Execution-only scheduling knobs (never part of the training semantics):
+  -- FUT_TUNING names a futhark-autotune-style file of NAME=VALUE tuning
+  -- assignments.  FUT_REJECT_INTRA=1 sets every suff_intra_par_* threshold
+  -- so high that the compiler's intra-workgroup kernel versions are never
+  -- selected: those versions request one workgroup as wide as the inner
+  -- parallel dimension (e.g. ff*sequence threads), which exceeds per-kernel
+  -- workgroup limits on register-poor devices (observed as CL_INVALID_WORK_
+  -- GROUP_SIZE on Polaris/rusticl, 2026-07-16) and falls back to the fully
+  -- flattened many-kernel schedule that suits this model's shapes.
+  tuningPath <- lookupEnv "FUT_TUNING"
+  case tuningPath of
+    Nothing -> pure ()
+    Just path -> do
+      assignments <- parseTuningFile <$> readFile path
+      forM_ assignments $ \(name, value) ->
+        withCString name $ \cname -> do
+          rc <- c_config_set_tuning_param cfg cname (fromIntegral value)
+          when (rc /= 0) $
+            throwIO (userError ("FUT_TUNING: unknown tuning parameter " ++ name))
+  rejectIntra <- lookupEnv "FUT_REJECT_INTRA"
+  when (rejectIntra == Just "1") $ do
+    count <- c_tuning_param_count
+    forM_ [0 .. count - 1] $ \i -> do
+      name <- peekCString =<< c_tuning_param_name i
+      when ("suff_intra_par" `isInfixOf` name) $
+        withCString name $ \cname ->
+          () <$ c_config_set_tuning_param cfg cname 2000000000
 #endif
   bracket (c_context_new cfg) freeContext $ \ctx -> do
     when (ctx == nullPtr) (throwIO (userError "Futhark context creation failed"))
@@ -112,6 +140,19 @@ withContext action = bracket c_config_new c_config_free $ \cfg -> do
     action (Context ctx)
   where
     freeContext ctx = when (ctx /= nullPtr) (c_context_free ctx)
+
+-- NAME=VALUE per line, as written by futhark autotune; blank lines and
+-- '--' comment lines are ignored.
+parseTuningFile :: String -> [(String, Integer)]
+parseTuningFile contents =
+  [ (name, value)
+  | line <- lines contents
+  , let trimmed = takeWhile (/= '\r') line
+  , not (null trimmed)
+  , not ("--" == take 2 trimmed)
+  , (name, '=' : rhs) <- [break (== '=') trimmed]
+  , Just value <- [readMaybe rhs]
+  ]
 
 withF32 :: Context -> [Float] -> (F32Array -> IO a) -> IO a
 withF32 ctx values = bracket (uploadF32 ctx values) (freeF32 ctx)
@@ -257,6 +298,9 @@ foreign import ccall unsafe "futhark_context_config_set_default_thread_block_siz
 #ifdef GPU_BACKEND
 foreign import ccall unsafe "futhark_context_config_set_cache_file" c_config_set_cache_file :: Ptr CContextConfig -> CString -> IO ()
 foreign import ccall unsafe "futhark_context_config_set_device" c_config_set_device :: Ptr CContextConfig -> CString -> IO ()
+foreign import ccall unsafe "futhark_context_config_set_tuning_param" c_config_set_tuning_param :: Ptr CContextConfig -> CString -> CSize -> IO CInt
+foreign import ccall unsafe "futhark_get_tuning_param_count" c_tuning_param_count :: IO CInt
+foreign import ccall unsafe "futhark_get_tuning_param_name" c_tuning_param_name :: CInt -> IO CString
 #endif
 foreign import ccall safe "futhark_context_new" c_context_new :: Ptr CContextConfig -> IO (Ptr CContext)
 foreign import ccall safe "futhark_context_free" c_context_free :: Ptr CContext -> IO ()

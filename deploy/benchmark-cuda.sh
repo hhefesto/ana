@@ -32,6 +32,7 @@ rm -f "$checkpoint"
 start=$(date +%s)
 TOKENIZER_FILE="$tokenizer" TRAIN_BATCH="$batch" MICRO_BATCH="$micro" \
   CHECKPOINT_EVERY="$steps" FUT_CACHE="${FUT_CACHE:-/tmp/formal-transformer-cuda.cache}" \
+  FUT_REJECT_INTRA="${FUT_REJECT_INTRA:-1}" \
   "$trainer" train "$corpus" "$checkpoint" "$steps" bpe10m
 end=$(date +%s)
 

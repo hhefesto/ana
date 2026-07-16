@@ -48,6 +48,18 @@ entry zero_vector (count: i64): [count]f32 =
 -- batch_loss_grad on the whole effective batch.  Summing the returned
 -- partial losses and gradients over a partition of the effective batch
 -- therefore equals the full-batch result up to f32 summation order only.
+--
+-- The differentiation is applied per sample, inside a sequential loop over
+-- the chunk, rather than to the batch-summed objective.  The two are equal
+-- by the same linearity (the seed 1/effective_batch is exactly the adjoint
+-- the division hands each sample), but the generated code is radically
+-- different: a vjp under a map over the batch compiles to ONE kernel whose
+-- only parallel dimension is the batch, so a micro-batch of 1 runs the
+-- whole reverse sweep on a single GPU thread (measured 2026-07-16: >17 min
+-- per step on an RTX 3090 at bpe10m scale).  A per-sample vjp distributes
+-- into a few hundred kernels parallel over sequence/dim/vocab, and the
+-- samples pay a sequential loop that costs nothing when each sweep already
+-- fills the GPU.  See HANDOFF.md.
 entry micro_batch_loss_grad [batch] [sequence]
     (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
     (effective_batch: i64)
@@ -57,12 +69,13 @@ entry micro_batch_loss_grad [batch] [sequence]
     : (f32, [parameter_count v d f n_layers]f32) =
   let checked = assert (batch > 0 && sequence >= 2 &&
                         effective_batch >= batch) tokens
-  let partial candidate =
-    f32.sum (map (\sample -> next_token_loss v d f h n_layers sample candidate)
-                 checked)
-      / f32.i64 effective_batch
-  let (partial_loss, gradient) = vjp2 partial params 1.0f32
-  in (partial_loss, map2 (+) accumulator gradient)
+  let seed = 1.0f32 / f32.i64 effective_batch
+  let (loss_sum, accumulated) =
+    loop (loss_sum, acc) = (0.0f32, accumulator) for b < batch do
+      let (sample_loss, gradient) =
+        vjp2 (next_token_loss v d f h n_layers checked[b]) params seed
+      in (loss_sum + sample_loss, map2 (+) acc gradient)
+  in (loss_sum / f32.i64 effective_batch, accumulated)
 
 entry clip_global_norm [p] (max_norm: f32) (gradient: [p]f32)
     : (f32, [p]f32) =

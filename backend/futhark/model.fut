@@ -63,24 +63,36 @@ def softmax [n] (x: [n]f32): [n]f32 =
   let denom = f32.sum ex
   in map (\z -> z / denom) ex
 
+-- Scores and softmax depend only on (head, i), never on the output component,
+-- so they are computed once per head here and shared by that head's hd output
+-- components. Every output element is still the same expression as the
+-- per-component formulation (pure let-floating; no f32 reassociation), but the
+-- forward work and — critically — the reverse-AD adjoint accumulations into
+-- the shared q/k slices shrink by a factor of hd (see HANDOFF.md 2026-07-16:
+-- those accumulations compile to lock-guarded updates on GPUs).
 def causal_attention [n] [d]
     (h: i64)
     (q: [n][d]f32) (k: [n][d]f32) (v: [n][d]f32): [n][d]f32 =
   let hd = d / h
   let inv_scale = 1.0f32 / f32.sqrt (f32.i64 hd)
-  in map (\i ->
-    tabulate d (\component ->
-      let head = component / hd
-      let within_head = component % hd
+  let per_head =
+    tabulate h (\head ->
       let head_base = head * hd
-      let scores = map (\j ->
-        if j <= i
-        then dot (take hd (drop head_base q[i]))
-                 (take hd (drop head_base k[j])) * inv_scale
-        else -1.0e30f32) (iota n)
-      let weights = softmax scores
-      in f32.sum (map2 (*) weights
-           (map (\j -> v[j,head_base+within_head]) (iota n))))) (iota n)
+      let qh = map (\row -> take hd (drop head_base row)) q
+      let kh = map (\row -> take hd (drop head_base row)) k
+      let vh = map (\row -> take hd (drop head_base row)) v
+      in map (\i ->
+           let scores = map (\j ->
+             if j <= i
+             then dot qh[i] kh[j] * inv_scale
+             else -1.0e30f32) (iota n)
+           let weights = softmax scores
+           in tabulate hd (\within_head ->
+                f32.sum (map2 (*) weights
+                  (map (\j -> vh[j, within_head]) (iota n)))))
+           (iota n))
+  in tabulate n (\i ->
+       flatten (map (\head -> per_head[head, i]) (iota h)) :> [d]f32)
 
 def decoder_block [n] [d] [p]
     (f: i64) (h: i64) (base: i64)

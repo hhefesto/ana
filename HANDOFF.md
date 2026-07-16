@@ -457,3 +457,55 @@ Readings:
 Fix direction: compute attention once per head (removes the xhd redundant
 softmax and cuts the locked adjoint updates by xhd), then re-measure this
 ladder; GPU grad must at minimum pass small under the watchdog.
+
+## Fix landed: the gradient now parallelizes on GPU (2026-07-16)
+
+Two changes, both conformance-verified against the Numeric.AD reference:
+
+1. **Per-head `causal_attention`** (model.fut): scores/softmax were computed
+   once per output component although they only depend on the head — pure
+   let-floating, no f32 reassociation; ~hd x less forward work and hd x fewer
+   adjoint accumulations. CPU bpe10m grad micro-batch: 7.20 s -> 2.80 s.
+2. **Per-sample vjp** (kernels.fut + kernels-opencl.fut
+   `micro_batch_loss_grad`): the vjp was applied to the batch-summed
+   objective, and a vjp under a batch map compiles to ONE kernel whose only
+   parallel dimension is the batch — with MICRO_BATCH=1 a single GPU thread
+   ran the entire reverse sweep sequentially (the true cause of the >17.5 min
+   RTX 3090 step AND the Blackwell "hang"; profile evidence: hot kernel
+   `grid=[1,1,1]`, guard `gtid < batch`, 86.6% of runtime). Restructured as a
+   sequential loop over samples with a per-sample vjp seeded 1/effective_batch
+   (equal by linearity D(sum f_i) = sum D f_i — the file's existing
+   justification); the per-sample reverse sweep now distributes into ~200
+   kernels parallel over sequence/dim/vocab. The conformance oracle now shows
+   micro-batch == full-batch gradients BIT-EXACTLY (max_abs=0.0; previously
+   ~1.5e-8) plus the usual tolerance vs Numeric.AD.
+
+Post-fix ladder (batch=1; RX 580 rusticl with FUT_REJECT_INTRA=1 semantics,
+16-core multicore; before -> after):
+
+| dataset | opencl grad | multicore grad |
+|---------|------------:|---------------:|
+| tiny    | 247 ms -> 12.8 ms | (new point) 0.85 ms |
+| small   | WATCHDOG >10 s -> 43.7 ms | 24.0 -> 16.9 ms |
+| bpe10m  | unrunnable -> 6.49 s | 7.20 -> 2.52 s |
+
+The full bpe10m gradient micro-batch now runs on a $60 Polaris in 6.5 s; an
+RTX 3090 should be well under a second, so `deploy/step-gate.sh` (180 s for
+one 8-sample step) passes with margin. bpe10m had no training trajectory yet
+and the small run is retired, so no trajectory constraints applied.
+
+**New execution-only knobs** (FutharkKernels.hs, docs/TRAINING.md): the
+distributed schedule exposes intra-workgroup kernel versions whose launches
+can exceed per-kernel workgroup limits on register-poor devices
+(CL_INVALID_WORK_GROUP_SIZE on Polaris/rusticl, e.g. a 768-wide
+`segmap_intrablock` = ff x sequence). `FUT_REJECT_INTRA=1` (deploy scripts'
+default) rejects those versions by setting every `suff_intra_par_*`
+threshold huge; `FUT_TUNING=file` applies autotune-style NAME=VALUE
+assignments. Benchmark on CUDA with FUT_REJECT_INTRA unset vs 1 before the
+full run; 1 is the safe posture.
+
+Bench harness: `backend/futhark/bench.fut` (`futhark bench
+--backend=multicore|opencl -e bench_grad ...`); on the local Polaris pass
+`--pass-option=--param=bench_grad.suff_intra_par_N=2000000000` for each
+suff_intra_par param (futhark bench has no reject-intra switch; get names
+from `<compiled-server> --print-params`).

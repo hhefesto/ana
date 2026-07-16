@@ -68,6 +68,8 @@ export TRAIN_BATCH="$BATCH"
 export MICRO_BATCH="${MICRO_BATCH:-1}"
 export CHECKPOINT_EVERY="${CHECKPOINT_EVERY:-100}"
 export FUT_CACHE="${FUT_CACHE:-run/futhark-cuda.cache}"
+# Execution-only: reject intra-workgroup kernel versions (see docs/TRAINING.md).
+export FUT_REJECT_INTRA="${FUT_REJECT_INTRA:-1}"
 
 trained=0
 # Segment line: segment <k> <offset> <docs> <corpus_id> <tw> <vw> <steps> <seg_start> <seg_end>
