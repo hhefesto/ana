@@ -12,8 +12,10 @@
 #
 # Usage:
 #   deploy/pull-checkpoint.sh USER@HOST [interval_seconds]
+#   vast.ai: SSH_PORT=<port> deploy/pull-checkpoint.sh root@<host> [interval]
 # Env:
 #   SSH_KEY      identity file (default: ~/.ssh/xpsoasis-ed25519 = hhefesto@olimpo)
+#   SSH_PORT     ssh port (default: 22; vast.ai gives a nonstandard port)
 #   REMOTE_DIR   remote repo path (default: formalTransformer)
 #   SIZE         model size (default: bpe10m)
 #   LOCAL_DIR    where to drop the checkpoint locally (default: run)
@@ -22,12 +24,14 @@ set -euo pipefail
 HOST="${1:?usage: pull-checkpoint.sh USER@HOST [interval_seconds]}"
 INTERVAL="${2:-120}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/xpsoasis-ed25519}"
+SSH_PORT="${SSH_PORT:-}"
 REMOTE_DIR="${REMOTE_DIR:-formalTransformer}"
 SIZE="${SIZE:-bpe10m}"
 LOCAL_DIR="${LOCAL_DIR:-run}"
 
 mkdir -p "$LOCAL_DIR"
 ssh_opts=(-i "$SSH_KEY" -o StrictHostKeyChecking=accept-new)
+[ -n "$SSH_PORT" ] && ssh_opts+=(-p "$SSH_PORT")
 remote_glob="$REMOTE_DIR/run/wiki-$SIZE-global.checkpoint"
 
 echo "pull-checkpoint: $HOST:$remote_glob* -> $LOCAL_DIR/ every ${INTERVAL}s"

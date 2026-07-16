@@ -44,35 +44,52 @@ times faster than the 6000 Ada. Benchmark dollars per processed token rather
 than advertised tensor FLOPS: this implementation currently uses Futhark `f32`
 kernels and does not silently switch to mixed-precision tensor cores.
 
-## Nix On The VM
+**GPU architecture constraint (2026-07-15): avoid Blackwell.** On an RTX PRO
+4000 Blackwell (compute capability sm_120) the Futhark-generated gradient kernel
+compiles (CUDA 12.9 NVRTC) but hangs at execution — one training step did not
+finish in 100 s with the GPU pegged at 100% and a warm kernel cache. This rules
+out all RTX 50xx and RTX PRO Blackwell cards. Rent Ada (RTX 40xx, sm_89) or
+Ampere (RTX 30xx, sm_86) instead; `cloud-init.sh` refuses compute capability
+≥ 10.0 unless `ALLOW_UNTESTED_ARCH=1`, and `deploy/step-gate.sh` proves one real
+step completes before any large transfer or training spend.
 
-Use Verda's `Ubuntu 24.04 + CUDA 12.6` image (not Minimal, which ships no
-driver; the `+ Docker` variant is unnecessary). Keep its kernel driver, install
-Nix for all userspace dependencies, and build the pinned CUDA closure from this
-flake. This is safer than replacing a cloud VM's working driver with a NixOS
-driver before the first benchmark.
+## Nix On The Rented Box (VM or container)
 
-`flake.nix` pins the CUDA userspace to **12.6** (`cudaPackages_12_6`) so the
-NVRTC that JIT-compiles the kernel PTX targets an ISA the CUDA-12.6 image driver
-accepts. The step-by-step minimum-cost runbook is `deploy/verda-fast-path.md`;
-`deploy/verda-init.sh` brings an instance up and `deploy/train-cloud.sh` trains
-per-shard from the pre-built plan without needing the source JSONL on the VM.
+Two supported targets. **Verda (VM):** use the `Ubuntu 24.04 + CUDA 12.6` image
+(not Minimal, which ships no driver; the `+ Docker` variant is unnecessary).
+**vast.ai (container):** rent any CUDA/Ubuntu container template that exposes the
+NVIDIA runtime and reports `Max CUDA ≥ 12.6`. Either way, keep the box's kernel
+driver, install Nix for all userspace dependencies, and build the pinned CUDA
+closure from this flake — safer than replacing a working driver.
+
+`flake.nix` pins the CUDA userspace to **12.6** (`cudaPackages_12_6`): its PTX
+is accepted by the widest range of rental-host drivers (most vast.ai hosts
+advertise Max CUDA 12.6 or 12.8, few 12.9+), and its NVRTC targets every arch
+we allow (Ada sm_89, Ampere sm_86, and older — just not the banned Blackwell).
+The step-by-step minimum-cost runbook is `deploy/cloud-fast-path.md`;
+`deploy/cloud-init.sh` brings an instance up — it auto-detects a VM (multi-user
+Nix) vs a Docker container (single-user `--no-daemon` Nix, `sandbox = false`) —
+and `deploy/train-cloud.sh` trains per-shard from the pre-built plan without
+needing the source JSONL on the box.
 
 The CUDA package links against the toolkit's `libcuda` stub only during the Nix
 build. Its runtime RPATH contains `/run/opengl-driver/lib` for NixOS plus the
 Nix CUDA runtime/NVRTC libraries, but no stub directory. On Ubuntu,
-`libcuda.so.1` resolves from the provider driver's loader configuration.
+`libcuda.so.1` resolves from the provider driver's loader configuration; in a
+container, `cloud-init.sh` sets `LD_LIBRARY_PATH` to the nvidia-runtime-injected
+lib dir when the default loader path misses it (persisted to `run/cloud-env.sh`).
 
 ```bash
-./deploy/bootstrap-ubuntu-nvidia.sh
+./deploy/cloud-init.sh   # (deploy/bootstrap-ubuntu-nvidia.sh is the older Verda-only variant)
 ```
 
 The provider driver must support CUDA 12.6-era PTX because Futhark compiles its
-embedded CUDA through NVRTC at context creation. The CUDA-12.6 image satisfies
-this. If a benchmark still rejects the PTX (older driver than the image name
-implies), pin lower — `cudaPackages_12_4` is available in this nixpkgs — rebuild,
-and re-run the conformance oracle before trusting the new backend build; do not
-bundle a mismatched kernel driver into the flake.
+embedded CUDA through NVRTC at context creation; any `Max CUDA ≥ 12.6` host
+satisfies this. If a benchmark still rejects the PTX (older driver than
+advertised), pin lower — `cudaPackages_12_4` is available in this nixpkgs —
+rebuild, and re-run the conformance oracle before trusting the new backend
+build; do not bundle a mismatched kernel driver into the flake. Never pin below
+the GPU's arch support (NVRTC then fails with "invalid --gpu-architecture").
 
 ## Whole-Dataset Contract
 

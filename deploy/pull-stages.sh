@@ -18,11 +18,13 @@
 #   WIKI_CHECKPOINT=run/wiki-bpe10m-global.stage-1of4.checkpoint nix run .#wiki-generate
 #
 # Usage:  deploy/pull-stages.sh USER@HOST
-# Env:    SSH_KEY REMOTE_DIR SIZE LOCAL_DIR TOTAL_SHARDS STAGES INTERVAL
+#         vast.ai: SSH_PORT=<port> deploy/pull-stages.sh root@<host>
+# Env:    SSH_KEY SSH_PORT REMOTE_DIR SIZE LOCAL_DIR TOTAL_SHARDS STAGES INTERVAL
 set -euo pipefail
 
 HOST="${1:?usage: pull-stages.sh USER@HOST}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/xpsoasis-ed25519}"
+SSH_PORT="${SSH_PORT:-}"
 REMOTE_DIR="${REMOTE_DIR:-formalTransformer}"
 SIZE="${SIZE:-bpe10m}"
 LOCAL_DIR="${LOCAL_DIR:-run}"
@@ -32,6 +34,7 @@ INTERVAL="${INTERVAL:-300}"
 
 mkdir -p "$LOCAL_DIR"
 ssh_opts=(-i "$SSH_KEY" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15)
+[ -n "$SSH_PORT" ] && ssh_opts+=(-p "$SSH_PORT")
 remote_run="$REMOTE_DIR/run/wiki-$SIZE"
 remote_ckpt="$REMOTE_DIR/run/wiki-$SIZE-global.checkpoint"
 

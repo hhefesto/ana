@@ -30,6 +30,13 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+# cloud-init.sh records the LD_LIBRARY_PATH that resolves the container's
+# injected libcuda.so.1 (empty when the default loader paths already work).
+if [ -f run/cloud-env.sh ]; then
+  # shellcheck disable=SC1091
+  . run/cloud-env.sh
+fi
+
 SIZE="${SIZE:-bpe10m}"
 BATCH="${TRAIN_BATCH:-8}"
 RUN_DIR="${RUN_DIR:-run/wiki-$SIZE}"
@@ -42,9 +49,13 @@ MAX_SHARDS="${MAX_SHARDS:-0}"
 test -f "$PLAN" || { echo "train-cloud: plan not found: $PLAN" >&2; exit 1; }
 test -f "$TOKENIZER_FILE" || { echo "train-cloud: tokenizer not found: $TOKENIZER_FILE" >&2; exit 1; }
 
-features="nix-command flakes"
-nix --extra-experimental-features "$features" build .#formal-transformer-cuda
+# Use the already-built binary if present (cloud-init built it). Only invoke a
+# Nix build as a fallback — on a rsync'd (non-git) tree Nix would otherwise copy
+# the whole dir, including run/ corpora, into the store and rebuild needlessly.
 trainer="$repo_root/result/bin/formal-transformer-cuda"
+if [ ! -x "$trainer" ]; then
+  nix --extra-experimental-features "nix-command flakes" build .#formal-transformer-cuda
+fi
 
 # Plan header: plan 1 <global_total> <global_id> <data_hash> <total> <per> <batch> <size> <tok_hash>
 read -r tag _ver global_total global_id _rest < "$PLAN"

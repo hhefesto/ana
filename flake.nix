@@ -23,13 +23,18 @@
           haskellPackage = pkgs.haskellPackages.callCabal2nix "formal-transformer" ./. { };
           futharkKernels = self.packages.${system}.futhark-kernels;
           futharkKernelsCuda = self.packages.${system}.futhark-kernels-cuda;
-          # CUDA is pinned to 12.6 to match Verda's "Ubuntu 24.04 + CUDA 12.6"
-          # image. Only the host's *kernel driver* is used at runtime (see
-          # docs/CLOUD-TRAINING.md); Futhark JIT-compiles its kernel PTX through
-          # NVRTC at context creation, so NVRTC must not emit PTX newer than the
-          # host driver accepts. 12.6 NVRTC targets a PTX ISA that the CUDA-12.6
-          # image driver accepts. If an instance reports a newer driver
-          # (nvidia-smi), bumping this back to pkgs.cudaPackages is safe.
+          # CUDA userspace. Futhark JIT-compiles its kernel PTX through NVRTC at
+          # context creation, so NVRTC must (a) support the GPU's compute
+          # capability and (b) not emit PTX newer than the host driver accepts.
+          # Pinned to 12.6 because its PTX is accepted by the widest range of
+          # rental-host drivers (most vast.ai hosts advertise Max CUDA 12.6 or
+          # 12.8, few 12.9+). 12.6 NVRTC targets Ada (sm_89) and Ampere (sm_86)
+          # fine; it cannot target Blackwell (sm_120 → "invalid
+          # --gpu-architecture"), but the generated gradient kernel HANGS on
+          # Blackwell anyway (RTX PRO 4000, 2026-07-15; cloud-init.sh refuses
+          # compute cap >= 10.0), so that arch is banned regardless. If
+          # Blackwell ever works, bump to pkgs.cudaPackages (12.9) and require
+          # Max CUDA >= 12.9 hosts.
           cudaPackages = pkgs.cudaPackages_12_6;
           cudaCudart = cudaPackages.cuda_cudart;
           cudaCccl = cudaPackages.cccl;
