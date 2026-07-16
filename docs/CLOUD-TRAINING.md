@@ -44,14 +44,16 @@ times faster than the 6000 Ada. Benchmark dollars per processed token rather
 than advertised tensor FLOPS: this implementation currently uses Futhark `f32`
 kernels and does not silently switch to mixed-precision tensor cores.
 
-**GPU architecture constraint (2026-07-15): avoid Blackwell.** On an RTX PRO
-4000 Blackwell (compute capability sm_120) the Futhark-generated gradient kernel
-compiles (CUDA 12.9 NVRTC) but hangs at execution — one training step did not
-finish in 100 s with the GPU pegged at 100% and a warm kernel cache. This rules
-out all RTX 50xx and RTX PRO Blackwell cards. Rent Ada (RTX 40xx, sm_89) or
-Ampere (RTX 30xx, sm_86) instead; `cloud-init.sh` refuses compute capability
-≥ 10.0 unless `ALLOW_UNTESTED_ARCH=1`, and `deploy/step-gate.sh` proves one real
-step completes before any large transfer or training spend.
+**Kernel constraint (2026-07-15): the bpe10m gradient kernel is currently too
+slow to train on ANY GPU.** On an RTX PRO 4000 Blackwell (sm_120) and again on
+an RTX 3090 Ampere (sm_86) the Futhark-generated gradient kernel compiles but
+one training step does not finish in >17 min with the GPU pegged at 100% and a
+warm kernel cache — the same signature on two unrelated architectures, so the
+cause is the generated vjp kernel at bpe10m scale, not the card. Do not rent
+until the kernel fix lands (see `HANDOFF.md`). `cloud-init.sh` still refuses
+compute capability ≥ 10.0 as untested unless `ALLOW_UNTESTED_ARCH=1`, and
+`deploy/step-gate.sh` proves one real step completes before any large transfer
+or training spend — on every arch.
 
 ## Nix On The Rented Box (VM or container)
 
@@ -65,7 +67,8 @@ closure from this flake — safer than replacing a working driver.
 `flake.nix` pins the CUDA userspace to **12.6** (`cudaPackages_12_6`): its PTX
 is accepted by the widest range of rental-host drivers (most vast.ai hosts
 advertise Max CUDA 12.6 or 12.8, few 12.9+), and its NVRTC targets every arch
-we allow (Ada sm_89, Ampere sm_86, and older — just not the banned Blackwell).
+we allow (Ada sm_89, Ampere sm_86, and older — not Blackwell, which the guard
+treats as untested).
 The step-by-step minimum-cost runbook is `deploy/cloud-fast-path.md`;
 `deploy/cloud-init.sh` brings an instance up — it auto-detects a VM (multi-user
 Nix) vs a Docker container (single-user `--no-daemon` Nix, `sandbox = false`) —

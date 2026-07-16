@@ -389,3 +389,34 @@ state and ..." forever, and what separates this model from GPT-2 level.
   verifies no linker stub remains in runtime RPATH.
 - Selected one Verda spot RTX 6000 Ada as the first benchmark target under a
   USD 50 cap. See `docs/CLOUD-TRAINING.md` and `deploy/`.
+
+## Finding: bpe10m gradient kernel is pathologically slow on every GPU (2026-07-15)
+
+- Rented an RTX 3090 (Ampere sm_86, vast.ai) to retry after the Blackwell
+  failure. Same signature exactly: NVRTC compiles the vjp kernel in ~2.5 min
+  (GPU idle, CPU maxed), then the GPU pegs at 100% (~2.7 GB) and ONE training
+  step (TRAIN_BATCH=8, MICRO_BATCH=1) does not finish in >17.5 min. A step at
+  this size should take milliseconds on a 3090 — roughly 10^6x too slow.
+- Two unrelated architectures failing identically falsifies the earlier
+  "Blackwell is the culprit, rent Ada/Ampere" conclusion. The cause is the
+  Futhark reverse-mode-AD entry `micro_batch_loss_grad`
+  (backend/futhark/kernels-opencl.fut, built by BOTH `futhark cuda` and
+  `futhark opencl`) at bpe10m scale (Config 8192 256 320 864 6 5, 10,059,840
+  params). GPU throughput at this size was never benchmarked: the conformance
+  oracle checks numerics on a tiny config via sequential C, and the small
+  preset (123K params) is cheap enough per step to hide the pathology.
+- Prime suspect: `causal_attention` (backend/futhark/model.fut) recomputes the
+  full scores+softmax for every one of d=320 output components although they
+  depend only on the head (hd=64) — ~64x redundant forward work whose vjp is
+  far worse. Secondary suspects: the tied-unembedding adjoint (accumulation
+  into the embedding, also gathered at the input) and the vjp tape of the
+  n_layers loop over the flat 10M param vector.
+- Plan: measure first (a `futhark bench` ladder interpolating small->bpe10m one
+  axis at a time, multicore locally plus rusticl OpenCL with --profile on the
+  local Polaris), then the per-head attention rewrite (pure let-floating,
+  extensionally equal), re-verify with `nix build .#conformance`, and only then
+  re-gate on a cheap rented card via deploy/step-gate.sh. The step-gate did its
+  job (verdict in ~4 min, saved a 9.3 GB upload and a doomed paid run); its
+  earlier rc=124 message blaming the GPU arch has been corrected.
+- The local `wiki-small-global` run is retired (user decision 2026-07-16), so
+  model.fut may change freely; bpe10m has no trajectory yet.

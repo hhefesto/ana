@@ -55,20 +55,21 @@ case "$smi_cuda" in
   *) echo "cloud-init: driver CUDA >= 12.6 — 12.6 PTX will be accepted." ;;
 esac
 
-# Blackwell guard. On sm_120 (RTX PRO 4000 Blackwell / RTX 50xx) the Futhark
-# gradient kernel compiles but HANGS at execution (one step > 100 s, GPU pegged;
-# observed 2026-07-15). Refuse compute capability >= 10.0 (all Blackwell) so a
-# wrong rental fails in seconds, not after paid transfer + build time.
+# Untested-arch guard. Compute capability >= 10.0 (Blackwell and newer) has
+# never passed a step gate here, so refuse it by default and fail in seconds
+# rather than after paid transfer + build time. NOTE: the 2026-07-15 stall that
+# first prompted this guard turned out to be a kernel-level pathology at bpe10m
+# scale (Ampere sm_86 stalls identically), NOT a Blackwell problem — so passing
+# this guard proves nothing; deploy/step-gate.sh is the real gate on any arch.
 compute_cap="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n1 | tr -d ' ' || true)"
 echo "cloud-init: GPU compute capability=${compute_cap:-unknown}"
 case "$compute_cap" in
   1[0-9].*|[2-9][0-9].*)
     if [ "${ALLOW_UNTESTED_ARCH:-0}" != 1 ]; then
-      echo "cloud-init: FATAL — compute capability $compute_cap is Blackwell-or-newer;" >&2
-      echo "  the generated gradient kernel hangs there (see docs/CLOUD-TRAINING.md)." >&2
-      echo "  Destroy this instance and rent Ada (RTX 40xx, 8.9) or Ampere (RTX 30xx, 8.6)." >&2
-      echo "  Set ALLOW_UNTESTED_ARCH=1 to proceed anyway (then run deploy/step-gate.sh" >&2
-      echo "  before anything else)." >&2
+      echo "cloud-init: FATAL — compute capability $compute_cap is Blackwell-or-newer," >&2
+      echo "  an arch this pipeline has never gated successfully (see docs/CLOUD-TRAINING.md)." >&2
+      echo "  Set ALLOW_UNTESTED_ARCH=1 to proceed anyway; on ANY arch, run" >&2
+      echo "  deploy/step-gate.sh before transferring corpora or training." >&2
       exit 1
     fi
     echo "cloud-init: ALLOW_UNTESTED_ARCH=1 — proceeding on untested arch $compute_cap." >&2

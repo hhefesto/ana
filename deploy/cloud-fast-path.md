@@ -1,5 +1,11 @@
 # Cloud fast path — train `bpe10m`, pull weights, kill the instance ASAP
 
+> **STATUS (2026-07-15): DO NOT RENT YET.** bpe10m training is blocked by a
+> kernel-level performance pathology: the Futhark vjp gradient kernel does not
+> finish one step in >17 min on an RTX 3090 (Ampere) or an RTX PRO 4000
+> (Blackwell) — same signature on both, so it is the kernel, not the GPU.
+> Fix it locally first (see `HANDOFF.md`), then re-gate on a cheap card.
+
 Goal: spend the **least paid GPU time** to train `bpe10m` on a rented GPU and get
 the weights onto your local machine, then destroy the instance. The model is
 ~10 M params, the checkpoint is tiny (~120 MB), and all CPU-heavy prep (tokenizer
@@ -39,9 +45,11 @@ The one rule that saves the most money: **DESTROY** the instance when done (not
   **RTX 3090 / 3090 Ti (~$0.13/hr, 24 GB, reliable)**, **RTX 4070 Ti / 4080 /
   4090** (fastest FP32). Whole run ≈ $1–2. Need <1 GB VRAM, so don't pay up for
   memory.
-  - **NEVER Blackwell** (RTX 50xx, "RTX PRO … Blackwell", compute cap ≥ 10.0):
-    the gradient kernel compiles but **hangs** there (verified 2026-07-15 on an
-    RTX PRO 4000; `cloud-init.sh` refuses these, `step-gate.sh` catches them).
+  - **Blackwell (RTX 50xx, compute cap ≥ 10.0) is untested-arch** —
+    `cloud-init.sh` refuses it by default (`ALLOW_UNTESTED_ARCH=1` overrides).
+    Note: the 2026-07-15 stall first blamed on Blackwell reproduced identically
+    on Ampere — it was the kernel, not the arch. `step-gate.sh` is the real
+    gate on any card.
   - **Avoid sub-12.6 hosts** (Max CUDA 12.0/12.2/12.4) — they reject our PTX.
   - Old datacenter cards (Tesla T4, sm_75) are *compatible* but poor value:
     ~3× the $/FP32-TFLOP of a 3090 and many times the wall-clock.
@@ -111,15 +119,17 @@ container), builds `formal-transformer-cuda`, guards stub leaks, resolves
 
 ## 3. Gate + benchmark (cents — BEFORE the 9.3 GB transfer and the full run)
 
-**Step gate first** — one hard-capped training step on shard 0. On a bad arch
-the kernel compiles yet hangs with the GPU pegged at 100%; the gate turns that
-into a ≤3-minute verdict:
+**Step gate first** — one hard-capped training step on shard 0. The kernel can
+compile yet fail to finish a step with the GPU pegged at 100% (a kernel-level
+pathology, seen identically on Blackwell and Ampere); the gate turns that into
+a ≤3-minute verdict:
 
 ```bash
 # on the instance, in formalTransformer/
 ./deploy/step-gate.sh run/wiki-bpe10m/shard-0-bpe10m.corpus \
   "$HOME/datasets/wikipedia-en/enwiki-8k.bpe"
-# PASS -> continue below.  rc=124 -> DESTROY the instance, rent Ada/Ampere.
+# PASS -> continue below.  rc=124 -> DESTROY the instance; the kernel is the
+# problem, not the GPU — renting a different card will not help. Fix locally.
 ```
 
 **Then benchmark:**

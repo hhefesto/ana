@@ -2,16 +2,18 @@
 # step-gate.sh — fail-fast GPU compatibility gate. Run BEFORE transferring the
 # full corpora or starting any paid training.
 #
-# Runs ONE hard-capped training step on a single shard. On an incompatible GPU
-# the Futhark gradient kernel can compile yet hang at execution with the GPU
-# pegged at 100% (observed on Blackwell sm_120, 2026-07-15); the timeout turns
-# that failure mode into a fast, unambiguous verdict instead of a silent
+# Runs ONE hard-capped training step on a single shard. The Futhark gradient
+# kernel can compile yet fail to finish a step with the GPU pegged at 100%
+# (observed 2026-07-15 on Blackwell sm_120 AND Ampere sm_86 alike — a
+# kernel-level pathology at bpe10m scale, not a GPU-arch problem); the timeout
+# turns that failure mode into a fast, unambiguous verdict instead of a silent
 # money-burner. A pass means the kernel genuinely executes end to end.
 #
 # Usage:  deploy/step-gate.sh CORPUS TOKENIZER.bpe
 # Env:    SIZE=bpe10m  GATE_TIMEOUT=180  FUT_CACHE=run/futhark-cuda.cache
 #
-# Exit: 0 = pass; 124 = step timed out (wrong GPU — destroy the instance);
+# Exit: 0 = pass; 124 = step timed out (kernel too slow — destroy the instance;
+#       renting a different GPU will not help);
 #       anything else = the trainer itself failed (see its output).
 set -euo pipefail
 
@@ -45,9 +47,12 @@ CHECKPOINT_EVERY=1 FUT_CACHE="${FUT_CACHE:-run/futhark-cuda.cache}" \
 if [ "$rc" -eq 0 ]; then
   echo "step-gate: PASS — the kernel executes on this GPU. Benchmark next."
 elif [ "$rc" -eq 124 ]; then
-  echo "step-gate: FAIL — one step did not finish in ${timeout_s}s; the kernel hangs on" >&2
-  echo "  this GPU architecture. DESTROY this instance and rent Ada (RTX 40xx) or" >&2
-  echo "  Ampere (RTX 30xx). Do not transfer corpora or train here." >&2
+  echo "step-gate: FAIL — one step did not finish in ${timeout_s}s. Known cause" >&2
+  echo "  (2026-07-15): the Futhark vjp gradient kernel is pathologically slow at" >&2
+  echo "  bpe10m scale on EVERY tested arch (Blackwell sm_120 and Ampere sm_86 fail" >&2
+  echo "  identically) — a kernel/code problem, not the GPU. Renting a different GPU" >&2
+  echo "  will NOT fix it. DESTROY this instance; fix the kernel locally first" >&2
+  echo "  (see HANDOFF.md). Do not transfer corpora or train here." >&2
 else
   echo "step-gate: trainer failed (rc=$rc) — not a hang; see the output above." >&2
 fi
