@@ -14,7 +14,7 @@
 #   deploy/pull-checkpoint.sh USER@HOST [interval_seconds]
 #   vast.ai: SSH_PORT=<port> deploy/pull-checkpoint.sh root@<host> [interval]
 # Env:
-#   SSH_KEY      identity file (default: ~/.ssh/xpsoasis-ed25519 = hhefesto@olimpo)
+#   SSH_KEY      optional identity file (default: use existing SSH configuration)
 #   SSH_PORT     ssh port (default: 22; vast.ai gives a nonstandard port)
 #   REMOTE_DIR   remote repo path (default: formalTransformer)
 #   SIZE         model size (default: bpe10m)
@@ -23,14 +23,15 @@ set -euo pipefail
 
 HOST="${1:?usage: pull-checkpoint.sh USER@HOST [interval_seconds]}"
 INTERVAL="${2:-120}"
-SSH_KEY="${SSH_KEY:-$HOME/.ssh/xpsoasis-ed25519}"
+SSH_KEY="${SSH_KEY:-}"
 SSH_PORT="${SSH_PORT:-}"
 REMOTE_DIR="${REMOTE_DIR:-formalTransformer}"
 SIZE="${SIZE:-bpe10m}"
 LOCAL_DIR="${LOCAL_DIR:-run}"
 
 mkdir -p "$LOCAL_DIR"
-ssh_opts=(-i "$SSH_KEY" -o StrictHostKeyChecking=accept-new)
+ssh_opts=(-o StrictHostKeyChecking=accept-new)
+[ -n "$SSH_KEY" ] && ssh_opts+=(-i "$SSH_KEY")
 [ -n "$SSH_PORT" ] && ssh_opts+=(-p "$SSH_PORT")
 remote_glob="$REMOTE_DIR/run/wiki-$SIZE-global.checkpoint"
 
@@ -38,7 +39,7 @@ echo "pull-checkpoint: $HOST:$remote_glob* -> $LOCAL_DIR/ every ${INTERVAL}s"
 echo "  (Ctrl-C to stop; safe to run alongside training)"
 while true; do
   if rsync -az --partial --inplace -e "ssh ${ssh_opts[*]}" \
-       "$HOST:$remote_glob" "$HOST:$remote_glob.best" "$LOCAL_DIR/" 2>/dev/null; then
+       "$HOST:$remote_glob*" "$LOCAL_DIR/" 2>/dev/null; then
     ckpt="$LOCAL_DIR/wiki-$SIZE-global.checkpoint"
     if [ -f "$ckpt" ]; then
       echo "pulled $(date -u +%H:%M:%S)  $(stat -c %s "$ckpt") bytes  -> $ckpt"

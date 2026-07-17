@@ -188,7 +188,7 @@ tmux new -s train
 cd formalTransformer
 TOKENIZER_FILE="$HOME/datasets/wikipedia-en/enwiki-8k.bpe" \
 TRAIN_BATCH=8 MICRO_BATCH=1 CHECKPOINT_EVERY=2000 \
-VALIDATE_EVERY=2000 VALIDATION_WINDOWS=32 \
+VALIDATE_EVERY=2000 VALIDATION_WINDOWS=1 \
 FUT_CACHE=run/futhark-cuda.cache \
   ./deploy/train-cloud.sh          # detach: Ctrl-b then d
 ```

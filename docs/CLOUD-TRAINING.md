@@ -197,7 +197,7 @@ TRAIN_BATCH=8 \
 MICRO_BATCH=1 \
 CHECKPOINT_EVERY=2000 \
 VALIDATE_EVERY=2000 \
-VALIDATION_WINDOWS=32 \
+VALIDATION_WINDOWS=1 \
 FUT_CACHE=run/futhark-cuda.cache \
 nohup ./deploy/train-cloud.sh >> run/train-cloud.log 2>&1 &
 ```

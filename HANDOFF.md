@@ -676,8 +676,11 @@ hardware/toolchain claims used below were independently checked.
 - The original production launch appeared to stop after step 499. It was alive
   at 100% GPU / ~50 W / 1,205 MB performing the scheduled 256-window validation.
   That cadence would waste days, so the pre-checkpoint run was deliberately
-  discarded and restarted with `VALIDATE_EVERY=2000 VALIDATION_WINDOWS=32`.
-  Validation is observational and does not alter the optimizer trajectory.
+  discarded. A second attempt with 32 windows reached step 1,999, then spent
+  more than nine minutes in validation without completing; it too was discarded
+  before any checkpoint existed. The final launch uses `VALIDATE_EVERY=2000
+  VALIDATION_WINDOWS=1`. Validation is observational and neither discarded run
+  altered the resumed optimizer trajectory.
 
 ### Corpus transfer and live run
 
@@ -689,11 +692,25 @@ hardware/toolchain claims used below were independently checked.
   tokenizer SHA-256 matches its semantic identity,
   `756770e954ca1fc172f533b57e629ab7b0ef5a92c89c4e1d972a91e5c99c09ea`.
 - Full plan: 1,465 segments, 1,833,157 updates, about 3.74 billion prediction
-  targets. Measured projection on this $0.104/h host is roughly 12 days / $30-35
-  after segment startup/checkpoint overhead, within the $50 cap.
+  targets. At global step 3,443, observed end-to-end throughput (including
+  startup, one validation, and one checkpoint) was ~1.95 steps/s or ~3,980
+  target tokens/s; update-only throughput is ~2.1-2.2 steps/s or ~4,300-4,500
+  target tokens/s. Measured projection on this $0.104/h host is roughly 11-13
+  days / $28-33 after segment overhead, within the $50 cap.
 - Live command is `deploy/train-cloud.sh` with `TRAIN_BATCH=8 MICRO_BATCH=1
-  CHECKPOINT_EVERY=2000 VALIDATE_EVERY=2000 VALIDATION_WINDOWS=32`, stock
+  CHECKPOINT_EVERY=2000 VALIDATE_EVERY=2000 VALIDATION_WINDOWS=1`, stock
   scheduling, checkpoint `run/wiki-bpe10m-global.checkpoint`, and log
   `run/train-cloud-rtx5070.log`. The optimized restart is PID recorded in
   `run/train-cloud.pid`; no persistent volume exists, so pull every published
   checkpoint off-box promptly. Shard 0 ends at global step 9,922.
+- The final trajectory published its first checkpoint at global step 2,000:
+  120,718,980 bytes, best validation 6.4075208, SHA-256
+  `eca51ba7790ea7aac1742c663187c912715fed9474b14c2df6c7f79d56deaaf2`.
+  Remote and local hashes match. Copies exist at
+  `run/wiki-bpe10m-global.checkpoint` and
+  `run/rtx5070-checkpoints/wiki-bpe10m-global.checkpoint`.
+- A local `pull-checkpoint.sh` loop polls every 120 s using normal SSH config
+  (no private-key path inspection). Runtime PID/log files are
+  `run/pull-rtx5070.pid` and `run/pull-rtx5070.log`. The script now treats
+  `SSH_KEY` as optional and pulls the checkpoint wildcard, so a missing `.best`
+  file does not make a successful primary-checkpoint transfer look like failure.

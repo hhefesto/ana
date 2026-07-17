@@ -25,7 +25,7 @@
 #   MAX_SHARDS=0     0 = whole plan; N = stop after N shards this run
 #   CHECKPOINT_EVERY=2000  checkpoint cadence (execution control; safe to change)
 #   VALIDATE_EVERY=2000    validation cadence (observation only)
-#   VALIDATION_WINDOWS=32  windows per validation observation
+#   VALIDATION_WINDOWS=1   windows per validation observation (CUDA forward is slow)
 #   RUN_DIR, SIZE, SHARD_ARTICLES, PLAN, CHECKPOINT, FUT_CACHE  (have defaults)
 set -euo pipefail
 
@@ -70,7 +70,7 @@ export TRAIN_BATCH="$BATCH"
 export MICRO_BATCH="${MICRO_BATCH:-1}"
 export CHECKPOINT_EVERY="${CHECKPOINT_EVERY:-2000}"
 export VALIDATE_EVERY="${VALIDATE_EVERY:-2000}"
-export VALIDATION_WINDOWS="${VALIDATION_WINDOWS:-32}"
+export VALIDATION_WINDOWS="${VALIDATION_WINDOWS:-1}"
 export FUT_CACHE="${FUT_CACHE:-run/futhark-cuda.cache}"
 
 trained=0
