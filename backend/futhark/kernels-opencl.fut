@@ -41,6 +41,19 @@ entry zero_vector (count: i64): [count]f32 =
   replicate (assert (count >= 0) count) 0.0f32
 
 
+-- Data constructors for profiling this exact production program.  They are
+-- deliberately nondifferentiated and do not enlarge the vjp-generated code.
+-- Keeping them here lets futhark-autotune emit parameter names that the CUDA
+-- trainer itself accepts (names from the separate bench.fut program are not
+-- guaranteed to be portable).
+entry benchmark_params (v: i64) (d: i64) (f: i64) (n_layers: i64)
+    : [parameter_count v d f n_layers]f32 =
+  replicate (parameter_count v d f n_layers) 0.0f32
+
+entry benchmark_tokens (batch: i64) (sequence: i64): [batch][sequence]i64 =
+  replicate batch (replicate sequence 0i64)
+
+
 -- One micro-batch of gradient accumulation, justified by linearity of the
 -- reverse derivative: D(sum f_i) = sum (D f_i).  The partial objective of a
 -- chunk is sum_{s in chunk} mean-CE(s) / effective_batch, so every

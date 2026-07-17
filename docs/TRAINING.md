@@ -83,7 +83,15 @@ futhark-autotune-style `NAME=VALUE` file applied to the kernel context, and
 whose one-workgroup-per-inner-dimension launches exceed per-kernel workgroup
 limits on register-poor devices (`CL_INVALID_WORK_GROUP_SIZE` on
 Polaris/rusticl) and whose fully-flattened fallback suits this model's
-shapes. The cloud deploy scripts default `FUT_REJECT_INTRA` to `1`.
+shapes. This is an explicit OpenCL/Polaris workaround, not a CUDA default:
+an RTX A4000 showed the same low-occupancy failure with it set and unset.
+CUDA deployment uses Futhark's stock schedule unless `FUT_TUNING` or another
+knob is deliberately supplied.
+
+Treat autotuning output as a hypothesis, not a result. On the RTX 5070 the
+generated tuning file made six of seven production-ladder shapes slower (up to
+30x); it was rejected after an independent rerun. Stock scheduling plus
+`MICRO_BATCH=1` is the measured `bpe10m` configuration.
 
 ## Baseline Gate
 

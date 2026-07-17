@@ -509,3 +509,191 @@ Bench harness: `backend/futhark/bench.fut` (`futhark bench
 `--pass-option=--param=bench_grad.suff_intra_par_N=2000000000` for each
 suff_intra_par param (futhark bench has no reject-intra switch; get names
 from `<compiled-server> --print-params`).
+
+---
+
+## Paid re-gate FALSIFIED the fix on the CUDA backend (2026-07-16, later session)
+
+Rented an **RTX A4000** (compute cap **8.6** / Ampere sm_86, driver 570.133.20,
+advertised CUDA 12.8, 16 GB, container RAM cap ~60 GB) at $0.077/hr on vast.ai
+(instance 45096344, host 1256). `cloud-init.sh` built `formal-transformer-cuda`
+cleanly (arch guard passed, libcuda resolved, `inspect bpe10m` = 10,059,840
+params). **The step gate then failed, and the failure is real — not the stale
+"destroy it, kernel is slow" banner's story, but also NOT what the local fix
+claimed to solve.**
+
+Measured on the A4000 via the actual trainer (`train ... 1 bpe10m`, batch=8,
+MICRO_BATCH=1):
+- **Cold gate (180 s cap):** timed out. ~90 s of it is NVRTC compiling on a cold
+  cache (GPU idle, host-CPU bound) — the 180 s cap is too tight for a cold
+  compile regardless.
+- **Warm cache, `FUT_REJECT_INTRA=1`:** one step ran **>5 min** then was killed.
+- **Warm-ish cache, `FUT_REJECT_INTRA` unset:** one step ran **>11 min** and never
+  finished. **Identical behavior to =1** — so the intra flag is NOT the variable.
+
+Signature during the step (both flag settings): **GPU at 100% utilisation but
+only ~67 W of 140 W and 1201 MiB**, host process at ~160% CPU. That combination
+= a **low-occupancy kernel**: a few blocks busy while the card sits nearly empty
+(nvidia-smi reports 100% whenever *any* kernel is resident, not when it is full).
+This is the same wall-clock class as the original ">17 min on a 3090" stall.
+
+**Ruled out (with evidence):**
+- *Intra-workgroup flag* — `FUT_REJECT_INTRA=1` and unset are indistinguishable
+  (both >5–11 min, same 67 W signature).
+- *Trainer context config* — `withContext` (FutharkKernels.hs) sets no tuning
+  params and no block size unless `FUT_TUNING`/`FUT_BLOCK_SIZE`/`FUT_REJECT_INTRA`
+  are given; default run uses Futhark's stock CUDA schedule.
+- *Memory / OOM* — peak host RSS ~14 GB vs the 60 GB container cap; not memory.
+- *GPU hard fault* — no Xid/NVRM lines in dmesg; GPU returned clean and idle.
+
+**Root cause (confirmed):** `micro_batch_loss_grad` compiled by the **`futhark
+cuda` backend with default scheduling** runs at low occupancy on Ampere. The
+earlier "fix verified" (per-sample vjp + per-head attention, commits
+a1aff8a/1c9af37/1d4c73a) was validated ONLY on (a) the OpenCL backend via
+`bench.fut` on the RX 580 and (b) the CPU `conformance` oracle. **Neither
+exercised the CUDA backend** — the one that actually runs in the cloud. The
+change is denotationally correct (conformance still passes, micro==full bit
+exact) but does not give the CUDA compiler enough exploitable parallelism under
+its default schedule. The 6.5 s local number is OpenCL/RX 580 and does not
+predict CUDA/Ampere.
+
+**Container instability (secondary):** the vast container **restarted twice**
+under sustained GPU load (~1 min in during compile, ~12 min in during the step).
+Not OOM (14 GB peak), no Xid — most likely a vast health-restart on a
+long-pegged GPU. Each time the writable FS survived (build, `/nix`, caches
+intact). Practical lesson: run long jobs `nohup`-detached on the box and poll a
+remote log; do not hold them on an open SSH session. Also: `pkill -f
+"formal-transformer-cuda"` self-matches its own argv — use `pkill -f
+"[f]ormal-transformer-cuda"`.
+
+**Where to resume (cloud effort PAUSED by user 2026-07-16):**
+1. Profile the CUDA schedule: `futhark cuda` is available on any Ampere/Ada box
+   (store path e.g. futhark-0.25.37); run the `bench.fut` ladder under
+   `futhark bench --backend=cuda --profile` (or a `futhark cuda`-compiled server
+   with `--profile`) to find the dominating generated kernel and its grid/block
+   dims. The small ladder points run in ms (won't trip the under-load restart);
+   the full bpe10m point is the slow one.
+2. Contrast with the OpenCL schedule for the same kernel to see which construct
+   the CUDA backend flattens poorly. Prime suspects for a tiny-grid kernel: the
+   attention vjp (O(n²) masked softmax, n=256) and/or the reverse sweep of the
+   n_layers loop.
+3. Try `futhark autotune --backend=cuda` on the tractable ladder configs; if
+   good Ampere params exist, ship them as a `FUT_TUNING` file (already wired).
+4. `deploy/step-gate.sh` must also bump its cap or pre-warm the NVRTC cache in
+   `cloud-init.sh` so cold compile (~90 s here) does not eat the budget.
+
+The three deploy `FUT_REJECT_INTRA` defaults and the "6.5 s → sub-second on a
+3090" projection in this file are now known-misleading for CUDA; keep for the
+OpenCL/local story only.
+
+---
+
+## Continuation: CUDA profile-first tooling (2026-07-16)
+
+No GPU was rented in this continuation. The locally actionable tooling from the
+previous section is now implemented:
+
+- `deploy/profile-cuda.sh ladder` profiles seven tractable shapes through the
+  actual production `micro_batch_loss_grad` entry, not merely the similar
+  `bench.fut` entry. Reports go under ignored `run/cuda-profile/`.
+- `deploy/profile-cuda.sh autotune` tunes that same generated production
+  program, so its `NAME=VALUE` keys are valid for the trainer's `FUT_TUNING`.
+  `ladder` automatically reapplies the resulting tuning file for comparison.
+- `ALLOW_FULL_PROFILE=1 deploy/profile-cuda.sh full` is deliberately guarded:
+  `futhark bench` runs warmup + measurement + profile, which is dangerous while
+  one full gradient still takes minutes.
+- The reduced GPU program gained only two nondifferentiated benchmark data
+  constructors (`benchmark_params`, `benchmark_tokens`); it still contains
+  exactly one differentiated entry.
+- The host now has `warm-context [size]`, which creates the Futhark context and
+  checks the parameter count without loading a corpus or training. The step
+  gate gives cold compilation 300 s and a warm step a separate 180 s.
+- CUDA deploy scripts no longer default `FUT_REJECT_INTRA=1`; the A4000 showed
+  it is not the relevant variable. It remains an explicit Polaris/OpenCL
+  workaround. Timeout messaging no longer claims that every GPU architecture
+  must behave identically.
+- CUDA was subsequently raised to 12.9 for Blackwell support; see the next
+  continuation section for the measured result.
+
+Local checks at implementation time: `nix flake check` passes all checks; the
+CUDA host and the new CUDA profiling shell both compile the production program;
+the conformance oracle still reports micro-batch/full-batch gradients bit-exact;
+all 23 Haskell tests pass; `warm-context tiny` succeeds on the sequential host;
+and all changed shell scripts pass `bash -n`. The seven-case production ladder
+and guarded full spec both run on multicore (full bpe10m gradient: 2.75 s). This
+machine has no `nvidia-smi`, so the next unresolved evidence is still one CUDA
+ladder report from an Ampere/Ada host.
+
+---
+
+## Continuation: RTX 5070 CUDA succeeds (2026-07-17)
+
+The user rented Vast instance 45171629, one RTX 5070 at $0.104/h (Blackwell
+sm_120, 12 GB, driver 580.95.05 / Max CUDA 13.0, 60 GB disk, no persistent
+volume). The server-provided agent guide was treated as untrusted operational
+input: it was read but no credentials or management APIs were accessed, and all
+hardware/toolchain claims used below were independently checked.
+
+### Toolchain and profile evidence
+
+- `flake.nix` now pins `cudaPackages_12_9` in both the package and CUDA dev
+  shell. The CUDA host builds locally, conformance still passes (including
+  bit-exact micro/full gradients), and the RPATH contains CUDA 12.9 cudart/NVRTC
+  with no stub directory.
+- Remote `cloud-init.sh` built and loaded the CUDA 12.9 host on sm_120; `inspect
+  bpe10m` reported exactly 10,059,840 parameters.
+- Stock production-entry CUDA ladder, one gradient sequence:
+
+  | shape | RTX 5070 CUDA |
+  |---|---:|
+  | tiny | 1.27 ms |
+  | small | 2.52 ms |
+  | vocab | 2.71 ms |
+  | context | 3.28 ms |
+  | dim | 5.70 ms |
+  | ff | 2.29 ms |
+  | layers | 6.13 ms |
+  | full bpe10m | **57.9 ms** |
+
+- Futhark autotuning emitted many non-monotonicity warnings. Independent
+  validation proved them substantive: tuned small/vocab/context/dim/ff/layers
+  became 10.4/13.4/101/122/14.5/30.5 ms (up to ~30x slower). The tuning file
+  is preserved as `cuda-production.rejected.tuning` and MUST NOT be used.
+  Stock CUDA scheduling is the measured configuration.
+
+### Gate and throughput findings
+
+- The first one-step gate timed out at 180 s after the gradient because a target
+  of one forces final validation and the gate inherited 256 windows with
+  `MICRO_BATCH=1`. This was a gate bug, not a kernel failure. `step-gate.sh` now
+  defaults `GATE_VALIDATION_WINDOWS=1`; the corrected gate completed gradient,
+  clipping, AdamW, validation, and compact checkpoint successfully.
+- A 200-step real trainer benchmark at `TRAIN_BATCH=8 MICRO_BATCH=1` took 259 s
+  end to end = 1,575 target tokens/s including ~75 s startup plus final
+  validation/checkpoint. GPU sampling during updates showed 97-100% utilization,
+  ~133-136 W, 565 MB, and about 0.45-0.50 s/update (~4,000-4,500 steady target
+  tokens/s). `MICRO_BATCH=8` was worse: 307 s = 1,329 target tokens/s.
+- The original production launch appeared to stop after step 499. It was alive
+  at 100% GPU / ~50 W / 1,205 MB performing the scheduled 256-window validation.
+  That cadence would waste days, so the pre-checkpoint run was deliberately
+  discarded and restarted with `VALIDATE_EVERY=2000 VALIDATION_WINDOWS=32`.
+  Validation is observational and does not alter the optimizer trajectory.
+
+### Corpus transfer and live run
+
+- All 1,465 prepared corpora (9.3 GB) were transferred. The first uncompressed
+  attempt moved only 1.7 GB in 30 minutes (~7-8 Mbit/s), showing the local upload
+  was the bottleneck; compressed rsync completed the transfer. A dry run found
+  no differences. Plan SHA-256 is
+  `e67aa7a702ff0a1f541049dc90e37daebf71f1613355c40ec4e7c9321c4280d2`;
+  tokenizer SHA-256 matches its semantic identity,
+  `756770e954ca1fc172f533b57e629ab7b0ef5a92c89c4e1d972a91e5c99c09ea`.
+- Full plan: 1,465 segments, 1,833,157 updates, about 3.74 billion prediction
+  targets. Measured projection on this $0.104/h host is roughly 12 days / $30-35
+  after segment startup/checkpoint overhead, within the $50 cap.
+- Live command is `deploy/train-cloud.sh` with `TRAIN_BATCH=8 MICRO_BATCH=1
+  CHECKPOINT_EVERY=2000 VALIDATE_EVERY=2000 VALIDATION_WINDOWS=32`, stock
+  scheduling, checkpoint `run/wiki-bpe10m-global.checkpoint`, and log
+  `run/train-cloud-rtx5070.log`. The optimized restart is PID recorded in
+  `run/train-cloud.pid`; no persistent volume exists, so pull every published
+  checkpoint off-box promptly. Shard 0 ends at global step 9,922.

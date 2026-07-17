@@ -41,6 +41,8 @@ main = do
   case args of
     ["inspect"] -> inspect tinyPreset
     ["inspect", size] -> chooseConfig size >>= inspect
+    ["warm-context"] -> warmContext tinyPreset
+    ["warm-context", size] -> chooseConfig size >>= warmContext
     ["train", corpus, checkpoint, stepsText] -> do
       spec <- parseTarget stepsText
       train corpus checkpoint (Standalone spec) tinyPreset
@@ -59,7 +61,7 @@ main = do
         (Segment total start end offset globalIdentity expectedCorpusIdentity) cfg
     ["generate", checkpoint, text] -> generate checkpoint text 128
     ["generate", checkpoint, text, budgetText] -> parseNonnegative "MAXTOKENS" budgetText >>= generate checkpoint text
-    _ -> die "usage: formal-transformer-gpu inspect [tiny|small|bpe10m] | train CORPUS CHECKPOINT (STEPS|epoch) [tiny|small|bpe10m] | train-segment CORPUS CHECKPOINT GLOBAL_TOTAL START END DOCUMENT_OFFSET GLOBAL_ID EXPECTED_CORPUS_ID SIZE | generate CHECKPOINT TEXT [MAXTOKENS]"
+    _ -> die "usage: formal-transformer-gpu inspect [tiny|small|bpe10m] | warm-context [tiny|small|bpe10m] | train CORPUS CHECKPOINT (STEPS|epoch) [tiny|small|bpe10m] | train-segment CORPUS CHECKPOINT GLOBAL_TOTAL START END DOCUMENT_OFFSET GLOBAL_ID EXPECTED_CORPUS_ID SIZE | generate CHECKPOINT TEXT [MAXTOKENS]"
 
 chooseConfig :: String -> IO Config
 chooseConfig "tiny" = pure tinyPreset
@@ -71,6 +73,19 @@ inspect :: Config -> IO ()
 inspect cfg = either die (mapM_ print) (namedLayout cfg) >> do
   putStrLn ("config: " ++ show cfg)
   putStrLn ("parameters: " ++ show (paramCount cfg))
+
+-- Force backend context creation without loading data or taking an optimizer
+-- step.  GPU backends compile and cache their generated program here, so a
+-- subsequent gate can measure execution independently of cold NVRTC/OpenCL
+-- compilation.
+warmContext :: Config -> IO ()
+warmContext cfg = do
+  gpu <- either die pure (gpuConfig cfg)
+  withContext $ \ctx -> do
+    count <- futharkParameterCount ctx gpu
+    when (count /= fromIntegral (paramCount cfg)) $
+      die "Futhark parameter count disagrees with the host configuration"
+    putStrLn ("context ready: " ++ show cfg ++ " (" ++ show count ++ " parameters)")
 
 -- A target is either an explicit completed-step count or "epoch": enough
 -- steps that every training window has been consumed at least once.

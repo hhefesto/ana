@@ -20,10 +20,10 @@ checkpoint made with another 8192-token table is incompatible by design.
 
 ## Provider Choice
 
-For an experimental budget below USD 50, start with one Verda spot RTX 6000
-Ada. One fast GPU is intentional: the current host is single-device, and this
-model fits comfortably in 48 GB. Renting a multi-GPU instance before Tier-2
-gradient reduction exists would pay for idle devices.
+For an experimental budget below USD 50, use one high-FP32 GPU with a driver
+advertising CUDA 12.9+. One fast GPU is intentional: the host is single-device,
+and measured peak device use is only about 1.2 GB. Renting a multi-GPU instance
+before Tier-2 gradient reduction exists would pay for idle devices.
 
 Rates observed on 2026-07-11:
 
@@ -44,31 +44,24 @@ times faster than the 6000 Ada. Benchmark dollars per processed token rather
 than advertised tensor FLOPS: this implementation currently uses Futhark `f32`
 kernels and does not silently switch to mixed-precision tensor cores.
 
-**Kernel constraint (2026-07-15): the bpe10m gradient kernel is currently too
-slow to train on ANY GPU.** On an RTX PRO 4000 Blackwell (sm_120) and again on
-an RTX 3090 Ampere (sm_86) the Futhark-generated gradient kernel compiles but
-one training step does not finish in >17 min with the GPU pegged at 100% and a
-warm kernel cache — the same signature on two unrelated architectures, so the
-cause is the generated vjp kernel at bpe10m scale, not the card. Do not rent
-until the kernel fix lands (see `HANDOFF.md`). `cloud-init.sh` still refuses
-compute capability ≥ 10.0 as untested unless `ALLOW_UNTESTED_ARCH=1`, and
-`deploy/step-gate.sh` proves one real step completes before any large transfer
-or training spend — on every arch.
+**Measured result (2026-07-17): CUDA training works on an RTX 5070 Blackwell.**
+With CUDA 12.9, the stock full `bpe10m` production gradient takes 57.9 ms per
+sequence and real updates sustain 97-100% GPU utilization. The previous A4000
+low-occupancy result does not reproduce. A harmful autotune file was rejected;
+stock scheduling is the measured configuration.
 
 ## Nix On The Rented Box (VM or container)
 
-Two supported targets. **Verda (VM):** use the `Ubuntu 24.04 + CUDA 12.6` image
+Two supported targets. **Verda (VM):** use an image advertising CUDA 12.9+
 (not Minimal, which ships no driver; the `+ Docker` variant is unnecessary).
 **vast.ai (container):** rent any CUDA/Ubuntu container template that exposes the
-NVIDIA runtime and reports `Max CUDA ≥ 12.6`. Either way, keep the box's kernel
+NVIDIA runtime and reports `Max CUDA >= 12.9`. Either way, keep the box's kernel
 driver, install Nix for all userspace dependencies, and build the pinned CUDA
 closure from this flake — safer than replacing a working driver.
 
-`flake.nix` pins the CUDA userspace to **12.6** (`cudaPackages_12_6`): its PTX
-is accepted by the widest range of rental-host drivers (most vast.ai hosts
-advertise Max CUDA 12.6 or 12.8, few 12.9+), and its NVRTC targets every arch
-we allow (Ada sm_89, Ampere sm_86, and older — not Blackwell, which the guard
-treats as untested).
+`flake.nix` pins CUDA userspace to **12.9** (`cudaPackages_12_9`), which targets
+Ampere, Ada, and Blackwell sm_120. Since Futhark JIT-compiles PTX through NVRTC,
+the provider driver must advertise CUDA 12.9 or newer.
 The step-by-step minimum-cost runbook is `deploy/cloud-fast-path.md`;
 `deploy/cloud-init.sh` brings an instance up — it auto-detects a VM (multi-user
 Nix) vs a Docker container (single-user `--no-daemon` Nix, `sandbox = false`) —
@@ -86,8 +79,8 @@ lib dir when the default loader path misses it (persisted to `run/cloud-env.sh`)
 ./deploy/cloud-init.sh   # (deploy/bootstrap-ubuntu-nvidia.sh is the older Verda-only variant)
 ```
 
-The provider driver must support CUDA 12.6-era PTX because Futhark compiles its
-embedded CUDA through NVRTC at context creation; any `Max CUDA ≥ 12.6` host
+The provider driver must support CUDA 12.9-era PTX because Futhark compiles its
+embedded CUDA through NVRTC at context creation; any `Max CUDA >= 12.9` host
 satisfies this. If a benchmark still rejects the PTX (older driver than
 advertised), pin lower — `cudaPackages_12_4` is available in this nixpkgs —
 rebuild, and re-run the conformance oracle before trusting the new backend
@@ -110,8 +103,8 @@ Training then uses:
 - atomic checkpoints and shard markers.
 
 `TRAIN_BATCH` is semantic for this run and is included in the plan identity.
-`MICRO_BATCH`, `CHECKPOINT_EVERY`, `FUT_BLOCK_SIZE`, and `FUT_DEVICE` remain
-execution controls.
+`MICRO_BATCH`, `CHECKPOINT_EVERY`, `FUT_BLOCK_SIZE`, `FUT_DEVICE`, and
+`FUT_TUNING` remain execution controls.
 
 Prepare the plan and retain compact tokenized corpora locally before renting:
 
@@ -136,17 +129,54 @@ training.
 
 ## Benchmark Gate
 
-On each candidate GPU, run the same corpus and settings:
+First profile the exact production `micro_batch_loss_grad` program. The ladder
+needs no corpus or tokenizer and excludes the pathological full configuration:
 
 ```bash
-TRAIN_BATCH=8 MICRO_BATCH=1 BENCH_STEPS=5 \
-./deploy/benchmark-cuda.sh run/wiki/shard-0-bpe10m.corpus \
+./deploy/profile-cuda.sh ladder
+# inspect run/cuda-profile/cuda-grad-ladder.prof/
+
+# Optional experiment: tune, then independently repeat the ladder.
+./deploy/profile-cuda.sh autotune
+./deploy/profile-cuda.sh ladder
+```
+
+The specs move one axis at a time from tiny/small toward `bpe10m`. Unlike a
+tuning file produced from the separate `bench.fut` program, the resulting
+`run/cuda-profile/cuda-production.tuning` contains names from the trainer's
+actual generated program and can be passed as `FUT_TUNING`.
+Treat the file as a hypothesis: RTX 5070 autotuning made six of seven relevant
+shapes slower (up to 30x), so that file was rejected after the repeat.
+
+Only after the ladder has a viable schedule, run the full profile explicitly:
+
+```bash
+ALLOW_FULL_PROFILE=1 ./deploy/profile-cuda.sh full
+```
+
+This opt-in matters because `futhark bench` performs a warmup, measured run,
+and profiling run; under the known bad schedule that can burn tens of minutes.
+
+Then gate one actual update. Context compilation and step execution have
+separate timeouts, so a cold NVRTC compile is no longer misreported as a slow
+gradient:
+
+```bash
+./deploy/step-gate.sh run/wiki-bpe10m/shard-0-bpe10m.corpus \
   "$HOME/datasets/wikipedia-en/enwiki-8k.bpe"
 ```
 
-Repeat once with the same `FUT_CACHE` to separate cold NVRTC compilation from
-steady-state training. Increase `MICRO_BATCH`, then `TRAIN_BATCH`, only while
-memory and throughput improve.
+After the gate passes, benchmark the same corpus and settings:
+
+```bash
+VALIDATION_WINDOWS=1 TRAIN_BATCH=8 MICRO_BATCH=1 BENCH_STEPS=200 \
+./deploy/benchmark-cuda.sh run/wiki-bpe10m/shard-0-bpe10m.corpus \
+  "$HOME/datasets/wikipedia-en/enwiki-8k.bpe"
+```
+
+`step-gate.sh` has already populated `FUT_CACHE`. Repeat only when comparing an
+execution control. On the measured RTX 5070, `MICRO_BATCH=1` outperformed `8`
+(1,575 versus 1,329 end-to-end target tokens/s).
 
 Reserve USD 3 for these tests. Start the full run only if:
 
@@ -162,14 +192,14 @@ optimize the kernel rather than spending through the budget.
 ## Launch
 
 ```bash
-WIKI_BACKEND=cuda \
-WIKI_SIZE=bpe10m \
-WIKI_TOKENIZER="$HOME/datasets/wikipedia-en/enwiki-8k.bpe" \
+TOKENIZER_FILE="$HOME/datasets/wikipedia-en/enwiki-8k.bpe" \
 TRAIN_BATCH=8 \
 MICRO_BATCH=1 \
-CHECKPOINT_EVERY=100 \
+CHECKPOINT_EVERY=2000 \
+VALIDATE_EVERY=2000 \
+VALIDATION_WINDOWS=32 \
 FUT_CACHE=run/futhark-cuda.cache \
-nohup nix run .#wiki-train >> run/wiki-bpe10m.log 2>&1 &
+nohup ./deploy/train-cloud.sh >> run/train-cloud.log 2>&1 &
 ```
 
 Spot eviction can happen without warning. Keep the plan and tokenized corpora

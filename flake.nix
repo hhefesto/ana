@@ -26,16 +26,10 @@
           # CUDA userspace. Futhark JIT-compiles its kernel PTX through NVRTC at
           # context creation, so NVRTC must (a) support the GPU's compute
           # capability and (b) not emit PTX newer than the host driver accepts.
-          # Pinned to 12.6 because its PTX is accepted by the widest range of
-          # rental-host drivers (most vast.ai hosts advertise Max CUDA 12.6 or
-          # 12.8, few 12.9+). 12.6 NVRTC targets Ada (sm_89) and Ampere (sm_86)
-          # fine; it cannot target Blackwell (sm_120 → "invalid
-          # --gpu-architecture"), but the generated gradient kernel HANGS on
-          # Blackwell anyway (RTX PRO 4000, 2026-07-15; cloud-init.sh refuses
-          # compute cap >= 10.0), so that arch is banned regardless. If
-          # Blackwell ever works, bump to pkgs.cudaPackages (12.9) and require
-          # Max CUDA >= 12.9 hosts.
-          cudaPackages = pkgs.cudaPackages_12_6;
+          # CUDA 12.9 is the oldest toolkit in this nixpkgs pin that targets
+          # Blackwell (sm_120). Futhark ships PTX and compiles it through NVRTC
+          # at context creation, so rental hosts must advertise Max CUDA 12.9+.
+          cudaPackages = pkgs.cudaPackages_12_9;
           cudaCudart = cudaPackages.cuda_cudart;
           cudaCccl = cudaPackages.cccl;
           cudaNvcc = cudaPackages.cuda_nvcc;
@@ -595,6 +589,11 @@
             config.allowUnfree = true;
           };
           agda = pkgs.agda.withPackages (p: [ p.standard-library ]);
+          cudaPackages = pkgs.cudaPackages_12_9;
+          cudaCudart = cudaPackages.cuda_cudart;
+          cudaCccl = cudaPackages.cccl;
+          cudaNvcc = cudaPackages.cuda_nvcc;
+          cudaNvrtc = cudaPackages.cuda_nvrtc;
         in
         {
           default = pkgs.mkShell {
@@ -607,6 +606,20 @@
               pkgs.pkg-config
               pkgs.ocl-icd
             ];
+          };
+          cuda = pkgs.mkShell {
+            packages = [
+              pkgs.futhark
+              cudaCccl
+              cudaCudart
+              cudaNvcc
+              cudaNvrtc
+            ];
+            shellHook = ''
+              export CPATH="${cudaCudart}/include:${cudaCccl}/include:${cudaNvcc}/include:${cudaNvrtc.include}/include''${CPATH:+:$CPATH}"
+              export LIBRARY_PATH="${cudaCudart}/lib/stubs:${cudaCudart}/lib:${cudaNvrtc.lib}/lib''${LIBRARY_PATH:+:$LIBRARY_PATH}"
+              export LD_LIBRARY_PATH="${cudaCudart}/lib:${cudaNvrtc.lib}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            '';
           };
         }
       );

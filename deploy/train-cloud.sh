@@ -23,7 +23,9 @@
 #   TRAIN_BATCH=8    must match the plan identity (batch is semantic)
 #   MICRO_BATCH=1    raise toward TRAIN_BATCH on a headless GPU (no watchdog)
 #   MAX_SHARDS=0     0 = whole plan; N = stop after N shards this run
-#   CHECKPOINT_EVERY=100  checkpoint cadence (execution control; safe to change)
+#   CHECKPOINT_EVERY=2000  checkpoint cadence (execution control; safe to change)
+#   VALIDATE_EVERY=2000    validation cadence (observation only)
+#   VALIDATION_WINDOWS=32  windows per validation observation
 #   RUN_DIR, SIZE, SHARD_ARTICLES, PLAN, CHECKPOINT, FUT_CACHE  (have defaults)
 set -euo pipefail
 
@@ -66,10 +68,10 @@ echo "train-cloud: checkpoint=$CHECKPOINT batch=$BATCH micro=${MICRO_BATCH:-1} m
 
 export TRAIN_BATCH="$BATCH"
 export MICRO_BATCH="${MICRO_BATCH:-1}"
-export CHECKPOINT_EVERY="${CHECKPOINT_EVERY:-100}"
+export CHECKPOINT_EVERY="${CHECKPOINT_EVERY:-2000}"
+export VALIDATE_EVERY="${VALIDATE_EVERY:-2000}"
+export VALIDATION_WINDOWS="${VALIDATION_WINDOWS:-32}"
 export FUT_CACHE="${FUT_CACHE:-run/futhark-cuda.cache}"
-# Execution-only: reject intra-workgroup kernel versions (see docs/TRAINING.md).
-export FUT_REJECT_INTRA="${FUT_REJECT_INTRA:-1}"
 
 trained=0
 # Segment line: segment <k> <offset> <docs> <corpus_id> <tw> <vw> <steps> <seg_start> <seg_end>

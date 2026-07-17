@@ -2,18 +2,16 @@
 # step-gate.sh — fail-fast GPU compatibility gate. Run BEFORE transferring the
 # full corpora or starting any paid training.
 #
-# Runs ONE hard-capped training step on a single shard. The Futhark gradient
-# kernel can compile yet fail to finish a step with the GPU pegged at 100%
-# (observed 2026-07-15 on Blackwell sm_120 AND Ampere sm_86 alike — a
-# kernel-level pathology at bpe10m scale, not a GPU-arch problem); the timeout
-# turns that failure mode into a fast, unambiguous verdict instead of a silent
-# money-burner. A pass means the kernel genuinely executes end to end.
+# Warms the Futhark context under its own timeout, then runs ONE hard-capped
+# training step on a single shard. This separates cold NVRTC compilation from
+# the low-occupancy execution failure observed on Ampere at bpe10m scale.
 #
 # Usage:  deploy/step-gate.sh CORPUS TOKENIZER.bpe
-# Env:    SIZE=bpe10m  GATE_TIMEOUT=180  FUT_CACHE=run/futhark-cuda.cache
+# Env:    SIZE=bpe10m  COMPILE_TIMEOUT=300  GATE_TIMEOUT=180
+#         GATE_VALIDATION_WINDOWS=1
+#         FUT_CACHE=run/futhark-cuda.cache  FUT_TUNING=path
 #
-# Exit: 0 = pass; 124 = step timed out (kernel too slow — destroy the instance;
-#       renting a different GPU will not help);
+# Exit: 0 = pass; 124 = context compilation or the step timed out;
 #       anything else = the trainer itself failed (see its output).
 set -euo pipefail
 
@@ -35,25 +33,40 @@ trainer=result/bin/formal-transformer-cuda
 [ -x "$trainer" ] || { echo "step-gate: $trainer missing — run deploy/cloud-init.sh first." >&2; exit 1; }
 
 timeout_s="${GATE_TIMEOUT:-180}"
-ckpt="$(mktemp -u /tmp/step-gate.XXXXXX.checkpoint)"
+compile_timeout_s="${COMPILE_TIMEOUT:-300}"
+size="${SIZE:-bpe10m}"
+cache="${FUT_CACHE:-run/futhark-cuda.cache}"
+mkdir -p "$(dirname "$cache")"
+ckpt="$(mktemp /tmp/step-gate.XXXXXX.checkpoint)"
+rm -f "$ckpt"
 trap 'rm -f "$ckpt"' EXIT
 
-echo "step-gate: one training step, hard-capped at ${timeout_s}s (includes NVRTC compile on a cold cache)..."
+echo "step-gate: warming CUDA context, hard-capped at ${compile_timeout_s}s..."
 rc=0
+FUT_CACHE="$cache" timeout "$compile_timeout_s" stdbuf -oL -eL \
+  "$trainer" warm-context "$size" || rc=$?
+
+if [ "$rc" -eq 124 ]; then
+  echo "step-gate: context compilation exceeded ${compile_timeout_s}s." >&2
+  echo "  Preserve the host details and cache; this is not a step-performance verdict." >&2
+  exit "$rc"
+elif [ "$rc" -ne 0 ]; then
+  echo "step-gate: context warm-up failed (rc=$rc); see the output above." >&2
+  exit "$rc"
+fi
+
+echo "step-gate: one warm-cache training step, hard-capped at ${timeout_s}s..."
 TOKENIZER_FILE="$tokenizer" TRAIN_BATCH="${TRAIN_BATCH:-8}" MICRO_BATCH="${MICRO_BATCH:-1}" \
-CHECKPOINT_EVERY=1 FUT_CACHE="${FUT_CACHE:-run/futhark-cuda.cache}" \
-FUT_REJECT_INTRA="${FUT_REJECT_INTRA:-1}" \
-  timeout "$timeout_s" stdbuf -oL -eL "$trainer" train "$corpus" "$ckpt" 1 "${SIZE:-bpe10m}" || rc=$?
+CHECKPOINT_EVERY=1 VALIDATION_WINDOWS="${GATE_VALIDATION_WINDOWS:-1}" FUT_CACHE="$cache" \
+  timeout "$timeout_s" stdbuf -oL -eL "$trainer" train "$corpus" "$ckpt" 1 "$size" || rc=$?
 
 if [ "$rc" -eq 0 ]; then
   echo "step-gate: PASS — the kernel executes on this GPU. Benchmark next."
 elif [ "$rc" -eq 124 ]; then
-  echo "step-gate: FAIL — one step did not finish in ${timeout_s}s. Known cause" >&2
-  echo "  (2026-07-15): the Futhark vjp gradient kernel is pathologically slow at" >&2
-  echo "  bpe10m scale on EVERY tested arch (Blackwell sm_120 and Ampere sm_86 fail" >&2
-  echo "  identically) — a kernel/code problem, not the GPU. Renting a different GPU" >&2
-  echo "  will NOT fix it. DESTROY this instance; fix the kernel locally first" >&2
-  echo "  (see HANDOFF.md). Do not transfer corpora or train here." >&2
+  echo "step-gate: FAIL — the warm-cache step exceeded ${timeout_s}s." >&2
+  echo "  Do not transfer corpora or start training. Run deploy/profile-cuda.sh" >&2
+  echo "  ladder and preserve its report; this is a scheduling/occupancy verdict," >&2
+  echo "  not evidence that a different GPU architecture will or will not help." >&2
 else
   echo "step-gate: trainer failed (rc=$rc) — not a hang; see the output above." >&2
 fi

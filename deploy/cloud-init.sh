@@ -11,8 +11,8 @@
 #   2. Install Nix — daemon on a VM, single-user (--no-daemon) in a container —
 #      and enable flakes (plus sandbox=false in a container, where the build
 #      sandbox's user namespaces may be unavailable).
-#   3. Build formal-transformer-cuda (CUDA pinned to 12.6 in flake.nix — its
-#      PTX is accepted by the widest range of rental-host drivers).
+#   3. Build formal-transformer-cuda (CUDA pinned to 12.9 in flake.nix for
+#      Blackwell sm_120 support).
 #   4. Fail loudly if CUDA driver stubs leaked into the runtime RPATH.
 #   5. Resolve libcuda.so.1: run `inspect bpe10m`; if the loader can't find the
 #      injected driver lib, locate it, set LD_LIBRARY_PATH, retry, and persist
@@ -35,8 +35,8 @@ if in_container; then env_kind=container; else env_kind=vm; fi
 echo "cloud-init: repo at $repo_root (environment: $env_kind)"
 
 # ---------------------------------------------------------------------------
-# 1. GPU runtime present?  Report its CUDA level (must be >= 12.6 for our PTX)
-#    and refuse architectures where the generated kernel is known to hang.
+# 1. GPU runtime present?  Report its CUDA level (must be >= 12.9 for our PTX)
+#    and refuse architectures unsupported by the pinned NVRTC.
 # ---------------------------------------------------------------------------
 if ! command -v nvidia-smi >/dev/null; then
   echo "cloud-init: nvidia-smi missing — rent a GPU instance whose template" >&2
@@ -46,35 +46,19 @@ fi
 nvidia-smi
 driver_ver="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -n1 || true)"
 smi_cuda="$(nvidia-smi 2>/dev/null | grep -oE 'CUDA (UMD )?Version: [0-9]+\.[0-9]+' | grep -oE '[0-9]+\.[0-9]+' | head -n1 || true)"
-echo "cloud-init: driver=$driver_ver  advertised CUDA=$smi_cuda  (flake emits 12.6 PTX)"
+echo "cloud-init: driver=$driver_ver  advertised CUDA=$smi_cuda  (flake emits 12.9 PTX)"
 case "$smi_cuda" in
-  ""|12.[0-5]|1[01].*)
-    echo "cloud-init: WARNING — driver advertises CUDA < 12.6; 12.6 PTX may be rejected." >&2
-    echo "  Pick a host with Max CUDA >= 12.6, or pin the flake lower (see fast-path doc)." >&2
+  ""|12.[0-8]|1[01].*)
+    echo "cloud-init: WARNING — driver advertises CUDA < 12.9; 12.9 PTX may be rejected." >&2
+    echo "  Pick a host with Max CUDA >= 12.9, or pin the flake lower (see fast-path doc)." >&2
     ;;
-  *) echo "cloud-init: driver CUDA >= 12.6 — 12.6 PTX will be accepted." ;;
+  *) echo "cloud-init: driver CUDA >= 12.9 — 12.9 PTX will be accepted." ;;
 esac
 
-# Untested-arch guard. Compute capability >= 10.0 (Blackwell and newer) has
-# never passed a step gate here, so refuse it by default and fail in seconds
-# rather than after paid transfer + build time. NOTE: the 2026-07-15 stall that
-# first prompted this guard turned out to be a kernel-level pathology at bpe10m
-# scale (Ampere sm_86 stalls identically), NOT a Blackwell problem — so passing
-# this guard proves nothing; deploy/step-gate.sh is the real gate on any arch.
+# CUDA 12.9 NVRTC targets Blackwell. Architecture remains diagnostic only: the
+# low-occupancy bpe10m failure also reproduced on Ampere.
 compute_cap="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n1 | tr -d ' ' || true)"
 echo "cloud-init: GPU compute capability=${compute_cap:-unknown}"
-case "$compute_cap" in
-  1[0-9].*|[2-9][0-9].*)
-    if [ "${ALLOW_UNTESTED_ARCH:-0}" != 1 ]; then
-      echo "cloud-init: FATAL — compute capability $compute_cap is Blackwell-or-newer," >&2
-      echo "  an arch this pipeline has never gated successfully (see docs/CLOUD-TRAINING.md)." >&2
-      echo "  Set ALLOW_UNTESTED_ARCH=1 to proceed anyway; on ANY arch, run" >&2
-      echo "  deploy/step-gate.sh before transferring corpora or training." >&2
-      exit 1
-    fi
-    echo "cloud-init: ALLOW_UNTESTED_ARCH=1 — proceeding on untested arch $compute_cap." >&2
-    ;;
-esac
 
 # ---------------------------------------------------------------------------
 # 2. Nix install + config (mode depends on VM vs container).
@@ -192,8 +176,10 @@ fi
 
 echo
 echo "cloud-init: OK — CUDA host built and loadable (inspect printed the config above)."
-echo "  Next: step gate, then benchmark, then train. See deploy/cloud-fast-path.md."
-echo "  Step gate (fail-fast GPU check, hard-capped at 3 min):"
+echo "  Next: profile the CUDA ladder; do not train until its schedule is viable."
+echo "  Profile (no corpus or tokenizer required):"
+echo "    ./deploy/profile-cuda.sh ladder"
+echo "  Then step gate (separate 5 min compile / 3 min execution caps):"
 echo "    ./deploy/step-gate.sh run/wiki-bpe10m/shard-0-bpe10m.corpus \\"
 echo "      \$HOME/datasets/wikipedia-en/enwiki-8k.bpe"
 echo "  Benchmark (cents):"

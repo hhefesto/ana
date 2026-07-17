@@ -1,15 +1,15 @@
 # Cloud fast path — train `bpe10m`, pull weights, kill the instance ASAP
 
-> **STATUS (2026-07-15): DO NOT RENT YET.** bpe10m training is blocked by a
-> kernel-level performance pathology: the Futhark vjp gradient kernel does not
-> finish one step in >17 min on an RTX 3090 (Ampere) or an RTX PRO 4000
-> (Blackwell) — same signature on both, so it is the kernel, not the GPU.
-> Fix it locally first (see `HANDOFF.md`), then re-gate on a cheap card.
+> **STATUS (2026-07-17): ACTIVE TRAINING on an RTX 5070.** CUDA 12.9 targets
+> Blackwell sm_120; the stock production gradient is 57.9 ms per sequence and
+> real updates saturate the GPU at 97-100%. A 200-step `MICRO_BATCH=1` benchmark
+> reached 1,575 target tokens/s including startup/final-checkpoint overhead;
+> steady updates are about 0.45-0.50 s. Autotuning was harmful and is rejected.
 
 Goal: spend the **least paid GPU time** to train `bpe10m` on a rented GPU and get
 the weights onto your local machine, then destroy the instance. The model is
 ~10 M params, the checkpoint is tiny (~120 MB), and all CPU-heavy prep (tokenizer
-+ corpora + plan) is done locally. CUDA is pinned to **12.6** in `flake.nix`;
++ corpora + plan) is done locally. CUDA is pinned to **12.9** in `flake.nix`;
 `cloud-init.sh` builds the host from that closure using only the box's kernel
 driver.
 
@@ -27,7 +27,7 @@ The one rule that saves the most money: **DESTROY** the instance when done (not
 - **Plan + corpora**: `run/wiki-bpe10m/plan-bpe10m-b8-s4000.tsv` (1,465 segments)
   ✅ plus all 1,465 `shard-<k>-bpe10m.corpus` (~9.3 GB) ✅
 - **CUDA host builds locally** ✅ (`nix build .#formal-transformer-cuda`, RPATH
-  clean, links CUDA 12.6). No GPU needed to build.
+  clean, links CUDA 12.9). No GPU needed to build.
 
 > **This run: full dataset (all 1,465 shards), benchmark-gated.** Transfer all
 > corpora, run the whole plan (`MAX_SHARDS` unset), and pull the checkpoint as
@@ -40,17 +40,12 @@ The one rule that saves the most money: **DESTROY** the instance when done (not
 ## 1. Rent the instance (vast.ai)
 
 - **GPU** — interruptible offers churn, so pick live by **highest FP32 TFLOPS/$
-  with Max CUDA ≥ 12.6** (not vast's tensor-weighted DLPerf), restricted to
-  **Ada (RTX 40xx, sm_89) or Ampere (RTX 30xx, sm_86)**. Good examples:
+  with Max CUDA >= 12.9** (not vast's tensor-weighted DLPerf). Ampere, Ada, and
+  Blackwell are supported. Good examples:
   **RTX 3090 / 3090 Ti (~$0.13/hr, 24 GB, reliable)**, **RTX 4070 Ti / 4080 /
-  4090** (fastest FP32). Whole run ≈ $1–2. Need <1 GB VRAM, so don't pay up for
-  memory.
-  - **Blackwell (RTX 50xx, compute cap ≥ 10.0) is untested-arch** —
-    `cloud-init.sh` refuses it by default (`ALLOW_UNTESTED_ARCH=1` overrides).
-    Note: the 2026-07-15 stall first blamed on Blackwell reproduced identically
-    on Ampere — it was the kernel, not the arch. `step-gate.sh` is the real
-    gate on any card.
-  - **Avoid sub-12.6 hosts** (Max CUDA 12.0/12.2/12.4) — they reject our PTX.
+  4090**, and **RTX 5070** (measured working). The full run is projected around
+  $30-35 on a $0.104/h 5070. Need only about 1.2 GB VRAM.
+  - **Avoid sub-12.9 hosts** — the driver PTX JIT may reject CUDA 12.9 output.
   - Old datacenter cards (Tesla T4, sm_75) are *compatible* but poor value:
     ~3× the $/FP32-TFLOP of a 3090 and many times the wall-clock.
 - **Template**: any CUDA/Ubuntu image that exposes the NVIDIA runtime (the vast
@@ -71,7 +66,7 @@ PORT=41234                          # from vast's SSH line
 SSH_E="ssh -p $PORT -i ~/.ssh/xpsoasis-ed25519"
 ```
 
-*(Verda)* Instead: image `Ubuntu 24.04 + CUDA 12.6`, GPU `RTX 6000 Ada spot`, no
+*(Verda)* Instead: use an image/driver advertising CUDA 12.9+, no
 startup script; `INSTANCE=ubuntu@<ip>` and `SSH_E="ssh -i ~/.ssh/xpsoasis-ed25519"`
 (no `-p`).
 
@@ -117,37 +112,57 @@ container), builds `formal-transformer-cuda`, guards stub leaks, resolves
 
 ---
 
-## 3. Gate + benchmark (cents — BEFORE the 9.3 GB transfer and the full run)
+## 3. Profile + gate + benchmark (BEFORE the 9.3 GB transfer)
 
-**Step gate first** — one hard-capped training step on shard 0. The kernel can
-compile yet fail to finish a step with the GPU pegged at 100% (a kernel-level
-pathology, seen identically on Blackwell and Ampere); the gate turns that into
-a ≤3-minute verdict:
+**Profile first.** This runs the production gradient entry over seven tractable
+shapes, with named reports under `run/cuda-profile/`; no corpus is needed:
+
+```bash
+# on the instance, in formalTransformer/
+./deploy/profile-cuda.sh ladder
+# Optional experiment; trust only an independently faster repeat:
+./deploy/profile-cuda.sh autotune
+./deploy/profile-cuda.sh ladder
+```
+
+Inspect `run/cuda-profile/cuda-grad-ladder.prof/`, especially each `.summary`
+and `.timeline`, for the dominant kernel and its grid/block dimensions. Do not
+run the full shape until this ladder is viable. The explicit command is
+`ALLOW_FULL_PROFILE=1 ./deploy/profile-cuda.sh full`; it is guarded because
+`futhark bench` runs the case three times.
+
+Autotuning is not intrinsically trustworthy. On the RTX 5070 it made six of
+seven relevant shapes slower (up to 30x), so stock scheduling was retained.
+
+**Then step gate.** It first creates the CUDA context under a five-minute cap,
+populating `FUT_CACHE` without training, then runs one warm-cache step under a
+separate three-minute cap:
 
 ```bash
 # on the instance, in formalTransformer/
 ./deploy/step-gate.sh run/wiki-bpe10m/shard-0-bpe10m.corpus \
   "$HOME/datasets/wikipedia-en/enwiki-8k.bpe"
-# PASS -> continue below.  rc=124 -> DESTROY the instance; the kernel is the
-# problem, not the GPU — renting a different card will not help. Fix locally.
+# PASS -> continue below. rc=124 -> preserve the ladder report and stop;
+# it is a scheduling verdict, not a universal GPU-architecture conclusion.
 ```
 
 **Then benchmark:**
 
 ```bash
 # on the instance, in formalTransformer/
-TRAIN_BATCH=8 MICRO_BATCH=1 BENCH_STEPS=5 FUT_CACHE=run/futhark-cuda.cache \
+VALIDATION_WINDOWS=1 TRAIN_BATCH=8 MICRO_BATCH=1 BENCH_STEPS=200 \
+  FUT_CACHE=run/futhark-cuda.cache \
   ./deploy/benchmark-cuda.sh run/wiki-bpe10m/shard-0-bpe10m.corpus \
   "$HOME/datasets/wikipedia-en/enwiki-8k.bpe"
-# run a SECOND time (same FUT_CACHE) for steady-state tokens/s (first pays NVRTC)
+# run a second time to confirm steady-state tokens/s
 ```
 
-- **PTX rejected / JIT error?** The host driver is older than 12.6 expects (you
-  picked a sub-12.6 host). Rent a Max-CUDA-≥12.6 host, or pin the flake lower
-  (`cudaPackages_12_6` → `cudaPackages_12_4`), rebuild, and re-run the
+- **PTX rejected / JIT error?** The host driver is older than 12.9 expects.
+  Rent a Max-CUDA >= 12.9 host, or deliberately pin lower only for a pre-Blackwell
+  GPU, rebuild, and re-run the
   conformance oracle before trusting it (`docs/CLOUD-TRAINING.md`).
-- **Tune `MICRO_BATCH`** up (2/4/8) — headless GPU, no display watchdog; result
-  is equation-equal, pure throughput.
+- **Tune `MICRO_BATCH` only by measurement.** On the RTX 5070, `1` beat `8`
+  (1,575 versus 1,329 end-to-end target tokens/s).
 - **Project cost:** `global_total=$(awk 'NR==1{print $3}'
   run/wiki-bpe10m/plan-bpe10m-b8-s4000.tsv)`;
   `hours = global_total * 8 * 255 / tokens_per_sec / 3600`;
@@ -172,7 +187,8 @@ rsync -az --info=progress2 -e "$SSH_E" run/wiki-bpe10m/shard-*-bpe10m.corpus \
 tmux new -s train
 cd formalTransformer
 TOKENIZER_FILE="$HOME/datasets/wikipedia-en/enwiki-8k.bpe" \
-TRAIN_BATCH=8 MICRO_BATCH=<tuned> CHECKPOINT_EVERY=100 \
+TRAIN_BATCH=8 MICRO_BATCH=1 CHECKPOINT_EVERY=2000 \
+VALIDATE_EVERY=2000 VALIDATION_WINDOWS=32 \
 FUT_CACHE=run/futhark-cuda.cache \
   ./deploy/train-cloud.sh          # detach: Ctrl-b then d
 ```
