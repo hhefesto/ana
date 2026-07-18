@@ -494,10 +494,15 @@ generate checkpointPath text budget = do
   let promptBytes = Text.encodeUtf8 (Text.pack text)
       prompt = bosToken : encodeWith tokenizer promptBytes
       n = paramCount cfg
+      completed = adamStep (checkpointOptimizer checkpoint)
+      scheduled = totalSteps (manifestOptimizerConfig manifest)
+      progress = 100 * fromIntegral completed / fromIntegral scheduled :: Double
       emit token = do
         bytes <- either die pure (decodeWith tokenizer [token])
         BS.putStr bytes
         hFlush stdout
+  printf "=== Wikipedia corpus training: %.3f%% complete (%d/%d updates) ===\n"
+    progress completed scheduled
   BS.putStr promptBytes
   hFlush stdout
   _ <- withContext $ \ctx -> withF32 ctx (map realToFrac (checkpointParameters checkpoint)) $ \params ->

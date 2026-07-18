@@ -795,3 +795,51 @@ $0.161/hour (driver 595.71.05, CUDA 13.2, compute capability 12.0, 16 GB VRAM).
   now prints the prompt immediately after checkpoint/tokenizer loading and
   flushes each decoded token, fixing the apparent multi-minute no-output stall
   of the local sequential backend (eight measured tokens took about 13.7 s).
+
+### Backend architecture clarification (2026-07-18)
+
+The project uses CUDA as a generated execution target, but contains no
+handwritten CUDA C++ kernels or `<<<grid, block>>>` launches:
+
+1. The transformer equations and differentiated production entry live in
+   `backend/futhark/model.fut` and `backend/futhark/kernels-opencl.fut`.
+   Despite the latter's historical name, it is the reduced GPU entry program
+   compiled by both the OpenCL and CUDA targets. Futhark's `vjp2` derives the
+   reverse pass for `micro_batch_loss_grad`; the backward kernel is not
+   handwritten.
+2. `futhark cuda --library` generates `kernels.c`, `kernels.h`, and metadata.
+   The generated C contains the CUDA runtime/driver integration, embedded
+   generated kernel source, allocation logic, launch logic, and exported
+   `futhark_entry_*` functions.
+3. `backend/gpu/FutharkKernels.hs` is the Haskell FFI boundary. It creates the
+   Futhark context, uploads arrays, calls generated entries, synchronizes, and
+   downloads checkpoint arrays. `backend/gpu/Main.hs` owns corpus/checkpoint
+   validation, the global schedule, sampling, logging, validation, generation,
+   and checkpoint publication.
+4. At context creation, CUDA 12.9 NVRTC compiles the embedded generated CUDA
+   source to PTX. The provider's `libcuda.so.1` loads that PTX and the NVIDIA
+   driver JIT-compiles it for Blackwell `sm_120`. `FUT_CACHE` caches the NVRTC
+   result to avoid repeated compilation.
+
+The current backend does **not** use cuBLAS, cuBLASLt, cuDNN, CUTLASS, WMMA,
+PyTorch, JAX, mixed precision, or explicit tensor-core GEMMs. It executes
+Futhark-generated FP32 maps, reductions, loops, indexing operations, and AD
+adjoints. Consequently, 100% `nvidia-smi` activity means a kernel is resident,
+not that CUDA lanes or tensor cores are saturated; the observed ~114 W at 100%
+activity and lack of 5070-to-5070-Ti scaling are consistent with this generated
+reduction/occupancy-limited workload.
+
+The same Futhark equations also compile through sequential C, multicore C, and
+OpenCL. Those hosts share model identity, flat parameter layout, checkpoint
+format, optimizer semantics, and dataset identity. Agda is the proof/specification
+layer and does not execute in the training process.
+
+`wiki-generate` now derives a response header from the checkpoint manifest's
+global Adam step and checkpointed total schedule, before printing the prompt:
+
+```text
+=== Wikipedia corpus training: 1.691% complete (31000/1833157 updates) ===
+```
+
+This percentage identifies the exact pulled weights used for that response;
+the smoke test passed and `nix flake check` passed all checks.
