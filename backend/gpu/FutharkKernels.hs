@@ -33,6 +33,7 @@ module FutharkKernels
   , logits
   , adamwStep
   , lastLogits
+  , decodeStep
   ) where
 
 import Control.Exception (bracket, throwIO)
@@ -273,6 +274,24 @@ lastLogits (Context ctx) cfg (F32Array params) (I64Array tokens) = alloca $ \out
   check ctx "last_logits sync" =<< c_context_sync ctx
   F32Array <$> peek out
 
+-- One incremental decoding step.  The three state arrays are CONSUMED by
+-- the entry (unique parameters): after this call the passed handles must
+-- not be used or freed again; the returned handles replace them.
+decodeStep :: Context -> GpuConfig -> Int64 -> Int64 -> Int64
+           -> F32Array -> F32Array -> F32Array -> F32Array
+           -> IO (F32Array, F32Array, F32Array, F32Array)
+decodeStep (Context ctx) cfg ctxSize position token
+           (F32Array params) (F32Array gla) (F32Array kc) (F32Array vc) =
+  alloca $ \outLogits -> alloca $ \outGla -> alloca $ \outK -> alloca $ \outV -> do
+    check ctx "decode_step" =<< entry_decode_step ctx outLogits outGla outK outV
+      (gpuVocab cfg) (gpuModelDim cfg) (gpuFfDim cfg) (gpuHeads cfg)
+      (gpuLayers cfg) ctxSize params position token gla kc vc
+    check ctx "decode_step sync" =<< c_context_sync ctx
+    (,,,) <$> (F32Array <$> peek outLogits)
+          <*> (F32Array <$> peek outGla)
+          <*> (F32Array <$> peek outK)
+          <*> (F32Array <$> peek outV)
+
 checkedPtr :: Ptr CContext -> String -> IO (Ptr a) -> (Ptr a -> b) -> IO b
 checkedPtr ctx label acquire wrap = do
   ptr <- acquire
@@ -327,5 +346,6 @@ foreign import ccall safe "futhark_entry_zero_vector" entry_zero_vector :: Ptr C
 foreign import ccall safe "futhark_entry_clip_global_norm" entry_clip_global_norm :: Ptr CContext -> Ptr Float -> Ptr (Ptr CF32_1d) -> Float -> Ptr CF32_1d -> IO CInt
 foreign import ccall safe "futhark_entry_n_params" entry_n_params :: Ptr CContext -> Ptr Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> IO CInt
 foreign import ccall safe "futhark_entry_logits" entry_logits :: Ptr CContext -> Ptr (Ptr CF32_2d) -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CI64_1d -> IO CInt
+foreign import ccall safe "futhark_entry_decode_step" entry_decode_step :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
 foreign import ccall safe "futhark_entry_adamw_step" entry_adamw_step :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Int64 -> Float -> Float -> Float -> Float -> Float -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CBool_1d -> IO CInt
 foreign import ccall safe "futhark_entry_last_logits" entry_last_logits :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CI64_1d -> IO CInt

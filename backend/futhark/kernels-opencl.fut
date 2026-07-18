@@ -123,3 +123,15 @@ entry adamw_step [p]
     in param - learning_rate*(adaptive + decay))
     (zip5 checked m second checked decay_mask)
   in (updated, m, second)
+
+-- Incremental decoding: the proved cache-run law executed with fixed-size
+-- per-layer state (GLA matrices and a NoPE softmax ring-buffer KV cache).
+-- Nondifferentiated, so it does not enlarge the vjp-generated code.
+entry decode_step [gs] [ks]
+    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64) (ctx: i64)
+    (params: [parameter_count v d f n_layers]f32)
+    (position: i64) (token: i64)
+    (gla_state: *[gs]f32) (k_cache: *[ks]f32) (v_cache: *[ks]f32)
+    : ([v]f32, *[gs]f32, *[ks]f32, *[ks]f32) =
+  decode_step_def v d f h n_layers ctx params position token
+                  gla_state k_cache v_cache

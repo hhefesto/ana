@@ -71,8 +71,41 @@ main = do
                       compareVector "AdamW first moment" 2e-6 2e-4 (firstMoment referenceState) futharkM
                       compareVector "AdamW second moment" 2e-7 3e-4 (secondMoment referenceState) futharkV
   microBatchConformance
+  decodeConformance
   sizeRejectionConformance
   putStrLn "conformance: all comparisons passed"
+
+-- Incremental decoding must observe the same language as whole-prefix
+-- evaluation: feeding the tokens one decode_step at a time (fixed GLA
+-- state, softmax ring buffer) must reproduce each row of the batch
+-- forward.  This is the proved cache-run law (Attention/LinearTrie.agda)
+-- checked numerically through the mixed hybrid stack.
+decodeConformance :: IO ()
+decodeConformance = do
+  gpuCfg <- either die pure (gpuConfig config)
+  referenceLogits <- either die pure (fullSequenceLogits config parameters tokens)
+  let d = modelDim config
+      hd = modelDim config `div` headCount config
+      glaLength = glaLayerCount config * d * hd
+      cacheLength = (layerCount config `div` 4) * contextSize config * d
+  withContext $ \ctx ->
+    withF32 ctx (map realToFrac parameters) $ \deviceParameters -> do
+      gla0 <- zeroVector ctx glaLength
+      k0 <- zeroVector ctx cacheLength
+      v0 <- zeroVector ctx cacheLength
+      (rows', (glaN, kN, vN)) <- foldM
+        (\(acc, (gla, kc, vc)) (position, token) -> do
+          (logitsArr, gla', kc', vc') <- decodeStep ctx gpuCfg
+            (fromIntegral (contextSize config)) position token
+            deviceParameters gla kc vc
+          row <- downloadF32 ctx (vocabSize config) logitsArr
+          freeF32 ctx logitsArr
+          pure (acc ++ [row], (gla', kc', vc')))
+        ([], (gla0, k0, v0))
+        (zip [0 :: Int64 ..] (map fromIntegral tokens))
+      mapM_ (freeF32 ctx) [glaN, kN, vN]
+      compareVector "incremental decode vs whole-prefix logits" 3e-4 3e-4
+        (concat referenceLogits) (map realToFrac (concat rows'))
 
 batchSequences :: [[Int]]
 batchSequences = [[0, 2, 3, 4], [0, 3, 2, 4], [0, 4, 2, 3], [0, 2, 4, 3]]

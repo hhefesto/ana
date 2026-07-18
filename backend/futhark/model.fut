@@ -210,6 +210,107 @@ def gla_block [n] [d] [p]
   let attended = gla_attention h q_unit k_unit values cum
   in block_tail f ooff (ooff + 2*d*d) params x attended
 
+def sigmoid (z: f32): f32 = 1.0f32 / (1.0f32 + f32.exp (-z))
+
+-- Output projection, residual, and SwiGLU for a single position.
+def block_tail_single [d] [p]
+    (f: i64) (ooff: i64) (rms_ff_off: i64)
+    (params: [p]f32) (x: [d]f32) (attended: [d]f32): [d]f32 =
+  let wo = matrix ooff d d params
+  let x_att = add x (matvec wo attended)
+  let rms_ff = vector rms_ff_off d params
+  let wgate = matrix (rms_ff_off + d) f d params
+  let wup = matrix (rms_ff_off + d + f*d) f d params
+  let wdown = matrix (rms_ff_off + d + 2*f*d) d f params
+  let nrm = rms_norm x_att rms_ff
+  let gate = matvec wgate nrm
+  let up = matvec wup nrm
+  let hidden = map2 (\g u -> (g / (1.0f32 + f32.exp (-g))) * u) gate up
+  in add x_att (matvec wdown hidden)
+
+-- One incremental decoding step of the hybrid model: the proved cache-run
+-- law executed.  Each GLA layer carries a fixed [d][hd] state advanced by
+-- stepGLA (the recurrent form; the state type never mentions the prefix
+-- length), and each NoPE softmax layer keeps a ring-buffer KV cache of the
+-- last `ctx` positions — without positional encodings the scores do not
+-- depend on cache order, so the ring needs no reindexing.  Within the
+-- first `ctx` tokens the incremental logits extensionally equal the batch
+-- forward's final row (recurrent≡parallel plus causality); beyond that the
+-- GLA state is simply never reset — the StateAlgebra run — while softmax
+-- attends to the trailing window.
+def decode_step_def [p] [gs] [ks]
+    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64) (ctx: i64)
+    (params: [p]f32)
+    (position: i64) (token: i64)
+    (gla_state: *[gs]f32) (k_cache: *[ks]f32) (v_cache: *[ks]f32)
+    : ([v]f32, *[gs]f32, *[ks]f32, *[ks]f32) =
+  let hd = d / h
+  let checked = assert (gs == gla_layers n_layers * d * hd &&
+                        ks == softmax_layers n_layers * ctx * d &&
+                        p == parameter_count v d f n_layers &&
+                        position >= 0 && token >= 0 && token < v && ctx > 0)
+                       params
+  let embedding = matrix 0 v d checked
+  let inv_scale = 1.0f32 / f32.sqrt (f32.i64 hd)
+  let (x_final, gla_out, k_out, v_out) =
+    loop (x, gstate, kc, vc) =
+        (copy (embedding[token] :> [d]f32), gla_state, k_cache, v_cache)
+    for layer < n_layers do
+      let base = block_base v d f layer
+      let rms_att = vector base d checked
+      let wq = matrix (base + d) d d checked
+      let wk = matrix (base + d + d*d) d d checked
+      let wv = matrix (base + d + 2*d*d) d d checked
+      let ooff = base + d + 3*d*d
+      let normed = rms_norm x rms_att
+      let q = matvec wq normed
+      let k = matvec wk normed
+      let vvec = matvec wv normed
+      in if layer % 4 == 3
+         then -- NoPE softmax attention over the ring-buffer cache.
+           let si = layer / 4
+           let slot = position % ctx
+           let koff = si*ctx*d + slot*d
+           let kc = scatter kc (map (+ koff) (iota d)) k
+           let vc = scatter vc (map (+ koff) (iota d)) vvec
+           let m = i64.min (position + 1) ctx
+           let per_head = tabulate h (\head ->
+             let scores = tabulate ctx (\e ->
+               if e < m
+               then inv_scale * f32.sum (map (\c ->
+                      q[head*hd+c] * kc[si*ctx*d + e*d + head*hd + c])
+                      (iota hd))
+               else -1.0e30f32)
+             let weights = softmax scores
+             in tabulate hd (\j ->
+                  f32.sum (map (\e -> weights[e] * vc[si*ctx*d + e*d + head*hd + j])
+                               (iota ctx))))
+           let attended = tabulate d (\og -> per_head[og / hd, og % hd])
+           let x' = block_tail_single f ooff (ooff + d*d) checked x attended
+           in (x', gstate, kc, vc)
+         else -- GLA: S' = diag(alpha)·S + k̂ vᵀ, o = q̂ᵀ S'.
+           let gi = layer - layer / 4
+           let qhat = l2_normalize_heads h q
+           let khat = l2_normalize_heads h k
+           let walpha = matrix (ooff + d*d) d d checked
+           let alpha = map sigmoid (matvec walpha normed)
+           let goff = gi*d*hd
+           let s_new = tabulate (d*hd) (\idx ->
+             let cg = idx / hd
+             let j = idx % hd
+             in alpha[cg] * gstate[goff + idx] + khat[cg] * vvec[(cg / hd)*hd + j])
+           let gstate = scatter gstate (map (+ goff) (iota (d*hd))) s_new
+           let attended = tabulate d (\og ->
+             let head = og / hd
+             let j = og % hd
+             in f32.sum (map (\c -> qhat[head*hd+c] * s_new[(head*hd+c)*hd + j])
+                             (iota hd)))
+           let x' = block_tail_single f ooff (ooff + 2*d*d) checked x attended
+           in (x', gstate, kc, vc)
+  let final_gain = vector (block_base v d f n_layers) d checked
+  let final_hidden = rms_norm x_final final_gain
+  in (map (\word -> dot word final_hidden) embedding, gla_out, k_out, v_out)
+
 def valid_tokens [n] (v: i64) (tokens: [n]i64): bool =
   all (\t -> t >= 0 && t < v) tokens
 

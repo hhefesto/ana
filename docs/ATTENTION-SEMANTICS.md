@@ -119,6 +119,26 @@ The hybrid's honest state is the product: one dk×dv matrix per GLA head
 step GLA layers with O(1) state per token (`cache-run` executed) and
 recompute only the 1-in-4 softmax layers over the window.
 
+### The incremental decoder (implemented)
+
+`decode_step` (backend/futhark/model.fut, exposed by both entry programs)
+feeds one token through the stack with explicit state: each GLA layer
+advances its fixed [d][hd] matrix by `stepGLA`, and each softmax layer
+appends to a ring-buffer KV cache of the trailing `context` positions —
+NoPE means the scores are permutation-invariant in the cache, so the ring
+needs no reindexing. The conformance oracle checks that feeding a sequence
+token-by-token reproduces every row of the batch forward (observed
+max_abs ≈ 6e-9 on the mixed 5-layer config): the proved `cache-run` law,
+numerically.
+
+Beyond the first window the decoder makes the extension choice the
+semantics recommends: the GLA state is never reset — generation *is* the
+`StateAlgebra` run — while softmax layers attend over the trailing window.
+Training only ever sees windows started from state zero, so all
+interpretations beyond one window are extrapolations; this one is the
+denotationally natural extension and costs O(model) per token instead of
+the previous O(window · model) full recomputation.
+
 Compute shape: per window of length n, GLA costs O(n·d) per head where
 masked softmax costs O(n²·hd) — and the measured superlinear grad axis in
 `backend/futhark/bench.fut` was precisely the context axis.

@@ -1,7 +1,7 @@
 module Main (main) where
 
 import Control.Exception (bracket)
-import Control.Monad (foldM, when)
+import Control.Monad (foldM, unless, when)
 import Control.Parallel.Strategies (parListChunk, rdeepseq, using)
 import qualified Data.ByteString as BS
 import Data.Bits (rotateL, shiftL, shiftR, xor)
@@ -524,22 +524,47 @@ tokenizerForIdentity identity
         (die "TOKENIZER_FILE identity does not match the checkpoint")
       pure tokenizer
 
+-- Incremental decoding: the proved cache-run law executed.  Each prompt or
+-- sampled token is fed through decode_step exactly once; GLA layers carry a
+-- fixed dk x dv state per head that is never reset (the StateAlgebra run),
+-- and the NoPE softmax layers attend over a ring buffer of the trailing
+-- context window.  Within the first window this observes the same language
+-- as full recomputation (recurrent≡parallel plus causality); per-token cost
+-- is O(model) instead of O(window * model).
 generateLoop
   :: Context -> GpuConfig -> Config -> F32Array
   -> ([Float] -> PRNGState -> (Int, PRNGState))
   -> (Int -> IO ()) -> Int -> PRNGState -> [Int] -> [Int] -> IO [Int]
-generateLoop _ _ _ _ _ _ 0 _ _ output = pure output
-generateLoop ctx gpuCfg cfg params pick emit remaining rng state output = do
-  let context = takeEnd (contextSize cfg) state
-  logits <- withI64_1d ctx (map fromIntegral context) $ \tokens ->
-    bracket (lastLogits ctx gpuCfg params tokens) (freeF32 ctx) (downloadF32 ctx (vocabSize cfg))
-  let (token, rng') = pick logits rng
-  if token == eosToken then pure output
-  else if token == bosToken
-    then generateLoop ctx gpuCfg cfg params pick emit (remaining - 1) rng' (state ++ [token]) output
-    else do
-      emit token
-      generateLoop ctx gpuCfg cfg params pick emit (remaining - 1) rng' (state ++ [token]) (output ++ [token])
+generateLoop ctx gpuCfg cfg params pick emit budget rng prompt _ = do
+  let d = modelDim cfg
+      hd = headDim cfg
+      glaStateLength = glaLayerCount cfg * d * hd
+      cacheLength = (layerCount cfg `div` 4) * contextSize cfg * d
+      step (gla, kc, vc) position token = do
+        (logitsArr, gla', kc', vc') <- decodeStep ctx gpuCfg
+          (fromIntegral (contextSize cfg)) (fromIntegral position)
+          (fromIntegral token) params gla kc vc
+        values <- downloadF32 ctx (vocabSize cfg) logitsArr
+        freeF32 ctx logitsArr
+        pure (values, (gla', kc', vc'))
+  gla0 <- zeroVector ctx glaStateLength
+  k0 <- zeroVector ctx cacheLength
+  v0 <- zeroVector ctx cacheLength
+  (promptLogits, primed) <- foldM
+    (\(_, states) (position, token) -> step states position token)
+    ([], (gla0, k0, v0))
+    (zip [0 ..] prompt)
+  let go remaining rng' position states logits output
+        | remaining <= (0 :: Int) = pure output
+        | otherwise = do
+            let (token, rng'') = pick logits rng'
+            if token == eosToken then pure output
+            else do
+              unless (token == bosToken) (emit token)
+              (logits', states') <- step states position token
+              go (remaining - 1) rng'' (position + 1) states' logits'
+                 (if token == bosToken then output else output ++ [token])
+  go budget rng (length prompt) primed promptLogits []
 
 -- Observation of the model's next-token distribution.  TEMPERATURE=0 is
 -- the degenerate greedy observation (the exact argmax path); otherwise the
