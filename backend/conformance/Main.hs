@@ -11,8 +11,14 @@ import FutharkKernels
 import Numeric.AD (grad)
 import System.Exit (die)
 
+-- Five layers cover both block kinds: indices 0,1,2,4 are GLA and index 3
+-- is softmax full attention, so one oracle run checks the GLA forward and
+-- vjp, the NoPE softmax path, and the mixed layer dispatch.  The Haskell
+-- reference computes GLA in the recurrent form while Futhark computes the
+-- parallel closed form, so these comparisons are also the f32 shadow of the
+-- proved recurrent≡parallel theorem.
 config :: Config
-config = Config 5 4 4 6 1 2
+config = Config 5 4 4 6 5 2
 
 tokens :: [Int]
 tokens = [0, 2, 3, 4]

@@ -8,6 +8,7 @@ module FormalTransformer.Model
   ) where
 
 import Control.Monad (foldM)
+import Data.List (transpose)
 import FormalTransformer.Config
 import FormalTransformer.Layout
 
@@ -60,6 +61,9 @@ embeddingRow c table token
   | otherwise = Right (take d (drop (token * d) table))
   where d = modelDim c
 
+-- Hybrid token mixer (docs/ATTENTION-SEMANTICS.md): GLA layers step a
+-- per-head dk x dv state; every fourth layer is softmax full attention with
+-- no positional encoding — position lives in the GLA gates.
 runBlock :: (Floating a, Ord a) => Config -> [a] -> [Slice] -> [[a]] -> Int -> Either String [[a]]
 runBlock c params layout xs blockIndex = do
   attGain <- get "rms_att"
@@ -72,11 +76,17 @@ runBlock c params layout xs blockIndex = do
   wup <- get "wup"
   wdown <- get "wdown"
   let normalized = map (rmsNorm attGain) xs
-      qs = zipWith (rope c) [0 ..] (map (matVec d d wq) normalized)
-      ks = zipWith (rope c) [0 ..] (map (matVec d d wk) normalized)
+      qs = map (matVec d d wq) normalized
+      ks = map (matVec d d wk) normalized
       vs = map (matVec d d wv) normalized
-      attended = causalAttention c qs ks vs
-      afterAttention = zipWith addVec xs (map (matVec d d wo) attended)
+  attended <-
+    if isSoftmaxLayer c blockIndex
+      then pure (causalAttention c qs ks vs)
+      else do
+        walpha <- get "walpha"
+        let alphas = map (map sigmoid . matVec d d walpha) normalized
+        pure (glaAttention c qs ks vs alphas)
+  let afterAttention = zipWith addVec xs (map (matVec d d wo) attended)
       ff x =
         let n = rmsNorm ffGain x
             gated = zipWith (*) (map silu (matVec f d wgate n)) (matVec f d wup n)
@@ -114,18 +124,46 @@ addVec = zipWith (+)
 silu :: Floating a => a -> a
 silu x = x / (1 + exp (-x))
 
-rope :: Floating a => Config -> Int -> [a] -> [a]
-rope c position vector = concatMap rotateHead (rows hd vector)
+sigmoid :: Floating a => a -> a
+sigmoid x = 1 / (1 + exp (-x))
+
+l2Normalize :: Floating a => [a] -> [a]
+l2Normalize x = map (/ norm) x
+  where norm = sqrt (sum (map (\v -> v * v) x) + 1e-6)
+
+-- Gated linear attention in the RECURRENT form — the definitional reading of
+-- the semantics (FormalTransformer/Attention/Linear.agda stepGLA/runGLA):
+-- per head, S_t = diag(alpha_t) * S_{t-1} + k_t v_t^T and o_t = q_t^T S_t.
+-- The Futhark implementation computes the PARALLEL closed form; their
+-- agreement in the conformance oracle is the f32 shadow of the proved
+-- recurrent≡parallel theorem.  Queries and keys are L2-normalized per head
+-- to bound the state readout.
+glaAttention :: Floating a => Config -> [[a]] -> [[a]] -> [[a]] -> [[a]] -> [[a]]
+glaAttention c qs ks vs alphas = map concat (transpose perHead)
   where
     hd = headDim c
-    rotateHead h = concat
-      [ let x = h !! (2 * i)
-            y = h !! (2 * i + 1)
-            theta = fromIntegral position / (10000 ** (fromIntegral (2 * i) / fromIntegral hd))
-        in [x * cos theta - y * sin theta, x * sin theta + y * cos theta]
-      | i <- [0 .. hd `div` 2 - 1]
-      ]
+    perHead = [ headOutputs h | h <- [0 .. headCount c - 1] ]
+    headSlice vector h = take hd (drop (h * hd) vector)
+    headOutputs h = go zeroState (zip4' qh kh vh ah)
+      where
+        qh = map (l2Normalize . (`headSlice` h)) qs
+        kh = map (l2Normalize . (`headSlice` h)) ks
+        vh = map (`headSlice` h) vs
+        ah = map (`headSlice` h) alphas
+        zeroState = replicate hd (replicate hd 0)
+        go _ [] = []
+        go state ((q, k, v, alpha) : rest) =
+          let state' = zipWith3
+                (\ac kc row -> zipWith (\s vj -> ac * s + kc * vj) row v)
+                alpha k state
+              out = [ sum (zipWith (*) q col) | col <- transpose state' ]
+          in out : go state' rest
 
+zip4' :: [a] -> [b] -> [c] -> [d] -> [(a, b, c, d)]
+zip4' (a : as) (b : bs) (c : cs) (d : ds) = (a, b, c, d) : zip4' as bs cs ds
+zip4' _ _ _ _ = []
+
+-- Softmax full attention, no positional encoding.
 causalAttention :: (Floating a, Ord a) => Config -> [[a]] -> [[a]] -> [[a]] -> [[a]]
 causalAttention c qs ks vs =
   [ concat

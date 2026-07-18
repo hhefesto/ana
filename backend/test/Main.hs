@@ -28,6 +28,7 @@ tests :: [(String, IO ())]
 tests =
   [ ("parameter count and layout coverage", testLayout)
   , ("10M BPE preset has exact dimensions", testBpePreset)
+  , ("GLA hybrid presets tile 3:1 with exact counts", testGlaPresets)
   , ("invalid configurations are rejected", testConfigRejection)
   , ("causal prefix logits are invariant", testCausalPrefix)
   , ("weighted-language residual laws", testResidualLaws)
@@ -96,6 +97,7 @@ testLayout = do
   assert (length mask == paramCount config) "decay mask length differs from parameter count"
   assert (paramCount config == vocabSize config * modelDim config
     + layerCount config * (4 * modelDim config ^ (2 :: Int) + 3 * ffDim config * modelDim config + 2 * modelDim config)
+    + glaLayerCount config * modelDim config ^ (2 :: Int)
     + modelDim config) "parameter count formula differs"
 
 testBpePreset :: IO ()
@@ -104,8 +106,32 @@ testBpePreset = do
   layout <- expectRight (namedLayout bpe10mPreset)
   assert (bpe10mPreset == Config 8192 256 320 864 6 5) "10M BPE preset dimensions differ"
   assert (headDim bpe10mPreset == 64) "10M BPE head dimension differs"
-  assert (paramCount bpe10mPreset == 10059840) "10M BPE parameter count differs"
-  assert (sum (map sliceLength layout) == 10059840) "10M BPE layout does not cover parameters"
+  -- Hybrid rule: of 6 layers only index 3 is softmax; 5 GLA gate
+  -- projections add 5*320*320 to the former softmax-only 10,059,840.
+  assert (paramCount bpe10mPreset == 10571840) "10M BPE parameter count differs"
+  assert (sum (map sliceLength layout) == 10571840) "10M BPE layout does not cover parameters"
+
+testGlaPresets :: IO ()
+testGlaPresets = do
+  _ <- expectRight (validateConfig glaPreset)
+  _ <- expectRight (validateConfig glaSmallPreset)
+  layout <- expectRight (namedLayout glaPreset)
+  smallLayout <- expectRight (namedLayout glaSmallPreset)
+  assert (glaPreset == Config 8192 256 320 864 8 5) "GLA preset dimensions differ"
+  assert (glaSmallPreset == Config 258 64 64 192 4 4) "GLA small preset dimensions differ"
+  -- Exact 3:1 tiling: 8 layers = 6 GLA + 2 softmax; 4 layers = 3 GLA + 1.
+  assert (glaLayerCount glaPreset == 6 && glaLayerCount glaSmallPreset == 3)
+    "hybrid 3:1 tiling differs"
+  assert (map (isSoftmaxLayer glaPreset) [0 .. 7]
+    == [False, False, False, True, False, False, False, True]) "softmax layer rule differs"
+  assert (paramCount glaPreset == 13153600) "GLA preset parameter count differs"
+  assert (paramCount glaSmallPreset == 242368) "GLA small parameter count differs"
+  assert (sum (map sliceLength layout) == paramCount glaPreset)
+    "GLA layout does not cover parameters"
+  assert (any ((== "blocks.3.rms_att") . sliceName) smallLayout
+    && not (any ((== "blocks.3.walpha") . sliceName) smallLayout)
+    && any ((== "blocks.2.walpha") . sliceName) smallLayout)
+    "softmax block unexpectedly carries a gate projection"
 
 testConfigRejection :: IO ()
 testConfigRejection = forM_ invalid $ \cfg ->

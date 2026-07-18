@@ -28,7 +28,7 @@ import Text.Printf (printf)
 import Text.Read (readMaybe)
 
 modelId :: Config -> String
-modelId cfg = "formal-transformer-futhark-v1:" ++ show cfg
+modelId cfg = "formal-transformer-futhark-hybrid-gla-v2:" ++ show cfg
 
 optimizerFor :: Int -> AdamWConfig
 optimizerFor steps = AdamWConfig 3e-4 0.9 0.999 1e-8 0.01 (min 100 steps) steps
@@ -61,14 +61,16 @@ main = do
         (Segment total start end offset globalIdentity expectedCorpusIdentity) cfg
     ["generate", checkpoint, text] -> generate checkpoint text 128
     ["generate", checkpoint, text, budgetText] -> parseNonnegative "MAXTOKENS" budgetText >>= generate checkpoint text
-    _ -> die "usage: formal-transformer-gpu inspect [tiny|small|bpe10m] | warm-context [tiny|small|bpe10m] | train CORPUS CHECKPOINT (STEPS|epoch) [tiny|small|bpe10m] | train-segment CORPUS CHECKPOINT GLOBAL_TOTAL START END DOCUMENT_OFFSET GLOBAL_ID EXPECTED_CORPUS_ID SIZE | generate CHECKPOINT TEXT [MAXTOKENS]"
+    _ -> die "usage: formal-transformer-gpu inspect [tiny|small|bpe10m|gla-small|gla] | warm-context [tiny|small|bpe10m|gla-small|gla] | train CORPUS CHECKPOINT (STEPS|epoch) [tiny|small|bpe10m|gla-small|gla] | train-segment CORPUS CHECKPOINT GLOBAL_TOTAL START END DOCUMENT_OFFSET GLOBAL_ID EXPECTED_CORPUS_ID SIZE | generate CHECKPOINT TEXT [MAXTOKENS]"
 
 chooseConfig :: String -> IO Config
 chooseConfig "tiny" = pure tinyPreset
 chooseConfig "small" = pure smallPreset
 chooseConfig "small4" = pure small4Preset
 chooseConfig "bpe10m" = pure bpe10mPreset
-chooseConfig value = die ("unknown model size: " ++ value ++ " (expected tiny, small, or bpe10m)")
+chooseConfig "gla-small" = pure glaSmallPreset
+chooseConfig "gla" = pure glaPreset
+chooseConfig value = die ("unknown model size: " ++ value ++ " (expected tiny, small, bpe10m, gla-small, or gla)")
 
 inspect :: Config -> IO ()
 inspect cfg = either die (mapM_ print) (namedLayout cfg) >> do

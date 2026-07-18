@@ -5,8 +5,9 @@
 open import "kernels"
 
 entry test_parameter_count (): bool =
-  -- v=3,d=4,f=6,L=2: 12 + 2*(64+72+8) + 4 = 304.
-  n_params 3 4 6 2 == 304
+  -- v=3,d=4,f=6,L=2: both layers are GLA (softmax needs index 3), so
+  -- 12 + 2*(64+72+8) + 2*16 + 4 = 336.
+  n_params 3 4 6 2 == 336
 
 entry test_finite_outputs (): bool =
   let count = n_params 3 4 4 1

@@ -11,10 +11,10 @@ import FormalTransformer.Config
 import Data.Word (Word32)
 
 canonicalLayoutIdentity :: String
-canonicalLayoutIdentity = "canonical-decoder-flat-parameters"
+canonicalLayoutIdentity = "hybrid-gla-decoder-flat-parameters"
 
 canonicalLayoutVersion :: Word32
-canonicalLayoutVersion = 1
+canonicalLayoutVersion = 2
 
 data Slice = Slice
   { sliceName :: !String
@@ -30,13 +30,19 @@ namedLayout c = do
   where
     d = modelDim c
     f = ffDim c
+    -- GLA blocks insert the gate projection walpha between wo and rms_ff;
+    -- the Futhark offsets in model.fut follow this order exactly.
     block i =
       [ ("blocks." ++ show i ++ ".rms_att", d, False)
       , ("blocks." ++ show i ++ ".wq", d * d, True)
       , ("blocks." ++ show i ++ ".wk", d * d, True)
       , ("blocks." ++ show i ++ ".wv", d * d, True)
       , ("blocks." ++ show i ++ ".wo", d * d, True)
-      , ("blocks." ++ show i ++ ".rms_ff", d, False)
+      ]
+      ++ [ ("blocks." ++ show i ++ ".walpha", d * d, True)
+         | not (isSoftmaxLayer c i) ]
+      ++
+      [ ("blocks." ++ show i ++ ".rms_ff", d, False)
       , ("blocks." ++ show i ++ ".wgate", f * d, True)
       , ("blocks." ++ show i ++ ".wup", f * d, True)
       , ("blocks." ++ show i ++ ".wdown", d * f, True)
