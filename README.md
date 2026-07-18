@@ -1,7 +1,9 @@
-# formalTransformer
+# ana
 
-`formalTransformer` is a specification-first decoder language model. It keeps
-three questions separate:
+`ana` — as in anamorphism: the coinductive unfold that builds the observation
+trie this project proves its decoder against — is a specification-first
+decoder language model (formerly `formalTransformer`). It keeps three
+questions separate:
 
 1. What language does an autoregressive model denote?
 2. What tensor function does the transformer compute?
@@ -256,6 +258,31 @@ corpus training percentage and global update count.
 
 The sequential and OpenCL hosts write identical checkpoint formats, so a run
 started on one backend continues on the other.
+
+### Generating From A Fresh Clone (vendored weights)
+
+The repository vendors the live run's trained weights under `weights/`: the
+FastBPE tokenizer (`enwiki-8k.bpe`) and the newest pulled
+`wiki-bpe10m-global.checkpoint`, split into sub-50 MB parts because GitHub
+rejects files over 100 MB. To generate with no other artifacts:
+
+```bash
+./weights/assemble.sh      # reassembles run/wiki-bpe10m-global.checkpoint, verifies SHA-256
+TOKENIZER_FILE=weights/enwiki-8k.bpe nix run .#wiki-generate
+```
+
+To refresh the vendored weights from the live trainer without touching the
+training process, `deploy/pull-latest-weights.sh` performs one read-only
+`scp` of the atomically published remote checkpoint (connection overridable
+via `TRAIN_SSH_HOST`/`TRAIN_SSH_PORT`/`TRAIN_REMOTE_CHECKPOINT`):
+
+```bash
+deploy/pull-latest-weights.sh                # -> run/wiki-bpe10m-global.checkpoint
+split -b 45M -d run/wiki-bpe10m-global.checkpoint weights/wiki-bpe10m-global.checkpoint.part-
+(cd weights && sha256sum ../run/wiki-bpe10m-global.checkpoint \
+  wiki-bpe10m-global.checkpoint.part-* enwiki-8k.bpe \
+  | sed 's|\.\./run/||' > SHA256SUMS)
+```
 
 ### Running With The Latest Weights
 
