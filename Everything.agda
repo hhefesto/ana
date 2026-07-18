@@ -8,6 +8,8 @@ import FormalTransformer.Language.Weighted
 import FormalTransformer.Language.Autoregressive
 import FormalTransformer.Language.Trie
 import FormalTransformer.Language.AutoregressiveTrie
+import FormalTransformer.Attention.Linear
+import FormalTransformer.Attention.LinearTrie
 import FormalTransformer.Enriched.Bradley
 import FormalTransformer.AD.Reverse
 import FormalTransformer.AD.Trusted

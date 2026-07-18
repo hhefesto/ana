@@ -25,6 +25,20 @@
 - Pointwise sum of additive maps; `addD`/`batchD` primal-sum and
   pullback-accumulation equations; factorization of `addD` through the
   proved `pairD` and `plusD`; the mean-loss pullback corollary.
+- Gated linear attention over an abstract semiring: the recurrent form
+  (`runGLA`) equals the parallel closed form (`closedGLA`) pointwise
+  (`recurrent≡parallel`); the chunk boundary law (`runGLA-++`) and the
+  chunkwise recurrence (`chunk-closed`), which license chunked/parallel
+  execution of the same meaning; the gate-product append law; the
+  contribution sum presented as a literal `listSum` over token/suffix pairs.
+- The GLA state machine packaged as a `StateAlgebra` whose state is one
+  dk×dv matrix (a type independent of prefix length); the generic `run`
+  agrees with the GLA recurrence refl per step; the trivial-weight
+  instance has path weight `1#`.
+- The GLA observation trie: `cache-run` — incremental stepping of the
+  cache equals whole-prefix evaluation with the reached state given by the
+  GLA recurrence — and `cache-denotes`. This is the first concrete
+  discharge of the abstract KV-cache law by a model-shaped state.
 
 All modules imported by `Everything.agda` use `--safe --without-K`. The two
 coinductive trie modules and `Everything.agda` additionally enable
@@ -50,6 +64,8 @@ disabled. There are no global postulates.
   must declare it.
 - f32 summation order is the tolerated divergence between micro-batch
   accumulation and a full-batch gradient.
+- The GLA per-step emitted weight and state observation are supplied
+  parameters of `Packaged`, not derived; normalization remains separate.
 
 ## Tested Refinements
 
@@ -85,8 +101,16 @@ disabled. There are no global postulates.
 - Full Yoneda completion or the magnitude closed form in Agda.
 - Correctness of a concrete backend KV cache; none is implemented yet. The
   abstract law — incremental stepping equals whole-prefix evaluation — is now
-  proved for every `StateAlgebra` through the observation trie, so a future
-  cache must only exhibit its state as a `StateAlgebra` implementation.
+  proved for every `StateAlgebra` through the observation trie, and the GLA
+  state algebra discharges it with a fixed dk×dv state at the semantic
+  level; a backend decoder must still exhibit its arrays as that state.
+- The delta-rule update `(I − βkkᵀ)·diag(α)` (Kimi Delta Attention) and any
+  non-diagonal (DPLR) transition: both need subtraction — a Ring, which
+  `Foundation.Algebra` deliberately does not yet carry — and matrix-product
+  algebra with sum interchange.
+- Any bounded-state `StateAlgebra` presentation of softmax attention; none
+  exists (its state is the whole prefix), which is the semantic reason the
+  production model adopts linear layers where a finite state is wanted.
 - Eventual EOS termination for unconstrained generation.
 - Optimizer convergence, generalization, factuality, capability, or safety.
 
