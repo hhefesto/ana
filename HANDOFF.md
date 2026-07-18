@@ -843,3 +843,63 @@ global Adam step and checkpointed total schedule, before printing the prompt:
 
 This percentage identifies the exact pulled weights used for that response;
 the smoke test passed and `nix flake check` passed all checks.
+
+---
+
+## Session 2026-07-18 (later): ana, attention semantics, the GLA hybrid (branch attention-semantics)
+
+The project is renamed **ana** (anamorphism — the unfold that builds the
+observation trie). Remote: git@github.com:hhefesto/ana.git; master is the
+principal branch and carries the vendored trained weights (`weights/`,
+split sub-50MB parts + tokenizer + assemble.sh) so `wiki-generate` works
+from a fresh clone; `deploy/pull-latest-weights.sh` refreshes them from the
+live trainer read-only. The RTX 5070 Ti bpe10m run was left untouched; its
+architecture (softmax, layout v1) lives on master. Branch
+`attention-semantics` holds everything below.
+
+1. **docs/DENOTATIONAL-ASSESSMENT.md** — scorecard against Elliott's
+   methodology; the identified central gap: attention had shape types but
+   no denotation and no bridge to the proved StateAlgebra layer.
+2. **A semantics for attention** (docs/ATTENTION-SEMANTICS.md, from Kimi
+   Linear arXiv:2510.26692): attention variants = one recurrent form
+   classified by the transition family; linear attention's update rule is
+   online gradient descent on a stated objective. Proved in safe Agda
+   (Attention/Linear.agda, Attention/LinearTrie.agda): recurrent≡parallel
+   for GLA over any semiring, the chunkwise recurrence (GEMM-shaped — the
+   licensed tensor-core route), the GLA StateAlgebra with fixed dk×dv
+   state, and cache-run — the first concrete discharge of the KV-cache
+   obligation.
+3. **The GLA 3:1 hybrid model**: three GLA layers per NoPE softmax layer;
+   gates carry position (RoPE removed); walpha [d,d] leaf per GLA block;
+   layout identity hybrid-gla-decoder-flat-parameters v2, model identity
+   v2 (old checkpoints intentionally rejected). Presets gla-small (242,368)
+   and gla (13,153,600); bpe10m now counts 10,571,840 under the hybrid
+   rule. Haskell reference computes the recurrent form, Futhark the
+   parallel form: the conformance oracle is the f32 shadow of the theorem
+   (gradients vs Numeric.AD max_rel<=2.9e-4 on the mixed 5-layer config;
+   micro==full bit-exact). Futhark GPU-codegen landmines found and fixed:
+   vectorized scan inside the head tabulate, per-row allocations
+   (l2_normalize) under the batch map, and a branch inside the
+   differentiated layer loop all produce irregular/nested allocations —
+   fixed by a masked-reduction prefix sum, per-element head normalization,
+   and a branch-free grouped loop (3 GLA + 1 softmax per group).
+4. **Incremental decoding** (decode_step in both entry programs): GLA
+   layers advance fixed [d][hd] states, NoPE softmax layers use a
+   ring-buffer KV cache (order-invariant without positional encodings).
+   Conformance: token-by-token equals every batch-forward row
+   (max_abs≈6e-9) — cache-run executed. Beyond the window the GLA state is
+   never reset (the StateAlgebra run). Generation went from one
+   full-window forward per token to O(model) per token; measured ~128
+   tokens in 0.24 s wall at gla-small scale.
+5. **First measurements** (docs/RUN-2026-07-18-GLA.md): training-step cost
+   at window shapes is near parity with softmax (the quadratic
+   within-window closed form; the win is decode + the future chunkwise
+   GEMM form). gla-small on wiki-sample: **validation 2.0532 nats /
+   2.9622 bpb at 5000 steps, beats the bigram gate (2.4922) from step
+   1250**; 5000 steps in ~13 min on the 16-core multicore backend.
+   nix flake check green throughout.
+
+Open threads: epoch-scale gla-small run; bpe-scale hybrid training (needs
+a rented GPU decision — the superseded softmax run is still billing);
+delta-rule (KDA) stage 2 after Ring-level Agda; tensor-core backend via
+the proved chunkwise form, only if it fits the semantics' implementation.
