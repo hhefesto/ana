@@ -23,7 +23,7 @@ import FutharkKernels
 import System.Directory (doesFileExist)
 import System.Environment (getArgs, lookupEnv, setEnv)
 import System.Exit (die)
-import System.IO (BufferMode (LineBuffering), hPutStrLn, hSetBuffering, stderr, stdout)
+import System.IO (BufferMode (LineBuffering), hFlush, hPutStrLn, hSetBuffering, stderr, stdout)
 import Text.Printf (printf)
 import Text.Read (readMaybe)
 
@@ -136,7 +136,8 @@ train corpusPath checkpointPath mode cfg = do
   bpbScale <- if null (validation split)
     then pure Nothing
     else Just <$> either die pure (bitsPerByteScale tokenizer (validation split))
-  gate <- if null (validation split)
+  skipBigramGate <- (== Just "1") <$> lookupEnv "SKIP_BIGRAM_GATE"
+  gate <- if null (validation split) || skipBigramGate
     then pure Nothing
     else either die (pure . Just) (bigramGateFrom validationWindows documentOffset cfg (corpusDocuments corpus))
   let windowCount = length (training split)
@@ -493,10 +494,14 @@ generate checkpointPath text budget = do
   let promptBytes = Text.encodeUtf8 (Text.pack text)
       prompt = bosToken : encodeWith tokenizer promptBytes
       n = paramCount cfg
-  generated <- withContext $ \ctx -> withF32 ctx (map realToFrac (checkpointParameters checkpoint)) $ \params ->
-    generateLoop ctx gpuCfg cfg params (pickToken temperature topK) budget rng prompt []
-  bytes <- either die pure (decodeWith tokenizer generated)
-  BS.putStr (promptBytes <> bytes)
+      emit token = do
+        bytes <- either die pure (decodeWith tokenizer [token])
+        BS.putStr bytes
+        hFlush stdout
+  BS.putStr promptBytes
+  hFlush stdout
+  _ <- withContext $ \ctx -> withF32 ctx (map realToFrac (checkpointParameters checkpoint)) $ \params ->
+    generateLoop ctx gpuCfg cfg params (pickToken temperature topK) emit budget rng prompt []
   putStrLn ""
 
 tokenizerForIdentity :: String -> IO Tokenizer
@@ -514,17 +519,19 @@ tokenizerForIdentity identity
 generateLoop
   :: Context -> GpuConfig -> Config -> F32Array
   -> ([Float] -> PRNGState -> (Int, PRNGState))
-  -> Int -> PRNGState -> [Int] -> [Int] -> IO [Int]
-generateLoop _ _ _ _ _ 0 _ _ output = pure output
-generateLoop ctx gpuCfg cfg params pick remaining rng state output = do
+  -> (Int -> IO ()) -> Int -> PRNGState -> [Int] -> [Int] -> IO [Int]
+generateLoop _ _ _ _ _ _ 0 _ _ output = pure output
+generateLoop ctx gpuCfg cfg params pick emit remaining rng state output = do
   let context = takeEnd (contextSize cfg) state
   logits <- withI64_1d ctx (map fromIntegral context) $ \tokens ->
     bracket (lastLogits ctx gpuCfg params tokens) (freeF32 ctx) (downloadF32 ctx (vocabSize cfg))
   let (token, rng') = pick logits rng
   if token == eosToken then pure output
   else if token == bosToken
-    then generateLoop ctx gpuCfg cfg params pick (remaining - 1) rng' (state ++ [token]) output
-    else generateLoop ctx gpuCfg cfg params pick (remaining - 1) rng' (state ++ [token]) (output ++ [token])
+    then generateLoop ctx gpuCfg cfg params pick emit (remaining - 1) rng' (state ++ [token]) output
+    else do
+      emit token
+      generateLoop ctx gpuCfg cfg params pick emit (remaining - 1) rng' (state ++ [token]) (output ++ [token])
 
 -- Observation of the model's next-token distribution.  TEMPERATURE=0 is
 -- the degenerate greedy observation (the exact argmax path); otherwise the

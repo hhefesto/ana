@@ -526,7 +526,7 @@
               else
                 checkpoint=
                 newest_mtime=
-                for candidate in run/*.checkpoint; do
+                for candidate in run/*.checkpoint run/*-checkpoints/*.checkpoint; do
                   if [ ! -f "$candidate" ]; then continue; fi
                   mtime="$(stat -L --format=%Y -- "$candidate")"
                   if [ -z "$checkpoint" ] || [ "$mtime" -gt "$newest_mtime" ]; then
@@ -542,7 +542,60 @@
               fi
               export TOKENIZER_FILE="''${WIKI_TOKENIZER:-$HOME/datasets/wikipedia-en/enwiki-8k.bpe}"
               echo "wiki-generate: checkpoint=$checkpoint tokens=$tokens" >&2
+              echo "wiki-generate: loading model; generated text streams after initialization" >&2
               exec ${sequential} generate "$checkpoint" "$prompt" "$tokens"
+            '';
+          };
+          watchTraining = pkgs.writeShellApplication {
+            name = "watch-training";
+            runtimeInputs = [
+              pkgs.coreutils
+              pkgs.openssh
+            ];
+            text = ''
+              host="''${TRAIN_SSH_HOST:-root@154.9.228.248}"
+              port="''${TRAIN_SSH_PORT:-21300}"
+              remote_log="''${TRAIN_REMOTE_LOG:-/root/formalTransformer-5070ti/run/train-cloud-rtx5070ti.log}"
+              lines="''${TRAIN_LOG_LINES:-20}"
+              reconnect_delay="''${TRAIN_RECONNECT_DELAY:-2}"
+
+              if [ -z "$port" ]; then
+                echo "watch-training: TRAIN_SSH_PORT must be an integer" >&2
+                exit 1
+              fi
+              case "$port" in
+                *[!0-9]*) echo "watch-training: TRAIN_SSH_PORT must be an integer" >&2; exit 1 ;;
+              esac
+              if [ -z "$lines" ]; then
+                echo "watch-training: TRAIN_LOG_LINES must be an integer" >&2
+                exit 1
+              fi
+              case "$lines" in
+                *[!0-9]*) echo "watch-training: TRAIN_LOG_LINES must be an integer" >&2; exit 1 ;;
+              esac
+
+              ssh_options=(
+                -q -T
+                -o BatchMode=yes
+                -o ConnectTimeout=15
+                -o ServerAliveInterval=15
+                -o ServerAliveCountMax=3
+                -p "$port"
+              )
+              if [ -n "''${TRAIN_SSH_KEY:-}" ]; then
+                ssh_options+=(-i "$TRAIN_SSH_KEY")
+              fi
+              printf -v remote_command 'tail -n %q -F -- %q' "$lines" "$remote_log"
+
+              echo "watch-training: $host:$remote_log (reconnecting automatically)" >&2
+              while true; do
+                rc=0
+                # remote_command is shell-escaped above with printf %q.
+                # shellcheck disable=SC2029
+                ssh "''${ssh_options[@]}" "$host" "$remote_command" || rc=$?
+                echo "watch-training: connection closed (rc=$rc); reconnecting in ''${reconnect_delay}s" >&2
+                sleep "$reconnect_delay"
+              done
             '';
           };
         in
@@ -561,6 +614,11 @@
           type = "app";
           program = "${wikiGenerate}/bin/wiki-generate";
           meta.description = "Generate text from the latest Wikipedia checkpoint";
+        };
+        watch-training = {
+          type = "app";
+          program = "${watchTraining}/bin/watch-training";
+          meta.description = "Follow the active cloud training log with automatic SSH reconnection";
         };
         formal-transformer-gpu = {
           type = "app";

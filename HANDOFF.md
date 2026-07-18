@@ -714,3 +714,84 @@ hardware/toolchain claims used below were independently checked.
   `run/pull-rtx5070.pid` and `run/pull-rtx5070.log`. The script now treats
   `SSH_KEY` as optional and pulls the checkpoint wildcard, so a missing `.best`
   file does not make a successful primary-checkpoint transfer look like failure.
+
+---
+
+## Continuation: on-demand RTX 5070 Ti migration (2026-07-18)
+
+The interruptible RTX 5070 was retired after repeated outbids. Training moved
+from the verified global step-4,000 checkpoint to an on-demand RTX 5070 Ti at
+$0.161/hour (driver 595.71.05, CUDA 13.2, compute capability 12.0, 16 GB VRAM).
+
+- SSH: `ssh -p 21300 root@154.9.228.248`; the isolated repository is
+  `/root/formalTransformer-5070ti`, tokenizer is under
+  `/root/datasets-5070ti`, and the live log is
+  `run/train-cloud-rtx5070ti.log`. The isolated names prevent a delayed provider
+  copy of the old container from overwriting the new run.
+- The new host's long SSH sessions close periodically. Remote detached jobs and
+  local reconnect loops are therefore mandatory; the writable filesystem and
+  remote processes survive those proxy disconnects.
+- The normal remote Nix build was bypassed by transferring already-built local
+  CUDA runtime closures. At durable step 7,500 the run switched to the current
+  stock, numerically validated CUDA binary at
+  `/nix/store/jfi0fjiyq8m0rvc6v9g0qh32cfmfzm6d-formal-transformer-cuda-0.1.0/bin/formal-transformer-cuda`.
+  It skips recomputing the observational bigram baseline at every shard boundary;
+  parameters, optimizer state, schedule, sampler, and validation are unchanged.
+- All 1,465 corpora are present: 9,973,617,809 bytes. Remote checkpoint, plan,
+  and tokenizer hashes match the local verified artifacts. An early short sample
+  overestimated speed; the longer repeatable measurements below are authoritative.
+- Step 4,500 was published and atomically pulled locally: 120,718,980 bytes,
+  SHA-256 `415d44945ad709335e440ff1689a0d26c864fdfc5efd308ffffba7c2d98e5a4a`.
+  `inspect-checkpoint` confirms global step 4,500 / 1,833,157 and best
+  validation loss 5.816778659820557.
+- Production uses `TRAIN_BATCH=8`, `MICRO_BATCH=1`, checkpoints every 500 steps,
+  validation every 2,000 steps with one window. The shorter checkpoint cadence
+  limits interruption loss to at most about 2.5 minutes at measured throughput.
+- Local watchdog `run/watch-rtx5070ti.pid` invokes the idempotent remote launcher
+  every 30 seconds. Local puller `run/pull-rtx5070ti.pid` atomically stages and
+  publishes checkpoints every 60 seconds into `run/rtx5070ti-checkpoints/`.
+- Follow the live log with `ssh -o BatchMode=yes -p 21300
+  root@154.9.228.248 "tail -F
+  /root/formalTransformer-5070ti/run/train-cloud-rtx5070ti.log"`.
+- CUDA, forced schedule decisions, CUBIN generation, and NVIDIA OpenCL were
+  compared during migration. OpenCL produced non-finite checkpoint data and was
+  rejected. The production stock CUDA path is finite and substantially faster
+  once sustained training begins; experimental CUBIN/tuning source changes were
+  removed.
+
+### Measured speed, runway, and local weights (2026-07-18)
+
+- Two live samples agree on update-only speed: 74 updates / 35 seconds and 347
+  updates / 164 seconds, both **2.11-2.12 updates/s**. Each update contains
+  `8 * 255 = 2,040` prediction targets, so this is about **4,310-4,320 target
+  tokens/s** before checkpoint and validation pauses. The observed
+  checkpoint-inclusive rate is about **1.9 updates/s**.
+- This matches the earlier RTX 5070 result (2.1-2.2 update-only, 1.95
+  end-to-end). It is not the optimistic 5070 Ti TFLOPS-scaled speedup: the
+  generated FP32 reduction/adjoint kernels do not use tensor cores or GEMMs, so
+  the larger card remains occupancy-limited. It is nevertheless the expected
+  rate from the exact production benchmark and remains practical.
+- Local 16-core multicore `bpe10m` takes 2.52 seconds per one-sequence gradient.
+  Eight sequential gradients therefore put a local update near 20.2 seconds
+  before optimizer/checkpoint overhead, about 0.050 updates/s or 101 target
+  tokens/s. Cloud update throughput is roughly **43x faster**; completing all
+  1,833,157 updates locally would take at least about **428 days**, versus about
+  **11.1 days remaining** in the cloud at the measured end-to-end rate.
+- At $0.161/hour, 8.2 USD funds **50.93 hours** (2 days 2 hours 56 minutes).
+  From step ~6,458, 1,826,699 updates remain: at 1.9 updates/s they require
+  about **267 hours / 11.1 days / $43.00**. The measured minimum additional
+  balance is therefore about **$34.80**. Deposit **$42** to cover the prior
+  13-day upper estimate, or **$45** for a small bandwidth/performance margin.
+- The authoritative locally pulled weights are
+  `run/rtx5070ti-checkpoints/wiki-bpe10m-global.checkpoint`. The puller stages
+  each transfer under `run/rtx5070ti-checkpoints/.checkpoint-pull/` and then
+  atomically replaces the public checkpoint.
+- `nix run .#watch-training` follows the remote log and automatically reconnects
+  after Vast closes a long-lived SSH session. Connection details can be
+  overridden with `TRAIN_SSH_HOST`, `TRAIN_SSH_PORT`, and `TRAIN_REMOTE_LOG`.
+- `nix run .#wiki-generate` now discovers checkpoints in both `run/` and nested
+  `run/*-checkpoints/` pull directories. A smoke test selected the latest RTX
+  5070 Ti checkpoint automatically and generated text successfully. Generation
+  now prints the prompt immediately after checkpoint/tokenizer loading and
+  flushes each decoded token, fixing the apparent multi-minute no-output stall
+  of the local sequential backend (eight measured tokens took about 13.7 s).

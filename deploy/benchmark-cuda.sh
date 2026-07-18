@@ -23,8 +23,9 @@ if [ -f run/cloud-env.sh ]; then
 fi
 # Prefer the already-built binary (cloud-init built it); `nix run` on a
 # non-git tree would copy run/ corpora into the store and rebuild needlessly.
-trainer=result/bin/formal-transformer-cuda
+trainer="${TRAINER:-result/bin/formal-transformer-cuda}"
 if [ ! -x "$trainer" ]; then
+  [ -z "${TRAINER:-}" ] || { echo "benchmark-cuda: TRAINER is not executable: $trainer" >&2; exit 1; }
   nix --extra-experimental-features "nix-command flakes" build .#formal-transformer-cuda
 fi
 

@@ -29,7 +29,7 @@ if [ -f run/cloud-env.sh ]; then
   . run/cloud-env.sh
 fi
 
-trainer=result/bin/formal-transformer-cuda
+trainer="${TRAINER:-result/bin/formal-transformer-cuda}"
 [ -x "$trainer" ] || { echo "step-gate: $trainer missing — run deploy/cloud-init.sh first." >&2; exit 1; }
 
 timeout_s="${GATE_TIMEOUT:-180}"

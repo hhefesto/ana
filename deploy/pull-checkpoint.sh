@@ -30,6 +30,8 @@ SIZE="${SIZE:-bpe10m}"
 LOCAL_DIR="${LOCAL_DIR:-run}"
 
 mkdir -p "$LOCAL_DIR"
+staging_dir="$LOCAL_DIR/.checkpoint-pull"
+mkdir -p "$staging_dir"
 ssh_opts=(-o StrictHostKeyChecking=accept-new)
 [ -n "$SSH_KEY" ] && ssh_opts+=(-i "$SSH_KEY")
 [ -n "$SSH_PORT" ] && ssh_opts+=(-p "$SSH_PORT")
@@ -38,8 +40,12 @@ remote_glob="$REMOTE_DIR/run/wiki-$SIZE-global.checkpoint"
 echo "pull-checkpoint: $HOST:$remote_glob* -> $LOCAL_DIR/ every ${INTERVAL}s"
 echo "  (Ctrl-C to stop; safe to run alongside training)"
 while true; do
-  if rsync -az --partial --inplace -e "ssh ${ssh_opts[*]}" \
-       "$HOST:$remote_glob*" "$LOCAL_DIR/" 2>/dev/null; then
+  if rsync -az --partial -e "ssh ${ssh_opts[*]}" \
+       "$HOST:$remote_glob*" "$staging_dir/" 2>/dev/null; then
+    for pulled in "$staging_dir"/"wiki-$SIZE-global.checkpoint"*; do
+      [ -f "$pulled" ] || continue
+      mv -f "$pulled" "$LOCAL_DIR/$(basename "$pulled")"
+    done
     ckpt="$LOCAL_DIR/wiki-$SIZE-global.checkpoint"
     if [ -f "$ckpt" ]; then
       echo "pulled $(date -u +%H:%M:%S)  $(stat -c %s "$ckpt") bytes  -> $ckpt"
