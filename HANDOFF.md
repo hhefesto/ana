@@ -903,3 +903,14 @@ Open threads: epoch-scale gla-small run; bpe-scale hybrid training (needs
 a rented GPU decision — the superseded softmax run is still billing);
 delta-rule (KDA) stage 2 after Ring-level Agda; tensor-core backend via
 the proved chunkwise form, only if it fits the semantics' implementation.
+
+## 2026-07-19: rented server destroyed; local-only from here
+
+The RTX 5070 Ti instance was destroyed by the user. The softmax bpe10m
+run's final surviving state is the locally pulled checkpoint at
+`run/rtx5070ti-checkpoints/wiki-bpe10m-global.checkpoint` (Jul 19 00:53
+pull; NOT re-vendored into weights/ — user decision, the Jul 18 parts
+stand). The stale pull/watch loops against the dead host were killed and
+their pid files removed; the deploy scripts keep their TRAIN_SSH_* env
+overrides for any future rental. All testing is local: 16-core multicore
+backend, optional RX 580 OpenCL.
