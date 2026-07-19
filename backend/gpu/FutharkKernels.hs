@@ -13,6 +13,8 @@ module FutharkKernels
   , BoolArray
   , GpuConfig (..)
   , gpuConfig
+  , gpuConfigIO
+  , chunkFor
   , withContext
   , withF32
   , uploadF32
@@ -24,6 +26,7 @@ module FutharkKernels
 #ifndef REDUCED_GPU_BACKEND
   , batchLossGrad
   , lossGrad
+  , logitsQuadratic
 #endif
   , batchMeanLoss
   , microBatchLossGrad
@@ -44,7 +47,7 @@ import Data.Word (Word8)
 import Foreign
 import Foreign.C.String (CString, peekCString, withCString)
 import Foreign.C.Types
-import FormalTransformer.Config (Config (..), validateConfig)
+import FormalTransformer.Config (Config (..), contextSize, validateConfig)
 import System.Environment (lookupEnv)
 import Text.Read (readMaybe)
 
@@ -67,13 +70,36 @@ data GpuConfig = GpuConfig
   , gpuFfDim :: !Int64
   , gpuHeads :: !Int64
   , gpuLayers :: !Int64
+  , gpuChunk :: !Int64
   } deriving (Eq, Show)
 
+-- The GLA chunk length is an execution schedule, invisible in the
+-- denotation (chunk-closed); it must divide the context width.  GEMM_CHUNK
+-- overrides the default of min 64 context.
 gpuConfig :: Config -> Either String GpuConfig
 gpuConfig cfg = do
   _ <- validateConfig cfg
-  pure (GpuConfig (f vocabSize) (f modelDim) (f ffDim) (f headCount) (f layerCount))
+  pure (GpuConfig (f vocabSize) (f modelDim) (f ffDim) (f headCount)
+                  (f layerCount) (fromIntegral (chunkFor (contextSize cfg) (contextSize cfg))))
   where f = fromIntegral . ($ cfg)
+
+-- Largest valid chunk not exceeding min(preference, 64, width).
+chunkFor :: Int -> Int -> Int
+chunkFor preferred width =
+  maximum [candidate | candidate <- [1 .. min (min preferred 64) width], width `mod` candidate == 0]
+
+-- gpuConfig with the GEMM_CHUNK env override applied.
+gpuConfigIO :: Config -> IO (Either String GpuConfig)
+gpuConfigIO cfg = do
+  requested <- lookupEnv "GEMM_CHUNK"
+  pure $ do
+    pref <- case requested of
+      Nothing -> Right 64
+      Just value -> case readMaybe value of
+        Just candidate | candidate > 0 -> Right candidate
+        _ -> Left "GEMM_CHUNK must be a positive integer"
+    base <- gpuConfig cfg
+    pure base { gpuChunk = fromIntegral (chunkFor pref (contextSize cfg)) }
 
 withContext :: (Context -> IO a) -> IO a
 withContext action = bracket c_config_new c_config_free $ \cfg -> do
@@ -197,7 +223,7 @@ freeF32 (Context ctx) (F32Array arr) = c_free_f32_1d ctx arr >>= check ctx "free
 #ifndef REDUCED_GPU_BACKEND
 batchLossGrad :: Context -> GpuConfig -> F32Array -> Ptr CI64_2d -> IO (Float, F32Array)
 batchLossGrad (Context ctx) cfg (F32Array params) tokens = alloca $ \loss -> alloca $ \gradient -> do
-  status <- entry_batch_loss_grad ctx loss gradient (gpuVocab cfg) (gpuModelDim cfg) (gpuFfDim cfg) (gpuHeads cfg) (gpuLayers cfg) params tokens
+  status <- entry_batch_loss_grad ctx loss gradient (gpuVocab cfg) (gpuModelDim cfg) (gpuFfDim cfg) (gpuHeads cfg) (gpuLayers cfg) (gpuChunk cfg) params tokens
   check ctx "batch_loss_grad" status
   check ctx "batch_loss_grad sync" =<< c_context_sync ctx
   (,) <$> peek loss <*> (F32Array <$> peek gradient)
@@ -209,7 +235,7 @@ batchLossGrad (Context ctx) cfg (F32Array params) tokens = alloca $ \loss -> all
 microBatchLossGrad :: Context -> GpuConfig -> Int64 -> F32Array -> F32Array -> Ptr CI64_2d -> IO (Float, F32Array)
 microBatchLossGrad (Context ctx) cfg effectiveBatch (F32Array accumulator) (F32Array params) tokens =
   alloca $ \loss -> alloca $ \gradient -> do
-    status <- entry_micro_batch_loss_grad ctx loss gradient (gpuVocab cfg) (gpuModelDim cfg) (gpuFfDim cfg) (gpuHeads cfg) (gpuLayers cfg) effectiveBatch accumulator params tokens
+    status <- entry_micro_batch_loss_grad ctx loss gradient (gpuVocab cfg) (gpuModelDim cfg) (gpuFfDim cfg) (gpuHeads cfg) (gpuLayers cfg) (gpuChunk cfg) effectiveBatch accumulator params tokens
     check ctx "micro_batch_loss_grad" status
     check ctx "micro_batch_loss_grad sync" =<< c_context_sync ctx
     (,) <$> peek loss <*> (F32Array <$> peek gradient)
@@ -229,7 +255,7 @@ clipGlobalNorm (Context ctx) maxNorm (F32Array gradient) =
 
 batchMeanLoss :: Context -> GpuConfig -> F32Array -> Ptr CI64_2d -> IO Float
 batchMeanLoss (Context ctx) cfg (F32Array params) tokens = alloca $ \loss -> do
-  check ctx "batch_mean_loss" =<< entry_batch_mean_loss ctx loss (gpuVocab cfg) (gpuModelDim cfg) (gpuFfDim cfg) (gpuHeads cfg) (gpuLayers cfg) params tokens
+  check ctx "batch_mean_loss" =<< entry_batch_mean_loss ctx loss (gpuVocab cfg) (gpuModelDim cfg) (gpuFfDim cfg) (gpuHeads cfg) (gpuLayers cfg) (gpuChunk cfg) params tokens
   check ctx "batch_mean_loss sync" =<< c_context_sync ctx
   peek loss
 
@@ -241,7 +267,7 @@ futharkParameterCount (Context ctx) cfg = alloca $ \out -> do
 
 logits :: Context -> GpuConfig -> Int -> F32Array -> I64Array -> IO [[Float]]
 logits (Context ctx) cfg sequenceLength (F32Array params) (I64Array tokens) = alloca $ \out -> do
-  check ctx "logits" =<< entry_logits ctx out (gpuVocab cfg) (gpuModelDim cfg) (gpuFfDim cfg) (gpuHeads cfg) (gpuLayers cfg) params tokens
+  check ctx "logits" =<< entry_logits ctx out (gpuVocab cfg) (gpuModelDim cfg) (gpuFfDim cfg) (gpuHeads cfg) (gpuLayers cfg) (gpuChunk cfg) params tokens
   check ctx "logits sync" =<< c_context_sync ctx
   arr <- peek out
   bracket (pure arr) (\p -> c_free_f32_2d ctx p >>= check ctx "free f32[2]") $ \p ->
@@ -252,9 +278,23 @@ logits (Context ctx) cfg sequenceLength (F32Array params) (I64Array tokens) = al
 #ifndef REDUCED_GPU_BACKEND
 lossGrad :: Context -> GpuConfig -> F32Array -> I64Array -> IO (Float, F32Array)
 lossGrad (Context ctx) cfg (F32Array params) (I64Array tokens) = alloca $ \loss -> alloca $ \gradient -> do
-  check ctx "loss_grad" =<< entry_loss_grad ctx loss gradient (gpuVocab cfg) (gpuModelDim cfg) (gpuFfDim cfg) (gpuHeads cfg) (gpuLayers cfg) params tokens
+  check ctx "loss_grad" =<< entry_loss_grad ctx loss gradient (gpuVocab cfg) (gpuModelDim cfg) (gpuFfDim cfg) (gpuHeads cfg) (gpuLayers cfg) (gpuChunk cfg) params tokens
   check ctx "loss_grad sync" =<< c_context_sync ctx
   (,) <$> peek loss <*> (F32Array <$> peek gradient)
+#endif
+
+#ifndef REDUCED_GPU_BACKEND
+-- Forward-only quadratic-GLA twin of `logits`, for the chunked≡quadratic
+-- conformance comparison; no chunk argument.
+logitsQuadratic :: Context -> GpuConfig -> Int -> F32Array -> I64Array -> IO [[Float]]
+logitsQuadratic (Context ctx) cfg sequenceLength (F32Array params) (I64Array tokens) = alloca $ \out -> do
+  check ctx "logits_quadratic" =<< entry_logits_quadratic ctx out (gpuVocab cfg) (gpuModelDim cfg) (gpuFfDim cfg) (gpuHeads cfg) (gpuLayers cfg) params tokens
+  check ctx "logits_quadratic sync" =<< c_context_sync ctx
+  arr <- peek out
+  bracket (pure arr) (\p -> c_free_f32_2d ctx p >>= check ctx "free f32[2]") $ \p ->
+    allocaArray (sequenceLength * fromIntegral (gpuVocab cfg)) $ \values -> do
+      c_values_f32_2d ctx p values >>= check ctx "download f32[2]"
+      rowsOf (fromIntegral (gpuVocab cfg)) <$> peekArray (sequenceLength * fromIntegral (gpuVocab cfg)) values
 #endif
 
 rowsOf :: Int -> [a] -> [[a]]
@@ -270,7 +310,7 @@ adamwStep (Context ctx) step lr b1 b2 eps wd (F32Array params) (F32Array grad) (
 
 lastLogits :: Context -> GpuConfig -> F32Array -> I64Array -> IO F32Array
 lastLogits (Context ctx) cfg (F32Array params) (I64Array tokens) = alloca $ \out -> do
-  check ctx "last_logits" =<< entry_last_logits ctx out (gpuVocab cfg) (gpuModelDim cfg) (gpuFfDim cfg) (gpuHeads cfg) (gpuLayers cfg) params tokens
+  check ctx "last_logits" =<< entry_last_logits ctx out (gpuVocab cfg) (gpuModelDim cfg) (gpuFfDim cfg) (gpuHeads cfg) (gpuLayers cfg) (gpuChunk cfg) params tokens
   check ctx "last_logits sync" =<< c_context_sync ctx
   F32Array <$> peek out
 
@@ -337,15 +377,18 @@ foreign import ccall safe "futhark_free_i64_2d" c_free_i64_2d :: Ptr CContext ->
 foreign import ccall safe "futhark_new_bool_1d" c_new_bool_1d :: Ptr CContext -> Ptr Word8 -> Int64 -> IO (Ptr CBool_1d)
 foreign import ccall safe "futhark_free_bool_1d" c_free_bool_1d :: Ptr CContext -> Ptr CBool_1d -> IO CInt
 #ifndef REDUCED_GPU_BACKEND
-foreign import ccall safe "futhark_entry_batch_loss_grad" entry_batch_loss_grad :: Ptr CContext -> Ptr Float -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CI64_2d -> IO CInt
-foreign import ccall safe "futhark_entry_loss_grad" entry_loss_grad :: Ptr CContext -> Ptr Float -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CI64_1d -> IO CInt
+foreign import ccall safe "futhark_entry_batch_loss_grad" entry_batch_loss_grad :: Ptr CContext -> Ptr Float -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CI64_2d -> IO CInt
+foreign import ccall safe "futhark_entry_loss_grad" entry_loss_grad :: Ptr CContext -> Ptr Float -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CI64_1d -> IO CInt
 #endif
-foreign import ccall safe "futhark_entry_batch_mean_loss" entry_batch_mean_loss :: Ptr CContext -> Ptr Float -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CI64_2d -> IO CInt
-foreign import ccall safe "futhark_entry_micro_batch_loss_grad" entry_micro_batch_loss_grad :: Ptr CContext -> Ptr Float -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CI64_2d -> IO CInt
+foreign import ccall safe "futhark_entry_batch_mean_loss" entry_batch_mean_loss :: Ptr CContext -> Ptr Float -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CI64_2d -> IO CInt
+foreign import ccall safe "futhark_entry_micro_batch_loss_grad" entry_micro_batch_loss_grad :: Ptr CContext -> Ptr Float -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CI64_2d -> IO CInt
 foreign import ccall safe "futhark_entry_zero_vector" entry_zero_vector :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> IO CInt
 foreign import ccall safe "futhark_entry_clip_global_norm" entry_clip_global_norm :: Ptr CContext -> Ptr Float -> Ptr (Ptr CF32_1d) -> Float -> Ptr CF32_1d -> IO CInt
 foreign import ccall safe "futhark_entry_n_params" entry_n_params :: Ptr CContext -> Ptr Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> IO CInt
-foreign import ccall safe "futhark_entry_logits" entry_logits :: Ptr CContext -> Ptr (Ptr CF32_2d) -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CI64_1d -> IO CInt
+#ifndef REDUCED_GPU_BACKEND
+foreign import ccall safe "futhark_entry_logits_quadratic" entry_logits_quadratic :: Ptr CContext -> Ptr (Ptr CF32_2d) -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CI64_1d -> IO CInt
+#endif
+foreign import ccall safe "futhark_entry_logits" entry_logits :: Ptr CContext -> Ptr (Ptr CF32_2d) -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CI64_1d -> IO CInt
 foreign import ccall safe "futhark_entry_decode_step" entry_decode_step :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
 foreign import ccall safe "futhark_entry_adamw_step" entry_adamw_step :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Int64 -> Float -> Float -> Float -> Float -> Float -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CBool_1d -> IO CInt
-foreign import ccall safe "futhark_entry_last_logits" entry_last_logits :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CI64_1d -> IO CInt
+foreign import ccall safe "futhark_entry_last_logits" entry_last_logits :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CI64_1d -> IO CInt

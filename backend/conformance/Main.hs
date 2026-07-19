@@ -23,6 +23,12 @@ config = Config 5 4 4 6 5 2
 tokens :: [Int]
 tokens = [0, 2, 3, 4]
 
+-- Chunk length 2 over 4-token sequences: every comparison in this oracle
+-- then exercises the cross-chunk state carry of the chunked GLA execution
+-- (chunk-closed), not just the intra-chunk formula.
+chunked2 :: GpuConfig -> GpuConfig
+chunked2 cfg = cfg { gpuChunk = 2 }
+
 parameters :: [Double]
 parameters = either error (concatMap initialize) (namedLayout config)
   where
@@ -32,7 +38,7 @@ parameters = either error (concatMap initialize) (namedLayout config)
 
 main :: IO ()
 main = do
-  gpuCfg <- either die pure (gpuConfig config)
+  gpuCfg <- either die pure (chunked2 <$> gpuConfig config)
   layout <- either die pure (namedLayout config)
   mask <- either die pure (decayMask config)
   referenceLogits <- either die pure (fullSequenceLogits config parameters tokens)
@@ -51,6 +57,9 @@ main = do
       withI64_1d ctx (map fromIntegral tokens) $ \deviceTokens -> do
         futharkLogits <- logits ctx gpuCfg (length tokens) deviceParameters deviceTokens
         compareVector "all logits" 3e-4 3e-4 (concat referenceLogits) (map realToFrac (concat futharkLogits))
+        quadraticLogits <- logitsQuadratic ctx gpuCfg (length tokens) deviceParameters deviceTokens
+        compareVector "chunked vs quadratic GLA logits" 1e-5 1e-5
+          (map realToFrac (concat quadraticLogits)) (map realToFrac (concat futharkLogits :: [Float]) :: [Double])
         compareVector "last logits" 3e-4 3e-4 (last referenceLogits) (map realToFrac (last futharkLogits))
         (futharkLoss, deviceGradient) <- lossGrad ctx gpuCfg deviceParameters deviceTokens
         bracket (pure deviceGradient) (freeF32 ctx) $ \gradient -> do
@@ -73,6 +82,7 @@ main = do
   microBatchConformance
   decodeConformance
   sizeRejectionConformance
+  chunkRejectionConformance
   putStrLn "conformance: all comparisons passed"
 
 -- Incremental decoding must observe the same language as whole-prefix
@@ -82,7 +92,7 @@ main = do
 -- checked numerically through the mixed hybrid stack.
 decodeConformance :: IO ()
 decodeConformance = do
-  gpuCfg <- either die pure (gpuConfig config)
+  gpuCfg <- either die pure (chunked2 <$> gpuConfig config)
   referenceLogits <- either die pure (fullSequenceLogits config parameters tokens)
   let d = modelDim config
       hd = modelDim config `div` headCount config
@@ -118,7 +128,7 @@ batchSequences = [[0, 2, 3, 4], [0, 3, 2, 4], [0, 4, 2, 3], [0, 2, 4, 3]]
 -- the ordinary cross-backend gradient tolerances.
 microBatchConformance :: IO ()
 microBatchConformance = do
-  gpuCfg <- either die pure (gpuConfig config)
+  gpuCfg <- either die pure (chunked2 <$> gpuConfig config)
   let n = paramCount config
       batch = map (map fromIntegral) batchSequences :: [[Int64]]
       width = length (head batch)
@@ -155,7 +165,7 @@ microBatchConformance = do
 -- state cannot leak into other comparisons.
 sizeRejectionConformance :: IO ()
 sizeRejectionConformance = do
-  gpuCfg <- either die pure (gpuConfig config)
+  gpuCfg <- either die pure (chunked2 <$> gpuConfig config)
   outcome <- try $ withContext $ \ctx ->
     withF32 ctx (map realToFrac (drop 1 parameters)) $ \shortParameters ->
       withI64_1d ctx (map fromIntegral tokens) $ \deviceTokens -> do
@@ -164,6 +174,21 @@ sizeRejectionConformance = do
   case (outcome :: Either SomeException ()) of
     Left _ -> putStrLn "size-typed interface rejects mis-sized parameters: exact"
     Right () -> die "size-typed interface accepted a mis-sized parameter vector"
+
+-- Exercise the Futhark runtime assertion in a fresh context because a failed
+-- call poisons that context.
+chunkRejectionConformance :: IO ()
+chunkRejectionConformance = do
+  gpuCfg <- either die pure (gpuConfig config)
+  let invalidCfg = gpuCfg { gpuChunk = 3 }
+  outcome <- try $ withContext $ \ctx ->
+    withF32 ctx (map realToFrac parameters) $ \deviceParameters ->
+      withI64_1d ctx (map fromIntegral tokens) $ \deviceTokens -> do
+        _ <- logits ctx invalidCfg (length tokens) deviceParameters deviceTokens
+        pure ()
+  case (outcome :: Either SomeException ()) of
+    Left _ -> putStrLn "chunk schedule rejects a non-divisor: exact"
+    Right () -> die "chunk schedule accepted a non-divisor"
 
 sequenceLoss :: (Floating a, Ord a) => [a] -> a
 sequenceLoss = sequenceLossFor tokens

@@ -143,13 +143,40 @@ Compute shape: per window of length n, GLA costs O(n·d) per head where
 masked softmax costs O(n²·hd) — and the measured superlinear grad axis in
 `backend/futhark/bench.fut` was precisely the context axis.
 
-## Backend Roadmap (deferred, conditional)
+## The Chunkwise Execution (implemented)
 
-The chunkwise theorem (`chunk-closed`) is GEMM-shaped: per-chunk products
-of gate-scaled query/key blocks against the carried state. If and when a
-backend change is made for tensor cores, it must implement exactly that
-form; candidates are cuBLAS/CUTLASS at the FFI boundary or a generated
-kernel route. Mixed precision (f16/bf16/tf32) is a change of numeric
-interpretation, to be recorded in the checkpoint manifest (as `clipNorm`
-is) and gated by the conformance oracle at stated tolerances. No backend
-work is licensed until the GLA hybrid model itself is landed and measured.
+`gla_attention_chunked` (backend/futhark/model.fut) executes the training
+forward in the chunkwise form licensed by `chunk-closed` — applied at TWO
+levels. Within a chunk of length C, the token-level parallel closed form;
+across chunks, the same theorem one level up: training windows start from
+S₀ = 0, so the state carried into chunk k is
+`S_before[k] = Σ_{k'<k} exp(cumdec[k−1]−cumdec[k']) ⊙ T[k']`, a masked
+reduction over the (few) chunks rather than a differentiated sequential
+loop — keeping the code inside the vjp-safe idioms this file's comments
+document. Every decay factor is `exp` of a later-minus-earlier difference
+of non-increasing prefix sums, so every exponent is ≤ 0; the K/Γ division
+of the textbook GEMM form is never materialized.
+
+The chunk length is an execution schedule, invisible in the denotation:
+the conformance oracle checks chunked ≡ quadratic logits at 1e-5 (observed
+~7e-9) and runs every gradient comparison at chunk 2 over 4-token windows,
+exercising the cross-chunk carry; `tests.fut` checks equivalence at chunk
+sizes 1, 2, 3, and 6. Host knob: `GEMM_CHUNK` (default 64, whole window
+when it does not divide). Measured (multicore): the context-axis gradient
+point (n=256) fell from 119.7 ms to 68.7 ms; the bpe-scale point ~8% —
+attention's FLOP share at that shape; single-chunk shapes pay a few
+percent of machinery overhead.
+
+The forms `T`, `S_before`, and the inter term are matrix contractions per
+(chunk, head): the shapes a BLAS/tensor-core backend consumes directly.
+
+## Backend Roadmap (staged)
+
+Stage B (in progress): a decomposed training step — matmuls through a
+BLAS boundary (openblas locally, cuBLAS on rental hardware), the
+nonlinear/elementwise pieces as per-piece Futhark entries with generated
+vjps, backward host-composed by the proved pullback laws, all
+conformance-gated locally against Numeric.AD and the fused sequential
+oracle. Stage C (rental): cuBLAS FP32 under pedantic math first (same
+numeric class), then TF32/BF16 as a NEW numeric interpretation recorded in
+the checkpoint manifest (as `clipNorm` is) with stated looser tolerances.

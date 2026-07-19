@@ -50,7 +50,7 @@ entry bench_grad [batch] [sequence]
   let (loss_sum, accumulated) =
     loop (loss_sum, acc) = (0.0f32, replicate p 0.0f32) for b < batch do
       let (sample_loss, gradient) =
-        vjp2 (next_token_loss v d f h n_layers tokens[b]) candidate0 seed
+        vjp2 (next_token_loss v d f h n_layers (default_chunk sequence) tokens[b]) candidate0 seed
       in (loss_sum + sample_loss, map2 (+) acc gradient)
   in loss_sum / f32.i64 batch + f32.sum accumulated
 
@@ -72,7 +72,7 @@ entry bench_forward [batch] [sequence]
     (params: []f32) (tokens: [batch][sequence]i64): f32 =
   let p = parameter_count v d f n_layers
   let candidate = params :> [p]f32
-  in f32.sum (map (\sample -> next_token_loss v d f h n_layers sample candidate)
+  in f32.sum (map (\sample -> next_token_loss v d f h n_layers (default_chunk sequence) sample candidate)
                   tokens)
        / f32.i64 batch
 

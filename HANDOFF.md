@@ -1,8 +1,35 @@
 # Session Handoff
 
 Everything needed to continue this work from another machine and account.
-State as of 2026-07-10, on branch `master` (repo not yet committed — the
-whole tree is staged; see "First Actions" below).
+
+## ▶ CONTINUE HERE (2026-07-19)
+
+**The active roadmap is `PLAN.md` at the repo root** — read it first. It is
+the living plan for the current line of work and always names the next step.
+
+Current position: branch **`attention-semantics`**. The project is renamed
+**ana** (anamorphism). Attention now has a stated, proved denotation
+(`docs/ATTENTION-SEMANTICS.md`, `docs/DENOTATIONAL-ASSESSMENT.md`), the model
+is a GLA 3:1 hybrid, and the **GEMM backend path** is under way:
+
+- **Stage A (chunkwise GLA) is LANDED** — the training forward runs the
+  GEMM-shaped chunkwise form licensed by the proved `chunk-closed` theorem;
+  conformance/codegen/quality gates all green (details in `PLAN.md`).
+- **Stage B is NEXT**: the BLAS-decomposed training step
+  (`backend/futhark/pieces.fut` + `backend/gemm/*`), fully local-verifiable.
+  `PLAN.md` "Stage B" lists the concrete first moves.
+- Stage C (cuBLAS / tensor cores) is prepared in `docs/GEMM-BACKEND.md`,
+  blocked on a GPU rental (the RTX 5070 Ti was destroyed; its last
+  checkpoint survives only in `run/rtx5070ti-checkpoints/`, not re-vendored).
+
+Orientation for a fresh clone: `PLAN.md` (roadmap) → `docs/ATTENTION-
+SEMANTICS.md` (what/why/proved) → `docs/GEMM-BACKEND.md` (backend design) →
+the dated session sections at the bottom of this file (chronological detail).
+Verify with the commands in `PLAN.md`; generate with
+`WIKI_CHECKPOINT=run/gla-small.checkpoint nix run .#wiki-generate`.
+
+The remainder of this file is the chronological log; the earliest entry
+below describes the original master-branch state.
 
 ## What This Session Did
 
@@ -927,3 +954,33 @@ decode's advantage grows with window/model size. Full table in
 docs/RUN-2026-07-18-GLA.md. The hybrid's case rests on decode cost, the
 proof-carrying semantics, long context, and the chunkwise GEMM route —
 not on small-scale training quality.
+
+## 2026-07-19 (later): GEMM backend Stage A landed; PLAN.md is now the roadmap
+
+Wrote `PLAN.md` (repo root) as the living roadmap for the GEMM backend path
+and pointed this handoff at it (see the CONTINUE HERE block at the top).
+Also fixed wiki-generate (identity-aware discovery: a `check-checkpoint`
+host subcommand + newest-compatible selection in the flake app, so the dead
+run's old-architecture checkpoint is skipped instead of crashing the v2
+host) and ran the local softmax-vs-hybrid A/B (parity: softmax small4
+2.0510 vs hybrid gla-small 2.0532 nats; decode 0.23 s vs 0.48 s for 128
+tokens — see docs/RUN-2026-07-18-GLA.md).
+
+**Stage A — chunkwise GLA — landed.** `gla_attention_chunked` in
+backend/futhark/model.fut executes the training forward chunkwise (the
+proved `chunk-closed` theorem applied at two levels: within-chunk token
+parallelism and a cross-chunk masked-reduction state carry, no
+differentiated loop; all decay exponents ≤ 0, no K/Γ division). `GEMM_CHUNK`
+threads through model_logits/next_token_loss/batch_mean_loss and every entry
+program + the FFI (one extra i64). The quadratic form is retained
+(`gla_block_quadratic`, `logits_quadratic`) purely for the equivalence
+check. Gates, all local and green: tests.fut `test_chunk_equivalence`
+(chunk 1/2/3/6); conformance `chunked vs quadratic GLA logits` ~7e-9 with
+every gradient/AdamW comparison run at chunk 2; codegen `nix build
+.#futhark-kernels .#futhark-kernels-cuda`; gla-small 5000-step regression at
+GEMM_CHUNK=16 → best val 2.0671 nats (within 0.0139 of 2.0532, gate crossed
+step 1000). Design doc: docs/GEMM-BACKEND.md.
+
+**Next: Stage B** (PLAN.md) — pieces.fut (per-op fwd+vjp entries), the
+backend/gemm/* BLAS-decomposed host, gemm-conformance vs Numeric.AD and the
+fused oracle, gla-small parity on gemm-cpu. Then Stage C on a rental.

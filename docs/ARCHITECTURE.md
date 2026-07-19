@@ -12,11 +12,11 @@ abstract autoregressive state algebra
 shape-indexed transformer specification
           ^
           | shared flat layout
-Haskell Double reference <----> Futhark sequential C
+Haskell Double reference <----> Futhark sequential/multicore C
                                   |
-                                  | same generated program
+                                  | same model and entry programs
                                   v
-                            Futhark OpenCL host
+                            Futhark OpenCL/CUDA hosts
 ```
 
 The reverse interpretation is independent of prefix residualization:
@@ -28,11 +28,13 @@ typed loss -> (primal loss, additive pullback) -> parameter gradient -> AdamW
 ## Parameter Order
 
 Matrices are row-major. For every block the order is `rms_att`, `wq`, `wk`,
-`wv`, `wo`, `rms_ff`, `wgate`, `wup`, `wdown`. Only matrix and embedding leaves
-receive decoupled weight decay. RMS gains do not.
+`wv`, `wo`, then `walpha` for GLA blocks only, followed by `rms_ff`, `wgate`,
+`wup`, `wdown`. Only matrix and embedding leaves receive decoupled weight
+decay. RMS gains do not.
 
-The layout is versioned as `canonical-decoder-flat-parameters`, version `1`.
-Checkpoint loading rejects any other identity or parameter count.
+The layout is versioned as `hybrid-gla-decoder-flat-parameters`, version `2`.
+Checkpoint loading rejects any other identity or parameter count. The
+authoritative host slicing implementation is `FormalTransformer.Layout`.
 
 The layout arithmetic is also part of the Futhark interface: every model
 entry takes `params: [parameter_count v d f n_layers]f32`, so a mis-sized

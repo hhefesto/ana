@@ -84,7 +84,7 @@ inspect cfg = either die (mapM_ print) (namedLayout cfg) >> do
 -- compilation.
 warmContext :: Config -> IO ()
 warmContext cfg = do
-  gpu <- either die pure (gpuConfig cfg)
+  gpu <- gpuConfigIO cfg >>= either die pure
   withContext $ \ctx -> do
     count <- futharkParameterCount ctx gpu
     when (count /= fromIntegral (paramCount cfg)) $
@@ -196,7 +196,7 @@ train corpusPath checkpointPath mode cfg = do
     (die "checkpoint is behind this segment's start step")
   when (adamStep (checkpointOptimizer checkpoint) > target)
     (die "checkpoint has already passed this segment's target step")
-  gpuCfg <- either die pure (gpuConfig cfg)
+  gpuCfg <- gpuConfigIO cfg >>= either die pure
   mask <- either die pure (decayMask cfg)
   let params0 = map realToFrac (checkpointParameters checkpoint)
       state0 = checkpointOptimizer checkpoint
@@ -503,7 +503,7 @@ generate checkpointPath text budget = do
   tokenizer <- tokenizerForIdentity (tokenizerIdentity identity)
   when (tokenizerVocabSize tokenizer /= vocabSize cfg)
     (die "checkpoint tokenizer vocabulary does not match its model configuration")
-  gpuCfg <- either die pure (gpuConfig cfg)
+  gpuCfg <- gpuConfigIO cfg >>= either die pure
   temperature <- nonnegativeDoubleEnv "TEMPERATURE" 0.8
   topK <- positiveEnv "TOP_K" 40
   seedText <- lookupEnv "SAMPLE_SEED"

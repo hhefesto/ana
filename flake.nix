@@ -278,16 +278,18 @@
           futhark =
             pkgs.runCommand "formal-transformer-futhark-check"
               {
-                nativeBuildInputs = [ pkgs.futhark ];
+                nativeBuildInputs = [ pkgs.futhark pkgs.stdenv.cc ];
                 src = ./.;
               }
               ''
                 cp -r $src source
+                chmod -R u+w source
                 cd source
                 futhark check backend/futhark/kernels.fut
                 futhark check backend/futhark/kernels-opencl.fut
                 futhark check backend/futhark/tests.fut
                 futhark check backend/futhark/bench.fut
+                futhark test --backend=c backend/futhark/tests.fut
                 touch $out
               '';
           gpu-host = self.packages.${system}.formal-transformer-gpu;

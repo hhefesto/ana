@@ -13,47 +13,54 @@ entry n_params (v: i64) (d: i64) (f: i64) (n_layers: i64): i64 =
   parameter_count v d f n_layers
 
 entry logits [n]
-    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
+    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64) (chunk: i64)
     (params: [parameter_count v d f n_layers]f32)
     (tokens: [n]i64): [n][v]f32 =
-  model_logits v d f h n_layers params tokens
+  model_logits v d f h n_layers chunk params tokens
 
 entry last_logits [n]
-    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
+    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64) (chunk: i64)
     (params: [parameter_count v d f n_layers]f32)
     (tokens: [n]i64): [v]f32 =
-  last (model_logits v d f h n_layers params tokens)
+  last (model_logits v d f h n_layers chunk params tokens)
 
 -- Conformance-oriented full-prefix inference.  Causality means row i is the
 -- same result as running last_logits on tokens[:i+1].  A shape-safe true KV
 -- cache entry remains pending; this entry intentionally does not fake one.
 entry prefix_logits [n]
+    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64) (chunk: i64)
+    (params: [parameter_count v d f n_layers]f32)
+    (tokens: [n]i64): [n][v]f32 =
+  model_logits v d f h n_layers chunk params tokens
+
+-- Forward-only quadratic-GLA twin for the chunked≡quadratic comparison.
+entry logits_quadratic [n]
     (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
     (params: [parameter_count v d f n_layers]f32)
     (tokens: [n]i64): [n][v]f32 =
-  model_logits v d f h n_layers params tokens
+  model_logits_quadratic v d f h n_layers params tokens
 -- Returns (mean next-token cross-entropy, gradient with respect to params).
 entry loss_grad [n]
-    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
+    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64) (chunk: i64)
     (params: [parameter_count v d f n_layers]f32)
     (tokens: [n]i64): (f32, [parameter_count v d f n_layers]f32) =
-  vjp2 (next_token_loss v d f h n_layers tokens) params 1.0f32
+  vjp2 (next_token_loss v d f h n_layers chunk tokens) params 1.0f32
 -- Mean next-token cross-entropy over a nonempty minibatch.  Every sequence
 -- has the same statically known length and contributes equally to the mean.
 entry batch_mean_loss [batch] [sequence]
-    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
+    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64) (chunk: i64)
     (params: [parameter_count v d f n_layers]f32)
     (tokens: [batch][sequence]i64): f32 =
-  batch_mean_loss_def v d f h n_layers params tokens
+  batch_mean_loss_def v d f h n_layers chunk params tokens
 
 -- Returns (batch mean loss, gradient of that mean with respect to params).
 entry batch_loss_grad [batch] [sequence]
-    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
+    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64) (chunk: i64)
     (params: [parameter_count v d f n_layers]f32)
     (tokens: [batch][sequence]i64)
     : (f32, [parameter_count v d f n_layers]f32) =
   vjp2 (\candidate ->
-    batch_mean_loss_def v d f h n_layers candidate tokens) params 1.0f32
+    batch_mean_loss_def v d f h n_layers chunk candidate tokens) params 1.0f32
 
 entry zero_vector (count: i64): [count]f32 =
   replicate (assert (count >= 0) count) 0.0f32
@@ -74,7 +81,7 @@ entry zero_vector (count: i64): [count]f32 =
 -- textually identical to kernels-opencl.fut so the conformance oracle
 -- (which builds this file) validates the formulation the GPU trainers run.
 entry micro_batch_loss_grad [batch] [sequence]
-    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
+    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64) (chunk: i64)
     (effective_batch: i64)
     (accumulator: [parameter_count v d f n_layers]f32)
     (params: [parameter_count v d f n_layers]f32)
@@ -86,7 +93,7 @@ entry micro_batch_loss_grad [batch] [sequence]
   let (loss_sum, accumulated) =
     loop (loss_sum, acc) = (0.0f32, accumulator) for b < batch do
       let (sample_loss, gradient) =
-        vjp2 (next_token_loss v d f h n_layers checked[b]) params seed
+        vjp2 (next_token_loss v d f h n_layers chunk checked[b]) params seed
       in (loss_sum + sample_loss, map2 (+) acc gradient)
   in (loss_sum / f32.i64 effective_batch, accumulated)
 
