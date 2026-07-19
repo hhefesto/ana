@@ -46,6 +46,7 @@
             p.ad
             p.binary
           ]);
+          gemmGhc = pkgs.haskellPackages.ghcWithPackages (p: [ p.vector ]);
         in
         {
           default = haskellPackage;
@@ -88,6 +89,65 @@
               cp kernels.c $out/lib/
               cp kernels.h $out/include/
               cp kernels.json $out/share/formal-transformer/
+              runHook postInstall
+            '';
+          };
+          futhark-pieces = pkgs.stdenv.mkDerivation {
+            pname = "formal-transformer-futhark-pieces";
+            version = "0.1.0";
+            src = ./.;
+            nativeBuildInputs = [ pkgs.futhark ];
+            buildPhase = ''
+              runHook preBuild
+              futhark multicore --library backend/futhark/pieces.fut -o pieces
+              runHook postBuild
+            '';
+            installPhase = ''
+              runHook preInstall
+              mkdir -p $out/lib $out/include $out/share/formal-transformer
+              cp pieces.c $out/lib/
+              cp pieces.h $out/include/
+              cp pieces.json $out/share/formal-transformer/
+              runHook postInstall
+            '';
+          };
+          futhark-pieces-cuda = pkgs.stdenv.mkDerivation {
+            pname = "formal-transformer-futhark-pieces-cuda";
+            version = "0.1.0";
+            src = ./.;
+            nativeBuildInputs = [ pkgs.futhark ];
+            buildPhase = ''
+              runHook preBuild
+              futhark cuda --library backend/futhark/pieces.fut -o pieces
+              runHook postBuild
+            '';
+            installPhase = ''
+              runHook preInstall
+              mkdir -p $out/lib $out/include $out/share/formal-transformer
+              cp pieces.c $out/lib/
+              cp pieces.h $out/include/
+              cp pieces.json $out/share/formal-transformer/
+              runHook postInstall
+            '';
+            meta.platforms = [ "x86_64-linux" ];
+          };
+          gemm-blas-test = pkgs.stdenv.mkDerivation {
+            pname = "formal-transformer-gemm-blas-test";
+            version = "0.1.0";
+            src = ./.;
+            nativeBuildInputs = [ gemmGhc ];
+            buildInputs = [ pkgs.openblas ];
+            buildPhase = ''
+              runHook preBuild
+              ghc -Wall -Wcompat -Werror -O2 -ibackend/gemm \
+                backend/gemm/BlasTest.hs -lopenblas -o gemm-blas-test
+              OPENBLAS_NUM_THREADS=1 ./gemm-blas-test
+              runHook postBuild
+            '';
+            installPhase = ''
+              runHook preInstall
+              mkdir -p $out/bin
+              cp gemm-blas-test $out/bin/
               runHook postInstall
             '';
           };
@@ -289,13 +349,19 @@
                 futhark check backend/futhark/kernels-opencl.fut
                 futhark check backend/futhark/tests.fut
                 futhark check backend/futhark/bench.fut
+                futhark check backend/futhark/pieces.fut
+                futhark check backend/futhark/pieces-conformance.fut
                 futhark test --backend=c backend/futhark/tests.fut
+                futhark test --backend=c backend/futhark/pieces-conformance.fut
                 touch $out
               '';
           gpu-host = self.packages.${system}.formal-transformer-gpu;
           cuda-host = self.packages.${system}.formal-transformer-cuda;
           sequential-host = self.packages.${system}.formal-transformer-sequential;
           conformance = self.packages.${system}.conformance;
+          futhark-pieces = self.packages.${system}.futhark-pieces;
+          futhark-pieces-cuda = self.packages.${system}.futhark-pieces-cuda;
+          gemm-blas = self.packages.${system}.gemm-blas-test;
         }
       );
 
