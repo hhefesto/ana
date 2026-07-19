@@ -524,23 +524,36 @@
               if [ -n "''${WIKI_CHECKPOINT:-}" ]; then
                 checkpoint="$WIKI_CHECKPOINT"
               else
+                # Newest first, but only checkpoints this host's architecture
+                # can interpret: a checkpoint from another architecture (for
+                # example another branch's model/layout identity) is skipped
+                # with a note instead of aborting generation.
                 checkpoint=
-                newest_mtime=
-                for candidate in run/*.checkpoint run/*-checkpoints/*.checkpoint; do
-                  if [ ! -f "$candidate" ]; then continue; fi
-                  mtime="$(stat -L --format=%Y -- "$candidate")"
-                  if [ -z "$checkpoint" ] || [ "$mtime" -gt "$newest_mtime" ]; then
+                candidates="$(
+                  for candidate in run/*.checkpoint run/*-checkpoints/*.checkpoint; do
+                    if [ ! -f "$candidate" ]; then continue; fi
+                    printf '%s %s\n' "$(stat -L --format=%Y -- "$candidate")" "$candidate"
+                  done | sort -rn | cut -d' ' -f2-
+                )"
+                for candidate in $candidates; do
+                  if ${sequential} check-checkpoint "$candidate" >/dev/null 2>&1; then
                     checkpoint="$candidate"
-                    newest_mtime="$mtime"
+                    break
+                  else
+                    echo "wiki-generate: skipping incompatible checkpoint $candidate" >&2
                   fi
                 done
               fi
               if [ -z "$checkpoint" ]; then
-                echo "wiki-generate: no checkpoint found under run/" >&2
+                echo "wiki-generate: no compatible checkpoint found under run/" >&2
                 echo "  train first: nix run .#wiki-train" >&2
                 exit 1
               fi
-              export TOKENIZER_FILE="''${WIKI_TOKENIZER:-$HOME/datasets/wikipedia-en/enwiki-8k.bpe}"
+              if [ -z "''${WIKI_TOKENIZER:-}" ] && [ -f weights/enwiki-8k.bpe ]; then
+                export TOKENIZER_FILE="weights/enwiki-8k.bpe"
+              else
+                export TOKENIZER_FILE="''${WIKI_TOKENIZER:-$HOME/datasets/wikipedia-en/enwiki-8k.bpe}"
+              fi
               echo "wiki-generate: checkpoint=$checkpoint tokens=$tokens" >&2
               echo "wiki-generate: loading model; generated text streams after initialization" >&2
               exec ${sequential} generate "$checkpoint" "$prompt" "$tokens"

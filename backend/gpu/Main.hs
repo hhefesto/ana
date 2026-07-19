@@ -61,7 +61,8 @@ main = do
         (Segment total start end offset globalIdentity expectedCorpusIdentity) cfg
     ["generate", checkpoint, text] -> generate checkpoint text 128
     ["generate", checkpoint, text, budgetText] -> parseNonnegative "MAXTOKENS" budgetText >>= generate checkpoint text
-    _ -> die "usage: formal-transformer-gpu inspect [tiny|small|bpe10m|gla-small|gla] | warm-context [tiny|small|bpe10m|gla-small|gla] | train CORPUS CHECKPOINT (STEPS|epoch) [tiny|small|bpe10m|gla-small|gla] | train-segment CORPUS CHECKPOINT GLOBAL_TOTAL START END DOCUMENT_OFFSET GLOBAL_ID EXPECTED_CORPUS_ID SIZE | generate CHECKPOINT TEXT [MAXTOKENS]"
+    ["check-checkpoint", checkpoint] -> checkCheckpoint checkpoint
+    _ -> die "usage: formal-transformer-gpu inspect [tiny|small|bpe10m|gla-small|gla] | warm-context [tiny|small|bpe10m|gla-small|gla] | train CORPUS CHECKPOINT (STEPS|epoch) [tiny|small|bpe10m|gla-small|gla] | train-segment CORPUS CHECKPOINT GLOBAL_TOTAL START END DOCUMENT_OFFSET GLOBAL_ID EXPECTED_CORPUS_ID SIZE | generate CHECKPOINT TEXT [MAXTOKENS] | check-checkpoint CHECKPOINT"
 
 chooseConfig :: String -> IO Config
 chooseConfig "tiny" = pure tinyPreset
@@ -473,6 +474,24 @@ validateResume cfg identity optCfg clipNorm checkpoint = do
       ++ " same GRAD_CLIP or start a new CHECKPOINT path"))
   when (manifestLayoutIdentity manifest /= canonicalLayoutIdentity || manifestLayoutVersion manifest /= canonicalLayoutVersion) (die "checkpoint layout identity mismatch")
   pure checkpoint
+
+-- Silent compatibility probe for checkpoint discovery: exit 0 iff this
+-- host's architecture (model identity + canonical layout) can interpret
+-- the checkpoint.  Loads and validates the artifact only; no Futhark
+-- context is created.  wiki-generate uses this to skip checkpoints written
+-- by a different architecture instead of dying on the newest file.
+checkCheckpoint :: FilePath -> IO ()
+checkCheckpoint path = do
+  checkpoint <- loadCheckpoint path >>= either die pure
+  let manifest = checkpointManifest checkpoint
+      cfg = manifestConfig manifest
+      identity = manifestIdentity manifest
+  when (modelIdentity identity /= modelId cfg)
+    (die "checkpoint model identity is not supported by this host")
+  when (manifestLayoutIdentity manifest /= canonicalLayoutIdentity
+        || manifestLayoutVersion manifest /= canonicalLayoutVersion)
+    (die "checkpoint layout identity is not supported by this host")
+  putStrLn ("compatible: " ++ path)
 
 generate :: FilePath -> String -> Int -> IO ()
 generate checkpointPath text budget = do
