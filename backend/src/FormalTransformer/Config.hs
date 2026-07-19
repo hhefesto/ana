@@ -7,6 +7,7 @@ module FormalTransformer.Config
   , paramCount
   , tinyPreset
   , smallPreset
+  , small4Preset
   , bpe10mPreset
   ) where
 
@@ -25,9 +26,11 @@ data Config = Config
 instance Binary Config
 
 -- The trainer presets live here so every host and gate shares one value.
-tinyPreset, smallPreset, bpe10mPreset :: Config
+tinyPreset, smallPreset, small4Preset, bpe10mPreset :: Config
 tinyPreset = Config 258 16 16 48 1 2
 smallPreset = Config 258 64 64 192 2 4
+-- Depth-matched softmax control for the hybrid A/B (gla-small is 4-layer).
+small4Preset = Config 258 64 64 192 4 4
 bpe10mPreset = Config 8192 256 320 864 6 5
 
 validateConfig :: Config -> Either String Config

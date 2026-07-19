@@ -66,6 +66,7 @@ main = do
 chooseConfig :: String -> IO Config
 chooseConfig "tiny" = pure tinyPreset
 chooseConfig "small" = pure smallPreset
+chooseConfig "small4" = pure small4Preset
 chooseConfig "bpe10m" = pure bpe10mPreset
 chooseConfig value = die ("unknown model size: " ++ value ++ " (expected tiny, small, or bpe10m)")
 
