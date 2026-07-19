@@ -914,3 +914,16 @@ stand). The stale pull/watch loops against the dead host were killed and
 their pid files removed; the deploy scripts keep their TRAIN_SSH_* env
 overrides for any future rental. All testing is local: 16-core multicore
 backend, optional RX 580 OpenCL.
+
+### A/B result (2026-07-19): quality parity at small scale
+
+Depth-matched local A/B, identical regime (wiki-sample, batch 4, 5000
+steps): softmax `small4` (master, 230,080 params) best val **2.0510**
+nats, gate at step 1000, ~11 min; GLA hybrid `gla-small` (242,368) best
+val **2.0532**, gate at 1250, ~13 min. Verdict: parity on quality (~0.1%
+apart, softmax marginally ahead and ~15-20% cheaper per step at n=64).
+Generation like-for-like: 0.48 s vs 0.23 s for a 128-token budget —
+decode's advantage grows with window/model size. Full table in
+docs/RUN-2026-07-18-GLA.md. The hybrid's case rests on decode cost, the
+proof-carrying semantics, long context, and the chunkwise GEMM route —
+not on small-scale training quality.
