@@ -1022,3 +1022,153 @@ step 1000). Design doc: docs/GEMM-BACKEND.md.
 **Next: Stage B** (PLAN.md) — pieces.fut (per-op fwd+vjp entries), the
 backend/gemm/* BLAS-decomposed host, gemm-conformance vs Numeric.AD and the
 fused oracle, gla-small parity on gemm-cpu. Then Stage C on a rental.
+
+## 2026-07-20: Stage B/C land; tensor cores measured; device-residency rewrite; open hang
+
+Branch `stage-b-gemm-conformance`. Stage B (`backend/gemm/*`,
+`backend/futhark/pieces.fut`) landed first: `PieceOps` decomposes the model
+into ~30 forward/backward pieces, GEMMs go through an injectable `Blas`
+boundary, and `gemm-conformance` checks the CPU (OpenBLAS) instantiation
+against the fused Futhark oracle and Numeric.AD (loss/every-gradient
+max_abs ~1.2e-7 / ~6.5e-8 on the tiny hybrid config). `CudaBlasOps` +
+`cublas_shim.c` added the cuBLAS GEMM with an explicit numerics selector
+(fp32-pedantic / tf32 / bf16 compute modes; storage stays f32) and
+`Artifact.hs` gained `manifestNumerics` (version 2→3, old checkpoints
+decode as `Fp32IEEE`, resume rejects a mismatch) — commit `d58d471`.
+
+**Rented hardware and ran Stage C's gates.** vast.ai RTX 5060 Ti (16 GB,
+sm_120), driver 570.153.02, Max CUDA 12.8. The flake was pinned to
+`cudaPackages_12_9` (chosen for the *previous* RTX 5070 Ti rental); this
+driver only advertises 12.8, so NVRTC's 12.9 PTX risked JIT rejection.
+Repinned to `cudaPackages_12_8` (`17dac44`) and confirmed on the box: the
+context-creation `inspect` test passed, i.e. **12.8 PTX is accepted**.
+`docs/TENSOR-CORE-RUNTIME.md`'s build gate (`cuda-blas-test`, all three
+numerics) and training gate (per-numerics 1-step tiny trains, checkpoint
+numerics round-trip via `inspect-checkpoint`, resume rejects a numerics
+mismatch) both passed on real hardware — recorded in
+`docs/RUN-2026-07-20-TENSOR-CORE.md` (`af1dbf2`).
+
+**The first working runtime used ~0–3% of the GPU.** Live `nvidia-smi`
+sampling during a training step showed near-idle utilization; a 20-step
+`gla-small` run took ~2.4–5 s/step. Root cause: every "GPU array" in
+`GemmKernels.hs` was actually a host `IORef [Float]`
+(`newtype F32Array = F32Array (IORef (Maybe [Float]))`); every Futhark
+piece call staged host→device→host per call
+(`futhark_new_f32_1d`/`futhark_values_f32_1d` in `ProductionPieces.hs`);
+every GEMM created and destroyed its own cuBLAS handle plus
+`cudaMalloc`/`cudaMemcpy`/`cudaDeviceSynchronize` per call
+(`cublas_shim.c`); and AdamW/grad-clip/grad-accumulate ran as pure Haskell
+`zipWith` on host lists — even though `pieces.fut` already had device
+`adamw_step`/`clip_global_norm`/`piece_accumulate`/`zero_vector` entries
+that nothing called. This matched the runtime doc's own stated scope
+("stages lists through host memory... intended to establish hardware
+correctness") but the user asked for the actual point: a runtime that
+saturates the GPU and gets the tensor-core speedup.
+
+**Planned and executed the device-residency rewrite**, phased and gated
+at each step:
+
+- **Phase A** (`72b4615`): `cublas_shim` gained a persistent
+  `ana_cublas_ctx` (one handle bound to a dedicated stream, optional
+  `ANA_CUBLAS_WORKSPACE_MB` workspace) and an enqueue-only
+  `ana_cublas_gemm_strided_batched_device` over raw `CUdeviceptr`s (no
+  malloc/memcpy/sync inside — caller owns ordering). Verified: while
+  gating, discovered the runtime was **already run-to-run
+  nondeterministic before this change** (repeated 20-step trains, both old
+  and new binary, produce slightly different losses from step ~3 — a
+  float-atomic scatter-add inside the Futhark pieces) — so all
+  correctness gates below are statistical (tolerance/trajectory bands),
+  never bit-exact, by design of the underlying kernels, not a rewrite
+  regression.
+- **Phase B1** (`3be9a23`): `Decomposed.hs`'s `PieceOps` (and every result
+  record) parameterized to `PieceOps buf tok` instead of hardwired
+  `[Float]`/`[Int64]`. New ops (`opsZeros`/`opsLength`/`opsFree`/
+  `opsReadSlice`/`opsWriteSlice`/`opsGatherChunk`/`opsPutChunk`) replace
+  every host list manipulation — parameter-slice extraction, gradient
+  assembly (was `++`/`concat`), the GLA per-chunk gather/assemble. CPU
+  conformance instantiates `PieceOps [Float] [Int64]` with the old pure-list
+  code moved into the record, so it keeps exercising the identical
+  traversal; full matrix still passes.
+- **Phase B2** (`ae7fcf5`): new Futhark data-movement entries
+  (`piece_read_slice`/`piece_write_slice`/`piece_gather_chunk`/
+  `piece_put_chunk`, pure `tabulate`, no VJPs) plus `conf_` conformance
+  wrappers, checked at zero tolerance against the pure-list references
+  across offset 0/interior/tail and first/last chunk index — all exact.
+- **Phase B3** (`06f2177`, the core): `ProductionPieces.hs` rewritten so
+  every op is device-handle-to-device-handle — no host round-trip.
+  Ownership invariant (sidesteps unverified `futhark_new_raw_*` semantics):
+  all model memory is Futhark-owned; cuBLAS only *reads* raw pointers
+  (`futhark_values_raw_f32_1d`) and only *writes* into fresh
+  `zero_vector` outputs. Sync is a conservative barrier with dirty-flag
+  elision (`futharkDirty`/`blasDirty` in the `Context`): pending cuBLAS
+  work is drained before any Futhark entry, host read, or free; pending
+  Futhark work is drained before a GEMM is enqueued. A per-traversal arena
+  frees every intermediate at the microbatch boundary except the
+  escaping gradient. New `CudaDeviceBlas.hs` does the GEMM fwd/pullback
+  over raw pointers with a FLOP counter for MFU. `GemmKernels.hs` rewritten
+  to real device arrays, keeping the exact `FutharkKernels` module API so
+  `backend/gpu/Main.hs` needed zero changes — and now wires the
+  already-existing `adamw_step`/`clip_global_norm`/`piece_accumulate`
+  entries instead of host `zipWith`. New `RawProbe.hs` validates the raw
+  interop (`CUdeviceptr` is 8 bytes; a `cudaMemcpy` into a `zero_vector`
+  allocation round-trips; a device GEMM over Futhark-owned buffers matches
+  a host reference) and — notably — **confirmed `piece_add_bwd`'s two
+  outputs alias the same device memory** (informational: safe under the
+  fresh-output invariant, but would be a real hazard for any future code
+  that writes through a raw pointer into a non-fresh buffer).
+- **Phase C start** (`396096d`): a `bench CORPUS SIZE` subcommand in the
+  shared `Main.hs` (`BENCH_WARMUP`/`BENCH_STEPS`, synchronized start/end
+  per step, median/p95/mean, tokens/s, GEMM-FLOP-derived MFU against
+  `BENCH_PEAK_TFLOPS`); both kernel modules export `synchronize` +
+  `gemmFlopsSinceReset` (the fused backend always reports 0 → "MFU: n/a").
+
+**Verified on hardware, in order:** `raw-probe` passed (including the
+alias finding above) → `cuda-blas-test` passed all three numerics plus the
+new device-pointer cases → **end-to-end device gradient vs the
+fused-oracle golden values** (dumped by `gemm-conformance` via
+`GEMM_CONFORMANCE_DUMP`): loss agrees to 1.2e-7, all 808 gradient entries
+to max_abs 8.9e-8 → per-numerics training gates + resume-mismatch
+rejection re-passed on the new binary → **2000-step `gla-small` trajectory
+A/B on the new runtime**: fp32 best-val **3.0732** in **140 s** (the old
+host-staged runtime's fp32 reference on identical data: best-val 3.0747 in
+**4694 s** — **~33.5× faster**, trajectories agree to 0.0015 nats, well
+inside the 0.02-nat equivalence gate); tf32 **3.0650** in 138 s; bf16
+**3.0319** in 139 s (all commensurate at this tiny scale — bf16's lower
+loss here reads as trajectory noise, not a real quality signal, and
+doesn't by itself satisfy the gradient-cosine≥0.999 acceptance bar from
+`docs/GEMM-BACKEND.md`, which hasn't been run) → steady-state `gla-small`
+bench: median 63 ms/step (was ~2.4–5 s), ~1000 target tokens/s, GPU
+utilization 36–52% (was 0–3%), MFU 0.019–0.021% (expected: d=64 GEMMs are
+far too small to engage tensor cores regardless of runtime overhead).
+
+**Then the bpe10m-scale bench (batch 8, micro 1) — the shape meant to
+actually show tensor-core MFU — hung.** `nvidia-smi` showed 100% GPU
+utilization and ~15.8 GB device memory held for 15+ minutes with zero step
+output (the fp32 leg never printed its `bench steps=...` line; the tf32
+leg was launched next per the script but its outcome wasn't observed
+before the session ended). Not yet diagnosed. Candidates to check first:
+whether a dirty-flag sync in `ProductionPieces.hs`/`CudaDeviceBlas.hs` is
+missed on a shape/path only exercised at batch>1 or micro<batch (the
+`gla-small` bench never exercises `MICRO_BATCH < TRAIN_BATCH`, so the
+`microLossGrad` fold's multi-chunk accumulate path — `piece_accumulate`
+racing a live arena window — is the least-tested code in the rewrite);
+whether the arena's `nub`-based free list is quadratic enough at bpe10m's
+larger per-call buffer count to look hung rather than deadlocked; or a
+genuine cuBLAS/Futhark stream deadlock at this shape. This is the
+immediate next task.
+
+**Separately, discovered the full training corpus doesn't exist yet in
+this environment.** `deploy/cloud-fast-path.md` describes 1,465
+`shard-<k>-bpe10m.corpus` files (~9.3 GB) plus their plan as already
+prepared — that was true in whatever session wrote that doc, but
+`run/wiki-bpe10m/` is absent from both this machine and the rented box
+right now, and the 18 GB source Wikipedia JSONL isn't present either. All
+benchmarking above used small synthetic corpora built from this repo's
+own docs (`prepare-bytes`/`prepare-bpe` over `README.md`/`HANDOFF.md`/
+`PLAN.md`/`docs/*.md`). A real "time to train the whole corpus" estimate
+needs the plan+shards regenerated first (`wiki-train` app, or locating a
+prior export).
+
+Everything through `396096d` is committed; branch not yet pushed
+upstream. The rented box's state (up/idle/billing) was not confirmed
+before this session ended — check and destroy-if-idle first thing.
