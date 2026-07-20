@@ -2,30 +2,68 @@
 
 Everything needed to continue this work from another machine and account.
 
-## ▶ CONTINUE HERE (2026-07-19)
+## ▶ CONTINUE HERE (2026-07-20)
 
-**The active roadmap is `PLAN.md` at the repo root** — read it first. It is
-the living plan for the current line of work and always names the next step.
+**`PLAN.md` is now stale** — it still reads "Stage B NEXT" / "Stage C blocked
+on hardware". Both are done; a fresh session should refresh `PLAN.md`'s
+Stage B/C sections against this entry before trusting it. Read this block
+first.
 
-Current position: branch **`attention-semantics`**. The project is renamed
-**ana** (anamorphism). Attention now has a stated, proved denotation
-(`docs/ATTENTION-SEMANTICS.md`, `docs/DENOTATIONAL-ASSESSMENT.md`), the model
-is a GLA 3:1 hybrid, and the **GEMM backend path** is under way:
+Current position: branch **`stage-b-gemm-conformance`** (not yet pushed —
+no `origin` tracking branch set). Stage B and Stage C of the GEMM backend
+path (`PLAN.md`, `docs/GEMM-BACKEND.md`) are both landed and verified on
+real tensor-core hardware:
 
-- **Stage A (chunkwise GLA) is LANDED** — the training forward runs the
-  GEMM-shaped chunkwise form licensed by the proved `chunk-closed` theorem;
-  conformance/codegen/quality gates all green (details in `PLAN.md`).
-- **Stage B is NEXT**: the BLAS-decomposed training step
-  (`backend/futhark/pieces.fut` + `backend/gemm/*`), fully local-verifiable.
-  `PLAN.md` "Stage B" lists the concrete first moves.
-- Stage C (cuBLAS / tensor cores) is prepared in `docs/GEMM-BACKEND.md`,
-  blocked on a GPU rental (the RTX 5070 Ti was destroyed; its last
-  checkpoint survives only in `run/rtx5070ti-checkpoints/`, not re-vendored).
+- **Stage B — decomposed step, BLAS/cuBLAS at the boundary — LANDED.**
+  `backend/gemm/*` + `backend/futhark/pieces.fut`; CPU conformance
+  (`nix build .#gemm-conformance`) passes the full matrix against the fused
+  oracle and Numeric.AD.
+- **Stage C — cuBLAS tensor cores on rented hardware — LANDED, then made
+  device-resident.** Rented a vast.ai **RTX 5060 Ti** (16 GB, Blackwell
+  sm_120, driver 570.153.02, Max CUDA 12.8). The flake's CUDA pin was
+  **12.9 → 12.8** to match this driver (`cudaPackages_12_8`;
+  `docs/RUN-2026-07-20-TENSOR-CORE.md`). Build and training gates on
+  hardware passed (fp32/tf32/bf16 all correct via `cuda-blas-test`;
+  per-numerics checkpoints round-trip; resume rejects a numerics
+  mismatch) — but the **first working runtime staged every piece and GEMM
+  through host Haskell lists**, so it trained at **0–3% GPU utilization**
+  (~5 s/step at `gla-small`). Rewrote the runtime to be **fully
+  device-resident** (see 2026-07-20 entry below): real Futhark device
+  handles end to end, a persistent cuBLAS handle/stream over raw device
+  pointers, dirty-flag conservative sync barriers, and the *existing but
+  previously-unused* `adamw_step`/`clip_global_norm`/`piece_accumulate`
+  Futhark entries now actually running on device. Result: **~33× faster**
+  at `gla-small` (median 63 ms/step, 36–52% GPU util, matches the
+  fused-oracle golden and the old runtime's trajectory).
 
-Orientation for a fresh clone: `PLAN.md` (roadmap) → `docs/ATTENTION-
-SEMANTICS.md` (what/why/proved) → `docs/GEMM-BACKEND.md` (backend design) →
-the dated session sections at the bottom of this file (chronological detail).
-Verify with the commands in `PLAN.md`; generate with
+**Open and unresolved — the very next thing to do:**
+1. **`bench bpe10m` (batch 8, the shapes meant to actually engage tensor
+   cores) hangs** on the device-resident runtime: 100% reported GPU util,
+   ~15.8 GB device memory held, zero step output after 15+ minutes. Never
+   diagnosed — this is a real bug (likely a synchronization deadlock or a
+   missing barrier at a larger-microbatch shape) and blocks the entire
+   point of this rewrite: an honest MFU number at a shape where tensor
+   cores matter, and the GEMM-BACKEND.md shape-smoke gate at bpe10m/gla
+   microbatch 1 and 8. **Diagnose this first.**
+2. **The full Wikipedia corpus is not present anywhere.** Despite
+   `deploy/cloud-fast-path.md` describing 1,465 prepared shards (~9.3 GB)
+   as done, `run/wiki-bpe10m/` does not exist locally, was never
+   transferred to the rented box, and the 18 GB source JSONL dump isn't
+   present either — that doc reflects a *prior* session's state, not this
+   one. All Stage C benchmarking above used tiny synthetic corpora built
+   from this repo's own docs. Before any real training run or a
+   "how long to train the whole corpus" estimate, the plan+shards must be
+   regenerated (or the source dump located) via the `wiki-train` app.
+3. **Check whether the rented box is still up** (it was mid-diagnostic
+   when this session ended) — destroy it if idle and not actively needed,
+   per the cost discipline in `docs/CLOUD-TRAINING.md`.
+
+Orientation for a fresh clone: `PLAN.md` (roadmap, needs refresh per above)
+→ `docs/GEMM-BACKEND.md` (backend design/contract) →
+`docs/RUN-2026-07-20-TENSOR-CORE.md` (hardware gates) → the dated session
+sections at the bottom of this file (chronological detail, including
+today's full device-residency rewrite). Verify with the commands in
+`PLAN.md`; generate with
 `WIKI_CHECKPOINT=run/gla-small.checkpoint nix run .#wiki-generate`.
 
 The remainder of this file is the chronological log; the earliest entry
