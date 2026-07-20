@@ -97,7 +97,7 @@ trainSmoke = do
             print loss
             let identity = Identity "smoke-model" "synthetic-token-v1" "synthetic-documents-v1"
                 manifest = Manifest artifactVersion tinyConfig (paramCount tinyConfig)
-                  canonicalLayoutIdentity canonicalLayoutVersion cfg identity 1
+                  canonicalLayoutIdentity canonicalLayoutVersion cfg identity 1 Fp32IEEE
                 checkpoint = Checkpoint manifest params finalState (Just loss) (PRNGState 1 2 3 4)
             case validateCheckpoint checkpoint of
               Left message -> putStrLn message
@@ -220,6 +220,7 @@ inspectCheckpoint path = do
       putStrLn ("parameters: " ++ show (manifestParameterCount manifest))
       putStrLn ("completed step: " ++ show (adamStep (checkpointOptimizer checkpoint)))
       putStrLn ("total steps: " ++ show (totalSteps (manifestOptimizerConfig manifest)))
+      putStrLn ("numerics: " ++ show (manifestNumerics manifest))
       putStrLn ("model: " ++ modelIdentity identity)
       putStrLn ("tokenizer: " ++ tokenizerIdentity identity)
       putStrLn ("dataset: " ++ datasetIdentity identity)

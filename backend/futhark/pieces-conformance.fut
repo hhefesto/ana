@@ -30,6 +30,135 @@ entry oracle_batch_loss_grad
   in vjp2 (\candidate ->
     batch_mean_loss_def v d f h n_layers chunk candidate tokens) params 1.0f32
 
+entry conf_piece_ce_fwd (batch: i64) (sequence: i64) (v: i64)
+    (effective_batch: i64) (logits: [batch*sequence*v]f32)
+    (tokens: [batch*sequence]i64): f32 =
+  piece_ce_fwd batch sequence v effective_batch logits tokens
+
+entry conf_piece_ce_bwd (batch: i64) (sequence: i64) (v: i64)
+    (effective_batch: i64) (loss_bar: f32)
+    (logits: [batch*sequence*v]f32) (tokens: [batch*sequence]i64)
+    : [batch*sequence*v]f32 =
+  piece_ce_bwd batch sequence v effective_batch loss_bar logits tokens
+
+entry conf_piece_embed_gather_bwd (v: i64) (d: i64) (count: i64)
+    (tokens: [count]i64) (output_bar: [count*d]f32): [v*d]f32 =
+  piece_embed_gather_bwd v d count tokens output_bar
+
+entry conf_piece_embed_gather_fwd (v: i64) (d: i64) (count: i64)
+    (embedding: [v*d]f32) (tokens: [count]i64): [count*d]f32 =
+  piece_embed_gather_fwd v d count embedding tokens
+
+entry conf_piece_rms_norm_fwd (rows: i64) (d: i64)
+    (x: [rows*d]f32) (gain: [d]f32): [rows*d]f32 =
+  piece_rms_norm_fwd rows d x gain
+
+entry conf_piece_rms_norm_bwd (rows: i64) (d: i64)
+    (x: [rows*d]f32) (gain: [d]f32) (output_bar: [rows*d]f32)
+    : ([rows*d]f32, [d]f32) =
+  piece_rms_norm_bwd rows d x gain output_bar
+
+entry conf_piece_l2norm_heads_fwd (rows: i64) (d: i64)
+    (h: i64) (x: [rows*d]f32): [rows*d]f32 =
+  piece_l2norm_heads_fwd rows d h x
+
+entry conf_piece_l2norm_heads_bwd (rows: i64) (d: i64)
+    (h: i64) (x: [rows*d]f32) (output_bar: [rows*d]f32): [rows*d]f32 =
+  piece_l2norm_heads_bwd rows d h x output_bar
+
+entry conf_piece_silu_gate_fwd [count]
+    (gate: [count]f32) (up: [count]f32): [count]f32 =
+  piece_silu_gate_fwd gate up
+
+entry conf_piece_silu_gate_bwd [count]
+    (gate: [count]f32) (up: [count]f32) (output_bar: [count]f32)
+    : ([count]f32, [count]f32) =
+  piece_silu_gate_bwd gate up output_bar
+
+entry conf_piece_add_fwd [count]
+    (x: [count]f32) (y: [count]f32): [count]f32 =
+  piece_add_fwd x y
+
+entry conf_piece_add_bwd [count]
+    (output_bar: [count]f32): ([count]f32, [count]f32) =
+  piece_add_bwd output_bar
+
+entry conf_piece_split_heads_fwd (batch: i64) (n: i64) (h: i64) (hd: i64)
+    (x: [batch*n*h*hd]f32): [batch*h*n*hd]f32 =
+  piece_split_heads_fwd batch n h hd x
+
+entry conf_piece_split_heads_bwd (batch: i64) (n: i64) (h: i64) (hd: i64)
+    (output_bar: [batch*h*n*hd]f32): [batch*n*h*hd]f32 =
+  piece_split_heads_bwd batch n h hd output_bar
+
+entry conf_piece_merge_heads_fwd (batch: i64) (n: i64) (h: i64) (hd: i64)
+    (x: [batch*h*n*hd]f32): [batch*n*h*hd]f32 =
+  piece_merge_heads_fwd batch n h hd x
+
+entry conf_piece_merge_heads_bwd (batch: i64) (n: i64) (h: i64) (hd: i64)
+    (output_bar: [batch*n*h*hd]f32): [batch*h*n*hd]f32 =
+  piece_merge_heads_bwd batch n h hd output_bar
+
+entry conf_piece_causal_softmax_fwd (groups: i64) (n: i64)
+    (head_dim: i64) (scores: [groups*n*n]f32): [groups*n*n]f32 =
+  piece_causal_softmax_fwd groups n head_dim scores
+
+entry conf_piece_causal_softmax_bwd (groups: i64) (n: i64)
+    (head_dim: i64) (scores: [groups*n*n]f32)
+    (weights_bar: [groups*n*n]f32): [groups*n*n]f32 =
+  piece_causal_softmax_bwd groups n head_dim scores weights_bar
+
+entry conf_piece_gate_cum_fwd (groups: i64) (chunk: i64) (hd: i64)
+    (gate_logits: [groups*chunk*hd]f32)
+    : ([groups*chunk*hd]f32, [groups*hd]f32) =
+  piece_gate_cum_fwd groups chunk hd gate_logits
+
+entry conf_piece_gate_cum_bwd (groups: i64) (chunk: i64) (hd: i64)
+    (gate_logits: [groups*chunk*hd]f32)
+    (relcum_bar: [groups*chunk*hd]f32) (dec_bar: [groups*hd]f32)
+    : [groups*chunk*hd]f32 =
+  piece_gate_cum_bwd groups chunk hd gate_logits relcum_bar dec_bar
+
+entry conf_piece_qk_decay_fwd (groups: i64) (chunk: i64) (hd: i64)
+    (q: [groups*chunk*hd]f32) (k: [groups*chunk*hd]f32)
+    (relcum: [groups*chunk*hd]f32) (dec: [groups*hd]f32)
+    : ([groups*chunk*hd]f32, [groups*chunk*hd]f32) =
+  piece_qk_decay_fwd groups chunk hd q k relcum dec
+
+entry conf_piece_qk_decay_bwd (groups: i64) (chunk: i64) (hd: i64)
+    (q: [groups*chunk*hd]f32) (k: [groups*chunk*hd]f32)
+    (relcum: [groups*chunk*hd]f32) (dec: [groups*hd]f32)
+    (q_scaled_bar: [groups*chunk*hd]f32)
+    (k_scaled_bar: [groups*chunk*hd]f32)
+    : ([groups*chunk*hd]f32, [groups*chunk*hd]f32,
+       [groups*chunk*hd]f32, [groups*hd]f32) =
+  piece_qk_decay_bwd groups chunk hd q k relcum dec q_scaled_bar k_scaled_bar
+
+entry conf_piece_gla_intra_fwd (groups: i64) (chunk: i64) (hd: i64)
+    (q: [groups*chunk*hd]f32) (k: [groups*chunk*hd]f32)
+    (values: [groups*chunk*hd]f32) (relcum: [groups*chunk*hd]f32)
+    : [groups*chunk*hd]f32 =
+  piece_gla_intra_fwd groups chunk hd q k values relcum
+
+entry conf_piece_gla_intra_bwd (groups: i64) (chunk: i64) (hd: i64)
+    (q: [groups*chunk*hd]f32) (k: [groups*chunk*hd]f32)
+    (values: [groups*chunk*hd]f32) (relcum: [groups*chunk*hd]f32)
+    (output_bar: [groups*chunk*hd]f32)
+    : ([groups*chunk*hd]f32, [groups*chunk*hd]f32,
+       [groups*chunk*hd]f32, [groups*chunk*hd]f32) =
+  piece_gla_intra_bwd groups chunk hd q k values relcum output_bar
+
+entry conf_piece_state_advance_fwd (groups: i64) (hd: i64)
+    (state: [groups*hd*hd]f32) (contribution: [groups*hd*hd]f32)
+    (dec: [groups*hd]f32): [groups*hd*hd]f32 =
+  piece_state_advance_fwd groups hd state contribution dec
+
+entry conf_piece_state_advance_bwd (groups: i64) (hd: i64)
+    (state: [groups*hd*hd]f32) (contribution: [groups*hd*hd]f32)
+    (dec: [groups*hd]f32) (output_bar: [groups*hd*hd]f32)
+    : ([groups*hd*hd]f32, [groups*hd*hd]f32, [groups*hd]f32) =
+  piece_state_advance_bwd groups hd state contribution dec output_bar
+
 -- ==
 -- entry: test_piece_head_permutations
 -- input { }

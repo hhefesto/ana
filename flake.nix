@@ -34,6 +34,7 @@
           cudaCccl = cudaPackages.cccl;
           cudaNvcc = cudaPackages.cuda_nvcc;
           cudaNvrtc = cudaPackages.cuda_nvrtc;
+          cudaCublas = cudaPackages.libcublas;
           gpuGhc = pkgs.haskellPackages.ghcWithPackages (p: [
            p.binary
            p.cryptohash-sha256
@@ -45,6 +46,7 @@
           conformanceGhc = pkgs.haskellPackages.ghcWithPackages (p: [
             p.ad
             p.binary
+            p.vector
           ]);
           gemmGhc = pkgs.haskellPackages.ghcWithPackages (p: [ p.vector ]);
         in
@@ -131,6 +133,25 @@
             '';
             meta.platforms = [ "x86_64-linux" ];
           };
+          futhark-pieces-conformance = pkgs.stdenv.mkDerivation {
+            pname = "formal-transformer-futhark-pieces-conformance";
+            version = "0.1.0";
+            src = ./.;
+            nativeBuildInputs = [ pkgs.futhark ];
+            buildPhase = ''
+              runHook preBuild
+              futhark c --library backend/futhark/pieces-conformance.fut -o pieces_conformance
+              runHook postBuild
+            '';
+            installPhase = ''
+              runHook preInstall
+              mkdir -p $out/lib $out/include $out/share/formal-transformer
+              cp pieces_conformance.c $out/lib/
+              cp pieces_conformance.h $out/include/
+              cp pieces_conformance.json $out/share/formal-transformer/
+              runHook postInstall
+            '';
+          };
           gemm-blas-test = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-gemm-blas-test";
             version = "0.1.0";
@@ -148,6 +169,31 @@
               runHook preInstall
               mkdir -p $out/bin
               cp gemm-blas-test $out/bin/
+              runHook postInstall
+            '';
+          };
+          gemm-conformance = pkgs.stdenv.mkDerivation {
+            pname = "formal-transformer-gemm-conformance";
+            version = "0.1.0";
+            src = ./.;
+            nativeBuildInputs = [ conformanceGhc ];
+            buildInputs = [ pkgs.openblas ];
+            buildPhase = ''
+              runHook preBuild
+              $CC -O2 -c ${self.packages.${system}.futhark-pieces-conformance}/lib/pieces_conformance.c \
+                -I${self.packages.${system}.futhark-pieces-conformance}/include \
+                -o pieces_conformance.o
+              ghc -Wall -Wcompat -Werror -O2 -ibackend/gemm -ibackend/src \
+                backend/gemm/GemmConformance.hs backend/gemm/PiecesConformance.hs \
+                pieces_conformance.o -lopenblas -lm -o gemm-conformance
+              OPENBLAS_NUM_THREADS=1 ./gemm-conformance | tee gemm-conformance-results.txt
+              runHook postBuild
+            '';
+            installPhase = ''
+              runHook preInstall
+              mkdir -p $out/bin $out/share/formal-transformer
+              cp gemm-conformance $out/bin/
+              cp gemm-conformance-results.txt $out/share/formal-transformer/
               runHook postInstall
             '';
           };
@@ -224,6 +270,71 @@
               case "$(patchelf --print-rpath $out/bin/formal-transformer-cuda)" in
                 *stubs*) echo "CUDA driver stubs leaked into runtime RPATH" >&2; exit 1 ;;
               esac
+            '';
+            meta.platforms = [ "x86_64-linux" ];
+          };
+          formal-transformer-gemm-cuda = pkgs.stdenv.mkDerivation {
+            pname = "formal-transformer-gemm-cuda";
+            version = "0.1.0";
+            src = ./.;
+            __structuredAttrs = true;
+            strictDeps = true;
+            nativeBuildInputs = [
+              gpuGhc
+              cudaPackages.removeStubsFromRunpathHook
+              pkgs.patchelf
+            ];
+            buildInputs = [
+              cudaCccl
+              cudaCudart
+              cudaNvcc
+              cudaNvrtc
+              cudaCublas
+              pkgs.openblas
+            ];
+            buildPhase = ''
+              runHook preBuild
+              $CC -O2 -c ${self.packages.${system}.futhark-pieces-cuda}/lib/pieces.c \
+                -I${self.packages.${system}.futhark-pieces-cuda}/include \
+                -I${cudaCudart}/include -I${cudaCccl}/include \
+                -I${cudaNvcc}/include -I${cudaNvrtc.include}/include \
+                -o pieces.o
+              $CC -std=c11 -Wall -Wextra -Werror -O2 \
+                -I${cudaCudart}/include -I${cudaCublas.include}/include \
+                -c backend/gemm/cublas_shim.c -o cublas_shim.o
+              ghc -O2 -threaded -rtsopts "-with-rtsopts=-N" \
+                -ibackend/gemm -ibackend/gpu -ibackend/src \
+                backend/gpu/Main.hs backend/gemm/GemmKernels.hs \
+                backend/gemm/ProductionPieces.hs backend/gemm/CudaBlasOps.hs \
+                pieces.o cublas_shim.o -lopenblas \
+                -optl-L${cudaCudart}/lib/stubs \
+                -optl-L${cudaCudart}/lib -optl-L${cudaNvrtc.lib}/lib \
+                -optl-L${cudaCublas.lib}/lib \
+                -optl-lcuda -optl-lcudart -optl-lnvrtc -optl-lcublas \
+                -optl-lm -optl-lpthread -o formal-transformer-gemm-cuda
+              ghc -O2 -ibackend/gemm -ibackend/src \
+                backend/gemm/CudaBlasTest.hs backend/gemm/CudaBlasOps.hs \
+                cublas_shim.o -lopenblas \
+                -optl-L${cudaCudart}/lib/stubs \
+                -optl-L${cudaCudart}/lib -optl-L${cudaCublas.lib}/lib \
+                -optl-lcuda -optl-lcudart -optl-lcublas -optl-lm \
+                -o cuda-blas-test
+              runHook postBuild
+            '';
+            installPhase = ''
+              runHook preInstall
+              mkdir -p $out/bin
+              cp formal-transformer-gemm-cuda cuda-blas-test $out/bin/
+              runHook postInstall
+            '';
+            postFixup = ''
+              removeStubsFromRunpath $out/bin/formal-transformer-gemm-cuda
+              removeStubsFromRunpath $out/bin/cuda-blas-test
+              for executable in formal-transformer-gemm-cuda cuda-blas-test; do
+                case "$(patchelf --print-rpath "$out/bin/$executable")" in
+                  *stubs*) echo "CUDA driver stubs leaked into runtime RPATH" >&2; exit 1 ;;
+                esac
+              done
             '';
             meta.platforms = [ "x86_64-linux" ];
           };
@@ -357,11 +468,14 @@
               '';
           gpu-host = self.packages.${system}.formal-transformer-gpu;
           cuda-host = self.packages.${system}.formal-transformer-cuda;
+          gemm-cuda-host = self.packages.${system}.formal-transformer-gemm-cuda;
           sequential-host = self.packages.${system}.formal-transformer-sequential;
           conformance = self.packages.${system}.conformance;
           futhark-pieces = self.packages.${system}.futhark-pieces;
           futhark-pieces-cuda = self.packages.${system}.futhark-pieces-cuda;
+          futhark-pieces-conformance = self.packages.${system}.futhark-pieces-conformance;
           gemm-blas = self.packages.${system}.gemm-blas-test;
+          gemm-conformance = self.packages.${system}.gemm-conformance;
         }
       );
 
@@ -711,6 +825,11 @@
           program = "${self.packages.${system}.formal-transformer-cuda}/bin/formal-transformer-cuda";
           meta.description = "Train and generate with the Futhark CUDA backend";
         };
+        formal-transformer-gemm-cuda = {
+          type = "app";
+          program = "${self.packages.${system}.formal-transformer-gemm-cuda}/bin/formal-transformer-gemm-cuda";
+          meta.description = "Train with explicit FP32, TF32, or BF16 cuBLAS GEMMs";
+        };
         formal-transformer-sequential = {
           type = "app";
           program = "${
@@ -732,7 +851,8 @@
           cudaCudart = cudaPackages.cuda_cudart;
           cudaCccl = cudaPackages.cccl;
           cudaNvcc = cudaPackages.cuda_nvcc;
-          cudaNvrtc = cudaPackages.cuda_nvrtc;
+           cudaNvrtc = cudaPackages.cuda_nvrtc;
+           cudaCublas = cudaPackages.libcublas;
         in
         {
           default = pkgs.mkShell {
@@ -753,6 +873,7 @@
               cudaCudart
               cudaNvcc
               cudaNvrtc
+              cudaCublas
             ];
             shellHook = ''
               export CPATH="${cudaCudart}/include:${cudaCccl}/include:${cudaNvcc}/include:${cudaNvrtc.include}/include''${CPATH:+:$CPATH}"

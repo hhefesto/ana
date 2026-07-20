@@ -3,6 +3,8 @@
 module Blas
   ( Transpose (..)
   , Blas (..)
+  , blasGemmPullback
+  , blasGemmBatchedPullback
   , openBlas
   ) where
 
@@ -27,6 +29,55 @@ data Blas = Blas
 
 openBlas :: Blas
 openBlas = Blas cblasGemm cblasGemmBatched
+
+-- Reverse mode for C += alpha * opA(A) * opB(B).  The incoming cotangent dC is
+-- multiplied by alpha, and the input cotangents are accumulated with beta=1.
+blasGemmPullback
+  :: Blas
+  -> Transpose
+  -> Transpose
+  -> Float
+  -> MatrixView
+  -> MatrixView
+  -> MatrixView
+  -> MatrixView
+  -> MatrixView
+  -> IO ()
+blasGemmPullback blas transA transB alpha a b dC dA dB =
+  case (transA, transB) of
+    (NoTrans, NoTrans) -> do
+      blasGemm blas NoTrans Trans alpha dC b 1 dA
+      blasGemm blas Trans NoTrans alpha a dC 1 dB
+    (NoTrans, Trans) -> do
+      blasGemm blas NoTrans NoTrans alpha dC b 1 dA
+      blasGemm blas Trans NoTrans alpha dC a 1 dB
+    (Trans, NoTrans) -> do
+      blasGemm blas NoTrans Trans alpha b dC 1 dA
+      blasGemm blas NoTrans NoTrans alpha a dC 1 dB
+    (Trans, Trans) -> blasError "TT GEMM pullback is not supported by this backend foundation"
+
+blasGemmBatchedPullback
+  :: Blas
+  -> Transpose
+  -> Transpose
+  -> Float
+  -> BatchView
+  -> BatchView
+  -> BatchView
+  -> BatchView
+  -> BatchView
+  -> IO ()
+blasGemmBatchedPullback blas transA transB alpha as bs dCs dAs dBs = do
+  let counts = map batchCount [as, bs, dCs, dAs, dBs]
+  when (not (all (== batchCount as) counts)) $
+    blasError "batched GEMM pullback operands have different batch counts"
+  forM_ [0 .. batchCount as - 1] $ \i -> do
+    a <- checkedIO (batchMatrixAt as i)
+    b <- checkedIO (batchMatrixAt bs i)
+    dC <- checkedIO (batchMatrixAt dCs i)
+    dA <- checkedIO (batchMatrixAt dAs i)
+    dB <- checkedIO (batchMatrixAt dBs i)
+    blasGemmPullback blas transA transB alpha a b dC dA dB
 
 data GemmDims = GemmDims
   { dimM :: !CInt

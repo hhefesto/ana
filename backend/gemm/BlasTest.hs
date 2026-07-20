@@ -5,6 +5,7 @@ import Buffer
 import Control.Exception (IOException, try)
 import Control.Monad (forM_, unless)
 import Data.List (transpose)
+import Dense
 import Foreign.C.Types (CInt)
 import Foreign.Storable (peekElemOff)
 
@@ -16,6 +17,11 @@ main = do
   testGemm "NN" NoTrans NoTrans left right
   testGemm "NT" NoTrans Trans left (transpose right)
   testGemm "TN" Trans NoTrans (transpose left) right
+  testPullback "NN" NoTrans NoTrans left right
+  testPullback "NT" NoTrans Trans left (transpose right)
+  testPullback "TN" Trans NoTrans (transpose left) right
+  testDenseProjection
+  testDensePullback
   testBatchedSharedB
   testBatchedSharedA
   testZeroInnerDimension
@@ -52,6 +58,67 @@ testGemm name transA transB physicalA physicalB = do
   -- Keep explicit references alive through the FFI call and readback.
   unless (sum (map bufferLength [aBuffer, bBuffer, cBuffer]) > 0) $
     fail "unexpected empty GEMM buffers"
+
+testPullback :: String -> Transpose -> Transpose -> Matrix -> Matrix -> IO ()
+testPullback name transA transB physicalA physicalB = do
+  (aBuffer, a) <- paddedView physicalA 1
+  (bBuffer, b) <- paddedView physicalB 2
+  let logicalA = applyTranspose transA physicalA
+      logicalB = applyTranspose transB physicalB
+      m = length logicalA
+      n = matrixColumnCount logicalB
+      cotangentC = matrix m n [fromIntegral (i - 2) / 5 | i <- [0 .. m * n - 1]]
+      initialA = matrix (length physicalA) (matrixColumnCount physicalA)
+        [fromIntegral (i + 1) / 17 | i <- [0 .. length physicalA * matrixColumnCount physicalA - 1]]
+      initialB = matrix (length physicalB) (matrixColumnCount physicalB)
+        [fromIntegral (i - 3) / 19 | i <- [0 .. length physicalB * matrixColumnCount physicalB - 1]]
+      expectedA = addMatrix initialA (unapplyTranspose transA
+        (scale 0.75 (matmul cotangentC (transpose logicalB))))
+      expectedB = addMatrix initialB (unapplyTranspose transB
+        (scale 0.75 (matmul (transpose logicalA) cotangentC)))
+  (_, dC) <- paddedView cotangentC 1
+  (dABuffer, dA) <- paddedView initialA 1
+  (dBBuffer, dB) <- paddedView initialB 2
+  blasGemmPullback openBlas transA transB 0.75 a b dC dA dB
+  actualA <- readView dA
+  actualB <- readView dB
+  assertMatrix (name ++ " pullback A") expectedA actualA
+  assertMatrix (name ++ " pullback B") expectedB actualB
+  unless (sum (map bufferLength [aBuffer, bBuffer, dABuffer, dBBuffer]) > 0) $
+    fail "unexpected empty pullback buffers"
+
+testDenseProjection :: IO ()
+testDenseProjection = do
+  let xRows = [[1, 2, -1], [0.5, -2, 3]]
+      weightRows = [[2, -1, 0], [0.25, 3, -2], [1, 1, 1], [-1, 0, 0.5]]
+      expected = matmul xRows (transpose weightRows)
+  (_, x) <- paddedView xRows 1
+  (_, weights) <- paddedView weightRows 2
+  outBuffer <- newBuffer (2 * 4)
+  out <- checked (matrixView outBuffer 0 2 4 4)
+  denseForward openBlas x weights out
+  actual <- readView out
+  assertMatrix "dense projection" expected actual
+
+testDensePullback :: IO ()
+testDensePullback = do
+  let xRows = [[1, 2, -1], [0.5, -2, 3]]
+      weightRows = [[2, -1, 0], [0.25, 3, -2], [1, 1, 1], [-1, 0, 0.5]]
+      outputBar = [[0.2, -1, 0.5, 2], [1.5, 0.25, -0.75, 0]]
+      initialXBar = [[0.1, 0.2, 0.3], [-0.1, -0.2, -0.3]]
+      initialWBar = matrix 4 3 [fromIntegral (i - 5) / 23 | i <- [0 :: Int .. 11]]
+      expectedXBar = addMatrix initialXBar (matmul outputBar weightRows)
+      expectedWBar = addMatrix initialWBar (matmul (transpose outputBar) xRows)
+  (_, x) <- paddedView xRows 1
+  (_, weights) <- paddedView weightRows 2
+  (_, outBar) <- paddedView outputBar 1
+  (_, xBar) <- paddedView initialXBar 1
+  (_, wBar) <- paddedView initialWBar 2
+  densePullback openBlas x weights outBar xBar wBar
+  actualXBar <- readView xBar
+  actualWBar <- readView wBar
+  assertMatrix "dense projection pullback X" expectedXBar actualXBar
+  assertMatrix "dense projection pullback W" expectedWBar actualWBar
 
 testBatchedSharedB :: IO ()
 testBatchedSharedB = do
@@ -169,6 +236,10 @@ readBatch batch = mapM (\i -> checked (batchMatrixAt batch i) >>= readView)
 applyTranspose :: Transpose -> Matrix -> Matrix
 applyTranspose NoTrans = id
 applyTranspose Trans = transpose
+
+unapplyTranspose :: Transpose -> Matrix -> Matrix
+unapplyTranspose NoTrans = id
+unapplyTranspose Trans = transpose
 
 matmul :: Matrix -> Matrix -> Matrix
 matmul a b =

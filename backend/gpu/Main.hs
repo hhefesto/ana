@@ -118,6 +118,7 @@ train corpusPath checkpointPath mode cfg = do
   validateEvery <- positiveEnv "VALIDATE_EVERY" 500
   validationWindows <- positiveEnv "VALIDATION_WINDOWS" 256
   clipNorm <- positiveDoubleEnv "GRAD_CLIP" 1
+  numerics <- backendNumerics
   corpus <- loadCorpus corpusPath >>= either die pure
   corpusVocab <- maybe (die "corpus has an unsupported tokenizer identity") pure
     (tokenizerVocabularyFromIdentity (corpusTokenizerIdentity corpus))
@@ -170,10 +171,11 @@ train corpusPath checkpointPath mode cfg = do
       optCfg = optimizerFor scheduleTotal
   existing <- doesFileExist checkpointPath
   checkpoint <- if existing
-    then loadCheckpoint checkpointPath >>= either die (validateResume cfg identity optCfg clipNorm)
+    then loadCheckpoint checkpointPath >>= either die
+      (validateResume cfg identity optCfg clipNorm numerics)
     else do
       when (segmentStart /= 0) (die "cannot begin a nonzero segment without the global checkpoint")
-      fresh <- pure (newCheckpoint cfg identity optCfg clipNorm)
+      fresh <- pure (newCheckpoint cfg identity optCfg clipNorm numerics)
       initFrom <- lookupEnv "TRAIN_INIT"
       case initFrom of
         Nothing -> pure fresh
@@ -207,6 +209,7 @@ train corpusPath checkpointPath mode cfg = do
     ++ " completed=" ++ show (adamStep state0)
     ++ " batch=" ++ show batchSize
     ++ " micro=" ++ show microSize
+    ++ " numerics=" ++ show numerics
     ++ " grad_clip=" ++ show clipNorm
     ++ " checkpoint_every=" ++ show checkpointEvery
     ++ " validate_every=" ++ show validateEvery
@@ -444,18 +447,20 @@ trainingSequencesFrom offset cfg documents = do
       (any (\token -> token < 2 || token >= vocabSize cfg) (documentTokens document))
       (Left ("document " ++ documentId document ++ " contains a token outside model vocabulary"))
 
-newCheckpoint :: Config -> Identity -> AdamWConfig -> Float -> Checkpoint
-newCheckpoint cfg identity optCfg clipNorm = Checkpoint manifest params (initAdamW count) Nothing initialPRNG
+newCheckpoint :: Config -> Identity -> AdamWConfig -> Float -> Numerics -> Checkpoint
+newCheckpoint cfg identity optCfg clipNorm numerics =
+  Checkpoint manifest params (initAdamW count) Nothing initialPRNG
   where
     count = paramCount cfg
-    manifest = Manifest artifactVersion cfg count canonicalLayoutIdentity canonicalLayoutVersion optCfg identity (realToFrac clipNorm)
+    manifest = Manifest artifactVersion cfg count canonicalLayoutIdentity canonicalLayoutVersion
+      optCfg identity (realToFrac clipNorm) numerics
     params = either error (concatMap initialize) (namedLayout cfg)
     initialize slice
       | sliceDecay slice = [0.02 * sin (fromIntegral (sliceOffset slice + i + 1) * 12.9898) | i <- [0 .. sliceLength slice - 1]]
       | otherwise = replicate (sliceLength slice) 1
 
-validateResume :: Config -> Identity -> AdamWConfig -> Float -> Checkpoint -> IO Checkpoint
-validateResume cfg identity optCfg clipNorm checkpoint = do
+validateResume :: Config -> Identity -> AdamWConfig -> Float -> Numerics -> Checkpoint -> IO Checkpoint
+validateResume cfg identity optCfg clipNorm numerics checkpoint = do
   let manifest = checkpointManifest checkpoint
   when (manifestConfig manifest /= cfg) (die "checkpoint config does not match requested model size")
   when (manifestIdentity manifest /= identity) (die "checkpoint model/tokenizer/dataset identity mismatch")
@@ -472,6 +477,12 @@ validateResume cfg identity optCfg clipNorm checkpoint = do
       ++ "  this run:   " ++ show clipNorm ++ " (GRAD_CLIP)\n"
       ++ "  the clip is part of the training trajectory; resume with the"
       ++ " same GRAD_CLIP or start a new CHECKPOINT path"))
+  when (manifestNumerics manifest /= numerics) (die
+    ("checkpoint numerics do not match this backend\n"
+      ++ "  checkpoint: " ++ show (manifestNumerics manifest) ++ "\n"
+      ++ "  this run:   " ++ show numerics ++ "\n"
+      ++ "  numerics are part of the training trajectory; use the matching"
+      ++ " backend or start a new CHECKPOINT path"))
   when (manifestLayoutIdentity manifest /= canonicalLayoutIdentity || manifestLayoutVersion manifest /= canonicalLayoutVersion) (die "checkpoint layout identity mismatch")
   pure checkpoint
 

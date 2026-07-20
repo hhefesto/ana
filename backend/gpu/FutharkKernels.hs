@@ -14,6 +14,7 @@ module FutharkKernels
   , GpuConfig (..)
   , gpuConfig
   , gpuConfigIO
+  , backendNumerics
   , chunkFor
   , withContext
   , withF32
@@ -48,6 +49,7 @@ import Foreign
 import Foreign.C.String (CString, peekCString, withCString)
 import Foreign.C.Types
 import FormalTransformer.Config (Config (..), contextSize, validateConfig)
+import FormalTransformer.Artifact (Numerics (..))
 import System.Environment (lookupEnv)
 import Text.Read (readMaybe)
 
@@ -100,6 +102,9 @@ gpuConfigIO cfg = do
         _ -> Left "GEMM_CHUNK must be a positive integer"
     base <- gpuConfig cfg
     pure base { gpuChunk = fromIntegral (chunkFor pref (contextSize cfg)) }
+
+backendNumerics :: IO Numerics
+backendNumerics = pure Fp32IEEE
 
 withContext :: (Context -> IO a) -> IO a
 withContext action = bracket c_config_new c_config_free $ \cfg -> do

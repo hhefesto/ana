@@ -3,6 +3,7 @@
 module FormalTransformer.Artifact
   ( Identity (..)
   , PRNGState (..)
+  , Numerics (..)
   , Manifest (..)
   , Checkpoint (..)
   , artifactVersion
@@ -24,8 +25,8 @@ import Control.Exception (IOException, bracketOnError, try)
 import Control.Monad (replicateM, unless)
 import Data.Bits (xor)
 import Data.Binary (Binary, decodeOrFail, encode, get, put)
-import Data.Binary.Get (getFloatbe, getWord16be, getWord32be, getWord64be, runGetOrFail)
-import Data.Binary.Put (putFloatbe, putWord16be, putWord32be, putWord64be, runPut)
+import Data.Binary.Get (getFloatbe, getWord8, getWord16be, getWord32be, getWord64be, runGetOrFail)
+import Data.Binary.Put (putFloatbe, putWord8, putWord16be, putWord32be, putWord64be, runPut)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
 import Data.List (sortOn)
@@ -61,6 +62,24 @@ data PRNGState = PRNGState !Word64 !Word64 !Word64 !Word64
 
 instance Binary PRNGState
 
+data Numerics
+  = Fp32IEEE
+  | Tf32TensorCores
+  | Bf16TensorCores
+  deriving (Eq, Show)
+
+instance Binary Numerics where
+  put Fp32IEEE = putWord8 0
+  put Tf32TensorCores = putWord8 1
+  put Bf16TensorCores = putWord8 2
+  get = do
+    tag <- getWord8
+    case tag of
+      0 -> pure Fp32IEEE
+      1 -> pure Tf32TensorCores
+      2 -> pure Bf16TensorCores
+      _ -> fail ("unsupported checkpoint numerics tag: " ++ show tag)
+
 data Manifest = Manifest
   { manifestVersion :: !Word32
   , manifestConfig :: !Config
@@ -70,12 +89,10 @@ data Manifest = Manifest
   , manifestOptimizerConfig :: !AdamWConfig
   , manifestIdentity :: !Identity
   , manifestClipNorm :: !Double
+  , manifestNumerics :: !Numerics
   } deriving (Eq, Show, Generic)
 
--- Version 1 manifests predate the gradient-clip field.  Every historical
--- run trained with the GRAD_CLIP default of 1.0, so a version-1 manifest
--- decodes with that clip and upgrades to the current version in memory;
--- saves always write the current version.
+-- Versions 1 and 2 predate explicit numerics. Historical runs used IEEE f32.
 instance Binary Manifest where
   put manifest = do
     put (manifestVersion manifest)
@@ -86,9 +103,10 @@ instance Binary Manifest where
     put (manifestOptimizerConfig manifest)
     put (manifestIdentity manifest)
     put (manifestClipNorm manifest)
+    put (manifestNumerics manifest)
   get = do
     version <- get
-    unless (version == 1 || version == artifactVersion)
+    unless (version >= 1 && version <= artifactVersion)
       (fail ("unsupported checkpoint manifest version: " ++ show (version :: Word32)))
     cfg <- get
     count <- get
@@ -97,7 +115,8 @@ instance Binary Manifest where
     optimizer <- get
     identity <- get
     clip <- if version == 1 then pure 1.0 else get
-    pure (Manifest artifactVersion cfg count layoutIdentity layoutVersion optimizer identity clip)
+    numerics <- if version <= 2 then pure Fp32IEEE else get
+    pure (Manifest artifactVersion cfg count layoutIdentity layoutVersion optimizer identity clip numerics)
 
 data Checkpoint = Checkpoint
   { checkpointManifest :: !Manifest
@@ -127,7 +146,7 @@ data LegacyCorpusArtifact = LegacyCorpusArtifact
 instance Binary LegacyCorpusArtifact
 
 artifactVersion :: Word32
-artifactVersion = 2
+artifactVersion = 3
 
 validateCheckpoint :: Checkpoint -> Either String Checkpoint
 validateCheckpoint checkpoint = do
