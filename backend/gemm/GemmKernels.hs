@@ -163,7 +163,7 @@ microBatchLossGrad ctx cfg effectiveBatch accumulatorArray paramsArray tokensArr
   accumulated <- uploadF32 ctx (zipWith (+) accumulator gradient)
   pure (loss, accumulated)
 
-pieceOps :: Numerics -> Context -> PieceOps
+pieceOps :: Numerics -> Context -> PieceOps [Float] [Int64]
 pieceOps numerics = productionPieceOpsWith $ \ops -> ops
   { opsDenseForward = cudaDenseForward numerics
   , opsDenseBackward = cudaDensePullback numerics

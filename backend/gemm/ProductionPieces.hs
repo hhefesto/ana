@@ -10,7 +10,14 @@ module ProductionPieces
 
 import Control.Exception (bracket, onException, throwIO)
 import Control.Monad (forM_, when)
-import Decomposed (PieceOps (..))
+import Data.Int (Int64)
+import Decomposed
+  ( PieceOps (..)
+  , gatherChunk
+  , putChunkList
+  , readSliceList
+  , writeSliceList
+  )
 import Foreign
 import Foreign.C.String (CString, peekCString)
 import Foreign.C.Types (CInt (..))
@@ -26,7 +33,10 @@ newtype I64Array = I64Array (Ptr CI64_1d)
 
 -- The updater lets callers add callbacks introduced in PieceOps concurrently,
 -- without making this module depend on their types or implementations.
-productionPieceOpsWith :: (PieceOps -> PieceOps) -> Context -> PieceOps
+productionPieceOpsWith
+  :: (PieceOps [Float] [Int64] -> PieceOps [Float] [Int64])
+  -> Context
+  -> PieceOps [Float] [Int64]
 productionPieceOpsWith extend ctx = extend PieceOps
   { opsRmsForward = rmsForward ctx
   , opsRmsBackward = rmsBackward ctx
@@ -54,9 +64,20 @@ productionPieceOpsWith extend ctx = extend PieceOps
   , opsEmbeddingBackward = embeddingBackward ctx
   , opsCeForward = ceForward ctx
   , opsCeBackward = ceBackward ctx
+  , opsZeros = \count -> pure (replicate count 0)
+  , opsLength = length
+  , opsTokenCount = length
+  , opsFree = const (pure ())
+  , opsReadSlice = \offset count values -> pure (readSliceList offset count values)
+  , opsWriteSlice = \offset destination source ->
+      pure (writeSliceList offset destination source)
+  , opsGatherChunk = \groups chunkCount elements chunkIndex values ->
+      pure (gatherChunk groups chunkCount elements chunkIndex values)
+  , opsPutChunk = \groups chunkCount elements chunkIndex destination source ->
+      pure (putChunkList groups chunkCount elements chunkIndex destination source)
   }
 
-productionPieceOps :: Context -> PieceOps
+productionPieceOps :: Context -> PieceOps [Float] [Int64]
 productionPieceOps = productionPieceOpsWith id
 
 withProductionContext :: (Context -> IO a) -> IO a

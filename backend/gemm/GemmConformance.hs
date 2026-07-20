@@ -253,7 +253,7 @@ addBackwardList :: Context -> [Float] -> IO ([Float], [Float])
 addBackwardList ctx outputBar =
   withF32 ctx outputBar $ pieceAddBackward ctx (length outputBar)
 
-conformancePieceOps :: Context -> PieceOps
+conformancePieceOps :: Context -> PieceOps [Float] [Int64]
 conformancePieceOps ctx = PieceOps
   { opsDenseForward = denseForwardList
   , opsDenseBackward = densePullbackList
@@ -285,6 +285,17 @@ conformancePieceOps ctx = PieceOps
   , opsEmbeddingBackward = embeddingBackwardList ctx
   , opsCeForward = ceForwardList ctx
   , opsCeBackward = ceBackwardList ctx
+  , opsZeros = \count -> pure (replicate count 0)
+  , opsLength = length
+  , opsTokenCount = length
+  , opsFree = const (pure ())
+  , opsReadSlice = \offset count values -> pure (readSliceList offset count values)
+  , opsWriteSlice = \offset destination source ->
+      pure (writeSliceList offset destination source)
+  , opsGatherChunk = \groups chunkCount elements chunkIndex values ->
+      pure (gatherChunk groups chunkCount elements chunkIndex values)
+  , opsPutChunk = \groups chunkCount elements chunkIndex destination source ->
+      pure (putChunkList groups chunkCount elements chunkIndex destination source)
   }
 
 feedForwardReference

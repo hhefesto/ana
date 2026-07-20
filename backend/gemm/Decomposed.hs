@@ -21,180 +21,197 @@ module Decomposed
   , densePullbackList
   , batchedGemmList
   , batchedGemmPullbackList
+  , gatherChunk
+  , assembleChunks
+  , putChunkList
+  , readSliceList
+  , writeSliceList
   ) where
 
 import Blas
 import Buffer
 import Control.Monad (foldM, unless)
-import Data.Int (Int64)
 import Dense
 import FormalTransformer.Config
 import FormalTransformer.Layout
 
-data PieceOps = PieceOps
-  { opsDenseForward :: Int -> Int -> Int -> [Float] -> [Float] -> IO [Float]
-  , opsDenseBackward :: Int -> Int -> Int -> [Float] -> [Float] -> [Float]
-      -> IO ([Float], [Float])
+-- The buffer type is abstract so the same traversal runs on host lists (the
+-- conformance instantiation) and on device handles (the CUDA runtime). All
+-- data-bearing values are `buf`; token vectors are `tok`. The final block of
+-- fields is pure data movement: it exists so the traversal never touches
+-- buffer contents on the host.
+data PieceOps buf tok = PieceOps
+  { opsDenseForward :: Int -> Int -> Int -> buf -> buf -> IO buf
+  , opsDenseBackward :: Int -> Int -> Int -> buf -> buf -> buf
+      -> IO (buf, buf)
   , opsBatchedGemmForward :: Transpose -> Transpose -> Int -> Int -> Int
-      -> Int -> Int -> Int -> Int -> [Float] -> [Float] -> IO [Float]
+      -> Int -> Int -> Int -> Int -> buf -> buf -> IO buf
   , opsBatchedGemmBackward :: Transpose -> Transpose -> Int -> Int -> Int
-      -> Int -> Int -> Int -> Int -> [Float] -> [Float] -> [Float]
-      -> IO ([Float], [Float])
-  , opsRmsForward :: Int -> Int -> [Float] -> [Float] -> IO [Float]
-  , opsRmsBackward :: Int -> Int -> [Float] -> [Float] -> [Float]
-      -> IO ([Float], [Float])
-  , opsL2HeadsForward :: Int -> Int -> Int -> [Float] -> IO [Float]
-  , opsL2HeadsBackward :: Int -> Int -> Int -> [Float] -> [Float] -> IO [Float]
-  , opsSiluGateForward :: [Float] -> [Float] -> IO [Float]
-  , opsSiluGateBackward :: [Float] -> [Float] -> [Float]
-      -> IO ([Float], [Float])
-  , opsAddForward :: [Float] -> [Float] -> IO [Float]
-  , opsAddBackward :: [Float] -> IO ([Float], [Float])
-  , opsSplitHeadsForward :: Int -> Int -> Int -> Int -> [Float] -> IO [Float]
-  , opsSplitHeadsBackward :: Int -> Int -> Int -> Int -> [Float] -> IO [Float]
-  , opsMergeHeadsForward :: Int -> Int -> Int -> Int -> [Float] -> IO [Float]
-  , opsMergeHeadsBackward :: Int -> Int -> Int -> Int -> [Float] -> IO [Float]
-  , opsCausalSoftmaxForward :: Int -> Int -> Int -> [Float] -> IO [Float]
-  , opsCausalSoftmaxBackward :: Int -> Int -> Int -> [Float] -> [Float]
-      -> IO [Float]
-  , opsGateCumForward :: Int -> Int -> Int -> [Float] -> IO ([Float], [Float])
-  , opsGateCumBackward :: Int -> Int -> Int -> [Float] -> [Float] -> [Float]
-      -> IO [Float]
-  , opsQkDecayForward :: Int -> Int -> Int -> [Float] -> [Float] -> [Float]
-      -> [Float] -> IO ([Float], [Float])
-  , opsQkDecayBackward :: Int -> Int -> Int -> [Float] -> [Float] -> [Float]
-      -> [Float] -> [Float] -> [Float]
-      -> IO ([Float], [Float], [Float], [Float])
-  , opsGlaIntraForward :: Int -> Int -> Int -> [Float] -> [Float] -> [Float]
-      -> [Float] -> IO [Float]
-  , opsGlaIntraBackward :: Int -> Int -> Int -> [Float] -> [Float] -> [Float]
-      -> [Float] -> [Float] -> IO ([Float], [Float], [Float], [Float])
-  , opsStateAdvanceForward :: Int -> Int -> [Float] -> [Float] -> [Float]
-      -> IO [Float]
-  , opsStateAdvanceBackward :: Int -> Int -> [Float] -> [Float] -> [Float]
-      -> [Float] -> IO ([Float], [Float], [Float])
-  , opsEmbeddingGather :: Int -> Int -> [Float] -> [Int64] -> IO [Float]
-  , opsEmbeddingBackward :: Int -> Int -> [Int64] -> [Float] -> IO [Float]
-  , opsCeForward :: Int -> Int -> Int -> Int -> [Float] -> [Int64] -> IO Float
-  , opsCeBackward :: Int -> Int -> Int -> Int -> Float -> [Float] -> [Int64]
-      -> IO [Float]
+      -> Int -> Int -> Int -> Int -> buf -> buf -> buf
+      -> IO (buf, buf)
+  , opsRmsForward :: Int -> Int -> buf -> buf -> IO buf
+  , opsRmsBackward :: Int -> Int -> buf -> buf -> buf
+      -> IO (buf, buf)
+  , opsL2HeadsForward :: Int -> Int -> Int -> buf -> IO buf
+  , opsL2HeadsBackward :: Int -> Int -> Int -> buf -> buf -> IO buf
+  , opsSiluGateForward :: buf -> buf -> IO buf
+  , opsSiluGateBackward :: buf -> buf -> buf
+      -> IO (buf, buf)
+  , opsAddForward :: buf -> buf -> IO buf
+  , opsAddBackward :: buf -> IO (buf, buf)
+  , opsSplitHeadsForward :: Int -> Int -> Int -> Int -> buf -> IO buf
+  , opsSplitHeadsBackward :: Int -> Int -> Int -> Int -> buf -> IO buf
+  , opsMergeHeadsForward :: Int -> Int -> Int -> Int -> buf -> IO buf
+  , opsMergeHeadsBackward :: Int -> Int -> Int -> Int -> buf -> IO buf
+  , opsCausalSoftmaxForward :: Int -> Int -> Int -> buf -> IO buf
+  , opsCausalSoftmaxBackward :: Int -> Int -> Int -> buf -> buf
+      -> IO buf
+  , opsGateCumForward :: Int -> Int -> Int -> buf -> IO (buf, buf)
+  , opsGateCumBackward :: Int -> Int -> Int -> buf -> buf -> buf
+      -> IO buf
+  , opsQkDecayForward :: Int -> Int -> Int -> buf -> buf -> buf
+      -> buf -> IO (buf, buf)
+  , opsQkDecayBackward :: Int -> Int -> Int -> buf -> buf -> buf
+      -> buf -> buf -> buf
+      -> IO (buf, buf, buf, buf)
+  , opsGlaIntraForward :: Int -> Int -> Int -> buf -> buf -> buf
+      -> buf -> IO buf
+  , opsGlaIntraBackward :: Int -> Int -> Int -> buf -> buf -> buf
+      -> buf -> buf -> IO (buf, buf, buf, buf)
+  , opsStateAdvanceForward :: Int -> Int -> buf -> buf -> buf
+      -> IO buf
+  , opsStateAdvanceBackward :: Int -> Int -> buf -> buf -> buf
+      -> buf -> IO (buf, buf, buf)
+  , opsEmbeddingGather :: Int -> Int -> buf -> tok -> IO buf
+  , opsEmbeddingBackward :: Int -> Int -> tok -> buf -> IO buf
+  , opsCeForward :: Int -> Int -> Int -> Int -> buf -> tok -> IO Float
+  , opsCeBackward :: Int -> Int -> Int -> Int -> Float -> buf -> tok
+      -> IO buf
+  , opsZeros :: Int -> IO buf
+  , opsLength :: buf -> Int
+  , opsTokenCount :: tok -> Int
+  , opsFree :: buf -> IO ()
+  , opsReadSlice :: Int -> Int -> buf -> IO buf
+  , opsWriteSlice :: Int -> buf -> buf -> IO buf
+  , opsGatherChunk :: Int -> Int -> Int -> Int -> buf -> IO buf
+  , opsPutChunk :: Int -> Int -> Int -> Int -> buf -> buf -> IO buf
   }
 
-data FeedForwardResult = FeedForwardResult
-  { ffOutput :: ![Float]
-  , ffXBar :: ![Float]
-  , ffGainBar :: ![Float]
-  , ffWgateBar :: ![Float]
-  , ffWupBar :: ![Float]
-  , ffWdownBar :: ![Float]
+data FeedForwardResult buf = FeedForwardResult
+  { ffOutput :: !buf
+  , ffXBar :: !buf
+  , ffGainBar :: !buf
+  , ffWgateBar :: !buf
+  , ffWupBar :: !buf
+  , ffWdownBar :: !buf
   }
 
-data SoftmaxAttentionResult = SoftmaxAttentionResult
-  { softmaxOutput :: ![Float]
-  , softmaxQBar :: ![Float]
-  , softmaxKBar :: ![Float]
-  , softmaxVBar :: ![Float]
+data SoftmaxAttentionResult buf = SoftmaxAttentionResult
+  { softmaxOutput :: !buf
+  , softmaxQBar :: !buf
+  , softmaxKBar :: !buf
+  , softmaxVBar :: !buf
   }
 
-data SoftmaxAttentionSubBlockResult = SoftmaxAttentionSubBlockResult
-  { softmaxBlockOutput :: ![Float]
-  , softmaxBlockXBar :: ![Float]
-  , softmaxBlockGainBar :: ![Float]
-  , softmaxBlockWqBar :: ![Float]
-  , softmaxBlockWkBar :: ![Float]
-  , softmaxBlockWvBar :: ![Float]
-  , softmaxBlockWoBar :: ![Float]
+data SoftmaxAttentionSubBlockResult buf = SoftmaxAttentionSubBlockResult
+  { softmaxBlockOutput :: !buf
+  , softmaxBlockXBar :: !buf
+  , softmaxBlockGainBar :: !buf
+  , softmaxBlockWqBar :: !buf
+  , softmaxBlockWkBar :: !buf
+  , softmaxBlockWvBar :: !buf
+  , softmaxBlockWoBar :: !buf
   }
 
-data SoftmaxBlockWeights = SoftmaxBlockWeights
-  { softmaxRmsAtt :: ![Float]
-  , softmaxWq :: ![Float]
-  , softmaxWk :: ![Float]
-  , softmaxWv :: ![Float]
-  , softmaxWo :: ![Float]
-  , softmaxRmsFf :: ![Float]
-  , softmaxWgate :: ![Float]
-  , softmaxWup :: ![Float]
-  , softmaxWdown :: ![Float]
+data SoftmaxBlockWeights buf = SoftmaxBlockWeights
+  { softmaxRmsAtt :: !buf
+  , softmaxWq :: !buf
+  , softmaxWk :: !buf
+  , softmaxWv :: !buf
+  , softmaxWo :: !buf
+  , softmaxRmsFf :: !buf
+  , softmaxWgate :: !buf
+  , softmaxWup :: !buf
+  , softmaxWdown :: !buf
   }
 
-data SoftmaxBlockResult = SoftmaxBlockResult
-  { fullSoftmaxOutput :: ![Float]
-  , fullSoftmaxXBar :: ![Float]
-  , fullSoftmaxRmsAttBar :: ![Float]
-  , fullSoftmaxWqBar :: ![Float]
-  , fullSoftmaxWkBar :: ![Float]
-  , fullSoftmaxWvBar :: ![Float]
-  , fullSoftmaxWoBar :: ![Float]
-  , fullSoftmaxRmsFfBar :: ![Float]
-  , fullSoftmaxWgateBar :: ![Float]
-  , fullSoftmaxWupBar :: ![Float]
-  , fullSoftmaxWdownBar :: ![Float]
+data SoftmaxBlockResult buf = SoftmaxBlockResult
+  { fullSoftmaxOutput :: !buf
+  , fullSoftmaxXBar :: !buf
+  , fullSoftmaxRmsAttBar :: !buf
+  , fullSoftmaxWqBar :: !buf
+  , fullSoftmaxWkBar :: !buf
+  , fullSoftmaxWvBar :: !buf
+  , fullSoftmaxWoBar :: !buf
+  , fullSoftmaxRmsFfBar :: !buf
+  , fullSoftmaxWgateBar :: !buf
+  , fullSoftmaxWupBar :: !buf
+  , fullSoftmaxWdownBar :: !buf
   }
 
-data GlaAttentionResult = GlaAttentionResult
-  { glaOutput :: ![Float]
-  , glaQBar :: ![Float]
-  , glaKBar :: ![Float]
-  , glaVBar :: ![Float]
-  , glaGateBar :: ![Float]
+data GlaAttentionResult buf = GlaAttentionResult
+  { glaOutput :: !buf
+  , glaQBar :: !buf
+  , glaKBar :: !buf
+  , glaVBar :: !buf
+  , glaGateBar :: !buf
   }
 
-data GlaAttentionSubBlockResult = GlaAttentionSubBlockResult
-  { glaBlockAttentionOutput :: ![Float]
-  , glaBlockAttentionXBar :: ![Float]
-  , glaBlockAttentionRmsBar :: ![Float]
-  , glaBlockAttentionWqBar :: ![Float]
-  , glaBlockAttentionWkBar :: ![Float]
-  , glaBlockAttentionWvBar :: ![Float]
-  , glaBlockAttentionWoBar :: ![Float]
-  , glaBlockAttentionWalphaBar :: ![Float]
+data GlaAttentionSubBlockResult buf = GlaAttentionSubBlockResult
+  { glaBlockAttentionOutput :: !buf
+  , glaBlockAttentionXBar :: !buf
+  , glaBlockAttentionRmsBar :: !buf
+  , glaBlockAttentionWqBar :: !buf
+  , glaBlockAttentionWkBar :: !buf
+  , glaBlockAttentionWvBar :: !buf
+  , glaBlockAttentionWoBar :: !buf
+  , glaBlockAttentionWalphaBar :: !buf
   }
 
-data GlaBlockWeights = GlaBlockWeights
-  { glaRmsAtt :: ![Float]
-  , glaWq :: ![Float]
-  , glaWk :: ![Float]
-  , glaWv :: ![Float]
-  , glaWo :: ![Float]
-  , glaWalpha :: ![Float]
-  , glaRmsFf :: ![Float]
-  , glaWgate :: ![Float]
-  , glaWup :: ![Float]
-  , glaWdown :: ![Float]
+data GlaBlockWeights buf = GlaBlockWeights
+  { glaRmsAtt :: !buf
+  , glaWq :: !buf
+  , glaWk :: !buf
+  , glaWv :: !buf
+  , glaWo :: !buf
+  , glaWalpha :: !buf
+  , glaRmsFf :: !buf
+  , glaWgate :: !buf
+  , glaWup :: !buf
+  , glaWdown :: !buf
   }
 
-data GlaBlockResult = GlaBlockResult
-  { fullGlaOutput :: ![Float]
-  , fullGlaXBar :: ![Float]
-  , fullGlaRmsAttBar :: ![Float]
-  , fullGlaWqBar :: ![Float]
-  , fullGlaWkBar :: ![Float]
-  , fullGlaWvBar :: ![Float]
-  , fullGlaWoBar :: ![Float]
-  , fullGlaWalphaBar :: ![Float]
-  , fullGlaRmsFfBar :: ![Float]
-  , fullGlaWgateBar :: ![Float]
-  , fullGlaWupBar :: ![Float]
-  , fullGlaWdownBar :: ![Float]
+data GlaBlockResult buf = GlaBlockResult
+  { fullGlaOutput :: !buf
+  , fullGlaXBar :: !buf
+  , fullGlaRmsAttBar :: !buf
+  , fullGlaWqBar :: !buf
+  , fullGlaWkBar :: !buf
+  , fullGlaWvBar :: !buf
+  , fullGlaWoBar :: !buf
+  , fullGlaWalphaBar :: !buf
+  , fullGlaRmsFfBar :: !buf
+  , fullGlaWgateBar :: !buf
+  , fullGlaWupBar :: !buf
+  , fullGlaWdownBar :: !buf
   }
 
-data LayerWeights
-  = GlaLayerWeights !GlaBlockWeights
-  | SoftmaxLayerWeights !SoftmaxBlockWeights
+data LayerWeights buf
+  = GlaLayerWeights !(GlaBlockWeights buf)
+  | SoftmaxLayerWeights !(SoftmaxBlockWeights buf)
 
 feedForwardDecomposed
-  :: PieceOps
+  :: PieceOps buf tok
   -> Int
   -> Int
   -> Int
-  -> [Float]
-  -> [Float]
-  -> [Float]
-  -> [Float]
-  -> [Float]
-  -> [Float]
-  -> IO FeedForwardResult
+  -> buf
+  -> buf
+  -> buf
+  -> buf
+  -> buf
+  -> buf
+  -> IO (FeedForwardResult buf)
 feedForwardDecomposed ops rows d f x gain wgate wup wdown outputBar = do
   normalized <- opsRmsForward ops rows d x gain
   gate <- opsDenseForward ops rows d f normalized wgate
@@ -213,16 +230,16 @@ feedForwardDecomposed ops rows d f x gain wgate wup wdown outputBar = do
   pure (FeedForwardResult output xBar gainBar wgateBar wupBar wdownBar)
 
 softmaxAttentionDecomposed
-  :: PieceOps
+  :: PieceOps buf tok
   -> Int
   -> Int
   -> Int
   -> Int
-  -> [Float]
-  -> [Float]
-  -> [Float]
-  -> [Float]
-  -> IO SoftmaxAttentionResult
+  -> buf
+  -> buf
+  -> buf
+  -> buf
+  -> IO (SoftmaxAttentionResult buf)
 softmaxAttentionDecomposed ops batch n heads hd q k value outputBar = do
   let groups = batch * heads
       tokenCount = batch * n * heads * hd
@@ -243,29 +260,29 @@ softmaxAttentionDecomposed ops batch n heads hd q k value outputBar = do
   qBar <- opsSplitHeadsBackward ops batch n heads hd qHeadsBar
   kBar <- opsSplitHeadsBackward ops batch n heads hd kHeadsBar
   valueBar <- opsSplitHeadsBackward ops batch n heads hd valueHeadsBar
-  unless (all (== tokenCount) (map length [output, qBar, kBar, valueBar])
-    && length scores == scoreCount) $
+  unless (all (== tokenCount) (map (opsLength ops) [output, qBar, kBar, valueBar])
+    && opsLength ops scores == scoreCount) $
     ioError (userError "decomposed softmax attention produced an invalid buffer length")
   pure (SoftmaxAttentionResult output qBar kBar valueBar)
 
 softmaxAttentionSubBlockDecomposed
-  :: PieceOps
+  :: PieceOps buf tok
   -> Int
   -> Int
   -> Int
   -> Int
-  -> [Float]
-  -> [Float]
-  -> [Float]
-  -> [Float]
-  -> [Float]
-  -> [Float]
-  -> [Float]
-  -> IO SoftmaxAttentionSubBlockResult
+  -> buf
+  -> buf
+  -> buf
+  -> buf
+  -> buf
+  -> buf
+  -> buf
+  -> IO (SoftmaxAttentionSubBlockResult buf)
 softmaxAttentionSubBlockDecomposed ops batch n heads hd x gain wq wk wv wo outputBar = do
   let d = heads * hd
       rows = batch * n
-      zeroAttentionBar = replicate (rows * d) 0
+  zeroAttentionBar <- opsZeros ops (rows * d)
   normalized <- opsRmsForward ops rows d x gain
   q <- opsDenseForward ops rows d d normalized wq
   k <- opsDenseForward ops rows d d normalized wk
@@ -290,20 +307,20 @@ softmaxAttentionSubBlockDecomposed ops batch n heads hd x gain wq wk wv wo outpu
   pure (SoftmaxAttentionSubBlockResult output xBar gainBar wqBar wkBar wvBar woBar)
 
 softmaxBlockDecomposed
-  :: PieceOps
+  :: PieceOps buf tok
   -> Int
   -> Int
   -> Int
   -> Int
   -> Int
-  -> [Float]
-  -> SoftmaxBlockWeights
-  -> [Float]
-  -> IO SoftmaxBlockResult
+  -> buf
+  -> SoftmaxBlockWeights buf
+  -> buf
+  -> IO (SoftmaxBlockResult buf)
 softmaxBlockDecomposed ops batch n heads hd f x weights outputBar = do
   let d = heads * hd
       rows = batch * n
-      zeroBar = replicate (rows * d) 0
+  zeroBar <- opsZeros ops (rows * d)
   attentionForward <- softmaxAttentionSubBlockDecomposed ops batch n heads hd x
     (softmaxRmsAtt weights) (softmaxWq weights) (softmaxWk weights)
     (softmaxWv weights) (softmaxWo weights) zeroBar
@@ -327,18 +344,18 @@ softmaxBlockDecomposed ops batch n heads hd f x weights outputBar = do
     (ffWdownBar ff))
 
 glaAttentionDecomposed
-  :: PieceOps
+  :: PieceOps buf tok
   -> Int
   -> Int
   -> Int
   -> Int
   -> Int
-  -> [Float]
-  -> [Float]
-  -> [Float]
-  -> [Float]
-  -> [Float]
-  -> IO GlaAttentionResult
+  -> buf
+  -> buf
+  -> buf
+  -> buf
+  -> buf
+  -> IO (GlaAttentionResult buf)
 glaAttentionDecomposed ops batch n heads hd chunk q k value gateLogits outputBar = do
   unless (chunk > 0 && n > 0 && n `mod` chunk == 0) $
     ioError (userError "GLA chunk must be positive and divide sequence length")
@@ -348,7 +365,7 @@ glaAttentionDecomposed ops batch n heads hd chunk q k value gateLogits outputBar
       chunkElements = chunk * hd
       stateElements = hd * hd
       tokenCount = batch * n * heads * hd
-      zeroState = replicate (headGroups * stateElements) 0
+  zeroState <- opsZeros ops (headGroups * stateElements)
   qHeads <- opsSplitHeadsForward ops batch n heads hd q
   kHeads <- opsSplitHeadsForward ops batch n heads hd k
   valueHeads <- opsSplitHeadsForward ops batch n heads hd value
@@ -365,7 +382,7 @@ glaAttentionDecomposed ops batch n heads hd chunk q k value gateLogits outputBar
     ([], [], zeroState)
     [0 .. chunkCount - 1]
   let states = reverse statesReversed
-      inter = assembleChunks headGroups chunkCount chunkElements (reverse interReversed)
+  inter <- assembleChunksOps ops headGroups chunkCount chunkElements (reverse interReversed)
   attendedHeads <- opsAddForward ops inter intra
   output <- opsMergeHeadsForward ops batch n heads hd attendedHeads
   attendedHeadsBar <- opsMergeHeadsBackward ops batch n heads hd outputBar
@@ -373,15 +390,16 @@ glaAttentionDecomposed ops batch n heads hd chunk q k value gateLogits outputBar
   (qIntraBar, kIntraBar, vIntraBar, relIntraBar) <-
     opsGlaIntraBackward ops chunkGroups chunk hd
       qHeads kHeads valueHeads relcum intraBar
+  zeroStateBar <- opsZeros ops (headGroups * stateElements)
   (_, qScaledChunks, kScaledChunks, vInterChunks, decStateChunks) <- foldM
     (reverseChunk ops headGroups chunkCount chunk hd states qScaled kScaled
       valueHeads contributions dec interBar)
-    (zeroState, [], [], [], [])
+    (zeroStateBar, [], [], [], [])
     (reverse [0 .. chunkCount - 1])
-  let qScaledBar = assembleChunks headGroups chunkCount chunkElements qScaledChunks
-      kScaledBar = assembleChunks headGroups chunkCount chunkElements kScaledChunks
-      vInterBar = assembleChunks headGroups chunkCount chunkElements vInterChunks
-      decStateBar = assembleChunks headGroups chunkCount hd decStateChunks
+  qScaledBar <- assembleChunksOps ops headGroups chunkCount chunkElements qScaledChunks
+  kScaledBar <- assembleChunksOps ops headGroups chunkCount chunkElements kScaledChunks
+  vInterBar <- assembleChunksOps ops headGroups chunkCount chunkElements vInterChunks
+  decStateBar <- assembleChunksOps ops headGroups chunkCount hd decStateChunks
   (qDecayBar, kDecayBar, relDecayBar, decDecayBar) <-
     opsQkDecayBackward ops chunkGroups chunk hd qHeads kHeads relcum dec
       qScaledBar kScaledBar
@@ -395,40 +413,41 @@ glaAttentionDecomposed ops batch n heads hd chunk q k value gateLogits outputBar
   kBar <- opsSplitHeadsBackward ops batch n heads hd kHeadsBar
   valueBar <- opsSplitHeadsBackward ops batch n heads hd valueHeadsBar
   gateBar <- opsSplitHeadsBackward ops batch n heads hd gateHeadsBar
-  unless (all (== tokenCount) (map length [output, qBar, kBar, valueBar, gateBar])) $
+  unless (all (== tokenCount)
+      (map (opsLength ops) [output, qBar, kBar, valueBar, gateBar])) $
     ioError (userError "decomposed GLA attention produced an invalid buffer length")
   pure (GlaAttentionResult output qBar kBar valueBar gateBar)
   where
     forwardChunk headGroups chunkCount chunkElements stateElements
         qScaled contributions dec (states, inters, state) chunkIndex = do
-      let qChunk = gatherChunk headGroups chunkCount chunkElements chunkIndex qScaled
-          contribution = gatherChunk headGroups chunkCount stateElements chunkIndex contributions
-          decChunk = gatherChunk headGroups chunkCount hd chunkIndex dec
+      qChunk <- opsGatherChunk ops headGroups chunkCount chunkElements chunkIndex qScaled
+      contribution <- opsGatherChunk ops headGroups chunkCount stateElements chunkIndex contributions
+      decChunk <- opsGatherChunk ops headGroups chunkCount hd chunkIndex dec
       inter <- opsBatchedGemmForward ops NoTrans NoTrans headGroups chunk hd hd hd
         chunk hd qChunk state
       state' <- opsStateAdvanceForward ops headGroups hd state contribution decChunk
       pure (state : states, inter : inters, state')
 
 glaAttentionSubBlockDecomposed
-  :: PieceOps
+  :: PieceOps buf tok
   -> Int
   -> Int
   -> Int
   -> Int
   -> Int
-  -> [Float]
-  -> [Float]
-  -> [Float]
-  -> [Float]
-  -> [Float]
-  -> [Float]
-  -> [Float]
-  -> [Float]
-  -> IO GlaAttentionSubBlockResult
+  -> buf
+  -> buf
+  -> buf
+  -> buf
+  -> buf
+  -> buf
+  -> buf
+  -> buf
+  -> IO (GlaAttentionSubBlockResult buf)
 glaAttentionSubBlockDecomposed ops batch n heads hd chunk x gain wq wk wv wo walpha outputBar = do
   let d = heads * hd
       rows = batch * n
-      zeroAttentionBar = replicate (rows * d) 0
+  zeroAttentionBar <- opsZeros ops (rows * d)
   normalized <- opsRmsForward ops rows d x gain
   q0 <- opsDenseForward ops rows d d normalized wq
   k0 <- opsDenseForward ops rows d d normalized wk
@@ -462,21 +481,21 @@ glaAttentionSubBlockDecomposed ops batch n heads hd chunk x gain wq wk wv wo wal
     woBar walphaBar)
 
 glaBlockDecomposed
-  :: PieceOps
+  :: PieceOps buf tok
   -> Int
   -> Int
   -> Int
   -> Int
   -> Int
   -> Int
-  -> [Float]
-  -> GlaBlockWeights
-  -> [Float]
-  -> IO GlaBlockResult
+  -> buf
+  -> GlaBlockWeights buf
+  -> buf
+  -> IO (GlaBlockResult buf)
 glaBlockDecomposed ops batch n heads hd chunk f x weights outputBar = do
   let d = heads * hd
       rows = batch * n
-      zeroBar = replicate (rows * d) 0
+  zeroBar <- opsZeros ops (rows * d)
   attentionForward <- glaAttentionSubBlockDecomposed ops batch n heads hd chunk x
     (glaRmsAtt weights) (glaWq weights) (glaWk weights) (glaWv weights)
     (glaWo weights) (glaWalpha weights) zeroBar
@@ -501,14 +520,14 @@ glaBlockDecomposed ops batch n heads hd chunk f x weights outputBar = do
     (ffWdownBar ff))
 
 modelLossGradDecomposed
-  :: PieceOps
+  :: PieceOps buf tok
   -> Config
   -> Int
   -> Int
   -> Int
-  -> [Float]
-  -> [Int64]
-  -> IO (Float, [Float])
+  -> buf
+  -> tok
+  -> IO (Float, buf)
 modelLossGradDecomposed ops cfg chunk batch effectiveBatch params tokens = do
   _ <- either (ioError . userError) pure (validateConfig cfg)
   let n = contextSize cfg
@@ -517,9 +536,11 @@ modelLossGradDecomposed ops cfg chunk batch effectiveBatch params tokens = do
       heads = headCount cfg
       vocab = vocabSize cfg
       rows = batch * n
-  unless (length params == paramCount cfg && length tokens == rows) $
+  unless (opsLength ops params == paramCount cfg
+      && opsTokenCount ops tokens == rows) $
     ioError (userError "decomposed model input length mismatch")
-  (embedding, layers, finalRms) <- parseModelWeights cfg params
+  layout <- either (ioError . userError) pure (namedLayout cfg)
+  (embedding, layers, finalRms) <- parseModelWeights ops cfg layout params
   initial <- opsEmbeddingGather ops vocab d embedding tokens
   (inputsReversed, hidden) <- foldM
     (forwardLayer ops batch n heads (d `div` heads) chunk f)
@@ -532,22 +553,37 @@ modelLossGradDecomposed ops cfg chunk batch effectiveBatch params tokens = do
   (finalHiddenBar, embeddingOutputBar) <- opsDenseBackward ops rows d vocab
     finalHidden embedding logitsBar
   (hiddenBar, finalRmsBar) <- opsRmsBackward ops rows d hidden finalRms finalHiddenBar
-  (initialBar, layerGradients) <- foldM
+  (initialBar, namedBars) <- foldM
     (reverseLayer ops batch n heads (d `div` heads) chunk f)
     (hiddenBar, [])
-    (zip (reverse layers) inputsReversed)
+    (zip3 (reverse [0 .. layerCount cfg - 1]) (reverse layers) inputsReversed)
   embeddingInputBar <- opsEmbeddingBackward ops vocab d tokens initialBar
   embeddingBar <- opsAddForward ops embeddingOutputBar embeddingInputBar
-  let gradient = embeddingBar ++ concat layerGradients ++ finalRmsBar
-  unless (length gradient == paramCount cfg) $
+  emptyGradient <- opsZeros ops (paramCount cfg)
+  gradient <- foldM (writeNamedSlice ops layout) emptyGradient
+    (("embedding", embeddingBar) : concat namedBars ++ [("final_rms", finalRmsBar)])
+  unless (opsLength ops gradient == paramCount cfg) $
     ioError (userError "decomposed model gradient length mismatch")
   pure (loss, gradient)
 
+-- Writes one named parameter cotangent into the flat gradient vector at its
+-- layout offset, so gradient assembly never concatenates on the host.
+writeNamedSlice
+  :: PieceOps buf tok -> [Slice] -> buf -> (String, buf) -> IO buf
+writeNamedSlice ops layout gradient (name, values) =
+  case filter ((== name) . sliceName) layout of
+    [slice] -> do
+      unless (opsLength ops values == sliceLength slice) $
+        ioError (userError ("gradient slice length mismatch for " ++ name))
+      opsWriteSlice ops (sliceOffset slice) gradient values
+    [] -> ioError (userError ("missing parameter slice: " ++ name))
+    _ -> ioError (userError ("duplicate parameter slice: " ++ name))
+
 forwardLayer
-  :: PieceOps -> Int -> Int -> Int -> Int -> Int -> Int
-  -> ([[Float]], [Float]) -> LayerWeights -> IO ([[Float]], [Float])
+  :: PieceOps buf tok -> Int -> Int -> Int -> Int -> Int -> Int
+  -> ([buf], buf) -> LayerWeights buf -> IO ([buf], buf)
 forwardLayer ops batch n heads hd chunk f (inputs, x) layer = do
-  let zeroBar = replicate (length x) 0
+  zeroBar <- opsZeros ops (opsLength ops x)
   output <- case layer of
     GlaLayerWeights weights -> fullGlaOutput <$>
       glaBlockDecomposed ops batch n heads hd chunk f x weights zeroBar
@@ -556,57 +592,68 @@ forwardLayer ops batch n heads hd chunk f (inputs, x) layer = do
   pure (x : inputs, output)
 
 reverseLayer
-  :: PieceOps -> Int -> Int -> Int -> Int -> Int -> Int
-  -> ([Float], [[Float]]) -> (LayerWeights, [Float]) -> IO ([Float], [[Float]])
-reverseLayer ops batch n heads hd chunk f (outputBar, gradients) (layer, x) =
+  :: PieceOps buf tok -> Int -> Int -> Int -> Int -> Int -> Int
+  -> (buf, [[(String, buf)]]) -> (Int, LayerWeights buf, buf)
+  -> IO (buf, [[(String, buf)]])
+reverseLayer ops batch n heads hd chunk f (outputBar, gradients)
+    (layerIndex, layer, x) =
   case layer of
     GlaLayerWeights weights -> do
       result <- glaBlockDecomposed ops batch n heads hd chunk f x weights outputBar
-      pure (fullGlaXBar result, glaGradient result : gradients)
+      pure (fullGlaXBar result, glaNamedGradient layerIndex result : gradients)
     SoftmaxLayerWeights weights -> do
       result <- softmaxBlockDecomposed ops batch n heads hd f x weights outputBar
-      pure (fullSoftmaxXBar result, softmaxGradient result : gradients)
+      pure (fullSoftmaxXBar result, softmaxNamedGradient layerIndex result : gradients)
 
-glaGradient :: GlaBlockResult -> [Float]
-glaGradient result = concat
-  [ fullGlaRmsAttBar result
-  , fullGlaWqBar result
-  , fullGlaWkBar result
-  , fullGlaWvBar result
-  , fullGlaWoBar result
-  , fullGlaWalphaBar result
-  , fullGlaRmsFfBar result
-  , fullGlaWgateBar result
-  , fullGlaWupBar result
-  , fullGlaWdownBar result
+glaNamedGradient :: Int -> GlaBlockResult buf -> [(String, buf)]
+glaNamedGradient layer result =
+  [ (prefix ++ "rms_att", fullGlaRmsAttBar result)
+  , (prefix ++ "wq", fullGlaWqBar result)
+  , (prefix ++ "wk", fullGlaWkBar result)
+  , (prefix ++ "wv", fullGlaWvBar result)
+  , (prefix ++ "wo", fullGlaWoBar result)
+  , (prefix ++ "walpha", fullGlaWalphaBar result)
+  , (prefix ++ "rms_ff", fullGlaRmsFfBar result)
+  , (prefix ++ "wgate", fullGlaWgateBar result)
+  , (prefix ++ "wup", fullGlaWupBar result)
+  , (prefix ++ "wdown", fullGlaWdownBar result)
   ]
+  where
+    prefix = "blocks." ++ show layer ++ "."
 
-softmaxGradient :: SoftmaxBlockResult -> [Float]
-softmaxGradient result = concat
-  [ fullSoftmaxRmsAttBar result
-  , fullSoftmaxWqBar result
-  , fullSoftmaxWkBar result
-  , fullSoftmaxWvBar result
-  , fullSoftmaxWoBar result
-  , fullSoftmaxRmsFfBar result
-  , fullSoftmaxWgateBar result
-  , fullSoftmaxWupBar result
-  , fullSoftmaxWdownBar result
+softmaxNamedGradient :: Int -> SoftmaxBlockResult buf -> [(String, buf)]
+softmaxNamedGradient layer result =
+  [ (prefix ++ "rms_att", fullSoftmaxRmsAttBar result)
+  , (prefix ++ "wq", fullSoftmaxWqBar result)
+  , (prefix ++ "wk", fullSoftmaxWkBar result)
+  , (prefix ++ "wv", fullSoftmaxWvBar result)
+  , (prefix ++ "wo", fullSoftmaxWoBar result)
+  , (prefix ++ "rms_ff", fullSoftmaxRmsFfBar result)
+  , (prefix ++ "wgate", fullSoftmaxWgateBar result)
+  , (prefix ++ "wup", fullSoftmaxWupBar result)
+  , (prefix ++ "wdown", fullSoftmaxWdownBar result)
   ]
+  where
+    prefix = "blocks." ++ show layer ++ "."
 
-parseModelWeights :: Config -> [Float] -> IO ([Float], [LayerWeights], [Float])
-parseModelWeights cfg params = do
-  layout <- either (ioError . userError) pure (namedLayout cfg)
-  embedding <- weight "embedding" layout
-  layers <- mapM (layerWeights layout) [0 .. layerCount cfg - 1]
-  finalRms <- weight "final_rms" layout
+parseModelWeights
+  :: PieceOps buf tok -> Config -> [Slice] -> buf
+  -> IO (buf, [LayerWeights buf], buf)
+parseModelWeights ops cfg layout params = do
+  embedding <- weight "embedding"
+  layers <- mapM layerWeights [0 .. layerCount cfg - 1]
+  finalRms <- weight "final_rms"
   pure (embedding, layers, finalRms)
   where
-    weight name layout = case filter ((== name) . sliceName) layout of
-      [slice] -> either (ioError . userError) pure (sliceValues slice params)
+    weight name = case filter ((== name) . sliceName) layout of
+      [slice] -> do
+        unless (sliceOffset slice >= 0 && sliceLength slice >= 0
+            && sliceOffset slice + sliceLength slice <= opsLength ops params) $
+          ioError (userError ("parameter vector too short for " ++ name))
+        opsReadSlice ops (sliceOffset slice) (sliceLength slice) params
       [] -> ioError (userError ("missing parameter slice: " ++ name))
       _ -> ioError (userError ("duplicate parameter slice: " ++ name))
-    layerWeights layout layer = do
+    layerWeights layer = do
       rmsAtt <- get "rms_att"
       wq <- get "wq"
       wk <- get "wk"
@@ -624,36 +671,36 @@ parseModelWeights cfg params = do
           pure (GlaLayerWeights
             (GlaBlockWeights rmsAtt wq wk wv wo walpha rmsFf wgate wup wdown))
       where
-        get suffix = weight ("blocks." ++ show layer ++ "." ++ suffix) layout
+        get suffix = weight ("blocks." ++ show layer ++ "." ++ suffix)
 
 reverseChunk
-  :: PieceOps
+  :: PieceOps buf tok
   -> Int
   -> Int
   -> Int
   -> Int
-  -> [[Float]]
-  -> [Float]
-  -> [Float]
-  -> [Float]
-  -> [Float]
-  -> [Float]
-  -> [Float]
-  -> ([Float], [[Float]], [[Float]], [[Float]], [[Float]])
+  -> [buf]
+  -> buf
+  -> buf
+  -> buf
+  -> buf
+  -> buf
+  -> buf
+  -> (buf, [buf], [buf], [buf], [buf])
   -> Int
-  -> IO ([Float], [[Float]], [[Float]], [[Float]], [[Float]])
+  -> IO (buf, [buf], [buf], [buf], [buf])
 reverseChunk ops headGroups chunkCount chunk hd states qScaled kScaled values
     contributions dec interBar
     (futureStateBar, qBars, kBars, vBars, decBars) chunkIndex = do
   state <- indexList "GLA state tape" states chunkIndex
   let chunkElements = chunk * hd
       stateElements = hd * hd
-      qChunk = gatherChunk headGroups chunkCount chunkElements chunkIndex qScaled
-      kChunk = gatherChunk headGroups chunkCount chunkElements chunkIndex kScaled
-      valueChunk = gatherChunk headGroups chunkCount chunkElements chunkIndex values
-      contribution = gatherChunk headGroups chunkCount stateElements chunkIndex contributions
-      decChunk = gatherChunk headGroups chunkCount hd chunkIndex dec
-      interChunkBar = gatherChunk headGroups chunkCount chunkElements chunkIndex interBar
+  qChunk <- opsGatherChunk ops headGroups chunkCount chunkElements chunkIndex qScaled
+  kChunk <- opsGatherChunk ops headGroups chunkCount chunkElements chunkIndex kScaled
+  valueChunk <- opsGatherChunk ops headGroups chunkCount chunkElements chunkIndex values
+  contribution <- opsGatherChunk ops headGroups chunkCount stateElements chunkIndex contributions
+  decChunk <- opsGatherChunk ops headGroups chunkCount hd chunkIndex dec
+  interChunkBar <- opsGatherChunk ops headGroups chunkCount chunkElements chunkIndex interBar
   (qChunkBar, stateInterBar) <- opsBatchedGemmBackward ops NoTrans NoTrans
     headGroups chunk hd hd hd chunk hd qChunk state interChunkBar
   (stateRecurrenceBar, contributionBar, decBar) <-
@@ -664,6 +711,28 @@ reverseChunk ops headGroups chunkCount chunk hd states qScaled kScaled values
   pure (stateBar, qChunkBar : qBars, kChunkBar : kBars,
     valueChunkBar : vBars, decBar : decBars)
 
+-- Reassembles per-chunk buffers into the grouped layout via opsPutChunk; the
+-- inverse of opsGatherChunk applied at every chunk index.
+assembleChunksOps
+  :: PieceOps buf tok -> Int -> Int -> Int -> [buf] -> IO buf
+assembleChunksOps ops groups chunkCount elements chunks = do
+  unless (length chunks == chunkCount) $
+    ioError (userError "chunk assembly received a wrong chunk count")
+  initial <- opsZeros ops (groups * chunkCount * elements)
+  foldM
+    (\assembled (chunkIndex, chunkValues) ->
+      opsPutChunk ops groups chunkCount elements chunkIndex assembled chunkValues)
+    initial
+    (zip [0 ..] chunks)
+
+indexList :: String -> [a] -> Int -> IO a
+indexList label values index = case drop index values of
+  value : _ -> pure value
+  [] -> ioError (userError (label ++ " index out of bounds"))
+
+-- Pure list reference implementations of the data-movement ops. They are the
+-- CPU instantiation of the buffer contract and the conformance oracle for the
+-- corresponding Futhark entries.
 gatherChunk :: Int -> Int -> Int -> Int -> [a] -> [a]
 gatherChunk groups chunkCount elements chunkIndex values = concat
   [ take elements (drop ((group * chunkCount + chunkIndex) * elements) values)
@@ -679,10 +748,26 @@ assembleChunks groups chunkCount elements chunks = concat
   | group <- [0 .. groups - 1]
   ]
 
-indexList :: String -> [a] -> Int -> IO a
-indexList label values index = case drop index values of
-  value : _ -> pure value
-  [] -> ioError (userError (label ++ " index out of bounds"))
+putChunkList :: Int -> Int -> Int -> Int -> [a] -> [a] -> [a]
+putChunkList groups chunkCount elements chunkIndex destination source = concat
+  [ if position == chunkIndex
+      then take elements (drop (group * elements) source)
+      else segment group position
+  | group <- [0 .. groups - 1]
+  , position <- [0 .. chunkCount - 1]
+  ]
+  where
+    segment group position =
+      take elements (drop ((group * chunkCount + position) * elements) destination)
+
+readSliceList :: Int -> Int -> [a] -> [a]
+readSliceList offset count = take count . drop offset
+
+writeSliceList :: Int -> [a] -> [a] -> [a]
+writeSliceList offset destination source =
+  take offset destination
+    ++ source
+    ++ drop (offset + length source) destination
 
 denseForwardList :: Int -> Int -> Int -> [Float] -> [Float] -> IO [Float]
 denseForwardList rows inputDim outputDim x weights = do
