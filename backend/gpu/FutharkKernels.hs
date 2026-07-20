@@ -38,13 +38,16 @@ module FutharkKernels
   , adamwStep
   , lastLogits
   , decodeStep
+  , synchronize
+  , gemmFlopsSinceReset
+  , resetGemmFlopCount
   ) where
 
 import Control.Exception (bracket, throwIO)
 import Control.Monad (forM_, when)
 import Data.Int (Int64)
 import Data.List (isInfixOf)
-import Data.Word (Word8)
+import Data.Word (Word64, Word8)
 import Foreign
 import Foreign.C.String (CString, peekCString, withCString)
 import Foreign.C.Types
@@ -336,6 +339,17 @@ decodeStep (Context ctx) cfg ctxSize position token
           <*> (F32Array <$> peek outGla)
           <*> (F32Array <$> peek outK)
           <*> (F32Array <$> peek outV)
+
+-- Bench support: the fused backend synchronizes its one queue and executes
+-- no cuBLAS GEMMs, so its GEMM-FLOP counter is always zero (MFU: n/a).
+synchronize :: Context -> IO ()
+synchronize (Context ctx) = check ctx "synchronize" =<< c_context_sync ctx
+
+gemmFlopsSinceReset :: Context -> IO Word64
+gemmFlopsSinceReset _ = pure 0
+
+resetGemmFlopCount :: Context -> IO ()
+resetGemmFlopCount _ = pure ()
 
 checkedPtr :: Ptr CContext -> String -> IO (Ptr a) -> (Ptr a -> b) -> IO b
 checkedPtr ctx label acquire wrap = do

@@ -20,6 +20,7 @@ import FormalTransformer.Layout
 import FormalTransformer.Optimizer
 import FormalTransformer.Tokenizer
 import FutharkKernels
+import GHC.Clock (getMonotonicTimeNSec)
 import System.Directory (doesFileExist)
 import System.Environment (getArgs, lookupEnv, setEnv)
 import System.Exit (die)
@@ -62,7 +63,9 @@ main = do
     ["generate", checkpoint, text] -> generate checkpoint text 128
     ["generate", checkpoint, text, budgetText] -> parseNonnegative "MAXTOKENS" budgetText >>= generate checkpoint text
     ["check-checkpoint", checkpoint] -> checkCheckpoint checkpoint
-    _ -> die "usage: formal-transformer-gpu inspect [tiny|small|bpe10m|gla-small|gla] | warm-context [tiny|small|bpe10m|gla-small|gla] | train CORPUS CHECKPOINT (STEPS|epoch) [tiny|small|bpe10m|gla-small|gla] | train-segment CORPUS CHECKPOINT GLOBAL_TOTAL START END DOCUMENT_OFFSET GLOBAL_ID EXPECTED_CORPUS_ID SIZE | generate CHECKPOINT TEXT [MAXTOKENS] | check-checkpoint CHECKPOINT"
+    ["bench", corpus] -> bench corpus tinyPreset
+    ["bench", corpus, size] -> chooseConfig size >>= bench corpus
+    _ -> die "usage: formal-transformer-gpu inspect [tiny|small|bpe10m|gla-small|gla] | warm-context [tiny|small|bpe10m|gla-small|gla] | train CORPUS CHECKPOINT (STEPS|epoch) [tiny|small|bpe10m|gla-small|gla] | train-segment CORPUS CHECKPOINT GLOBAL_TOTAL START END DOCUMENT_OFFSET GLOBAL_ID EXPECTED_CORPUS_ID SIZE | generate CHECKPOINT TEXT [MAXTOKENS] | check-checkpoint CHECKPOINT | bench CORPUS [tiny|small|bpe10m|gla-small|gla]"
 
 chooseConfig :: String -> IO Config
 chooseConfig "tiny" = pure tinyPreset
@@ -250,6 +253,104 @@ train corpusPath checkpointPath mode cfg = do
       saveSnapshot target rngFinal (progressBestValidationLoss progressFinal) paramsFinal mFinal vFinal
       logTraining ("saved checkpoint at completed step " ++ show target ++ ": " ++ checkpointPath)
       mapM_ (freeF32 ctx) [paramsFinal, mFinal, vFinal]
+
+-- Synchronized step-time benchmark per the measurement contract: every
+-- measured interval starts with both device queues drained (the previous
+-- step ends in synchronize) and ends after its own synchronize, so no
+-- interval includes pending work from before its start or omits work queued
+-- before its end. Reports median/p95/mean over BENCH_STEPS post-warmup
+-- steps, tokens/s, and GEMM-only FLOP throughput (MFU against
+-- BENCH_PEAK_TFLOPS when given; the fused backend reports no GEMM FLOPs).
+bench :: FilePath -> Config -> IO ()
+bench corpusPath cfg = do
+  batchSize <- positiveEnv "TRAIN_BATCH" 1
+  microSize <- positiveEnv "MICRO_BATCH" batchSize
+  when (microSize > batchSize) (die "MICRO_BATCH must not exceed TRAIN_BATCH")
+  warmupSteps <- positiveEnv "BENCH_WARMUP" 10
+  benchSteps <- positiveEnv "BENCH_STEPS" 100
+  clipNorm <- positiveDoubleEnv "GRAD_CLIP" 1
+  numerics <- backendNumerics
+  peakTflops <- ((>>= readMaybe) <$> lookupEnv "BENCH_PEAK_TFLOPS") :: IO (Maybe Double)
+  corpus <- loadCorpus corpusPath >>= either die pure
+  corpusVocab <- maybe (die "corpus has an unsupported tokenizer identity") pure
+    (tokenizerVocabularyFromIdentity (corpusTokenizerIdentity corpus))
+  when (corpusVocab /= vocabSize cfg) (die
+    ("corpus tokenizer vocabulary " ++ show corpusVocab
+      ++ " does not match model vocabulary " ++ show (vocabSize cfg)))
+  split <- either die pure (trainingSequencesFrom 0 cfg (corpusDocuments corpus))
+  when (null (training split)) (die "corpus yields no training windows")
+  let total = warmupSteps + benchSteps
+      sampler = randomSampler batchSize (training split)
+      optCfg = optimizerFor total
+      identity = Identity (modelId cfg) (corpusTokenizerIdentity corpus)
+        (corpusDatasetIdentity corpus)
+      fresh = newCheckpoint cfg identity optCfg clipNorm numerics
+      state0 = checkpointOptimizer fresh
+      n = paramCount cfg
+  mask <- either die pure (decayMask cfg)
+  gpuCfg <- gpuConfigIO cfg >>= either die pure
+  logTraining ("bench config=" ++ show cfg
+    ++ " batch=" ++ show batchSize
+    ++ " micro=" ++ show microSize
+    ++ " numerics=" ++ show numerics
+    ++ " grad_clip=" ++ show clipNorm
+    ++ " warmup=" ++ show warmupSteps
+    ++ " steps=" ++ show benchSteps)
+  withContext $ \ctx -> do
+    params <- uploadF32 ctx (map realToFrac (checkpointParameters fresh))
+    m <- uploadF32 ctx (map realToFrac (firstMoment state0))
+    v <- uploadF32 ctx (map realToFrac (secondMoment state0))
+    withBool ctx mask $ \deviceMask -> do
+      let o field = realToFrac (field optCfg)
+          benchStep step (rng, ps, ms, vs) = do
+            let (batch, rng') = sampler step rng
+                lr = realToFrac (learningRate optCfg step)
+            when (null batch) (die "internal error: sampled an empty training batch")
+            (loss, gradient) <- microLossGrad ctx gpuCfg n microSize batch ps
+            (gradientNorm, clipped) <- bracket (pure gradient) (freeF32 ctx) $ \g ->
+              clipGlobalNorm ctx clipNorm g
+            (ps', ms', vs') <- bracket (pure clipped) (freeF32 ctx) $ \g ->
+              adamwStep ctx (fromIntegral step) lr (o beta1) (o beta2)
+                (o adamEpsilon) (o weightDecay) ps g ms vs deviceMask
+            mapM_ (freeF32 ctx) [ps, ms, vs]
+            synchronize ctx
+            loss `seq` gradientNorm `seq` pure (rng', ps', ms', vs')
+          measure step state durations
+            | step > total = pure (state, durations)
+            | otherwise = do
+                when (step == warmupSteps + 1) (resetGemmFlopCount ctx)
+                startNs <- getMonotonicTimeNSec
+                state' <- benchStep step state
+                endNs <- getMonotonicTimeNSec
+                measure (step + 1) state'
+                  (if step > warmupSteps
+                    then (endNs - startNs) : durations
+                    else durations)
+      ((_, psF, msF, vsF), durationsRev) <-
+        measure 1 (checkpointPRNG fresh, params, m, v) []
+      flops <- gemmFlopsSinceReset ctx
+      mapM_ (freeF32 ctx) [psF, msF, vsF]
+      let seconds = map ((/ 1e9) . fromIntegral) (reverse durationsRev) :: [Double]
+          sorted = sortOn id seconds
+          percentile p = sorted !!
+            min (length sorted - 1)
+              (max 0 (ceiling (p / 100 * fromIntegral (length sorted) :: Double) - 1))
+          totalSeconds = sum seconds
+          targetsPerStep = batchSize * (contextSize cfg - 1)
+          tokensPerSecond =
+            fromIntegral (benchSteps * targetsPerStep) / totalSeconds :: Double
+          flopsPerStep = fromIntegral flops / fromIntegral benchSteps :: Double
+          gemmTflops = fromIntegral flops / totalSeconds / 1e12 :: Double
+      printf "bench steps=%d median=%.6fs p95=%.6fs mean=%.6fs\n"
+        benchSteps (percentile 50) (percentile 95) (totalSeconds / fromIntegral benchSteps)
+      printf "bench target_tokens_per_second=%.1f\n" tokensPerSecond
+      if flops == 0
+        then putStrLn "bench gemm_flops: none counted (fused backend; MFU n/a)"
+        else case peakTflops of
+          Just peak -> printf "bench gemm_flops_per_step=%.4g gemm_tflops=%.4f mfu=%.4f%%\n"
+            flopsPerStep gemmTflops (100 * gemmTflops / peak)
+          Nothing -> printf "bench gemm_flops_per_step=%.4g gemm_tflops=%.4f (set BENCH_PEAK_TFLOPS for MFU)\n"
+            flopsPerStep gemmTflops
 
 -- Given the one-based step and the PRNG, a sampler yields that step's
 -- batch.  The random sampler threads the PRNG; the epoch sampler is a

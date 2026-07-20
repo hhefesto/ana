@@ -32,12 +32,16 @@ module FutharkKernels
   , adamwStep
   , lastLogits
   , decodeStep
+  , synchronize
+  , gemmFlopsSinceReset
+  , resetGemmFlopCount
   ) where
 
 import Control.Exception (bracket, onException)
 import Control.Monad (unless)
 import CudaDeviceBlas
 import Data.Int (Int64)
+import Data.Word (Word64)
 import Decomposed (PieceOps (..), modelLossGradDecomposed)
 import Foreign.Ptr (Ptr)
 import FormalTransformer.Artifact (Numerics (..))
@@ -56,6 +60,8 @@ import ProductionPieces
   , popArenaKeeping
   , productionPieceOpsWith
   , pushArena
+  , syncBlasIfDirty
+  , syncFutharkIfDirty
   , uploadBool
   , uploadI64
   , withProductionContext
@@ -247,6 +253,19 @@ decodeStep _ _ _ _ _ _ _ _ _ = unsupported "decodeStep"
 unsupported :: String -> IO a
 unsupported operation = ioError . userError $
   "GEMM backend does not support generation (" ++ operation ++ ")"
+
+-- Completes all pending device work on both runtimes; the bench timing
+-- boundary.
+synchronize :: Context -> IO ()
+synchronize ctx = do
+  syncBlasIfDirty ctx
+  syncFutharkIfDirty ctx
+
+gemmFlopsSinceReset :: Context -> IO Word64
+gemmFlopsSinceReset _ = readGemmFlops
+
+resetGemmFlopCount :: Context -> IO ()
+resetGemmFlopCount _ = resetGemmFlops
 
 batchOf :: I64Array -> IO (Int, Int, DevI64)
 batchOf (I64Array [rows, cols] tokens) = pure (rows, cols, tokens)
