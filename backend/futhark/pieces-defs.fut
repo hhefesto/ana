@@ -182,3 +182,42 @@ def piece_merge_heads [batch] [n] [h] [hd]
 def piece_add [count]
     (inputs: ([count]f32, [count]f32)): [count]f32 =
   let (x, y) = inputs in map2 (+) x y
+
+-- Pure data movement for the device-resident host traversal: parameter-slice
+-- reads/writes against the flat vector and per-chunk gather/scatter in the
+-- grouped [groups][chunk_count][elements] layout.  No VJPs: these never carry
+-- derivatives of their own.
+
+def piece_slice_read [n] (offset: i64) (count: i64)
+    (source: [n]f32): [count]f32 =
+  let checked = assert (offset >= 0 && count >= 0 && offset + count <= n) source
+  in tabulate count (\index -> checked[offset + index])
+
+def piece_slice_write [n] [m] (offset: i64)
+    (destination: [n]f32) (source: [m]f32): [n]f32 =
+  let checked = assert (offset >= 0 && offset + m <= n) destination
+  in tabulate n (\index ->
+    if index >= offset && index < offset + m
+    then source[index - offset]
+    else checked[index])
+
+def piece_chunk_gather [groups] [chunk_count] [elements] (chunk_index: i64)
+    (values: [groups*chunk_count*elements]f32): [groups*elements]f32 =
+  let checked = assert (chunk_index >= 0 && chunk_index < chunk_count) values
+  in tabulate (groups*elements) (\index ->
+    let element = index % elements
+    let group = index / elements
+    in checked[(group*chunk_count + chunk_index)*elements + element])
+
+def piece_chunk_put [groups] [chunk_count] [elements] (chunk_index: i64)
+    (destination: [groups*chunk_count*elements]f32)
+    (source: [groups*elements]f32): [groups*chunk_count*elements]f32 =
+  let checked = assert (chunk_index >= 0 && chunk_index < chunk_count) destination
+  in tabulate (groups*chunk_count*elements) (\index ->
+    let element = index % elements
+    let rest = index / elements
+    let position = rest % chunk_count
+    let group = rest / chunk_count
+    in if position == chunk_index
+       then source[group*elements + element]
+       else checked[index])

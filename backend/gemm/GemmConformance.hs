@@ -33,6 +33,7 @@ main = do
   parameterViewSmoke
   withContext $ \ctx -> do
     pieceSmoke ctx
+    dataMovementSmoke ctx
     oracleSmoke ctx
     putStrLn "gemm conformance: initial piece/oracle smoke passed"
 
@@ -297,6 +298,64 @@ conformancePieceOps ctx = PieceOps
   , opsPutChunk = \groups chunkCount elements chunkIndex destination source ->
       pure (putChunkList groups chunkCount elements chunkIndex destination source)
   }
+
+-- The data-movement entries must reproduce the pure list references exactly:
+-- they move bytes, so the tolerance is zero. Cases cover offset zero, interior,
+-- and tail slices, the first and last chunk index, and single-chunk layouts.
+dataMovementSmoke :: Context -> IO ()
+dataMovementSmoke ctx = do
+  let asDouble = map realToFrac :: [Float] -> [Double]
+      source13 = [fromIntegral i * 0.5 - 3 | i <- [1 :: Int .. 13]] :: [Float]
+      patch = [fromIntegral i * 0.25 + 40 | i <- [1 :: Int .. 5]] :: [Float]
+      grouped groups chunkCount elements =
+        [ fromIntegral i * 0.125 - 7
+        | i <- [1 :: Int .. groups * chunkCount * elements]
+        ] :: [Float]
+  sequence_
+    [ do
+        actual <- withF32 ctx source13 $
+          pieceReadSlice ctx count 13 (fromIntegral offset) (fromIntegral count)
+        compareVector
+          ("piece read_slice offset=" ++ show offset ++ " count=" ++ show count)
+          0 0 (asDouble (readSliceList offset count source13)) (asDouble actual)
+    | (offset, count) <- [(0, 5), (4, 6), (8, 5), (3, 0)]
+    ]
+  sequence_
+    [ do
+        actual <- withF32 ctx source13 $ \destination ->
+          withF32 ctx patch $
+            pieceWriteSlice ctx 13 13 (fromIntegral (length patch))
+              (fromIntegral offset) destination
+        compareVector ("piece write_slice offset=" ++ show offset) 0 0
+          (asDouble (writeSliceList offset source13 patch)) (asDouble actual)
+    | offset <- [0, 4, 8]
+    ]
+  sequence_
+    [ do
+        let values = grouped groups chunkCount elements
+            expected = gatherChunk groups chunkCount elements chunkIndex values
+        actual <- withF32 ctx values $
+          pieceGatherChunk ctx (groups * elements) (fromIntegral groups)
+            (fromIntegral chunkCount) (fromIntegral elements)
+            (fromIntegral chunkIndex)
+        compareVector
+          ("piece gather_chunk " ++ show (groups, chunkCount, elements, chunkIndex))
+          0 0 (asDouble expected) (asDouble actual)
+        let replacement =
+              [fromIntegral i * 0.0625 + 90 | i <- [1 :: Int .. groups * elements]]
+            expectedPut =
+              putChunkList groups chunkCount elements chunkIndex values replacement
+        actualPut <- withF32 ctx values $ \destination ->
+          withF32 ctx replacement $
+            piecePutChunk ctx (groups * chunkCount * elements)
+              (fromIntegral groups) (fromIntegral chunkCount)
+              (fromIntegral elements) (fromIntegral chunkIndex) destination
+        compareVector
+          ("piece put_chunk " ++ show (groups, chunkCount, elements, chunkIndex))
+          0 0 (asDouble expectedPut) (asDouble actualPut)
+    | (groups, chunkCount, elements, chunkIndex) <-
+        [(3, 4, 5, 0), (3, 4, 5, 2), (3, 4, 5, 3), (2, 1, 6, 0), (1, 5, 2, 4)]
+    ]
 
 feedForwardReference
   :: Floating a

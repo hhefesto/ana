@@ -159,6 +159,24 @@ entry conf_piece_state_advance_bwd (groups: i64) (hd: i64)
     : ([groups*hd*hd]f32, [groups*hd*hd]f32, [groups*hd]f32) =
   piece_state_advance_bwd groups hd state contribution dec output_bar
 
+entry conf_piece_read_slice (n: i64) (offset: i64) (count: i64)
+    (source: [n]f32): [count]f32 =
+  piece_read_slice n offset count source
+
+entry conf_piece_write_slice (n: i64) (m: i64) (offset: i64)
+    (destination: [n]f32) (source: [m]f32): [n]f32 =
+  piece_write_slice n m offset destination source
+
+entry conf_piece_gather_chunk (groups: i64) (chunk_count: i64) (elements: i64)
+    (chunk_index: i64) (values: [groups*chunk_count*elements]f32)
+    : [groups*elements]f32 =
+  piece_gather_chunk groups chunk_count elements chunk_index values
+
+entry conf_piece_put_chunk (groups: i64) (chunk_count: i64) (elements: i64)
+    (chunk_index: i64) (destination: [groups*chunk_count*elements]f32)
+    (source: [groups*elements]f32): [groups*chunk_count*elements]f32 =
+  piece_put_chunk groups chunk_count elements chunk_index destination source
+
 -- ==
 -- entry: test_piece_head_permutations
 -- input { }

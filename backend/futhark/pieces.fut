@@ -141,6 +141,24 @@ entry piece_accumulate [count]
     (accumulator: [count]f32) (addition: [count]f32): [count]f32 =
   map2 (+) accumulator addition
 
+entry piece_read_slice (n: i64) (offset: i64) (count: i64)
+    (source: [n]f32): [count]f32 =
+  piece_slice_read offset count source
+
+entry piece_write_slice (n: i64) (m: i64) (offset: i64)
+    (destination: [n]f32) (source: [m]f32): [n]f32 =
+  piece_slice_write offset destination source
+
+entry piece_gather_chunk (groups: i64) (chunk_count: i64) (elements: i64)
+    (chunk_index: i64) (values: [groups*chunk_count*elements]f32)
+    : [groups*elements]f32 =
+  piece_chunk_gather chunk_index values
+
+entry piece_put_chunk (groups: i64) (chunk_count: i64) (elements: i64)
+    (chunk_index: i64) (destination: [groups*chunk_count*elements]f32)
+    (source: [groups*elements]f32): [groups*chunk_count*elements]f32 =
+  piece_chunk_put chunk_index destination source
+
 entry zero_vector (count: i64): [count]f32 = zero_vector_def count
 
 entry clip_global_norm [p] (max_norm: f32) (gradient: [p]f32)
