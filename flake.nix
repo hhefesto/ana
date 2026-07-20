@@ -187,7 +187,8 @@
               ghc -Wall -Wcompat -Werror -O2 -ibackend/gemm -ibackend/src \
                 backend/gemm/GemmConformance.hs backend/gemm/PiecesConformance.hs \
                 pieces_conformance.o -lopenblas -lm -o gemm-conformance
-              OPENBLAS_NUM_THREADS=1 ./gemm-conformance | tee gemm-conformance-results.txt
+              OPENBLAS_NUM_THREADS=1 GEMM_CONFORMANCE_DUMP=gemm-oracle-golden.txt \
+                ./gemm-conformance | tee gemm-conformance-results.txt
               runHook postBuild
             '';
             installPhase = ''
@@ -195,6 +196,7 @@
               mkdir -p $out/bin $out/share/formal-transformer
               cp gemm-conformance $out/bin/
               cp gemm-conformance-results.txt $out/share/formal-transformer/
+              cp gemm-oracle-golden.txt $out/share/formal-transformer/
               runHook postInstall
             '';
           };
@@ -320,18 +322,28 @@
                 -optl-L${cudaCudart}/lib -optl-L${cudaCublas.lib}/lib \
                 -optl-lcuda -optl-lcudart -optl-lcublas -optl-lm \
                 -o cuda-blas-test
+              ghc -O2 -threaded -rtsopts "-with-rtsopts=-N" \
+                -ibackend/gemm -ibackend/gpu -ibackend/src \
+                backend/gemm/RawProbe.hs \
+                pieces.o cublas_shim.o -lopenblas \
+                -optl-L${cudaCudart}/lib/stubs \
+                -optl-L${cudaCudart}/lib -optl-L${cudaNvrtc.lib}/lib \
+                -optl-L${cudaCublas.lib}/lib \
+                -optl-lcuda -optl-lcudart -optl-lnvrtc -optl-lcublas \
+                -optl-lm -optl-lpthread -o raw-probe
               runHook postBuild
             '';
             installPhase = ''
               runHook preInstall
               mkdir -p $out/bin
-              cp formal-transformer-gemm-cuda cuda-blas-test $out/bin/
+              cp formal-transformer-gemm-cuda cuda-blas-test raw-probe $out/bin/
               runHook postInstall
             '';
             postFixup = ''
               removeStubsFromRunpath $out/bin/formal-transformer-gemm-cuda
               removeStubsFromRunpath $out/bin/cuda-blas-test
-              for executable in formal-transformer-gemm-cuda cuda-blas-test; do
+              removeStubsFromRunpath $out/bin/raw-probe
+              for executable in formal-transformer-gemm-cuda cuda-blas-test raw-probe; do
                 case "$(patchelf --print-rpath "$out/bin/$executable")" in
                   *stubs*) echo "CUDA driver stubs leaked into runtime RPATH" >&2; exit 1 ;;
                 esac

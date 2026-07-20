@@ -10,6 +10,7 @@ import FormalTransformer.Model
 import Numeric.AD (grad)
 import Parameters
 import PiecesConformance
+import System.Environment (lookupEnv)
 import System.Exit (die)
 
 config :: Config
@@ -1014,6 +1015,11 @@ oracleSmoke ctx = do
         (fromIntegral (length tokens)) vocab dim ff heads layers chunk paramsArr tokensArr
       compareScalar "oracle batch loss" 3e-4 3e-4 (referenceBatchLoss parameters) (realToFrac loss)
       compareVector "oracle batch gradient" 2e-3 2e-2 referenceGradient (map realToFrac gradientValues)
+      dumpPath <- lookupEnv "GEMM_CONFORMANCE_DUMP"
+      case dumpPath of
+        Just path ->
+          writeFile path (unlines (show loss : map show gradientValues))
+        Nothing -> pure ()
       (decomposedLoss, decomposedGradient) <- modelLossGradDecomposed
         (conformancePieceOps ctx) config (fromIntegral chunk)
         (length batchTokens) (length batchTokens)

@@ -1,23 +1,54 @@
 {-# LANGUAGE ForeignFunctionInterface #-}
 {-# OPTIONS_GHC -Wno-incomplete-uni-patterns -Wno-missing-fields #-}
 
+-- Device-resident piece layer: every op maps Futhark device handles to
+-- Futhark device handles with no host staging.  Ownership: all model memory
+-- is Futhark-owned (allocated by entries, freed by futhark_free_f32_1d);
+-- cuBLAS only reads raw pointers and writes into fresh zero_vector outputs.
+-- Ordering follows the conservative ownership-transfer contract with
+-- dirty-flag elision: pending cuBLAS work is synchronized before any Futhark
+-- entry, host read, or free; pending Futhark work is synchronized before a
+-- GEMM is enqueued (docs/GEMM-BACKEND.md, Synchronization and threading).
 module ProductionPieces
   ( Context
+  , CContext
+  , CF32_1d
+  , CI64_1d
+  , CBool_1d
+  , DevF32 (..)
+  , DevI64 (..)
   , withProductionContext
   , productionPieceOps
   , productionPieceOpsWith
+  , rawContext
+  , uploadF32
+  , downloadF32
+  , freeF32
+  , uploadI64
+  , freeI64
+  , uploadBool
+  , freeBool
+  , deviceZeros
+  , deviceRawPointer
+  , deviceAccumulate
+  , deviceClipGlobalNorm
+  , deviceAdamwStep
+  , pushArena
+  , popArenaKeeping
+  , markFutharkDirty
+  , syncFutharkIfDirty
+  , markBlasDirty
+  , syncBlasIfDirty
   ) where
 
 import Control.Exception (bracket, onException, throwIO)
-import Control.Monad (forM_, when)
+import Control.Monad (forM_, unless, when)
+import CudaBlasOps (cublasContextSync)
+import Data.IORef
 import Data.Int (Int64)
-import Decomposed
-  ( PieceOps (..)
-  , gatherChunk
-  , putChunkList
-  , readSliceList
-  , writeSliceList
-  )
+import Data.List (nub)
+import Data.Word (Word64, Word8)
+import Decomposed (PieceOps (..))
 import Foreign
 import Foreign.C.String (CString, peekCString)
 import Foreign.C.Types (CInt (..))
@@ -26,17 +57,28 @@ data CContextConfig
 data CContext
 data CF32_1d
 data CI64_1d
+data CBool_1d
 
-newtype Context = Context (Ptr CContext)
-newtype F32Array = F32Array (Ptr CF32_1d)
-newtype I64Array = I64Array (Ptr CI64_1d)
+data Context = Context
+  { rawContext :: !(Ptr CContext)
+  , ctxArena :: !(IORef (Maybe [Ptr CF32_1d]))
+  , ctxFutharkDirty :: !(IORef Bool)
+  , ctxBlasDirty :: !(IORef Bool)
+  }
+
+-- A device f32 vector: the Futhark array handle plus its element count, so
+-- the host traversal can check shapes without touching device data.
+data DevF32 = DevF32 !(Ptr CF32_1d) !Int
+
+-- A device token vector: flat i64 handle plus its element count.
+data DevI64 = DevI64 !(Ptr CI64_1d) !Int
 
 -- The updater lets callers add callbacks introduced in PieceOps concurrently,
 -- without making this module depend on their types or implementations.
 productionPieceOpsWith
-  :: (PieceOps [Float] [Int64] -> PieceOps [Float] [Int64])
+  :: (PieceOps DevF32 DevI64 -> PieceOps DevF32 DevI64)
   -> Context
-  -> PieceOps [Float] [Int64]
+  -> PieceOps DevF32 DevI64
 productionPieceOpsWith extend ctx = extend PieceOps
   { opsRmsForward = rmsForward ctx
   , opsRmsBackward = rmsBackward ctx
@@ -64,20 +106,17 @@ productionPieceOpsWith extend ctx = extend PieceOps
   , opsEmbeddingBackward = embeddingBackward ctx
   , opsCeForward = ceForward ctx
   , opsCeBackward = ceBackward ctx
-  , opsZeros = \count -> pure (replicate count 0)
-  , opsLength = length
-  , opsTokenCount = length
-  , opsFree = const (pure ())
-  , opsReadSlice = \offset count values -> pure (readSliceList offset count values)
-  , opsWriteSlice = \offset destination source ->
-      pure (writeSliceList offset destination source)
-  , opsGatherChunk = \groups chunkCount elements chunkIndex values ->
-      pure (gatherChunk groups chunkCount elements chunkIndex values)
-  , opsPutChunk = \groups chunkCount elements chunkIndex destination source ->
-      pure (putChunkList groups chunkCount elements chunkIndex destination source)
+  , opsZeros = deviceZeros ctx
+  , opsLength = \(DevF32 _ count) -> count
+  , opsTokenCount = \(DevI64 _ count) -> count
+  , opsFree = freeF32 ctx
+  , opsReadSlice = readSlice ctx
+  , opsWriteSlice = writeSlice ctx
+  , opsGatherChunk = gatherChunkDevice ctx
+  , opsPutChunk = putChunkDevice ctx
   }
 
-productionPieceOps :: Context -> PieceOps [Float] [Int64]
+productionPieceOps :: Context -> PieceOps DevF32 DevI64
 productionPieceOps = productionPieceOpsWith id
 
 withProductionContext :: (Context -> IO a) -> IO a
@@ -85,7 +124,10 @@ withProductionContext action = bracket newConfig cConfigFree $ \cfg -> do
   bracket (cContextNew cfg) freeContext $ \rawCtx -> do
     whenNull rawCtx "Futhark context allocation failed"
     check rawCtx "Futhark context creation" =<< cContextSync rawCtx
-    action (Context rawCtx)
+    arena <- newIORef Nothing
+    futharkDirty <- newIORef False
+    blasDirty <- newIORef False
+    action (Context rawCtx arena futharkDirty blasDirty)
   where
     newConfig = do
       cfg <- cConfigNew
@@ -93,287 +135,432 @@ withProductionContext action = bracket newConfig cConfigFree $ \cfg -> do
       pure cfg
     freeContext rawCtx = when (rawCtx /= nullPtr) (cContextFree rawCtx)
 
-rmsForward :: Context -> Int -> Int -> [Float] -> [Float] -> IO [Float]
-rmsForward ctx rows dim x gain = withF32s ctx [x, gain] $ \[xArr, gainArr] ->
+-- Arena: device intermediates allocated between pushArena and popArenaKeeping
+-- are freed at pop, except the survivors. Pending cuBLAS work is completed
+-- before anything is freed. Uploads and entry outputs outside a window are
+-- caller-owned.
+pushArena :: Context -> IO ()
+pushArena ctx = do
+  previous <- readIORef (ctxArena ctx)
+  case previous of
+    Just _ -> throwIO (userError "device arena windows do not nest")
+    Nothing -> writeIORef (ctxArena ctx) (Just [])
+
+popArenaKeeping :: Context -> [DevF32] -> IO ()
+popArenaKeeping ctx survivors = do
+  entries <- readIORef (ctxArena ctx)
+  case entries of
+    Nothing -> throwIO (userError "device arena pop without a window")
+    Just pointers -> do
+      writeIORef (ctxArena ctx) Nothing
+      syncBlasIfDirty ctx
+      syncFutharkIfDirty ctx
+      let kept = [pointer | DevF32 pointer _ <- survivors]
+      forM_ (nub pointers) $ \pointer ->
+        unless (pointer `elem` kept) $
+          cFreeF32 (rawContext ctx) pointer
+            >>= check (rawContext ctx) "arena free f32[1]"
+
+registerArena :: Context -> Ptr CF32_1d -> IO ()
+registerArena ctx pointer = modifyIORef' (ctxArena ctx) (fmap (pointer :))
+
+markFutharkDirty :: Context -> IO ()
+markFutharkDirty ctx = writeIORef (ctxFutharkDirty ctx) True
+
+syncFutharkIfDirty :: Context -> IO ()
+syncFutharkIfDirty ctx = do
+  dirty <- readIORef (ctxFutharkDirty ctx)
+  when dirty $ do
+    sync ctx "pending Futhark work"
+    writeIORef (ctxFutharkDirty ctx) False
+
+markBlasDirty :: Context -> IO ()
+markBlasDirty ctx = writeIORef (ctxBlasDirty ctx) True
+
+syncBlasIfDirty :: Context -> IO ()
+syncBlasIfDirty ctx = do
+  dirty <- readIORef (ctxBlasDirty ctx)
+  when dirty $ do
+    cublasContextSync
+    writeIORef (ctxBlasDirty ctx) False
+
+rmsForward :: Context -> Int -> Int -> DevF32 -> DevF32 -> IO DevF32
+rmsForward ctx rows dim (DevF32 x _) (DevF32 gain _) =
   output1 ctx "piece_rms_norm_fwd" (rows * dim) $ \[out] ->
-    entryPieceRmsNormFwd (rawContext ctx) out (f rows) (f dim) xArr gainArr
+    entryPieceRmsNormFwd (rawContext ctx) out (f rows) (f dim) x gain
 
-rmsBackward :: Context -> Int -> Int -> [Float] -> [Float] -> [Float]
-  -> IO ([Float], [Float])
-rmsBackward ctx rows dim x gain outputBar =
-  withF32s ctx [x, gain, outputBar] $ \[xArr, gainArr, barArr] ->
-    output2 ctx "piece_rms_norm_bwd" [rows * dim, dim] $ \[xOut, gainOut] ->
-      entryPieceRmsNormBwd (rawContext ctx) xOut gainOut (f rows) (f dim)
-        xArr gainArr barArr
+rmsBackward :: Context -> Int -> Int -> DevF32 -> DevF32 -> DevF32
+  -> IO (DevF32, DevF32)
+rmsBackward ctx rows dim (DevF32 x _) (DevF32 gain _) (DevF32 bar _) =
+  output2 ctx "piece_rms_norm_bwd" [rows * dim, dim] $ \[xOut, gainOut] ->
+    entryPieceRmsNormBwd (rawContext ctx) xOut gainOut (f rows) (f dim)
+      x gain bar
 
-l2HeadsForward :: Context -> Int -> Int -> Int -> [Float] -> IO [Float]
-l2HeadsForward ctx rows dim heads x = withF32s ctx [x] $ \[xArr] ->
+l2HeadsForward :: Context -> Int -> Int -> Int -> DevF32 -> IO DevF32
+l2HeadsForward ctx rows dim heads (DevF32 x _) =
   output1 ctx "piece_l2norm_heads_fwd" (rows * dim) $ \[out] ->
-    entryPieceL2HeadsFwd (rawContext ctx) out (f rows) (f dim) (f heads) xArr
+    entryPieceL2HeadsFwd (rawContext ctx) out (f rows) (f dim) (f heads) x
 
-l2HeadsBackward :: Context -> Int -> Int -> Int -> [Float] -> [Float] -> IO [Float]
-l2HeadsBackward ctx rows dim heads x outputBar =
-  withF32s ctx [x, outputBar] $ \[xArr, barArr] ->
-    output1 ctx "piece_l2norm_heads_bwd" (rows * dim) $ \[out] ->
-      entryPieceL2HeadsBwd (rawContext ctx) out (f rows) (f dim) (f heads)
-        xArr barArr
+l2HeadsBackward :: Context -> Int -> Int -> Int -> DevF32 -> DevF32 -> IO DevF32
+l2HeadsBackward ctx rows dim heads (DevF32 x _) (DevF32 bar _) =
+  output1 ctx "piece_l2norm_heads_bwd" (rows * dim) $ \[out] ->
+    entryPieceL2HeadsBwd (rawContext ctx) out (f rows) (f dim) (f heads) x bar
 
-siluGateForward :: Context -> [Float] -> [Float] -> IO [Float]
-siluGateForward ctx gate up = withF32s ctx [gate, up] $ \[gateArr, upArr] ->
-  output1 ctx "piece_silu_gate_fwd" (length gate) $ \[out] ->
-    entryPieceSiluGateFwd (rawContext ctx) out gateArr upArr
+siluGateForward :: Context -> DevF32 -> DevF32 -> IO DevF32
+siluGateForward ctx (DevF32 gate count) (DevF32 up _) =
+  output1 ctx "piece_silu_gate_fwd" count $ \[out] ->
+    entryPieceSiluGateFwd (rawContext ctx) out gate up
 
-siluGateBackward :: Context -> [Float] -> [Float] -> [Float]
-  -> IO ([Float], [Float])
-siluGateBackward ctx gate up outputBar =
-  withF32s ctx [gate, up, outputBar] $ \[gateArr, upArr, barArr] ->
-    output2 ctx "piece_silu_gate_bwd" [length gate, length gate] $ \[gateOut, upOut] ->
-      entryPieceSiluGateBwd (rawContext ctx) gateOut upOut gateArr upArr barArr
+siluGateBackward :: Context -> DevF32 -> DevF32 -> DevF32
+  -> IO (DevF32, DevF32)
+siluGateBackward ctx (DevF32 gate count) (DevF32 up _) (DevF32 bar _) =
+  output2 ctx "piece_silu_gate_bwd" [count, count] $ \[gateOut, upOut] ->
+    entryPieceSiluGateBwd (rawContext ctx) gateOut upOut gate up bar
 
-addForward :: Context -> [Float] -> [Float] -> IO [Float]
-addForward ctx x y = withF32s ctx [x, y] $ \[xArr, yArr] ->
-  output1 ctx "piece_add_fwd" (length x) $ \[out] ->
-    entryPieceAddFwd (rawContext ctx) out xArr yArr
+addForward :: Context -> DevF32 -> DevF32 -> IO DevF32
+addForward ctx (DevF32 x count) (DevF32 y _) =
+  output1 ctx "piece_add_fwd" count $ \[out] ->
+    entryPieceAddFwd (rawContext ctx) out x y
 
-addBackward :: Context -> [Float] -> IO ([Float], [Float])
-addBackward ctx outputBar = withF32s ctx [outputBar] $ \[barArr] ->
-  output2 ctx "piece_add_bwd" [length outputBar, length outputBar] $ \[xOut, yOut] ->
-    entryPieceAddBwd (rawContext ctx) xOut yOut barArr
+addBackward :: Context -> DevF32 -> IO (DevF32, DevF32)
+addBackward ctx (DevF32 bar count) =
+  output2 ctx "piece_add_bwd" [count, count] $ \[xOut, yOut] ->
+    entryPieceAddBwd (rawContext ctx) xOut yOut bar
 
-splitHeadsForward :: Context -> Int -> Int -> Int -> Int -> [Float] -> IO [Float]
-splitHeadsForward ctx batch n heads headDim x = withF32s ctx [x] $ \[xArr] ->
-  output1 ctx "piece_split_heads_fwd" (length x) $ \[out] ->
+splitHeadsForward :: Context -> Int -> Int -> Int -> Int -> DevF32 -> IO DevF32
+splitHeadsForward ctx batch n heads headDim (DevF32 x count) =
+  output1 ctx "piece_split_heads_fwd" count $ \[out] ->
     entryPieceSplitHeadsFwd (rawContext ctx) out (f batch) (f n) (f heads)
-      (f headDim) xArr
+      (f headDim) x
 
-splitHeadsBackward :: Context -> Int -> Int -> Int -> Int -> [Float] -> IO [Float]
-splitHeadsBackward ctx batch n heads headDim outputBar =
-  withF32s ctx [outputBar] $ \[barArr] ->
-    output1 ctx "piece_split_heads_bwd" (length outputBar) $ \[out] ->
-      entryPieceSplitHeadsBwd (rawContext ctx) out (f batch) (f n) (f heads)
-        (f headDim) barArr
+splitHeadsBackward :: Context -> Int -> Int -> Int -> Int -> DevF32 -> IO DevF32
+splitHeadsBackward ctx batch n heads headDim (DevF32 bar count) =
+  output1 ctx "piece_split_heads_bwd" count $ \[out] ->
+    entryPieceSplitHeadsBwd (rawContext ctx) out (f batch) (f n) (f heads)
+      (f headDim) bar
 
-mergeHeadsForward :: Context -> Int -> Int -> Int -> Int -> [Float] -> IO [Float]
-mergeHeadsForward ctx batch n heads headDim x = withF32s ctx [x] $ \[xArr] ->
-  output1 ctx "piece_merge_heads_fwd" (length x) $ \[out] ->
+mergeHeadsForward :: Context -> Int -> Int -> Int -> Int -> DevF32 -> IO DevF32
+mergeHeadsForward ctx batch n heads headDim (DevF32 x count) =
+  output1 ctx "piece_merge_heads_fwd" count $ \[out] ->
     entryPieceMergeHeadsFwd (rawContext ctx) out (f batch) (f n) (f heads)
-      (f headDim) xArr
+      (f headDim) x
 
-mergeHeadsBackward :: Context -> Int -> Int -> Int -> Int -> [Float] -> IO [Float]
-mergeHeadsBackward ctx batch n heads headDim outputBar =
-  withF32s ctx [outputBar] $ \[barArr] ->
-    output1 ctx "piece_merge_heads_bwd" (length outputBar) $ \[out] ->
-      entryPieceMergeHeadsBwd (rawContext ctx) out (f batch) (f n) (f heads)
-        (f headDim) barArr
+mergeHeadsBackward :: Context -> Int -> Int -> Int -> Int -> DevF32 -> IO DevF32
+mergeHeadsBackward ctx batch n heads headDim (DevF32 bar count) =
+  output1 ctx "piece_merge_heads_bwd" count $ \[out] ->
+    entryPieceMergeHeadsBwd (rawContext ctx) out (f batch) (f n) (f heads)
+      (f headDim) bar
 
-causalSoftmaxForward :: Context -> Int -> Int -> Int -> [Float] -> IO [Float]
-causalSoftmaxForward ctx groups n headDim scores = withF32s ctx [scores] $ \[scoresArr] ->
-  output1 ctx "piece_causal_softmax_fwd" (length scores) $ \[out] ->
+causalSoftmaxForward :: Context -> Int -> Int -> Int -> DevF32 -> IO DevF32
+causalSoftmaxForward ctx groups n headDim (DevF32 scores count) =
+  output1 ctx "piece_causal_softmax_fwd" count $ \[out] ->
     entryPieceCausalSoftmaxFwd (rawContext ctx) out (f groups) (f n)
-      (f headDim) scoresArr
+      (f headDim) scores
 
-causalSoftmaxBackward :: Context -> Int -> Int -> Int -> [Float] -> [Float]
-  -> IO [Float]
-causalSoftmaxBackward ctx groups n headDim scores weightsBar =
-  withF32s ctx [scores, weightsBar] $ \[scoresArr, barArr] ->
-    output1 ctx "piece_causal_softmax_bwd" (length scores) $ \[out] ->
-      entryPieceCausalSoftmaxBwd (rawContext ctx) out (f groups) (f n)
-        (f headDim) scoresArr barArr
+causalSoftmaxBackward :: Context -> Int -> Int -> Int -> DevF32 -> DevF32
+  -> IO DevF32
+causalSoftmaxBackward ctx groups n headDim (DevF32 scores count) (DevF32 bar _) =
+  output1 ctx "piece_causal_softmax_bwd" count $ \[out] ->
+    entryPieceCausalSoftmaxBwd (rawContext ctx) out (f groups) (f n)
+      (f headDim) scores bar
 
-gateCumForward :: Context -> Int -> Int -> Int -> [Float] -> IO ([Float], [Float])
-gateCumForward ctx groups chunk headDim gateLogits =
-  withF32s ctx [gateLogits] $ \[gateArr] ->
-    output2 ctx "piece_gate_cum_fwd"
-      [groups * chunk * headDim, groups * headDim] $ \[relOut, decOut] ->
-        entryPieceGateCumFwd (rawContext ctx) relOut decOut (f groups) (f chunk)
-          (f headDim) gateArr
+gateCumForward :: Context -> Int -> Int -> Int -> DevF32 -> IO (DevF32, DevF32)
+gateCumForward ctx groups chunk headDim (DevF32 gate _) =
+  output2 ctx "piece_gate_cum_fwd"
+    [groups * chunk * headDim, groups * headDim] $ \[relOut, decOut] ->
+      entryPieceGateCumFwd (rawContext ctx) relOut decOut (f groups) (f chunk)
+        (f headDim) gate
 
-gateCumBackward :: Context -> Int -> Int -> Int -> [Float] -> [Float] -> [Float]
-  -> IO [Float]
-gateCumBackward ctx groups chunk headDim gateLogits relBar decBar =
-  withF32s ctx [gateLogits, relBar, decBar] $ \[gateArr, relArr, decArr] ->
-    output1 ctx "piece_gate_cum_bwd" (groups * chunk * headDim) $ \[out] ->
-      entryPieceGateCumBwd (rawContext ctx) out (f groups) (f chunk) (f headDim)
-        gateArr relArr decArr
+gateCumBackward :: Context -> Int -> Int -> Int -> DevF32 -> DevF32 -> DevF32
+  -> IO DevF32
+gateCumBackward ctx groups chunk headDim (DevF32 gate _) (DevF32 rel _)
+    (DevF32 dec _) =
+  output1 ctx "piece_gate_cum_bwd" (groups * chunk * headDim) $ \[out] ->
+    entryPieceGateCumBwd (rawContext ctx) out (f groups) (f chunk) (f headDim)
+      gate rel dec
 
-qkDecayForward :: Context -> Int -> Int -> Int -> [Float] -> [Float] -> [Float]
-  -> [Float] -> IO ([Float], [Float])
-qkDecayForward ctx groups chunk headDim q k rel dec =
-  withF32s ctx [q, k, rel, dec] $ \[qArr, kArr, relArr, decArr] ->
-    let count = groups * chunk * headDim
-    in output2 ctx "piece_qk_decay_fwd" [count, count] $ \[qOut, kOut] ->
-      entryPieceQkDecayFwd (rawContext ctx) qOut kOut (f groups) (f chunk)
-        (f headDim) qArr kArr relArr decArr
+qkDecayForward :: Context -> Int -> Int -> Int -> DevF32 -> DevF32 -> DevF32
+  -> DevF32 -> IO (DevF32, DevF32)
+qkDecayForward ctx groups chunk headDim (DevF32 q _) (DevF32 k _)
+    (DevF32 rel _) (DevF32 dec _) =
+  let count = groups * chunk * headDim
+  in output2 ctx "piece_qk_decay_fwd" [count, count] $ \[qOut, kOut] ->
+    entryPieceQkDecayFwd (rawContext ctx) qOut kOut (f groups) (f chunk)
+      (f headDim) q k rel dec
 
-qkDecayBackward :: Context -> Int -> Int -> Int -> [Float] -> [Float] -> [Float]
-  -> [Float] -> [Float] -> [Float] -> IO ([Float], [Float], [Float], [Float])
-qkDecayBackward ctx groups chunk headDim q k rel dec qBar kBar =
-  withF32s ctx [q, k, rel, dec, qBar, kBar] $
-    \[qArr, kArr, relArr, decArr, qBarArr, kBarArr] ->
-      let count = groups * chunk * headDim
-      in output4 ctx "piece_qk_decay_bwd"
-        [count, count, count, groups * headDim] $ \[qOut, kOut, relOut, decOut] ->
-          entryPieceQkDecayBwd (rawContext ctx) qOut kOut relOut decOut
-            (f groups) (f chunk) (f headDim) qArr kArr relArr decArr qBarArr kBarArr
+qkDecayBackward :: Context -> Int -> Int -> Int -> DevF32 -> DevF32 -> DevF32
+  -> DevF32 -> DevF32 -> DevF32 -> IO (DevF32, DevF32, DevF32, DevF32)
+qkDecayBackward ctx groups chunk headDim (DevF32 q _) (DevF32 k _)
+    (DevF32 rel _) (DevF32 dec _) (DevF32 qBar _) (DevF32 kBar _) =
+  let count = groups * chunk * headDim
+  in output4 ctx "piece_qk_decay_bwd"
+    [count, count, count, groups * headDim] $ \[qOut, kOut, relOut, decOut] ->
+      entryPieceQkDecayBwd (rawContext ctx) qOut kOut relOut decOut
+        (f groups) (f chunk) (f headDim) q k rel dec qBar kBar
 
-glaIntraForward :: Context -> Int -> Int -> Int -> [Float] -> [Float] -> [Float]
-  -> [Float] -> IO [Float]
-glaIntraForward ctx groups chunk headDim q k values rel =
-  withF32s ctx [q, k, values, rel] $ \[qArr, kArr, valuesArr, relArr] ->
-    output1 ctx "piece_gla_intra_fwd" (groups * chunk * headDim) $ \[out] ->
-      entryPieceGlaIntraFwd (rawContext ctx) out (f groups) (f chunk) (f headDim)
-        qArr kArr valuesArr relArr
+glaIntraForward :: Context -> Int -> Int -> Int -> DevF32 -> DevF32 -> DevF32
+  -> DevF32 -> IO DevF32
+glaIntraForward ctx groups chunk headDim (DevF32 q _) (DevF32 k _)
+    (DevF32 values _) (DevF32 rel _) =
+  output1 ctx "piece_gla_intra_fwd" (groups * chunk * headDim) $ \[out] ->
+    entryPieceGlaIntraFwd (rawContext ctx) out (f groups) (f chunk) (f headDim)
+      q k values rel
 
-glaIntraBackward :: Context -> Int -> Int -> Int -> [Float] -> [Float] -> [Float]
-  -> [Float] -> [Float] -> IO ([Float], [Float], [Float], [Float])
-glaIntraBackward ctx groups chunk headDim q k values rel outputBar =
-  withF32s ctx [q, k, values, rel, outputBar] $
-    \[qArr, kArr, valuesArr, relArr, barArr] ->
-      let count = groups * chunk * headDim
-      in output4 ctx "piece_gla_intra_bwd" (replicate 4 count) $
-        \[qOut, kOut, valuesOut, relOut] ->
-          entryPieceGlaIntraBwd (rawContext ctx) qOut kOut valuesOut relOut
-            (f groups) (f chunk) (f headDim) qArr kArr valuesArr relArr barArr
+glaIntraBackward :: Context -> Int -> Int -> Int -> DevF32 -> DevF32 -> DevF32
+  -> DevF32 -> DevF32 -> IO (DevF32, DevF32, DevF32, DevF32)
+glaIntraBackward ctx groups chunk headDim (DevF32 q _) (DevF32 k _)
+    (DevF32 values _) (DevF32 rel _) (DevF32 bar _) =
+  let count = groups * chunk * headDim
+  in output4 ctx "piece_gla_intra_bwd" (replicate 4 count) $
+    \[qOut, kOut, valuesOut, relOut] ->
+      entryPieceGlaIntraBwd (rawContext ctx) qOut kOut valuesOut relOut
+        (f groups) (f chunk) (f headDim) q k values rel bar
 
-stateAdvanceForward :: Context -> Int -> Int -> [Float] -> [Float] -> [Float]
-  -> IO [Float]
-stateAdvanceForward ctx groups headDim state contribution dec =
-  withF32s ctx [state, contribution, dec] $ \[stateArr, contributionArr, decArr] ->
-    output1 ctx "piece_state_advance_fwd" (groups * headDim * headDim) $ \[out] ->
-      entryPieceStateAdvanceFwd (rawContext ctx) out (f groups) (f headDim)
-        stateArr contributionArr decArr
+stateAdvanceForward :: Context -> Int -> Int -> DevF32 -> DevF32 -> DevF32
+  -> IO DevF32
+stateAdvanceForward ctx groups headDim (DevF32 state _)
+    (DevF32 contribution _) (DevF32 dec _) =
+  output1 ctx "piece_state_advance_fwd" (groups * headDim * headDim) $ \[out] ->
+    entryPieceStateAdvanceFwd (rawContext ctx) out (f groups) (f headDim)
+      state contribution dec
 
-stateAdvanceBackward :: Context -> Int -> Int -> [Float] -> [Float] -> [Float]
-  -> [Float] -> IO ([Float], [Float], [Float])
-stateAdvanceBackward ctx groups headDim state contribution dec outputBar =
-  withF32s ctx [state, contribution, dec, outputBar] $
-    \[stateArr, contributionArr, decArr, barArr] ->
-      let stateCount = groups * headDim * headDim
-      in output3 ctx "piece_state_advance_bwd"
-        [stateCount, stateCount, groups * headDim] $ \[stateOut, contributionOut, decOut] ->
-          entryPieceStateAdvanceBwd (rawContext ctx) stateOut contributionOut decOut
-            (f groups) (f headDim) stateArr contributionArr decArr barArr
+stateAdvanceBackward :: Context -> Int -> Int -> DevF32 -> DevF32 -> DevF32
+  -> DevF32 -> IO (DevF32, DevF32, DevF32)
+stateAdvanceBackward ctx groups headDim (DevF32 state _)
+    (DevF32 contribution _) (DevF32 dec _) (DevF32 bar _) =
+  let stateCount = groups * headDim * headDim
+  in output3 ctx "piece_state_advance_bwd"
+    [stateCount, stateCount, groups * headDim] $
+      \[stateOut, contributionOut, decOut] ->
+        entryPieceStateAdvanceBwd (rawContext ctx) stateOut contributionOut
+          decOut (f groups) (f headDim) state contribution dec bar
 
-embeddingGather :: Context -> Int -> Int -> [Float] -> [Int64] -> IO [Float]
-embeddingGather ctx vocab dim embedding tokens =
-  withF32s ctx [embedding] $ \[embeddingArr] -> withI64 ctx tokens $ \tokensArr ->
-    output1 ctx "piece_embed_gather_fwd" (length tokens * dim) $ \[out] ->
-      entryPieceEmbedGatherFwd (rawContext ctx) out (f vocab) (f dim)
-        (f (length tokens)) embeddingArr tokensArr
+embeddingGather :: Context -> Int -> Int -> DevF32 -> DevI64 -> IO DevF32
+embeddingGather ctx vocab dim (DevF32 embedding _) (DevI64 tokens count) =
+  output1 ctx "piece_embed_gather_fwd" (count * dim) $ \[out] ->
+    entryPieceEmbedGatherFwd (rawContext ctx) out (f vocab) (f dim)
+      (f count) embedding tokens
 
-embeddingBackward :: Context -> Int -> Int -> [Int64] -> [Float] -> IO [Float]
-embeddingBackward ctx vocab dim tokens outputBar =
-  withI64 ctx tokens $ \tokensArr -> withF32s ctx [outputBar] $ \[barArr] ->
-    output1 ctx "piece_embed_gather_bwd" (vocab * dim) $ \[out] ->
-      entryPieceEmbedGatherBwd (rawContext ctx) out (f vocab) (f dim)
-        (f (length tokens)) tokensArr barArr
+embeddingBackward :: Context -> Int -> Int -> DevI64 -> DevF32 -> IO DevF32
+embeddingBackward ctx vocab dim (DevI64 tokens count) (DevF32 bar _) =
+  output1 ctx "piece_embed_gather_bwd" (vocab * dim) $ \[out] ->
+    entryPieceEmbedGatherBwd (rawContext ctx) out (f vocab) (f dim)
+      (f count) tokens bar
 
-ceForward :: Context -> Int -> Int -> Int -> Int -> [Float] -> [Int64] -> IO Float
-ceForward ctx batch sequenceLength vocab effectiveBatch logits tokens =
-  withF32s ctx [logits] $ \[logitsArr] -> withI64 ctx tokens $ \tokensArr ->
-    alloca $ \out -> do
-      entryPieceCeFwd (rawContext ctx) out (f batch) (f sequenceLength) (f vocab)
-        (f effectiveBatch) logitsArr tokensArr >>= check (rawContext ctx) "piece_ce_fwd"
-      sync ctx "piece_ce_fwd"
-      peek out
+ceForward :: Context -> Int -> Int -> Int -> Int -> DevF32 -> DevI64 -> IO Float
+ceForward ctx batch sequenceLength vocab effectiveBatch (DevF32 logits _)
+    (DevI64 tokens _) = do
+  syncBlasIfDirty ctx
+  alloca $ \out -> do
+    entryPieceCeFwd (rawContext ctx) out (f batch) (f sequenceLength) (f vocab)
+      (f effectiveBatch) logits tokens >>= check (rawContext ctx) "piece_ce_fwd"
+    sync ctx "piece_ce_fwd"
+    writeIORef (ctxFutharkDirty ctx) False
+    peek out
 
-ceBackward :: Context -> Int -> Int -> Int -> Int -> Float -> [Float] -> [Int64]
-  -> IO [Float]
-ceBackward ctx batch sequenceLength vocab effectiveBatch seed logits tokens =
-  withF32s ctx [logits] $ \[logitsArr] -> withI64 ctx tokens $ \tokensArr ->
-    output1 ctx "piece_ce_bwd" (batch * sequenceLength * vocab) $ \[out] ->
-      entryPieceCeBwd (rawContext ctx) out (f batch) (f sequenceLength) (f vocab)
-        (f effectiveBatch) seed logitsArr tokensArr
+ceBackward :: Context -> Int -> Int -> Int -> Int -> Float -> DevF32 -> DevI64
+  -> IO DevF32
+ceBackward ctx batch sequenceLength vocab effectiveBatch seed (DevF32 logits _)
+    (DevI64 tokens _) =
+  output1 ctx "piece_ce_bwd" (batch * sequenceLength * vocab) $ \[out] ->
+    entryPieceCeBwd (rawContext ctx) out (f batch) (f sequenceLength) (f vocab)
+      (f effectiveBatch) seed logits tokens
 
-withF32s :: Context -> [[Float]] -> ([Ptr CF32_1d] -> IO a) -> IO a
-withF32s _ [] action = action []
-withF32s ctx (values : rest) action =
-  bracket (uploadF32 ctx values) (freeF32 ctx) $ \(F32Array arr) ->
-    withF32s ctx rest (action . (arr :))
+deviceZeros :: Context -> Int -> IO DevF32
+deviceZeros ctx count =
+  output1 ctx "zero_vector" count $ \[out] ->
+    entryZeroVector (rawContext ctx) out (f count)
 
-withI64 :: Context -> [Int64] -> (Ptr CI64_1d -> IO a) -> IO a
-withI64 ctx values action = bracket (uploadI64 ctx values) (freeI64 ctx) $ \(I64Array arr) ->
-  action arr
+readSlice :: Context -> Int -> Int -> DevF32 -> IO DevF32
+readSlice ctx offset count (DevF32 source n) =
+  output1 ctx "piece_read_slice" count $ \[out] ->
+    entryPieceReadSlice (rawContext ctx) out (f n) (f offset) (f count) source
 
-uploadF32 :: Context -> [Float] -> IO F32Array
-uploadF32 ctx values = withArray values $ \host -> do
-  arr <- cNewF32 (rawContext ctx) host (f (length values))
-  whenNull arr "upload f32[1] returned null"
-  sync ctx "upload f32[1]" `onException` (cFreeF32 (rawContext ctx) arr >> pure ())
-  pure (F32Array arr)
+writeSlice :: Context -> Int -> DevF32 -> DevF32 -> IO DevF32
+writeSlice ctx offset (DevF32 destination n) (DevF32 source m) =
+  output1 ctx "piece_write_slice" n $ \[out] ->
+    entryPieceWriteSlice (rawContext ctx) out (f n) (f m) (f offset)
+      destination source
 
-uploadI64 :: Context -> [Int64] -> IO I64Array
-uploadI64 ctx values = withArray values $ \host -> do
-  arr <- cNewI64 (rawContext ctx) host (f (length values))
-  whenNull arr "upload i64[1] returned null"
-  sync ctx "upload i64[1]" `onException` (cFreeI64 (rawContext ctx) arr >> pure ())
-  pure (I64Array arr)
+gatherChunkDevice :: Context -> Int -> Int -> Int -> Int -> DevF32 -> IO DevF32
+gatherChunkDevice ctx groups chunkCount elements chunkIndex (DevF32 values _) =
+  output1 ctx "piece_gather_chunk" (groups * elements) $ \[out] ->
+    entryPieceGatherChunk (rawContext ctx) out (f groups) (f chunkCount)
+      (f elements) (f chunkIndex) values
 
-freeF32 :: Context -> F32Array -> IO ()
-freeF32 ctx (F32Array arr) = cFreeF32 (rawContext ctx) arr >>= check (rawContext ctx) "free f32[1]"
+putChunkDevice :: Context -> Int -> Int -> Int -> Int -> DevF32 -> DevF32
+  -> IO DevF32
+putChunkDevice ctx groups chunkCount elements chunkIndex
+    (DevF32 destination total) (DevF32 source _) =
+  output1 ctx "piece_put_chunk" total $ \[out] ->
+    entryPiecePutChunk (rawContext ctx) out (f groups) (f chunkCount)
+      (f elements) (f chunkIndex) destination source
 
-freeI64 :: Context -> I64Array -> IO ()
-freeI64 ctx (I64Array arr) = cFreeI64 (rawContext ctx) arr >>= check (rawContext ctx) "free i64[1]"
+deviceAccumulate :: Context -> DevF32 -> DevF32 -> IO DevF32
+deviceAccumulate ctx (DevF32 accumulator count) (DevF32 addition _) =
+  output1 ctx "piece_accumulate" count $ \[out] ->
+    entryPieceAccumulate (rawContext ctx) out accumulator addition
 
-output1 :: Context -> String -> Int -> ([Ptr (Ptr CF32_1d)] -> IO CInt) -> IO [Float]
+-- Returns the pre-clip norm (a host scalar, so this synchronizes) and the
+-- scaled gradient.
+deviceClipGlobalNorm :: Context -> Float -> DevF32 -> IO (Float, DevF32)
+deviceClipGlobalNorm ctx maxNorm (DevF32 gradient count) = do
+  syncBlasIfDirty ctx
+  alloca $ \normOut -> allocaArray 1 $ \slots -> do
+    pokeArray slots [nullPtr]
+    status <- entryClipGlobalNorm (rawContext ctx) normOut slots maxNorm gradient
+    scaled <- peekArray 1 slots
+    check (rawContext ctx) "clip_global_norm" status
+      `onException` mapM_ (freeIfNonNull ctx) scaled
+    forM_ scaled $ \arr -> whenNull arr "clip_global_norm returned a null array"
+    sync ctx "clip_global_norm"
+    writeIORef (ctxFutharkDirty ctx) False
+    let [scaledArr] = scaled
+    registerArenaIfActive ctx scaledArr
+    norm <- peek normOut
+    pure (norm, DevF32 scaledArr count)
+
+deviceAdamwStep
+  :: Context -> Int64 -> Float -> Float -> Float -> Float -> Float
+  -> DevF32 -> DevF32 -> DevF32 -> DevF32 -> Ptr CBool_1d
+  -> IO (DevF32, DevF32, DevF32)
+deviceAdamwStep ctx step learningRate beta1 beta2 epsilon weightDecay
+    (DevF32 params count) (DevF32 gradient _) (DevF32 firstMoment _)
+    (DevF32 secondMoment _) mask =
+  output3 ctx "adamw_step" [count, count, count] $ \[paramsOut, mOut, vOut] ->
+    entryAdamwStep (rawContext ctx) paramsOut mOut vOut step learningRate
+      beta1 beta2 epsilon weightDecay params gradient firstMoment secondMoment
+      mask
+
+-- The raw device pointer backing a Futhark array, for the cuBLAS boundary.
+-- The wrapper and its Futhark owner must stay live through both barriers;
+-- host code never dereferences it.
+deviceRawPointer :: Context -> DevF32 -> IO Word64
+deviceRawPointer ctx (DevF32 arr _) = cValuesRawF32 (rawContext ctx) arr
+
+uploadF32 :: Context -> [Float] -> IO DevF32
+uploadF32 ctx values = do
+  syncBlasIfDirty ctx
+  withArray values $ \host -> do
+    arr <- cNewF32 (rawContext ctx) host (f (length values))
+    whenNull arr "upload f32[1] returned null"
+    sync ctx "upload f32[1]" `onException` (cFreeF32 (rawContext ctx) arr >> pure ())
+    registerArenaIfActive ctx arr
+    pure (DevF32 arr (length values))
+
+uploadI64 :: Context -> [Int64] -> IO DevI64
+uploadI64 ctx values = do
+  syncBlasIfDirty ctx
+  withArray values $ \host -> do
+    arr <- cNewI64 (rawContext ctx) host (f (length values))
+    whenNull arr "upload i64[1] returned null"
+    sync ctx "upload i64[1]" `onException` (cFreeI64 (rawContext ctx) arr >> pure ())
+    pure (DevI64 arr (length values))
+
+uploadBool :: Context -> [Bool] -> IO (Ptr CBool_1d)
+uploadBool ctx values = do
+  syncBlasIfDirty ctx
+  withArray (map (\b -> if b then 1 else 0 :: Word8) values) $ \host -> do
+    arr <- cNewBool (rawContext ctx) host (f (length values))
+    whenNull arr "upload bool[1] returned null"
+    sync ctx "upload bool[1]"
+      `onException` (cFreeBool (rawContext ctx) arr >> pure ())
+    pure arr
+
+downloadF32 :: Context -> DevF32 -> IO [Float]
+downloadF32 ctx (DevF32 arr count) = do
+  syncBlasIfDirty ctx
+  syncFutharkIfDirty ctx
+  allocaArray count $ \host -> do
+    cValuesF32 (rawContext ctx) arr host
+      >>= check (rawContext ctx) "download f32[1]"
+    sync ctx "download f32[1]"
+    peekArray count host
+
+freeF32 :: Context -> DevF32 -> IO ()
+freeF32 ctx (DevF32 arr _) = do
+  syncBlasIfDirty ctx
+  syncFutharkIfDirty ctx
+  arena <- readIORef (ctxArena ctx)
+  case arena of
+    Just pointers ->
+      writeIORef (ctxArena ctx) (Just (filter (/= arr) pointers))
+    Nothing -> pure ()
+  cFreeF32 (rawContext ctx) arr >>= check (rawContext ctx) "free f32[1]"
+
+freeI64 :: Context -> DevI64 -> IO ()
+freeI64 ctx (DevI64 arr _) =
+  cFreeI64 (rawContext ctx) arr >>= check (rawContext ctx) "free i64[1]"
+
+freeBool :: Context -> Ptr CBool_1d -> IO ()
+freeBool ctx arr =
+  cFreeBool (rawContext ctx) arr >>= check (rawContext ctx) "free bool[1]"
+
+registerArenaIfActive :: Context -> Ptr CF32_1d -> IO ()
+registerArenaIfActive ctx pointer = do
+  arena <- readIORef (ctxArena ctx)
+  case arena of
+    Just _ -> registerArena ctx pointer
+    Nothing -> pure ()
+
+freeIfNonNull :: Context -> Ptr CF32_1d -> IO ()
+freeIfNonNull ctx arr = when (arr /= nullPtr) $
+  cFreeF32 (rawContext ctx) arr >>= check (rawContext ctx) "output free"
+
+output1 :: Context -> String -> Int -> ([Ptr (Ptr CF32_1d)] -> IO CInt)
+  -> IO DevF32
 output1 ctx label count entry = do
-  values <- arrayOutputs ctx label [count] entry
+  values <- deviceOutputs ctx label [count] entry
   case values of
     [a] -> pure a
     _ -> internalOutputCount label
 
 output2 :: Context -> String -> [Int] -> ([Ptr (Ptr CF32_1d)] -> IO CInt)
-  -> IO ([Float], [Float])
+  -> IO (DevF32, DevF32)
 output2 ctx label counts entry = do
-  values <- arrayOutputs ctx label counts entry
+  values <- deviceOutputs ctx label counts entry
   case values of
     [a, b] -> pure (a, b)
     _ -> internalOutputCount label
 
 output3 :: Context -> String -> [Int] -> ([Ptr (Ptr CF32_1d)] -> IO CInt)
-  -> IO ([Float], [Float], [Float])
+  -> IO (DevF32, DevF32, DevF32)
 output3 ctx label counts entry = do
-  values <- arrayOutputs ctx label counts entry
+  values <- deviceOutputs ctx label counts entry
   case values of
     [a, b, c] -> pure (a, b, c)
     _ -> internalOutputCount label
 
 output4 :: Context -> String -> [Int] -> ([Ptr (Ptr CF32_1d)] -> IO CInt)
-  -> IO ([Float], [Float], [Float], [Float])
+  -> IO (DevF32, DevF32, DevF32, DevF32)
 output4 ctx label counts entry = do
-  values <- arrayOutputs ctx label counts entry
+  values <- deviceOutputs ctx label counts entry
   case values of
     [a, b, c, d] -> pure (a, b, c, d)
     _ -> internalOutputCount label
 
-arrayOutputs :: Context -> String -> [Int] -> ([Ptr (Ptr CF32_1d)] -> IO CInt)
-  -> IO [[Float]]
-arrayOutputs ctx label counts entry = allocaArray (length counts) $ \slots -> do
-  pokeArray slots (replicate (length counts) nullPtr)
-  let outputSlots = [slots `advancePtr` i | i <- [0 .. length counts - 1]]
-  status <- entry outputSlots
-  arrays <- peekArray (length counts) slots
-  bracket (pure arrays) (mapM_ (freeOutput ctx label)) $ \owned -> do
+-- Runs one entry handle-to-handle: complete pending cuBLAS work first (its
+-- outputs may be entry inputs), invoke, wrap the outputs, and leave the queue
+-- asynchronous with the dirty flag set. Errors from the asynchronous queue
+-- surface at the next synchronizing operation, attributed there.
+deviceOutputs :: Context -> String -> [Int] -> ([Ptr (Ptr CF32_1d)] -> IO CInt)
+  -> IO [DevF32]
+deviceOutputs ctx label counts entry = do
+  syncBlasIfDirty ctx
+  allocaArray (length counts) $ \slots -> do
+    pokeArray slots (replicate (length counts) nullPtr)
+    let outputSlots = [slots `advancePtr` i | i <- [0 .. length counts - 1]]
+    status <- entry outputSlots
+    arrays <- peekArray (length counts) slots
     check (rawContext ctx) label status
-    forM_ owned $ \arr -> whenNull arr (label ++ " returned a null array")
-    sync ctx label
-    sequence (zipWith (downloadF32 ctx label) counts owned)
-
-downloadF32 :: Context -> String -> Int -> Ptr CF32_1d -> IO [Float]
-downloadF32 ctx label count arr = allocaArray count $ \host -> do
-  cValuesF32 (rawContext ctx) arr host >>= check (rawContext ctx) (label ++ " download")
-  sync ctx (label ++ " download")
-  peekArray count host
-
-freeOutput :: Context -> String -> Ptr CF32_1d -> IO ()
-freeOutput ctx label arr = when (arr /= nullPtr) $
-  cFreeF32 (rawContext ctx) arr >>= check (rawContext ctx) (label ++ " output free")
+      `onException` mapM_ (freeIfNonNull ctx) arrays
+    forM_ arrays $ \arr -> whenNull arr (label ++ " returned a null array")
+    markFutharkDirty ctx
+    mapM_ (registerArenaIfActive ctx) arrays
+    pure (zipWith DevF32 arrays counts)
 
 sync :: Context -> String -> IO ()
 sync ctx label = cContextSync (rawContext ctx) >>= check (rawContext ctx) (label ++ " sync")
-
-rawContext :: Context -> Ptr CContext
-rawContext (Context ctx) = ctx
 
 f :: Integral a => Int -> a
 f = fromIntegral
@@ -401,9 +588,12 @@ foreign import ccall safe "futhark_context_sync" cContextSync :: Ptr CContext ->
 
 foreign import ccall safe "futhark_new_f32_1d" cNewF32 :: Ptr CContext -> Ptr Float -> Int64 -> IO (Ptr CF32_1d)
 foreign import ccall safe "futhark_new_i64_1d" cNewI64 :: Ptr CContext -> Ptr Int64 -> Int64 -> IO (Ptr CI64_1d)
+foreign import ccall safe "futhark_new_bool_1d" cNewBool :: Ptr CContext -> Ptr Word8 -> Int64 -> IO (Ptr CBool_1d)
 foreign import ccall safe "futhark_values_f32_1d" cValuesF32 :: Ptr CContext -> Ptr CF32_1d -> Ptr Float -> IO CInt
+foreign import ccall unsafe "futhark_values_raw_f32_1d" cValuesRawF32 :: Ptr CContext -> Ptr CF32_1d -> IO Word64
 foreign import ccall safe "futhark_free_f32_1d" cFreeF32 :: Ptr CContext -> Ptr CF32_1d -> IO CInt
 foreign import ccall safe "futhark_free_i64_1d" cFreeI64 :: Ptr CContext -> Ptr CI64_1d -> IO CInt
+foreign import ccall safe "futhark_free_bool_1d" cFreeBool :: Ptr CContext -> Ptr CBool_1d -> IO CInt
 
 foreign import ccall safe "futhark_entry_piece_rms_norm_fwd" entryPieceRmsNormFwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
 foreign import ccall safe "futhark_entry_piece_rms_norm_bwd" entryPieceRmsNormBwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
@@ -431,3 +621,11 @@ foreign import ccall safe "futhark_entry_piece_embed_gather_fwd" entryPieceEmbed
 foreign import ccall safe "futhark_entry_piece_embed_gather_bwd" entryPieceEmbedGatherBwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CI64_1d -> Ptr CF32_1d -> IO CInt
 foreign import ccall safe "futhark_entry_piece_ce_fwd" entryPieceCeFwd :: Ptr CContext -> Ptr Float -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CI64_1d -> IO CInt
 foreign import ccall safe "futhark_entry_piece_ce_bwd" entryPieceCeBwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Float -> Ptr CF32_1d -> Ptr CI64_1d -> IO CInt
+foreign import ccall safe "futhark_entry_piece_accumulate" entryPieceAccumulate :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_zero_vector" entryZeroVector :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> IO CInt
+foreign import ccall safe "futhark_entry_clip_global_norm" entryClipGlobalNorm :: Ptr CContext -> Ptr Float -> Ptr (Ptr CF32_1d) -> Float -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_adamw_step" entryAdamwStep :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Int64 -> Float -> Float -> Float -> Float -> Float -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CBool_1d -> IO CInt
+foreign import ccall safe "futhark_entry_piece_read_slice" entryPieceReadSlice :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_piece_write_slice" entryPieceWriteSlice :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_piece_gather_chunk" entryPieceGatherChunk :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_piece_put_chunk" entryPiecePutChunk :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt

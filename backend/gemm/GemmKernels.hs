@@ -1,3 +1,10 @@
+-- The device-resident kernel module for the decomposed cuBLAS trainer. It
+-- keeps the fused FutharkKernels module API so backend/gpu/Main.hs compiles
+-- against either backend, but every array is a real Futhark device handle:
+-- pieces run handle-to-handle, GEMMs go through the persistent cuBLAS stream
+-- over raw device pointers, and accumulate/clip/AdamW run on device. Host
+-- data crosses the boundary only at token upload, checkpoint save/load, and
+-- the per-step loss/norm scalars.
 module FutharkKernels
   ( Context
   , F32Array
@@ -27,27 +34,41 @@ module FutharkKernels
   , decodeStep
   ) where
 
-import Control.Exception (bracket)
+import Control.Exception (bracket, onException)
 import Control.Monad (unless)
-import CudaBlasOps
+import CudaDeviceBlas
 import Data.Int (Int64)
-import Data.IORef
-import Data.List (zipWith4)
 import Decomposed (PieceOps (..), modelLossGradDecomposed)
+import Foreign.Ptr (Ptr)
 import FormalTransformer.Artifact (Numerics (..))
 import FormalTransformer.Config
 import ProductionPieces
-  ( Context
+  ( CBool_1d
+  , Context
+  , DevF32 (..)
+  , DevI64 (..)
+  , deviceAccumulate
+  , deviceAdamwStep
+  , deviceClipGlobalNorm
+  , deviceZeros
+  , freeBool
+  , freeI64
+  , popArenaKeeping
   , productionPieceOpsWith
+  , pushArena
+  , uploadBool
+  , uploadI64
   , withProductionContext
   )
+import qualified ProductionPieces as PP
 import System.Environment (lookupEnv)
 import Text.Read (readMaybe)
 
-newtype F32Array = F32Array (IORef (Maybe [Float]))
-newtype BoolArray = BoolArray (IORef [Bool])
+newtype F32Array = F32Array DevF32
 
-data I64Array = I64Array ![Int] !(IORef [Int64])
+newtype BoolArray = BoolArray (Ptr CBool_1d)
+
+data I64Array = I64Array ![Int] !DevI64
 
 data GpuConfig = GpuConfig
   { gpuVocab :: !Int64
@@ -110,79 +131,92 @@ withF32 :: Context -> [Float] -> (F32Array -> IO a) -> IO a
 withF32 ctx values = bracket (uploadF32 ctx values) (freeF32 ctx)
 
 uploadF32 :: Context -> [Float] -> IO F32Array
-uploadF32 _ values = F32Array <$> newIORef (Just values)
+uploadF32 ctx values = F32Array <$> PP.uploadF32 ctx values
 
 withI64_1d :: Context -> [Int64] -> (I64Array -> IO a) -> IO a
-withI64_1d _ values action = newI64 [length values] values >>= action
+withI64_1d ctx values action =
+  bracket (uploadI64 ctx values) (freeI64 ctx) $ \tokens ->
+    action (I64Array [length values] tokens)
 
 withI64_2d :: Context -> Int -> Int -> [Int64] -> (I64Array -> IO a) -> IO a
-withI64_2d _ rows cols values action = do
+withI64_2d ctx rows cols values action = do
   unless (rows >= 0 && cols >= 0 && length values == rows * cols) $
     ioError (userError "invalid i64[2] host shape")
-  newI64 [rows, cols] values >>= action
+  bracket (uploadI64 ctx values) (freeI64 ctx) $ \tokens ->
+    action (I64Array [rows, cols] tokens)
 
 withBool :: Context -> [Bool] -> (BoolArray -> IO a) -> IO a
-withBool _ values action = BoolArray <$> newIORef values >>= action
-
-newI64 :: [Int] -> [Int64] -> IO I64Array
-newI64 shape values = I64Array shape <$> newIORef values
+withBool ctx values action =
+  bracket (uploadBool ctx values) (freeBool ctx) (action . BoolArray)
 
 downloadF32 :: Context -> Int -> F32Array -> IO [Float]
-downloadF32 _ expected array = do
-  values <- readF32 array
-  unless (length values == expected) $
+downloadF32 ctx expected (F32Array dev@(DevF32 _ count)) = do
+  unless (count == expected) $
     ioError (userError ("download f32[1] length mismatch: expected "
-      ++ show expected ++ ", got " ++ show (length values)))
-  pure values
+      ++ show expected ++ ", got " ++ show count))
+  PP.downloadF32 ctx dev
 
 freeF32 :: Context -> F32Array -> IO ()
-freeF32 _ (F32Array ref) = writeIORef ref Nothing
+freeF32 ctx (F32Array dev) = PP.freeF32 ctx dev
 
 batchMeanLoss :: Context -> GpuConfig -> F32Array -> I64Array -> IO Float
-batchMeanLoss ctx cfg paramsArray tokensArray = do
-  (batch, width, tokens) <- readBatch tokensArray
-  params <- readF32 paramsArray
+batchMeanLoss ctx cfg (F32Array params) tokensArray = do
+  (batch, width, tokens) <- batchOf tokensArray
   numerics <- backendNumerics
-  fst <$> modelLossGradDecomposed (pieceOps numerics ctx) (configOf cfg width)
-    (fromIntegral (gpuChunk cfg)) batch batch params tokens
+  withArena ctx $ do
+    (loss, _) <- modelLossGradDecomposed (pieceOps numerics ctx)
+      (configOf cfg width) (fromIntegral (gpuChunk cfg)) batch batch
+      params tokens
+    pure (loss, [])
 
 microBatchLossGrad
   :: Context -> GpuConfig -> Int64 -> F32Array -> F32Array -> I64Array
   -> IO (Float, F32Array)
-microBatchLossGrad ctx cfg effectiveBatch accumulatorArray paramsArray tokensArray = do
+microBatchLossGrad ctx cfg effectiveBatch (F32Array accumulator)
+    (F32Array params) tokensArray = do
   unless (effectiveBatch > 0) $
     ioError (userError "effective batch must be positive")
-  (batch, width, tokens) <- readBatch tokensArray
-  accumulator <- readF32 accumulatorArray
-  params <- readF32 paramsArray
+  (batch, width, tokens) <- batchOf tokensArray
   numerics <- backendNumerics
-  (loss, gradient) <- modelLossGradDecomposed (pieceOps numerics ctx) (configOf cfg width)
-    (fromIntegral (gpuChunk cfg)) batch (fromIntegral effectiveBatch) params tokens
-  unless (length accumulator == length gradient) $
-    ioError (userError "gradient accumulator length mismatch")
-  accumulated <- uploadF32 ctx (zipWith (+) accumulator gradient)
-  pure (loss, accumulated)
+  withArena ctx $ do
+    (loss, gradient) <- modelLossGradDecomposed (pieceOps numerics ctx)
+      (configOf cfg width) (fromIntegral (gpuChunk cfg)) batch
+      (fromIntegral effectiveBatch) params tokens
+    let DevF32 _ accumulatorCount = accumulator
+        DevF32 _ gradientCount = gradient
+    unless (accumulatorCount == gradientCount) $
+      ioError (userError "gradient accumulator length mismatch")
+    accumulated <- deviceAccumulate ctx accumulator gradient
+    pure ((loss, F32Array accumulated), [accumulated])
 
-pieceOps :: Numerics -> Context -> PieceOps [Float] [Int64]
-pieceOps numerics = productionPieceOpsWith $ \ops -> ops
-  { opsDenseForward = cudaDenseForward numerics
-  , opsDenseBackward = cudaDensePullback numerics
-  , opsBatchedGemmForward = cudaBatchedGemmForward numerics
-  , opsBatchedGemmBackward = cudaBatchedGemmPullback numerics
-  }
+-- All device intermediates of one loss/gradient traversal are freed when the
+-- window closes; only the listed survivors escape to the caller.
+withArena :: Context -> IO (a, [DevF32]) -> IO a
+withArena ctx action = do
+  pushArena ctx
+  (result, survivors) <- action `onException` popArenaKeeping ctx []
+  popArenaKeeping ctx survivors
+  pure result
+
+pieceOps :: Numerics -> Context -> PieceOps DevF32 DevI64
+pieceOps numerics ctx = productionPieceOpsWith
+  (\ops -> ops
+    { opsDenseForward = deviceDenseForward ctx numerics
+    , opsDenseBackward = deviceDensePullback ctx numerics
+    , opsBatchedGemmForward = deviceBatchedGemmForward ctx numerics
+    , opsBatchedGemmBackward = deviceBatchedGemmPullback ctx numerics
+    })
+  ctx
 
 zeroVector :: Context -> Int -> IO F32Array
 zeroVector ctx count
   | count < 0 = ioError (userError "zero vector length must be non-negative")
-  | otherwise = uploadF32 ctx (replicate count 0)
+  | otherwise = F32Array <$> deviceZeros ctx count
 
 clipGlobalNorm :: Context -> Float -> F32Array -> IO (Float, F32Array)
-clipGlobalNorm ctx maxNorm gradientArray = do
-  gradient <- readF32 gradientArray
-  let norm = sqrt (sum (map (\x -> x * x) gradient))
-      scale = if norm > maxNorm then maxNorm / norm else 1
-  clipped <- uploadF32 ctx (map (* scale) gradient)
-  pure (norm, clipped)
+clipGlobalNorm ctx maxNorm (F32Array gradient) = do
+  (norm, clipped) <- deviceClipGlobalNorm ctx maxNorm gradient
+  pure (norm, F32Array clipped)
 
 futharkParameterCount :: Context -> GpuConfig -> IO Int64
 futharkParameterCount _ = pure . fromIntegral . paramCount . flip configOf 2
@@ -192,24 +226,11 @@ adamwStep
   -> F32Array -> F32Array -> F32Array -> F32Array -> BoolArray
   -> IO (F32Array, F32Array, F32Array)
 adamwStep ctx step learningRate beta1 beta2 epsilon weightDecay
-    paramsArray gradientArray firstArray secondArray (BoolArray maskRef) = do
-  params <- readF32 paramsArray
-  gradient <- readF32 gradientArray
-  first <- readF32 firstArray
-  second <- readF32 secondArray
-  mask <- readIORef maskRef
-  let lengths = map length [gradient, first, second]
-  unless (all (== length params) lengths && length mask == length params) $
-    ioError (userError "AdamW vector length mismatch")
-  let first' = zipWith (\m g -> beta1 * m + (1 - beta1) * g) first gradient
-      second' = zipWith (\v g -> beta2 * v + (1 - beta2) * g * g) second gradient
-      firstCorrection = 1 - beta1 ** fromIntegral step
-      secondCorrection = 1 - beta2 ** fromIntegral step
-      update p m v decay = p - learningRate
-        * (m / firstCorrection / (sqrt (v / secondCorrection) + epsilon)
-          + if decay then weightDecay * p else 0)
-      params' = zipWith4 update params first' second' mask
-  (,,) <$> uploadF32 ctx params' <*> uploadF32 ctx first' <*> uploadF32 ctx second'
+    (F32Array params) (F32Array gradient) (F32Array firstMoment)
+    (F32Array secondMoment) (BoolArray mask) = do
+  (params', first', second') <- deviceAdamwStep ctx step learningRate beta1
+    beta2 epsilon weightDecay params gradient firstMoment secondMoment mask
+  pure (F32Array params', F32Array first', F32Array second')
 
 logits :: Context -> GpuConfig -> Int -> F32Array -> I64Array -> IO [[Float]]
 logits _ _ _ _ _ = unsupported "logits"
@@ -227,13 +248,9 @@ unsupported :: String -> IO a
 unsupported operation = ioError . userError $
   "GEMM backend does not support generation (" ++ operation ++ ")"
 
-readF32 :: F32Array -> IO [Float]
-readF32 (F32Array ref) = readIORef ref >>= maybe
-  (ioError (userError "use of freed f32 array")) pure
-
-readBatch :: I64Array -> IO (Int, Int, [Int64])
-readBatch (I64Array [rows, cols] valuesRef) = (,,) rows cols <$> readIORef valuesRef
-readBatch _ = ioError (userError "expected an i64[2] batch")
+batchOf :: I64Array -> IO (Int, Int, DevI64)
+batchOf (I64Array [rows, cols] tokens) = pure (rows, cols, tokens)
+batchOf _ = ioError (userError "expected an i64[2] batch")
 
 configOf :: GpuConfig -> Int -> Config
 configOf cfg sequenceLength = Config
