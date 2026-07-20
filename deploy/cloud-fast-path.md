@@ -9,7 +9,8 @@
 Goal: spend the **least paid GPU time** to train `bpe10m` on a rented GPU and get
 the weights onto your local machine, then destroy the instance. The model is
 ~10 M params, the checkpoint is tiny (~120 MB), and all CPU-heavy prep (tokenizer
-+ corpora + plan) is done locally. CUDA is pinned to **12.9** in `flake.nix`;
++ corpora + plan) is done locally. CUDA is pinned to **12.8** in `flake.nix`
+(keep the pin at or below the rental driver's Max CUDA);
 `cloud-init.sh` builds the host from that closure using only the box's kernel
 driver.
 
@@ -27,7 +28,7 @@ The one rule that saves the most money: **DESTROY** the instance when done (not
 - **Plan + corpora**: `run/wiki-bpe10m/plan-bpe10m-b8-s4000.tsv` (1,465 segments)
   ✅ plus all 1,465 `shard-<k>-bpe10m.corpus` (~9.3 GB) ✅
 - **CUDA host builds locally** ✅ (`nix build .#formal-transformer-cuda`, RPATH
-  clean, links CUDA 12.9). No GPU needed to build.
+  clean, links CUDA 12.8). No GPU needed to build.
 
 > **This run: full dataset (all 1,465 shards), benchmark-gated.** Transfer all
 > corpora, run the whole plan (`MAX_SHARDS` unset), and pull the checkpoint as
@@ -40,12 +41,13 @@ The one rule that saves the most money: **DESTROY** the instance when done (not
 ## 1. Rent the instance (vast.ai)
 
 - **GPU** — interruptible offers churn, so pick live by **highest FP32 TFLOPS/$
-  with Max CUDA >= 12.9** (not vast's tensor-weighted DLPerf). Ampere, Ada, and
+  with Max CUDA >= 12.8** (not vast's tensor-weighted DLPerf). Ampere, Ada, and
   Blackwell are supported. Good examples:
   **RTX 3090 / 3090 Ti (~$0.13/hr, 24 GB, reliable)**, **RTX 4070 Ti / 4080 /
   4090**, and **RTX 5070** (measured working). The full run is projected around
   $30-35 on a $0.104/h 5070. Need only about 1.2 GB VRAM.
-  - **Avoid sub-12.9 hosts** — the driver PTX JIT may reject CUDA 12.9 output.
+  - **Avoid hosts below the flake's CUDA pin (12.8)** — the driver PTX JIT may
+    reject newer PTX than it advertises.
   - Old datacenter cards (Tesla T4, sm_75) are *compatible* but poor value:
     ~3× the $/FP32-TFLOP of a 3090 and many times the wall-clock.
 - **Template**: any CUDA/Ubuntu image that exposes the NVIDIA runtime (the vast
@@ -66,7 +68,7 @@ PORT=41234                          # from vast's SSH line
 SSH_E="ssh -p $PORT -i ~/.ssh/xpsoasis-ed25519"
 ```
 
-*(Verda)* Instead: use an image/driver advertising CUDA 12.9+, no
+*(Verda)* Instead: use an image/driver advertising CUDA 12.8+, no
 startup script; `INSTANCE=ubuntu@<ip>` and `SSH_E="ssh -i ~/.ssh/xpsoasis-ed25519"`
 (no `-p`).
 
@@ -157,8 +159,9 @@ VALIDATION_WINDOWS=1 TRAIN_BATCH=8 MICRO_BATCH=1 BENCH_STEPS=200 \
 # run a second time to confirm steady-state tokens/s
 ```
 
-- **PTX rejected / JIT error?** The host driver is older than 12.9 expects.
-  Rent a Max-CUDA >= 12.9 host, or deliberately pin lower only for a pre-Blackwell
+- **PTX rejected / JIT error?** The host driver is older than the flake's CUDA
+  pin expects.
+  Rent a host at or above the pin, or deliberately pin lower only for a pre-Blackwell
   GPU, rebuild, and re-run the
   conformance oracle before trusting it (`docs/CLOUD-TRAINING.md`).
 - **Tune `MICRO_BATCH` only by measurement.** On the RTX 5070, `1` beat `8`
@@ -245,6 +248,24 @@ WIKI_PROMPT="The theory of" nix run .#wiki-generate
 
 `inspect-checkpoint` on a pulled file confirms its global step and
 model/tokenizer/dataset identities.
+
+---
+
+## Tensor-core (cuBLAS) variant
+
+To run the decomposed cuBLAS trainer instead of the fused Futhark one, build it
+during bring-up with `BUILD_GEMM_CUDA=1 ./deploy/cloud-init.sh` (lands in
+`result-gemm/`), pass the build/training gates in `docs/TENSOR-CORE-RUNTIME.md`
+(`./result-gemm/bin/cuda-blas-test`, then one tiny train per numerics mode),
+and only then point training at it:
+
+```bash
+TRAINER=result-gemm/bin/formal-transformer-gemm-cuda GEMM_NUMERICS=tf32 \
+  ./deploy/train-cloud.sh
+```
+
+`GEMM_NUMERICS` (`fp32`|`tf32`|`bf16`) is checkpointed as the run's numeric
+interpretation; resume rejects a mismatch, so keep one checkpoint per mode.
 
 ---
 

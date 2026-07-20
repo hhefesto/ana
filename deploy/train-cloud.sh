@@ -27,6 +27,12 @@
 #   VALIDATE_EVERY=2000    validation cadence (observation only)
 #   VALIDATION_WINDOWS=1   windows per validation observation (CUDA forward is slow)
 #   RUN_DIR, SIZE, SHARD_ARTICLES, PLAN, CHECKPOINT, FUT_CACHE  (have defaults)
+#   TRAINER          override the trainer binary; point it at
+#                    result-gemm/bin/formal-transformer-gemm-cuda (built with
+#                    BUILD_GEMM_CUDA=1 cloud-init.sh) for cuBLAS tensor-core
+#                    GEMMs, and set GEMM_NUMERICS=fp32|tf32|bf16 — it reaches
+#                    the trainer through the environment. See
+#                    docs/TENSOR-CORE-RUNTIME.md for the gates to run first.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

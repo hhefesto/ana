@@ -21,7 +21,7 @@ checkpoint made with another 8192-token table is incompatible by design.
 ## Provider Choice
 
 For an experimental budget below USD 50, use one high-FP32 GPU with a driver
-advertising CUDA 12.9+. One fast GPU is intentional: the host is single-device,
+advertising CUDA 12.8+. One fast GPU is intentional: the host is single-device,
 and measured peak device use is only about 1.2 GB. Renting a multi-GPU instance
 before Tier-2 gradient reduction exists would pay for idle devices.
 
@@ -52,16 +52,16 @@ stock scheduling is the measured configuration.
 
 ## Nix On The Rented Box (VM or container)
 
-Two supported targets. **Verda (VM):** use an image advertising CUDA 12.9+
+Two supported targets. **Verda (VM):** use an image advertising CUDA 12.8+
 (not Minimal, which ships no driver; the `+ Docker` variant is unnecessary).
 **vast.ai (container):** rent any CUDA/Ubuntu container template that exposes the
-NVIDIA runtime and reports `Max CUDA >= 12.9`. Either way, keep the box's kernel
+NVIDIA runtime and reports `Max CUDA >= 12.8`. Either way, keep the box's kernel
 driver, install Nix for all userspace dependencies, and build the pinned CUDA
 closure from this flake — safer than replacing a working driver.
 
-`flake.nix` pins CUDA userspace to **12.9** (`cudaPackages_12_9`), which targets
+`flake.nix` pins CUDA userspace to **12.8** (`cudaPackages_12_8`), which targets
 Ampere, Ada, and Blackwell sm_120. Since Futhark JIT-compiles PTX through NVRTC,
-the provider driver must advertise CUDA 12.9 or newer.
+the provider driver must advertise CUDA 12.8 or newer (>= the pin).
 The step-by-step minimum-cost runbook is `deploy/cloud-fast-path.md`;
 `deploy/cloud-init.sh` brings an instance up — it auto-detects a VM (multi-user
 Nix) vs a Docker container (single-user `--no-daemon` Nix, `sandbox = false`) —
@@ -79,8 +79,8 @@ lib dir when the default loader path misses it (persisted to `run/cloud-env.sh`)
 ./deploy/cloud-init.sh   # (deploy/bootstrap-ubuntu-nvidia.sh is the older Verda-only variant)
 ```
 
-The provider driver must support CUDA 12.9-era PTX because Futhark compiles its
-embedded CUDA through NVRTC at context creation; any `Max CUDA >= 12.9` host
+The provider driver must support CUDA 12.8-era PTX because Futhark compiles its
+embedded CUDA through NVRTC at context creation; any `Max CUDA >= 12.8` host
 satisfies this. If a benchmark still rejects the PTX (older driver than
 advertised), pin lower — `cudaPackages_12_4` is available in this nixpkgs —
 rebuild, and re-run the conformance oracle before trusting the new backend

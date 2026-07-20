@@ -11,8 +11,8 @@
 #   2. Install Nix — daemon on a VM, single-user (--no-daemon) in a container —
 #      and enable flakes (plus sandbox=false in a container, where the build
 #      sandbox's user namespaces may be unavailable).
-#   3. Build formal-transformer-cuda (CUDA pinned to 12.9 in flake.nix for
-#      Blackwell sm_120 support).
+#   3. Build formal-transformer-cuda (CUDA pinned to 12.8 in flake.nix for
+#      Blackwell sm_120 support; keep the pin <= the driver's Max CUDA).
 #   4. Fail loudly if CUDA driver stubs leaked into the runtime RPATH.
 #   5. Resolve libcuda.so.1: run `inspect bpe10m`; if the loader can't find the
 #      injected driver lib, locate it, set LD_LIBRARY_PATH, retry, and persist
@@ -35,7 +35,7 @@ if in_container; then env_kind=container; else env_kind=vm; fi
 echo "cloud-init: repo at $repo_root (environment: $env_kind)"
 
 # ---------------------------------------------------------------------------
-# 1. GPU runtime present?  Report its CUDA level (must be >= 12.9 for our PTX)
+# 1. GPU runtime present?  Report its CUDA level (must be >= 12.8 for our PTX)
 #    and refuse architectures unsupported by the pinned NVRTC.
 # ---------------------------------------------------------------------------
 if ! command -v nvidia-smi >/dev/null; then
@@ -46,16 +46,16 @@ fi
 nvidia-smi
 driver_ver="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -n1 || true)"
 smi_cuda="$(nvidia-smi 2>/dev/null | grep -oE 'CUDA (UMD )?Version: [0-9]+\.[0-9]+' | grep -oE '[0-9]+\.[0-9]+' | head -n1 || true)"
-echo "cloud-init: driver=$driver_ver  advertised CUDA=$smi_cuda  (flake emits 12.9 PTX)"
+echo "cloud-init: driver=$driver_ver  advertised CUDA=$smi_cuda  (flake emits 12.8 PTX)"
 case "$smi_cuda" in
-  ""|12.[0-8]|1[01].*)
-    echo "cloud-init: WARNING — driver advertises CUDA < 12.9; 12.9 PTX may be rejected." >&2
-    echo "  Pick a host with Max CUDA >= 12.9, or pin the flake lower (see fast-path doc)." >&2
+  ""|12.[0-7]|1[01].*)
+    echo "cloud-init: WARNING — driver advertises CUDA < 12.8; 12.8 PTX may be rejected." >&2
+    echo "  Pick a host with Max CUDA >= 12.8, or pin the flake lower (see fast-path doc)." >&2
     ;;
-  *) echo "cloud-init: driver CUDA >= 12.9 — 12.9 PTX will be accepted." ;;
+  *) echo "cloud-init: driver CUDA >= 12.8 — 12.8 PTX will be accepted." ;;
 esac
 
-# CUDA 12.9 NVRTC targets Blackwell. Architecture remains diagnostic only: the
+# CUDA 12.8 NVRTC targets Blackwell. Architecture remains diagnostic only: the
 # low-occupancy bpe10m failure also reproduced on Ampere.
 compute_cap="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n1 | tr -d ' ' || true)"
 echo "cloud-init: GPU compute capability=${compute_cap:-unknown}"
@@ -120,6 +120,14 @@ NIX() { nix --extra-experimental-features "$features" "$@"; }
 # ---------------------------------------------------------------------------
 echo "cloud-init: building formal-transformer-cuda..."
 NIX build .#formal-transformer-cuda
+
+# Opt-in: also build the cuBLAS tensor-core trainer + its GPU smoke test
+# (docs/TENSOR-CORE-RUNTIME.md). Kept separate from result/ so train-cloud.sh
+# defaults stay on the fused Futhark trainer until the gates pass.
+if [ "${BUILD_GEMM_CUDA:-0}" = 1 ]; then
+  echo "cloud-init: building formal-transformer-gemm-cuda (BUILD_GEMM_CUDA=1)..."
+  NIX build .#formal-transformer-gemm-cuda -o result-gemm
+fi
 
 # ---------------------------------------------------------------------------
 # 4. Stub-leak guard (same check the derivation enforces; belt and braces).

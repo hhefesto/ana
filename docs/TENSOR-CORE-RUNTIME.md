@@ -14,7 +14,8 @@ Old checkpoints decode as `Fp32IEEE`. Resume rejects a numerics mismatch.
 
 ## Build gate
 
-The rental driver must advertise Max CUDA 12.9 or newer.
+The rental driver must advertise Max CUDA at or above the flake's pinned
+toolkit (currently 12.8).
 
 ```bash
 nvidia-smi

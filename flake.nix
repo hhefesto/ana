@@ -26,10 +26,11 @@
           # CUDA userspace. Futhark JIT-compiles its kernel PTX through NVRTC at
           # context creation, so NVRTC must (a) support the GPU's compute
           # capability and (b) not emit PTX newer than the host driver accepts.
-          # CUDA 12.9 is the oldest toolkit in this nixpkgs pin that targets
-          # Blackwell (sm_120). Futhark ships PTX and compiles it through NVRTC
-          # at context creation, so rental hosts must advertise Max CUDA 12.9+.
-          cudaPackages = pkgs.cudaPackages_12_9;
+          # CUDA 12.8 is the first toolkit with Blackwell (sm_120) support and
+          # matches the rented box's 570-series driver (Max CUDA 12.8); a newer
+          # toolkit than the driver risks PTX JIT rejection at context creation,
+          # so keep this pin <= the rental driver's advertised CUDA version.
+          cudaPackages = pkgs.cudaPackages_12_8;
           cudaCudart = cudaPackages.cuda_cudart;
           cudaCccl = cudaPackages.cccl;
           cudaNvcc = cudaPackages.cuda_nvcc;
@@ -847,7 +848,7 @@
             config.allowUnfree = true;
           };
           agda = pkgs.agda.withPackages (p: [ p.standard-library ]);
-          cudaPackages = pkgs.cudaPackages_12_9;
+          cudaPackages = pkgs.cudaPackages_12_8;
           cudaCudart = cudaPackages.cuda_cudart;
           cudaCccl = cudaPackages.cccl;
           cudaNvcc = cudaPackages.cuda_nvcc;
