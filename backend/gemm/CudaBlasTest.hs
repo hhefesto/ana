@@ -15,6 +15,10 @@ data Mode = Mode
 
 main :: IO ()
 main = do
+  pointerSize <- cudaDeviceptrSize
+  unless (pointerSize == 8) $
+    fail ("CUdeviceptr is " ++ show pointerSize
+      ++ " bytes; the Word64 FFI boundary expects 8")
   mapM_ testMode modes
   putStrLn "CudaBlasOps GPU runtime tests passed"
 
@@ -30,10 +34,13 @@ testMode mode = do
   denseForwardError <- testDenseForward mode
   (denseXError, denseWeightError) <- testDensePullback mode
   batchedErrors <- forM batchedCases (testBatched mode)
-  let errors = denseForwardError : denseXError : denseWeightError : batchedErrors
-  printf "%s max errors: dense=%0.8g, dX=%0.8g, dW=%0.8g, NN=%0.8g, NT=%0.8g, TN=%0.8g; overall=%0.8g\n"
+  deviceErrors <- forM batchedCases (testDeviceBatched mode)
+  let errors = denseForwardError : denseXError : denseWeightError
+        : batchedErrors ++ deviceErrors
+  printf "%s max errors: dense=%0.8g, dX=%0.8g, dW=%0.8g, NN=%0.8g, NT=%0.8g, TN=%0.8g, devNN=%0.8g, devNT=%0.8g, devTN=%0.8g; overall=%0.8g\n"
     (modeName mode) denseForwardError denseXError denseWeightError
     (batchedErrors !! 0) (batchedErrors !! 1) (batchedErrors !! 2)
+    (deviceErrors !! 0) (deviceErrors !! 1) (deviceErrors !! 2)
     (maximum errors)
 
 testDenseForward :: Mode -> IO Double
@@ -107,6 +114,41 @@ testBatched mode testCase = do
     (caseTransA testCase) (caseTransB testCase) groups
     aRows aCols bRows bCols 3 7 a b
   checkResult mode ("batched " ++ caseName testCase) expected actual
+
+-- The same batched cases through the enqueue-only device-pointer entry: the
+-- inputs live in caller-owned device memory, the GEMM lands on the persistent
+-- stream, and the result is observed only after cublasContextSync.
+testDeviceBatched :: Mode -> BatchedCase -> IO Double
+testDeviceBatched mode testCase = do
+  let groups = 3
+      aRows = caseARows testCase
+      aCols = caseACols testCase
+      bRows = caseBRows testCase
+      bCols = caseBCols testCase
+      aStride = aRows * aCols
+      bStride = bRows * bCols
+      a = testValues (113 + aStride) (groups * aStride)
+      b = testValues (127 + bStride) (groups * bStride)
+      outputCount = groups * 3 * 7
+      expected = concat
+        [ gemmReference (caseTransA testCase) (caseTransB testCase)
+            aRows aCols bRows bCols
+            (take aStride (drop (group * aStride) a))
+            (take bStride (drop (group * bStride) b))
+        | group <- [0 .. groups - 1]
+        ]
+  devA <- cudaMallocDevice (length a * 4)
+  devB <- cudaMallocDevice (length b * 4)
+  devC <- cudaMallocDevice (outputCount * 4)
+  cudaCopyToDevice devA a
+  cudaCopyToDevice devB b
+  cudaDeviceGemmEnqueue (modeNumerics mode)
+    (caseTransA testCase) (caseTransB testCase) groups
+    aRows aCols bRows bCols 3 7 devA devB devC
+  cublasContextSync
+  actual <- cudaCopyFromDevice outputCount devC
+  mapM_ cudaFreeDevice [devA, devB, devC]
+  checkResult mode ("device batched " ++ caseName testCase) expected actual
 
 -- Inputs are Float, while each dot product is accumulated in Double. This is
 -- independent of cuBLAS and preserves the packed row-major interpretation.
