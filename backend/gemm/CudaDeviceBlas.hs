@@ -25,6 +25,7 @@ import ProductionPieces
   , deviceZeros
   , markBlasDirty
   , syncFutharkIfDirty
+  , traceOp
   )
 import System.IO.Unsafe (unsafePerformIO)
 
@@ -59,6 +60,9 @@ deviceBatchedGemmForward
 deviceBatchedGemmForward ctx numerics transA transB groups
     aRows aCols bRows bCols cRows cCols a b = do
   k <- validateShapes transA transB groups aRows aCols bRows bCols cRows cCols a b
+  traceOp ("gemm " ++ transposeTag transA ++ transposeTag transB
+    ++ " groups=" ++ show groups ++ " a=" ++ dimensions aRows aCols
+    ++ " b=" ++ dimensions bRows bCols ++ " c=" ++ dimensions cRows cCols)
   let outputCount = groups * cRows * cCols
   output <- deviceZeros ctx outputCount
   if outputCount == 0 || k == 0
@@ -144,6 +148,10 @@ validateShapes transA transB groups aRows aCols bRows bCols cRows cCols
 logicalShape :: Transpose -> Int -> Int -> (Int, Int)
 logicalShape NoTrans rows cols = (rows, cols)
 logicalShape Trans rows cols = (cols, rows)
+
+transposeTag :: Transpose -> String
+transposeTag NoTrans = "N"
+transposeTag Trans = "T"
 
 dimensions :: Int -> Int -> String
 dimensions rows cols = show rows ++ "x" ++ show cols

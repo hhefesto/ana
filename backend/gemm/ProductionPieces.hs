@@ -39,6 +39,8 @@ module ProductionPieces
   , syncFutharkIfDirty
   , markBlasDirty
   , syncBlasIfDirty
+  , syncDevice
+  , traceOp
   ) where
 
 import Control.Exception (bracket, onException, throwIO)
@@ -52,6 +54,9 @@ import Decomposed (PieceOps (..))
 import Foreign
 import Foreign.C.String (CString, peekCString)
 import Foreign.C.Types (CInt (..))
+import System.Environment (lookupEnv)
+import System.IO (hFlush, hPutStrLn, stderr)
+import System.IO.Unsafe (unsafePerformIO)
 
 data CContextConfig
 data CContext
@@ -132,8 +137,20 @@ withProductionContext action = bracket newConfig cConfigFree $ \cfg -> do
     newConfig = do
       cfg <- cConfigNew
       whenNull cfg "Futhark context config allocation failed"
+      profile <- lookupEnv "FUT_PROFILE"
+      when (profile == Just "1") (cConfigSetProfiling cfg 1)
       pure cfg
-    freeContext rawCtx = when (rawCtx /= nullPtr) (cContextFree rawCtx)
+    freeContext rawCtx = when (rawCtx /= nullPtr) $ do
+      -- FUT_PROFILE=1: dump the runtime's per-kernel totals before the
+      -- context goes away; the where-does-the-step-time-go diagnostic.
+      profile <- lookupEnv "FUT_PROFILE"
+      when (profile == Just "1") $ do
+        report <- cContextReport rawCtx
+        unless (report == nullPtr) $ do
+          hPutStrLn stderr =<< peekCString report
+          hFlush stderr
+          free report
+      cContextFree rawCtx
 
 -- Arena: device intermediates allocated between pushArena and popArenaKeeping
 -- are freed at pop, except the survivors. Pending cuBLAS work is completed
@@ -153,8 +170,7 @@ popArenaKeeping ctx survivors = do
     Nothing -> throwIO (userError "device arena pop without a window")
     Just pointers -> do
       writeIORef (ctxArena ctx) Nothing
-      syncBlasIfDirty ctx
-      syncFutharkIfDirty ctx
+      syncDevice ctx
       let kept = [pointer | DevF32 pointer _ <- survivors]
       forM_ (nub pointers) $ \pointer ->
         unless (pointer `elem` kept) $
@@ -167,22 +183,48 @@ registerArena ctx pointer = modifyIORef' (ctxArena ctx) (fmap (pointer :))
 markFutharkDirty :: Context -> IO ()
 markFutharkDirty ctx = writeIORef (ctxFutharkDirty ctx) True
 
+-- Under GEMM_ORDERING=stream the cuBLAS queue is the legacy default stream
+-- of the shared CUDA context, so the device itself orders GEMMs against
+-- Futhark kernels; the per-boundary host barriers below become no-ops.
+-- Host reads, uploads, and the arena/timing boundaries keep their own
+-- unconditional synchronization (sync/syncDevice call sites).
+{-# NOINLINE streamOrdered #-}
+streamOrdered :: Bool
+streamOrdered = unsafePerformIO ((== Just "stream") <$> lookupEnv "GEMM_ORDERING")
+
 syncFutharkIfDirty :: Context -> IO ()
-syncFutharkIfDirty ctx = do
+syncFutharkIfDirty ctx = unless streamOrdered $ do
   dirty <- readIORef (ctxFutharkDirty ctx)
   when dirty $ do
+    traceOp "sync futhark begin"
     sync ctx "pending Futhark work"
+    traceOp "sync futhark end"
     writeIORef (ctxFutharkDirty ctx) False
 
 markBlasDirty :: Context -> IO ()
 markBlasDirty ctx = writeIORef (ctxBlasDirty ctx) True
 
 syncBlasIfDirty :: Context -> IO ()
-syncBlasIfDirty ctx = do
+syncBlasIfDirty ctx = unless streamOrdered $ do
   dirty <- readIORef (ctxBlasDirty ctx)
   when dirty $ do
+    traceOp "sync blas begin"
     cublasContextSync
+    traceOp "sync blas end"
     writeIORef (ctxBlasDirty ctx) False
+
+-- Completes all pending work on both queues regardless of ordering mode:
+-- the arena free boundary, the bench timing boundary, and the end-of-step
+-- barrier.  Syncing the legacy stream then the Futhark stream covers every
+-- enqueue order under both contracts.
+syncDevice :: Context -> IO ()
+syncDevice ctx = do
+  traceOp "sync device begin"
+  cublasContextSync
+  sync ctx "device sync"
+  traceOp "sync device end"
+  writeIORef (ctxBlasDirty ctx) False
+  writeIORef (ctxFutharkDirty ctx) False
 
 rmsForward :: Context -> Int -> Int -> DevF32 -> DevF32 -> IO DevF32
 rmsForward ctx rows dim (DevF32 x _) (DevF32 gain _) =
@@ -350,10 +392,12 @@ embeddingBackward ctx vocab dim (DevI64 tokens count) (DevF32 bar _) =
 ceForward :: Context -> Int -> Int -> Int -> Int -> DevF32 -> DevI64 -> IO Float
 ceForward ctx batch sequenceLength vocab effectiveBatch (DevF32 logits _)
     (DevI64 tokens _) = do
+  traceOp "entry piece_ce_fwd"
   syncBlasIfDirty ctx
   alloca $ \out -> do
     entryPieceCeFwd (rawContext ctx) out (f batch) (f sequenceLength) (f vocab)
       (f effectiveBatch) logits tokens >>= check (rawContext ctx) "piece_ce_fwd"
+    traceOp "entry piece_ce_fwd returned"
     sync ctx "piece_ce_fwd"
     writeIORef (ctxFutharkDirty ctx) False
     peek out
@@ -440,6 +484,7 @@ deviceRawPointer ctx (DevF32 arr _) = cValuesRawF32 (rawContext ctx) arr
 
 uploadF32 :: Context -> [Float] -> IO DevF32
 uploadF32 ctx values = do
+  traceOp ("upload f32 count=" ++ show (length values))
   syncBlasIfDirty ctx
   withArray values $ \host -> do
     arr <- cNewF32 (rawContext ctx) host (f (length values))
@@ -546,11 +591,13 @@ output4 ctx label counts entry = do
 deviceOutputs :: Context -> String -> [Int] -> ([Ptr (Ptr CF32_1d)] -> IO CInt)
   -> IO [DevF32]
 deviceOutputs ctx label counts entry = do
+  traceOp ("entry " ++ label ++ " counts=" ++ show counts)
   syncBlasIfDirty ctx
   allocaArray (length counts) $ \slots -> do
     pokeArray slots (replicate (length counts) nullPtr)
     let outputSlots = [slots `advancePtr` i | i <- [0 .. length counts - 1]]
     status <- entry outputSlots
+    traceOp ("entry " ++ label ++ " returned")
     arrays <- peekArray (length counts) slots
     check (rawContext ctx) label status
       `onException` mapM_ (freeIfNonNull ctx) arrays
@@ -579,8 +626,23 @@ check ctx label status
 whenNull :: Ptr a -> String -> IO ()
 whenNull ptr message = when (ptr == nullPtr) (throwIO (userError message))
 
+{-# NOINLINE traceEnabled #-}
+traceEnabled :: Bool
+traceEnabled = unsafePerformIO ((== Just "1") <$> lookupEnv "GEMM_TRACE")
+
+-- One flushed stderr line per launched op under GEMM_TRACE=1: the hang
+-- diagnostic. A tail ending in "entry X counts=..." with no "returned" means
+-- X blocked inside the entry (allocation-triggered internal sync); a "sync
+-- ... begin" with no "end" names the barrier that never completed.
+traceOp :: String -> IO ()
+traceOp message = when traceEnabled $ do
+  hPutStrLn stderr ("gemm-trace " ++ message)
+  hFlush stderr
+
 foreign import ccall unsafe "futhark_context_config_new" cConfigNew :: IO (Ptr CContextConfig)
 foreign import ccall unsafe "futhark_context_config_free" cConfigFree :: Ptr CContextConfig -> IO ()
+foreign import ccall unsafe "futhark_context_config_set_profiling" cConfigSetProfiling :: Ptr CContextConfig -> CInt -> IO ()
+foreign import ccall safe "futhark_context_report" cContextReport :: Ptr CContext -> IO CString
 foreign import ccall safe "futhark_context_new" cContextNew :: Ptr CContextConfig -> IO (Ptr CContext)
 foreign import ccall safe "futhark_context_free" cContextFree :: Ptr CContext -> IO ()
 foreign import ccall unsafe "futhark_context_get_error" cContextGetError :: Ptr CContext -> IO CString

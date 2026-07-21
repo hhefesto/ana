@@ -65,13 +65,82 @@ def piece_gla_intra [groups] [chunk] [hd]
                :> [groups][chunk][hd]f32
   let rel = unflatten (unflatten rel_flat :> [groups*chunk][hd]f32)
             :> [groups][chunk][hd]f32
+  -- The attention weight depends only on (g, i, s), never on the output
+  -- component, so it is computed once per pair and shared by that pair's hd
+  -- output components (pure let-floating; no f32 reassociation).  The
+  -- per-element form cost O(chunk^2 * hd^2) per group and dominated the
+  -- profiled step.
+  let a = tabulate_3d groups chunk chunk (\g i s ->
+    if s > i then 0.0f32
+    else f32.sum (map (\c -> q[g,i,c] * k[g,s,c] *
+                        f32.exp (rel[g,i,c] - rel[g,s,c])) (iota hd)))
   let output = tabulate_3d groups chunk hd (\g i j ->
     f32.sum (map (\s ->
       if s > i then 0.0f32
-      else f32.sum (map (\c -> q[g,i,c] * k[g,s,c] *
-                          f32.exp (rel[g,i,c] - rel[g,s,c])) (iota hd))
-           * values[g,s,j]) (iota chunk)))
+      else a[g,i,s] * values[g,s,j]) (iota chunk)))
   in flatten (flatten output)
+
+-- Handwritten pullback of piece_gla_intra.  The vjp of the per-element
+-- forward recomputed the (i, s) attention weight for every output component
+-- and dominated the whole bpe10m step (~194 ms per call, 48x the forward);
+-- here the weight matrix A[i,s] and its cotangent are computed once per
+-- group (they depend only on (g, i, s)) and each input cotangent is the
+-- standard O(chunk^2*hd) contraction.
+--   A[i,s]    = mask(s<=i) sum_c q[i,c] k[s,c] e^(rel[i,c]-rel[s,c])
+--   O[i,j]    = sum_{s<=i} A[i,s] v[s,j]
+--   vbar[s,j] = sum_{i>=s} A[i,s] obar[i,j]
+--   Abar[i,s] = mask(s<=i) sum_j obar[i,j] v[s,j]
+--   qbar[i,c] = sum_{s<=i} Abar[i,s] k[s,c] e^(rel[i,c]-rel[s,c])
+--   kbar[s,c] = sum_{i>=s} Abar[i,s] q[i,c] e^(rel[i,c]-rel[s,c])
+--   relbar[i,c] = sum_{s<=i} Abar[i,s] W[i,s,c] - sum_{p>=i} Abar[p,i] W[p,i,c]
+--     where W[i,s,c] = q[i,c] k[s,c] e^(rel[i,c]-rel[s,c])
+def piece_gla_intra_bars [groups] [chunk] [hd]
+    (q_flat: [groups*chunk*hd]f32) (k_flat: [groups*chunk*hd]f32)
+    (v_flat: [groups*chunk*hd]f32) (rel_flat: [groups*chunk*hd]f32)
+    (output_bar_flat: [groups*chunk*hd]f32)
+    : ([groups*chunk*hd]f32, [groups*chunk*hd]f32,
+       [groups*chunk*hd]f32, [groups*chunk*hd]f32) =
+  let q = unflatten (unflatten q_flat :> [groups*chunk][hd]f32)
+          :> [groups][chunk][hd]f32
+  let k = unflatten (unflatten k_flat :> [groups*chunk][hd]f32)
+          :> [groups][chunk][hd]f32
+  let values = unflatten (unflatten v_flat :> [groups*chunk][hd]f32)
+               :> [groups][chunk][hd]f32
+  let rel = unflatten (unflatten rel_flat :> [groups*chunk][hd]f32)
+            :> [groups][chunk][hd]f32
+  let output_bar =
+    unflatten (unflatten output_bar_flat :> [groups*chunk][hd]f32)
+    :> [groups][chunk][hd]f32
+  let weight = \g i s c -> q[g,i,c] * k[g,s,c] * f32.exp (rel[g,i,c] - rel[g,s,c])
+  let a = tabulate_3d groups chunk chunk (\g i s ->
+    if s > i then 0.0f32
+    else f32.sum (map (\c -> weight g i s c) (iota hd)))
+  let a_bar = tabulate_3d groups chunk chunk (\g i s ->
+    if s > i then 0.0f32
+    else f32.sum (map (\j -> output_bar[g,i,j] * values[g,s,j]) (iota hd)))
+  let q_bar = tabulate_3d groups chunk hd (\g i c ->
+    f32.sum (map (\s ->
+      if s > i then 0.0f32
+      else a_bar[g,i,s] * k[g,s,c] * f32.exp (rel[g,i,c] - rel[g,s,c]))
+      (iota chunk)))
+  let k_bar = tabulate_3d groups chunk hd (\g s c ->
+    f32.sum (map (\i ->
+      if i < s then 0.0f32
+      else a_bar[g,i,s] * q[g,i,c] * f32.exp (rel[g,i,c] - rel[g,s,c]))
+      (iota chunk)))
+  let v_bar = tabulate_3d groups chunk hd (\g s j ->
+    f32.sum (map (\i ->
+      if i < s then 0.0f32
+      else a[g,i,s] * output_bar[g,i,j]) (iota chunk)))
+  let rel_bar = tabulate_3d groups chunk hd (\g i c ->
+    f32.sum (map (\s ->
+      if s > i then 0.0f32
+      else a_bar[g,i,s] * weight g i s c) (iota chunk))
+    - f32.sum (map (\p ->
+        if p < i then 0.0f32
+        else a_bar[g,p,i] * weight g p i c) (iota chunk)))
+  in (flatten (flatten q_bar), flatten (flatten k_bar),
+      flatten (flatten v_bar), flatten (flatten rel_bar))
 
 -- Advance exactly one chunk.  The host invokes this in forward chunk order
 -- (and its pullback in reverse order); no differentiated loop is hidden here.
@@ -135,10 +204,18 @@ def piece_ce_dlogits [batch] [sequence] [v]
   let checked = assert (batch > 0 && sequence >= 2 && v > 0 &&
                         effective_batch >= batch && valid_tokens v tokens) logits
   let denom = f32.i64 effective_batch * f32.i64 (sequence-1)
-  in flatten (flatten (tabulate_3d batch sequence v (\b i word ->
-       if i == sequence-1 then 0.0f32
-       else loss_bar * ((softmax checked[b,i])[word] -
-                        (if word == tok[b,i+1] then 1.0f32 else 0.0f32)) / denom)))
+  -- The softmax depends only on (b, i), never on the output component, so it
+  -- is computed once per row and shared by that row's v output elements
+  -- (pure let-floating; no f32 reassociation).  The per-element form made the
+  -- pullback O(v) per element, which at vocab 8192 never terminates.
+  in flatten (flatten (tabulate_2d batch sequence (\b i ->
+       if i == sequence-1 then replicate v 0.0f32
+       else
+         let probabilities = softmax checked[b,i]
+         in tabulate v (\word ->
+              loss_bar * (probabilities[word] -
+                          (if word == tok[b,i+1] then 1.0f32 else 0.0f32))
+                / denom))))
 
 def piece_embed_gather [v] [d] [count]
     (embedding_flat: [v*d]f32) (tokens: [count]i64): [count*d]f32 =

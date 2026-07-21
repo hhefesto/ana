@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static void set_error(char *message, size_t capacity, const char *format, ...) {
   va_list arguments;
@@ -210,6 +211,11 @@ struct ana_cublas_ctx {
   void *workspace;
 };
 
+static int ordering_is_stream(void) {
+  const char *ordering = getenv("GEMM_ORDERING");
+  return ordering != NULL && strcmp(ordering, "stream") == 0;
+}
+
 int ana_cublas_ctx_create(
     ana_cublas_ctx **out, char *error_message, size_t error_capacity) {
   ana_cublas_ctx *ctx;
@@ -233,19 +239,30 @@ int ana_cublas_ctx_create(
     return cublas_failure("cublasCreate", cublas_status,
         error_message, error_capacity);
   }
-  /* Default (legacy-blocking) flags: the dedicated stream synchronizes with
-     default-stream work, an extra safety margin under the conservative
-     ownership-transfer barriers. */
-  cuda_status = cudaStreamCreate(&ctx->stream);
-  if (cuda_status != cudaSuccess) {
-    (void)cublasDestroy(ctx->handle);
-    free(ctx);
-    return cuda_failure("cudaStreamCreate", cuda_status,
-        error_message, error_capacity);
+  /* GEMM_ORDERING=stream: enqueue on the legacy default stream instead of a
+     dedicated stream.  The Futhark runtime's stream is created with
+     CU_STREAM_DEFAULT (blocking) in the same CUDA context (the runtime API
+     picks up the Futhark driver context current on the calling thread), so
+     legacy-stream semantics order every GEMM against every Futhark kernel on
+     the device itself; the host-side dirty-flag barriers become unnecessary
+     at kernel-kernel boundaries.  Default remains the dedicated stream with
+     conservative host barriers. */
+  if (ordering_is_stream()) {
+    ctx->stream = NULL;
+  } else {
+    cuda_status = cudaStreamCreate(&ctx->stream);
+    if (cuda_status != cudaSuccess) {
+      (void)cublasDestroy(ctx->handle);
+      free(ctx);
+      return cuda_failure("cudaStreamCreate", cuda_status,
+          error_message, error_capacity);
+    }
   }
   cublas_status = cublasSetStream(ctx->handle, ctx->stream);
   if (cublas_status != CUBLAS_STATUS_SUCCESS) {
-    (void)cudaStreamDestroy(ctx->stream);
+    if (ctx->stream != NULL) {
+      (void)cudaStreamDestroy(ctx->stream);
+    }
     (void)cublasDestroy(ctx->handle);
     free(ctx);
     return cublas_failure("cublasSetStream", cublas_status,
@@ -289,7 +306,9 @@ void ana_cublas_ctx_destroy(ana_cublas_ctx *ctx) {
   if (ctx->workspace != NULL) {
     (void)cudaFree(ctx->workspace);
   }
-  (void)cudaStreamDestroy(ctx->stream);
+  if (ctx->stream != NULL) {
+    (void)cudaStreamDestroy(ctx->stream);
+  }
   (void)cublasDestroy(ctx->handle);
   free(ctx);
 }

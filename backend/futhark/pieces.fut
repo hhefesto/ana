@@ -61,8 +61,7 @@ entry piece_gla_intra_bwd (groups: i64) (chunk: i64) (hd: i64)
     (output_bar: [groups*chunk*hd]f32)
     : ([groups*chunk*hd]f32, [groups*chunk*hd]f32,
        [groups*chunk*hd]f32, [groups*chunk*hd]f32) =
-  let (_, bars) = vjp2 piece_gla_intra (q, k, values, relcum) output_bar
-  in bars
+  piece_gla_intra_bars q k values relcum output_bar
 
 entry piece_state_advance_fwd (groups: i64) (hd: i64)
     (state: [groups*hd*hd]f32) (contribution: [groups*hd*hd]f32)

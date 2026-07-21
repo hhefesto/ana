@@ -60,8 +60,7 @@ import ProductionPieces
   , popArenaKeeping
   , productionPieceOpsWith
   , pushArena
-  , syncBlasIfDirty
-  , syncFutharkIfDirty
+  , syncDevice
   , uploadBool
   , uploadI64
   , withProductionContext
@@ -255,11 +254,10 @@ unsupported operation = ioError . userError $
   "GEMM backend does not support generation (" ++ operation ++ ")"
 
 -- Completes all pending device work on both runtimes; the bench timing
--- boundary.
+-- boundary.  Unconditional: under GEMM_ORDERING=stream the dirty-flag
+-- barriers are no-ops, but timing still needs a real device drain.
 synchronize :: Context -> IO ()
-synchronize ctx = do
-  syncBlasIfDirty ctx
-  syncFutharkIfDirty ctx
+synchronize = syncDevice
 
 gemmFlopsSinceReset :: Context -> IO Word64
 gemmFlopsSinceReset _ = readGemmFlops
