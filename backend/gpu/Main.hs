@@ -256,6 +256,24 @@ train corpusPath checkpointPath mode cfg = do
             saved <- saveCheckpointAtomic checkpointPath snapshot
             either die pure saved
             logTraining ("checkpoint step=" ++ show step ++ " path=" ++ checkpointPath)
+      -- DUMP_GRAD_SLICES=N: every N steps print each named slice's clipped
+      -- gradient norm and post-update parameter norm — the where-does-the-
+      -- gradient-live / which-parameters-drift diagnostic.
+      dumpEvery <- maybe (0 :: Int) (\raw -> maybe 0 id (readMaybe raw)) <$> lookupEnv "DUMP_GRAD_SLICES"
+      let layoutSlices = either (const []) id (namedLayout cfg)
+          dumpSlices step gradientDevice paramsDevice =
+            when (dumpEvery > 0 && step `mod` dumpEvery == 0) $ do
+              gradientHost <- downloadF32 ctx n gradientDevice
+              paramsHost <- downloadF32 ctx n paramsDevice
+              let sliceNorm values slice = sqrt (sum
+                    [ realToFrac x * realToFrac x
+                    | x <- take (sliceLength slice) (drop (sliceOffset slice) values)
+                    ]) :: Double
+              mapM_ (\slice -> hPutStrLn stderr ("slice step=" ++ show step
+                ++ " name=" ++ sliceName slice
+                ++ printf " grad=%.6g" (sliceNorm gradientHost slice)
+                ++ printf " param=%.6g" (sliceNorm paramsHost slice))) layoutSlices
+              hFlush stderr
       let resumedBest = checkpointBestValidationLoss checkpoint
           segmentBest = case mode of
             Segment _ start _ _ _ _ | adamStep state0 == start -> Nothing
@@ -265,7 +283,7 @@ train corpusPath checkpointPath mode cfg = do
         loop ctx gpuCfg n optCfg split sampler target (adamStep state0) microSize checkpointEvery
           validateEvery clipNorm bpbScale
           (gateSampleCrossEntropy <$> gate)
-          saveSnapshot params m v deviceMask (checkpointPRNG checkpoint)
+          saveSnapshot dumpSlices params m v deviceMask (checkpointPRNG checkpoint)
           progress0
       saveSnapshot target rngFinal (progressBestValidationLoss progressFinal) paramsFinal mFinal vFinal
       logTraining ("saved checkpoint at completed step " ++ show target ++ ": " ++ checkpointPath)
@@ -415,6 +433,7 @@ loop
   -> Maybe Double
   -> Maybe Double
   -> (Int -> PRNGState -> Maybe Double -> F32Array -> F32Array -> F32Array -> IO ())
+  -> (Int -> F32Array -> F32Array -> IO ())
   -> F32Array
   -> F32Array
   -> F32Array
@@ -422,7 +441,7 @@ loop
   -> PRNGState
   -> TrainingProgress
   -> IO (F32Array, F32Array, F32Array, PRNGState, TrainingProgress)
-loop ctx gpuCfg n optCfg split sampler target completed microSize checkpointEvery validateEvery clipNorm bpbScale gate saveSnapshot params m v mask rng progress
+loop ctx gpuCfg n optCfg split sampler target completed microSize checkpointEvery validateEvery clipNorm bpbScale gate saveSnapshot dumpSlices params m v mask rng progress
   | completed >= target = pure (params, m, v, rng, progress)
   | otherwise = do
       let step = completed + 1
@@ -432,8 +451,10 @@ loop ctx gpuCfg n optCfg split sampler target completed microSize checkpointEver
       (loss, gradient) <- microLossGrad ctx gpuCfg n microSize batch params
       (gradientNorm, clipped) <- bracket (pure gradient) (freeF32 ctx) $ \g ->
         clipGlobalNorm ctx clipNorm g
-      (params', m', v') <- bracket (pure clipped) (freeF32 ctx) $ \g ->
-        adamwStep ctx (fromIntegral step) lr (f beta1) (f beta2) (f adamEpsilon) (f weightDecay) params g m v mask
+      (params', m', v') <- bracket (pure clipped) (freeF32 ctx) $ \g -> do
+        result@(nextParams, _, _) <- adamwStep ctx (fromIntegral step) lr (f beta1) (f beta2) (f adamEpsilon) (f weightDecay) params g m v mask
+        dumpSlices step g nextParams
+        pure result
       freeF32 ctx params
       freeF32 ctx m
       freeF32 ctx v
@@ -478,7 +499,7 @@ loop ctx gpuCfg n optCfg split sampler target completed microSize checkpointEver
         ++ validationText)
       when (step `mod` checkpointEvery == 0 && step /= target) $
         saveSnapshot step rng' (progressBestValidationLoss progress') params' m' v'
-      loop ctx gpuCfg n optCfg split sampler target step microSize checkpointEvery validateEvery clipNorm bpbScale gate saveSnapshot
+      loop ctx gpuCfg n optCfg split sampler target step microSize checkpointEvery validateEvery clipNorm bpbScale gate saveSnapshot dumpSlices
         params' m' v' mask rng' progress'
   where f field = realToFrac (field optCfg)
 
@@ -574,8 +595,37 @@ newCheckpoint cfg identity optCfg clipNorm numerics =
       optCfg identity (realToFrac clipNorm) numerics
     params = either error (concatMap initialize) (namedLayout cfg)
     initialize slice
-      | sliceDecay slice = [0.02 * sin (fromIntegral (sliceOffset slice + i + 1) * 12.9898) | i <- [0 .. sliceLength slice - 1]]
+      | sliceDecay slice =
+          [initNoise (sliceOffset slice + i + 1) | i <- [0 .. sliceLength slice - 1]]
       | otherwise = replicate (sliceLength slice) 1
+
+-- Init experiment overrides (probes only; the initialization is part of a
+-- run's identity, so record any override with a published run).
+-- INIT_SCALE: amplitude, default the historical 0.02 — which is fan-in
+-- independent, the prime suspect for the bpe10m gradient-norm collapse.
+-- INIT_KIND=hash: independent splitmix64 noise instead of the historical
+-- deterministic sin sweep (which has strong serial structure).
+{-# NOINLINE initScale #-}
+initScale :: Double
+initScale = envFloat "INIT_SCALE" 0.02
+
+{-# NOINLINE initKind #-}
+initKind :: String
+initKind = unsafePerformIO (maybe "sin" id <$> lookupEnv "INIT_KIND")
+
+initNoise :: Int -> Double
+initNoise index = case initKind of
+  "hash" -> initScale * hashNoise index
+  _ -> initScale * sin (fromIntegral index * 12.9898)
+
+-- splitmix64 finalizer mapped to [-1, 1).
+hashNoise :: Int -> Double
+hashNoise index =
+  let z0 = fromIntegral index * 0x9e3779b97f4a7c15 :: Word64
+      z1 = (z0 `xor` (z0 `shiftR` 30)) * 0xbf58476d1ce4e5b9
+      z2 = (z1 `xor` (z1 `shiftR` 27)) * 0x94d049bb133111eb
+      z3 = z2 `xor` (z2 `shiftR` 31)
+  in fromIntegral z3 / 9223372036854775808 - 1
 
 validateResume :: Config -> Identity -> AdamWConfig -> Float -> Numerics -> Checkpoint -> IO Checkpoint
 validateResume cfg identity optCfg clipNorm numerics checkpoint = do
