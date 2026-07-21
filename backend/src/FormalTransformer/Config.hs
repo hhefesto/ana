@@ -13,6 +13,8 @@ module FormalTransformer.Config
   , bpe10mPreset
   , glaSmallPreset
   , glaPreset
+  , gateTemperature
+  , glaOutputNorm
   ) where
 
 import Data.Binary (Binary)
@@ -56,6 +58,21 @@ validateConfig c
 
 headDim :: Config -> Int
 headDim c = modelDim c `div` headCount c
+
+-- GLA fix arms, mirrored by `gate_temperature`/`gla_out_norm` in
+-- backend/futhark/model.fut (flip both languages together).  The gate is
+-- alpha = sigmoid(z)^(1/gateTemperature): at temperature 1 this is the
+-- historical sigmoid bit pattern; larger temperatures put the init near
+-- alpha ≈ 0.5^(1/tau) (tau=16 gives ≈0.958) so memory spans longer than a
+-- couple of tokens have live gradients.  glaOutputNorm applies the same
+-- per-head L2 normalization as q/k to the attended output before Wo,
+-- bounding the readout once the gates open (the unnormalized sum grows
+-- like 1/(1-alpha)).
+gateTemperature :: Double
+gateTemperature = 1
+
+glaOutputNorm :: Bool
+glaOutputNorm = False
 
 -- The hybrid attention rule: every fourth layer is softmax full attention,
 -- the rest are gated linear attention (GLA).  The rule is part of the

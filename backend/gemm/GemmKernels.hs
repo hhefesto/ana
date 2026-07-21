@@ -35,12 +35,15 @@ module FutharkKernels
   , synchronize
   , gemmFlopsSinceReset
   , resetGemmFlopCount
+  , headPathProbe
   ) where
 
 import Control.Exception (bracket, onException)
 import Control.Monad (unless)
 import CudaDeviceBlas
 import Data.Int (Int64)
+import qualified Data.Vector.Unboxed as UV
+import qualified Data.Vector.Unboxed.Mutable as UMV
 import Data.Word (Word64)
 import Decomposed (PieceOps (..), modelLossGradDecomposed)
 import Foreign.Ptr (Ptr)
@@ -278,3 +281,133 @@ configOf cfg sequenceLength = Config
   , layerCount = fromIntegral (gpuLayers cfg)
   , headCount = fromIntegral (gpuHeads cfg)
   }
+
+-- Per-op isolation of the training head path at PRODUCTION dims with
+-- synthetic deterministic data: dense forward (cuBLAS), piece_ce_bwd,
+-- the dense pullback pair (cuBLAS), piece_rms_norm_bwd, and the embedding
+-- scatter are each compared against an independent host reference on a
+-- subset of rows.  Motivated by the bpe10m gradient corruption: the tiny
+-- conformance dims never exercised these kernels at vocab 8192 / d 320 /
+-- rows 2048.
+headPathProbe :: Config -> IO ()
+headPathProbe cfg = withProductionContext $ \ctx -> do
+  numerics <- backendNumerics
+  let ops = pieceOps numerics ctx
+      batch = 8 :: Int
+      n = contextSize cfg
+      vocab = vocabSize cfg
+      d = modelDim cfg
+      rows = batch * n
+      sub = 16 :: Int
+      noise seed i = 0.5 * sin (fromIntegral i * seed :: Double)
+      hHost = [ realToFrac (noise 7.13 i) | i <- [1 .. rows * d] ] :: [Float]
+      eHost = [ realToFrac (0.04 * noise 12.9898 i) | i <- [1 .. vocab * d] ] :: [Float]
+      dzNoiseHost = [ realToFrac (1.0e-3 * noise 3.77 i) | i <- [1 .. rows * vocab] ] :: [Float]
+      barNoiseHost = [ realToFrac (noise 5.21 i) | i <- [1 .. rows * d] ] :: [Float]
+      toksHost = [ fromIntegral ((i * 2654435761) `mod` vocab) | i <- [1 .. rows] ] :: [Int64]
+      hD = UV.fromListN (rows * d) (map realToFrac hHost) :: UV.Vector Double
+      eD = UV.fromListN (vocab * d) (map realToFrac eHost) :: UV.Vector Double
+      dzD = UV.fromListN (rows * vocab) (map realToFrac dzNoiseHost) :: UV.Vector Double
+      barD = UV.fromListN (rows * d) (map realToFrac barNoiseHost) :: UV.Vector Double
+      toksV = UV.fromListN rows (map fromIntegral toksHost) :: UV.Vector Int
+      dotHE r w = sum [ (hD UV.! (r * d + j)) * (eD UV.! (w * d + j)) | j <- [0 .. d - 1] ]
+      zRow r = UV.generate vocab (dotHE r)
+      stage name expected actual = do
+        let e = UV.fromListN (length expected) expected :: UV.Vector Double
+            a = UV.fromListN (length actual) (map realToFrac actual) :: UV.Vector Double
+            dot2 u v = UV.sum (UV.zipWith (*) u v)
+            norm2 u = sqrt (dot2 u u)
+            c = if norm2 e == 0 || norm2 a == 0 then 0 else dot2 e a / (norm2 e * norm2 a)
+            maxDiff = UV.maximum (UV.map abs (UV.zipWith (-) e a))
+        putStrLn (name ++ ": cos=" ++ show c ++ " expected_norm=" ++ show (norm2 e)
+          ++ " actual_norm=" ++ show (norm2 a) ++ " max_abs_diff=" ++ show maxDiff)
+  putStrLn ("head-path-probe rows=" ++ show rows ++ " vocab=" ++ show vocab
+    ++ " d=" ++ show d ++ " sub=" ++ show sub ++ " numerics=" ++ show numerics)
+  hDev <- PP.uploadF32 ctx hHost
+  eDev <- PP.uploadF32 ctx eHost
+  dzNoiseDev <- PP.uploadF32 ctx dzNoiseHost
+  barNoiseDev <- PP.uploadF32 ctx barNoiseHost
+  tokDev <- uploadI64 ctx toksHost
+  -- 1: dense forward (cuBLAS) h[rows x d] . E^T -> logits[rows x vocab]
+  logitsDev <- opsDenseForward ops rows d vocab hDev eDev
+  logitsHost <- PP.downloadF32 ctx logitsDev
+  let zSub = concat [ UV.toList (zRow r) | r <- [0 .. sub - 1] ]
+  stage "1 dense_fwd(sub rows)" zSub (take (sub * vocab) logitsHost)
+  -- 2: piece_ce_bwd on the device logits
+  dzDev <- opsCeBackward ops batch n vocab batch 1 logitsDev tokDev
+  dzHost <- PP.downloadF32 ctx dzDev
+  let denom = fromIntegral batch * fromIntegral (n - 1) :: Double
+      dzRefRow r =
+        let i = r `mod` n
+        in if i == n - 1 then replicate vocab 0
+           else
+             let z = zRow r
+                 zMax = UV.maximum z
+                 ez = UV.map (\v -> exp (v - zMax)) z
+                 zSum = UV.sum ez
+                 t = toksV UV.! (r + 1)
+             in [ ((ez UV.! w) / zSum - (if w == t then 1 else 0)) / denom
+                | w <- [0 .. vocab - 1] ]
+      dzSubRef = concat [ dzRefRow r | r <- [0 .. sub - 1] ]
+  stage "2 ce_bwd(sub rows)" dzSubRef (take (sub * vocab) dzHost)
+  let lastRows = [ r | r <- [0 .. rows - 1], r `mod` n == n - 1 ]
+      lastNonzero = length [ () | r <- lastRows
+                           , any (/= 0) (take vocab (drop (r * vocab) dzHost)) ]
+  putStrLn ("2b ce_bwd last-position rows nonzero (expect 0): " ++ show lastNonzero)
+  -- 3: dense pullback pair (cuBLAS) with the synthetic cotangent
+  (aBarDev, bBarDev) <- opsDenseBackward ops rows d vocab hDev eDev dzNoiseDev
+  aBarHost <- PP.downloadF32 ctx aBarDev
+  bBarHost <- PP.downloadF32 ctx bBarDev
+  let aBarRef = [ sum [ (dzD UV.! (r * vocab + w)) * (eD UV.! (w * d + j))
+                      | w <- [0 .. vocab - 1] ]
+                | r <- [0 .. sub - 1], j <- [0 .. d - 1] ]
+      bBarRef = [ sum [ (dzD UV.! (r * vocab + w)) * (hD UV.! (r * d + j))
+                      | r <- [0 .. rows - 1] ]
+                | w <- [0 .. sub - 1], j <- [0 .. d - 1] ]
+  stage "3a dense_bwd inputBar(sub rows)" aBarRef (take (sub * d) aBarHost)
+  stage "3b dense_bwd weightBar(sub rows)" bBarRef (take (sub * d) bBarHost)
+  -- 4: rms backward at production rows x d with unit gain
+  let gainHost = replicate d 1 :: [Float]
+  gainDev <- PP.uploadF32 ctx gainHost
+  (rmsXBarDev, rmsGainBarDev) <- opsRmsBackward ops rows d hDev gainDev barNoiseDev
+  rmsXBarHost <- PP.downloadF32 ctx rmsXBarDev
+  rmsGainBarHost <- PP.downloadF32 ctx rmsGainBarDev
+  let dn = fromIntegral d :: Double
+      rmsRefRow r =
+        let x = UV.slice (r * d) d hD
+            ob = UV.slice (r * d) d barD
+            ms = UV.sum (UV.map (\v -> v * v) x) / dn
+            s = sqrt (ms + 1.0e-5)
+            uDotX = UV.sum (UV.zipWith (*) ob x)
+        in [ (ob UV.! j) / s - (x UV.! j) * uDotX / (dn * s * s * s)
+           | j <- [0 .. d - 1] ]
+      rmsGainRef = [ sum [ (barD UV.! (r * d + j)) * (hD UV.! (r * d + j))
+                             / sqrt (UV.sum (UV.map (\v -> v * v) (UV.slice (r * d) d hD)) / dn + 1.0e-5)
+                         | r <- [0 .. rows - 1] ]
+                   | j <- [0 .. d - 1] ]
+      rmsXSubRef = concat [ rmsRefRow r | r <- [0 .. sub - 1] ]
+  stage "4a rms_bwd xBar(sub rows)" rmsXSubRef (take (sub * d) rmsXBarHost)
+  stage "4b rms_bwd gainBar(full)" rmsGainRef rmsGainBarHost
+  -- 5: embedding scatter with the synthetic bar
+  scatterDev <- opsEmbeddingBackward ops vocab d tokDev barNoiseDev
+  scatterHost <- PP.downloadF32 ctx scatterDev
+  let scatterRef = UV.toList (UV.create (do
+        acc <- UMV.replicate (vocab * d) (0 :: Double)
+        let go r | r >= rows = pure ()
+                 | otherwise = do
+                     let t = toksV UV.! r
+                         upd j | j >= d = pure ()
+                               | otherwise = do
+                                   UMV.unsafeModify acc (+ (barD UV.! (r * d + j))) (t * d + j)
+                                   upd (j + 1)
+                     upd 0
+                     go (r + 1)
+        go 0
+        pure acc))
+  stage "5 embed_scatter(full)" scatterRef scatterHost
+  -- 6: embedding gather roundtrip
+  gatherDev <- opsEmbeddingGather ops vocab d eDev tokDev
+  gatherHost <- PP.downloadF32 ctx gatherDev
+  let gatherRef = [ eD UV.! ((toksV UV.! r) * d + j) | r <- [0 .. rows - 1], j <- [0 .. d - 1] ]
+  stage "6 embed_gather(full)" gatherRef gatherHost
+  putStrLn "head-path-probe done"

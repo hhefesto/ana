@@ -41,6 +41,7 @@ module FutharkKernels
   , synchronize
   , gemmFlopsSinceReset
   , resetGemmFlopCount
+  , headPathProbe
   ) where
 
 import Control.Exception (bracket, throwIO)
@@ -350,6 +351,11 @@ gemmFlopsSinceReset _ = pure 0
 
 resetGemmFlopCount :: Context -> IO ()
 resetGemmFlopCount _ = pure ()
+
+-- The decomposed-runtime head-path isolation probe only exists in the
+-- gemm-cuda backend (backend/gemm/GemmKernels.hs).
+headPathProbe :: Config -> IO ()
+headPathProbe _ = ioError (userError "head-path-probe requires the gemm-cuda backend")
 
 checkedPtr :: Ptr CContext -> String -> IO (Ptr a) -> (Ptr a -> b) -> IO b
 checkedPtr ctx label acquire wrap = do

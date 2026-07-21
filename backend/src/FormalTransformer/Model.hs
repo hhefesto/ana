@@ -5,6 +5,10 @@ module FormalTransformer.Model
   , nextTokenCEGeneric
   , logSumExp
   , softmax
+  , ActStats (..)
+  , BlockStats (..)
+  , fullSequenceStats
+  , gateAlpha
   ) where
 
 import Control.Monad (foldM)
@@ -41,6 +45,140 @@ nextTokenCEGeneric c params prefix target
       logits <- fullSequenceLogitsGeneric c params prefix
       let z = last logits
       pure (logSumExp z - z !! target)
+
+-- Instrumented twin of the reference forward for the `act-stats`
+-- diagnostic: the same math through the same helpers (rmsNorm, matVec,
+-- glaAttention, causalAttention), plus per-block activation statistics.
+-- Double-only and used by no training path; the conformance oracle keeps
+-- the real forward honest, and this twin reuses its pieces so the
+-- statistics describe the conformant denotation.
+data BlockStats = BlockStats
+  { blockStatsIndex :: !Int
+  , blockStatsKind :: !String
+  , blockStatsResidual :: !(Double, Double, Double)
+    -- ^ output-residual RMS over the first 32 / middle / last 32 positions
+  , blockStatsAttended :: !Double
+    -- ^ RMS of the attention output (pre-Wo)
+  , blockStatsCosEmbed :: !Double
+    -- ^ mean cosine between the block output and the token's own embedding:
+    -- the symmetry-dominance measurement (≈1 means the stream still denotes
+    -- the current token, so the tied head sees a near-symmetric Gram logit)
+  , blockStatsAlpha :: !(Maybe (Double, Double, Double))
+    -- ^ GLA gates: (arithmetic mean, geometric mean, fraction above 0.9)
+  }
+
+data ActStats = ActStats
+  { actEmbeddingRms :: !Double
+  , actBlocks :: ![BlockStats]
+  , actLogitRms :: !Double
+  , actLogitMax :: !Double
+  , actPTarget :: !Double
+  , actLoss :: !Double
+  }
+
+fullSequenceStats :: Config -> [Double] -> [Int] -> Either String ActStats
+fullSequenceStats c params tokens = do
+  _ <- validateInputs c params tokens
+  layout <- namedLayout c
+  embedding <- getSlice "embedding" layout params
+  initial <- mapM (embeddingRow c embedding) tokens
+  (finalHidden, statsRev) <- foldM
+    (\(xs, acc) i -> do
+      (xs', stats) <- runBlockStats c params layout initial xs i
+      pure (xs', stats : acc))
+    (initial, [])
+    [0 .. layerCount c - 1]
+  gain <- getSlice "final_rms" layout params
+  let final = map (rmsNorm gain) finalHidden
+      logits = [map (dot h) (rows (modelDim c) embedding) | h <- final]
+      scored = zip logits (drop 1 tokens)
+      losses = [logSumExp z - z !! t | (z, t) <- scored]
+      pTargets = [exp (z !! t - logSumExp z) | (z, t) <- scored]
+  pure ActStats
+    { actEmbeddingRms = rmsOfRows initial
+    , actBlocks = reverse statsRev
+    , actLogitRms = rmsOfRows logits
+    , actLogitMax = maximum (0 : map (maximum . map abs) logits)
+    , actPTarget = meanOf pTargets
+    , actLoss = meanOf losses
+    }
+
+-- Statistics-carrying copy of runBlock; the math must stay line-for-line
+-- equivalent to runBlock (any edit there belongs here too).
+runBlockStats :: Config -> [Double] -> [Slice] -> [[Double]] -> [[Double]] -> Int -> Either String ([[Double]], BlockStats)
+runBlockStats c params layout embedded xs blockIndex = do
+  attGain <- get "rms_att"
+  wq <- get "wq"
+  wk <- get "wk"
+  wv <- get "wv"
+  wo <- get "wo"
+  ffGain <- get "rms_ff"
+  wgate <- get "wgate"
+  wup <- get "wup"
+  wdown <- get "wdown"
+  let normalized = map (rmsNorm attGain) xs
+      qs = map (matVec d d wq) normalized
+      ks = map (matVec d d wk) normalized
+      vs = map (matVec d d wv) normalized
+  (attended, alphaStats) <-
+    if isSoftmaxLayer c blockIndex
+      then pure (causalAttention c qs ks vs, Nothing)
+      else do
+        walpha <- get "walpha"
+        let alphas = map (map gateAlpha . matVec d d walpha) normalized
+            flat = concat alphas
+        pure ( glaAttendedOut c (glaAttention c qs ks vs alphas)
+             , Just ( meanOf flat
+                    , exp (meanOf (map log flat))
+                    , fromIntegral (length (filter (> 0.9) flat))
+                        / fromIntegral (max 1 (length flat))))
+  let afterAttention = zipWith addVec xs (map (matVec d d wo) attended)
+      ff x =
+        let n = rmsNorm ffGain x
+            gated = zipWith (*) (map silu (matVec f d wgate n)) (matVec f d wup n)
+        in matVec d f wdown gated
+      out = zipWith addVec afterAttention (map ff afterAttention)
+      kind = if isSoftmaxLayer c blockIndex then "softmax" else "gla"
+  pure ( out
+       , BlockStats blockIndex kind (bucketRms out) (rmsOfRows attended)
+           (meanCos out embedded) alphaStats)
+  where
+    d = modelDim c
+    f = ffDim c
+    prefix = "blocks." ++ show blockIndex ++ "."
+    get suffix = case filter ((== prefix ++ suffix) . sliceName) layout of
+      [s] -> sliceValues s params
+      _ -> Left ("missing layout slice: " ++ prefix ++ suffix)
+
+getSlice :: String -> [Slice] -> [Double] -> Either String [Double]
+getSlice name layout params = case filter ((== name) . sliceName) layout of
+  [s] -> sliceValues s params
+  _ -> Left ("missing layout slice: " ++ name)
+
+meanOf :: [Double] -> Double
+meanOf [] = 0
+meanOf xs = sum xs / fromIntegral (length xs)
+
+rmsOfRows :: [[Double]] -> Double
+rmsOfRows rowsOf =
+  let flat = concat rowsOf
+  in if null flat then 0 else sqrt (meanOf (map (\v -> v * v) flat))
+
+bucketRms :: [[Double]] -> (Double, Double, Double)
+bucketRms rowsOf =
+  let n = length rowsOf
+      firstB = take 32 rowsOf
+      lastB = drop (max 0 (n - 32)) rowsOf
+      midB = if n > 64 then take (n - 64) (drop 32 rowsOf) else rowsOf
+  in (rmsOfRows firstB, rmsOfRows midB, rmsOfRows lastB)
+
+meanCos :: [[Double]] -> [[Double]] -> Double
+meanCos hs es = meanOf (zipWith cosine hs es)
+  where
+    cosine h e =
+      let nh = sqrt (dot h h)
+          ne = sqrt (dot e e)
+      in if nh == 0 || ne == 0 then 0 else dot h e / (nh * ne)
 
 validateInputs :: Config -> [a] -> [Int] -> Either String ()
 validateInputs c params tokens = do
@@ -84,8 +222,8 @@ runBlock c params layout xs blockIndex = do
       then pure (causalAttention c qs ks vs)
       else do
         walpha <- get "walpha"
-        let alphas = map (map sigmoid . matVec d d walpha) normalized
-        pure (glaAttention c qs ks vs alphas)
+        let alphas = map (map gateAlpha . matVec d d walpha) normalized
+        pure (glaAttendedOut c (glaAttention c qs ks vs alphas))
   let afterAttention = zipWith addVec xs (map (matVec d d wo) attended)
       ff x =
         let n = rmsNorm ffGain x
@@ -126,6 +264,32 @@ silu x = x / (1 + exp (-x))
 
 sigmoid :: Floating a => a -> a
 sigmoid x = 1 / (1 + exp (-x))
+
+-- Numerically stable log(sigmoid z) = -(max(-z,0) + log(1+exp(-|z|))),
+-- written with primitives every Floating+Ord (including AD types) has.
+logSigmoid :: (Floating a, Ord a) => a -> a
+logSigmoid z = negate (max (negate z) 0 + log (1 + exp (negate (abs z))))
+
+-- The GLA gate with temperature (FormalTransformer.Config.gateTemperature):
+-- alpha = sigmoid(z)^(1/tau).  The tau == 1 branch keeps the historical
+-- bit pattern for conformance against the recorded references.
+gateAlpha :: (Floating a, Ord a) => a -> a
+gateAlpha z
+  | gateTemperature == 1 = sigmoid z
+  | otherwise = exp (logSigmoid z / realToFrac gateTemperature)
+
+-- Per-head L2 normalization of a full d-row, the same map q/k go through.
+l2NormalizeHeads :: Floating a => Config -> [a] -> [a]
+l2NormalizeHeads c x =
+  concat [l2Normalize (take hd (drop (h * hd) x)) | h <- [0 .. headCount c - 1]]
+  where hd = headDim c
+
+-- FormalTransformer.Config.glaOutputNorm: normalize the GLA attended
+-- output (pre-Wo) per head, or pass it through unchanged.
+glaAttendedOut :: Floating a => Config -> [[a]] -> [[a]]
+glaAttendedOut c attended
+  | glaOutputNorm = map (l2NormalizeHeads c) attended
+  | otherwise = attended
 
 l2Normalize :: Floating a => [a] -> [a]
 l2Normalize x = map (/ norm) x

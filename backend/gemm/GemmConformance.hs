@@ -837,7 +837,7 @@ glaAttentionSmoke ctx = do
       [0.3 * sin (fromIntegral (i + 1) * frequency) | i <- [0 .. count - 1]]
 
 glaAttentionReference
-  :: Floating a
+  :: (Floating a, Ord a)
   => Int
   -> Int
   -> Int
@@ -876,7 +876,7 @@ glaAttentionReference batch n heads hd q k value gate = concat
     go state ((qRow, kRow, valueRow, gateRow) : rest) =
       output : go state' rest
       where
-        alpha = map sigmoidReference gateRow
+        alpha = map gateAlpha gateRow
         state' = zipWith3
           (\decay key stateRow -> zipWith (\old valueElement ->
             decay * old + key * valueElement) stateRow valueRow)
@@ -886,9 +886,6 @@ glaAttentionReference batch n heads hd q k value gate = concat
               qRow (map (\row -> indexDefault 0 row column) state'))
           | column <- [0 .. hd - 1]
           ]
-
-sigmoidReference :: Floating a => a -> a
-sigmoidReference x = 1 / (1 + exp (-x))
 
 zip4Lists :: [a] -> [b] -> [c] -> [d] -> [(a, b, c, d)]
 zip4Lists (a : as) (b : bs) (c : cs) (d : ds) =
@@ -966,7 +963,10 @@ glaFullBlockReference batch n heads hd _chunk f packed =
     gate = denseReference d d normalized walpha
     q = concatMap (l2NormalizeHeads heads) (chunksOf d q0)
     k = concatMap (l2NormalizeHeads heads) (chunksOf d k0)
-    attended = glaAttentionReference batch n heads hd q k value gate
+    attendedRaw = glaAttentionReference batch n heads hd q k value gate
+    attended
+      | glaOutputNorm = concatMap (l2NormalizeHeads heads) (chunksOf d attendedRaw)
+      | otherwise = attendedRaw
     afterAttention = zipWith (+) x (denseReference d d attended wo)
 
 unpackGlaBlock
