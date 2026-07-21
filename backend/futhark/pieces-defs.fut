@@ -198,24 +198,32 @@ def piece_ce_dlogits [batch] [sequence] [v]
     (effective_batch: i64) (loss_bar: f32)
     (logits_flat: [batch*sequence*v]f32) (tokens: [batch*sequence]i64)
     : [batch*sequence*v]f32 =
-  let logits = unflatten (unflatten logits_flat :> [batch*sequence][v]f32)
-               :> [batch][sequence][v]f32
-  let tok = unflatten tokens :> [batch][sequence]i64
   let checked = assert (batch > 0 && sequence >= 2 && v > 0 &&
-                        effective_batch >= batch && valid_tokens v tokens) logits
+                        effective_batch >= batch && valid_tokens v tokens)
+                       logits_flat
   let denom = f32.i64 effective_batch * f32.i64 (sequence-1)
-  -- The softmax depends only on (b, i), never on the output component, so it
-  -- is computed once per row and shared by that row's v output elements
-  -- (pure let-floating; no f32 reassociation).  The per-element form made the
-  -- pullback O(v) per element, which at vocab 8192 never terminates.
-  in flatten (flatten (tabulate_2d batch sequence (\b i ->
-       if i == sequence-1 then replicate v 0.0f32
-       else
-         let probabilities = softmax checked[b,i]
-         in tabulate v (\word ->
-              loss_bar * (probabilities[word] -
-                          (if word == tok[b,i+1] then 1.0f32 else 0.0f32))
-                / denom))))
+  -- Row-invariant softmax statistics hoisted into flat per-row arrays (same
+  -- expressions and reduction order as piece_ce_loss, so values are
+  -- unchanged), then the pullback as ONE flat regular tabulate over
+  -- elements.  The previous tabulate_2d whose body produced a [v] array was
+  -- mis-lowered by the CUDA codegen at production dims: piece_ce_bwd
+  -- returned mis-indexed rows (the sequence-1 guard rows came back
+  -- nonzero) while the identical source compiled correctly on the C
+  -- backend — see the head-path-probe in backend/gemm/GemmKernels.hs.
+  -- Flat index math over elements is the shape every other piece uses.
+  let rows = unflatten checked :> [batch*sequence][v]f32
+  let row_max = map f32.maximum rows
+  let row_sum = map2 (\row m -> f32.sum (map (\z -> f32.exp (z - m)) row))
+                     rows row_max
+  in tabulate (batch*sequence*v) (\idx ->
+       let r = idx / v
+       let word = idx % v
+       let i = r % sequence
+       in if i == sequence - 1 then 0.0f32
+          else
+            let p = f32.exp (checked[idx] - row_max[r]) / row_sum[r]
+            let hit = if word == tokens[r+1] then 1.0f32 else 0.0f32
+            in loss_bar * (p - hit) / denom)
 
 def piece_embed_gather [v] [d] [count]
     (embedding_flat: [v*d]f32) (tokens: [count]i64): [count*d]f32 =
