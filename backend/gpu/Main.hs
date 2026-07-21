@@ -25,14 +25,31 @@ import System.Directory (doesFileExist)
 import System.Environment (getArgs, lookupEnv, setEnv)
 import System.Exit (die)
 import System.IO (BufferMode (LineBuffering), hFlush, hPutStrLn, hSetBuffering, stderr, stdout)
+import System.IO.Unsafe (unsafePerformIO)
 import Text.Printf (printf)
 import Text.Read (readMaybe)
 
 modelId :: Config -> String
 modelId cfg = "formal-transformer-futhark-hybrid-gla-v2:" ++ show cfg
 
+-- Schedule experiment overrides; the defaults are the historical constants.
+-- TRAIN_LR / TRAIN_WD / TRAIN_WARMUP change training semantics — use them
+-- only for stability probes, and record them with any published run.
+{-# NOINLINE envFloat #-}
+envFloat :: String -> Double -> Double
+envFloat name fallback = unsafePerformIO $
+  maybe fallback (\raw -> maybe fallback id (readMaybe raw)) <$> lookupEnv name
+
+{-# NOINLINE envInt #-}
+envInt :: String -> Int -> Int
+envInt name fallback = unsafePerformIO $
+  maybe fallback (\raw -> maybe fallback id (readMaybe raw)) <$> lookupEnv name
+
 optimizerFor :: Int -> AdamWConfig
-optimizerFor steps = AdamWConfig 3e-4 0.9 0.999 1e-8 0.01 (min 100 steps) steps
+optimizerFor steps = AdamWConfig
+  (envFloat "TRAIN_LR" 3e-4) 0.9 0.999 1e-8
+  (envFloat "TRAIN_WD" 0.01)
+  (min (envInt "TRAIN_WARMUP" 100) steps) steps
 
 main :: IO ()
 main = do
