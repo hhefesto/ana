@@ -47,6 +47,7 @@
           conformanceGhc = pkgs.haskellPackages.ghcWithPackages (p: [
             p.ad
             p.binary
+            p.cryptohash-sha256
             p.vector
           ]);
           gemmGhc = pkgs.haskellPackages.ghcWithPackages (p: [ p.vector ]);

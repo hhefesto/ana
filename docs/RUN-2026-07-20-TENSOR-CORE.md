@@ -215,3 +215,68 @@ gradient-norm collapse from ~4 to ~0.35 within 50 steps (init scaling
 at d=320 vs 64? gate saturation?), and weight decay's outsized role in
 the divergence rate. The trainer, corpus, plan, and 14.7K tok/s
 pipeline are ready to relaunch the moment the model is fixed.
+
+## 2026-07-21: Root cause found — piece_ce_bwd was mis-compiled on CUDA
+
+The "model-scale property" conclusion above was WRONG, and so was the
+runtime exoneration. The divergence was a runtime bug after all — one
+crafted to slip through every check above.
+
+**The bug.** The CUDA compilation of `piece_ce_dlogits`
+(`backend/futhark/pieces-defs.fut`) — then a `tabulate_2d batch sequence`
+whose body produced a `[v]` array — was mis-lowered at production dims
+(vocab 8192, n 256, rows 2048): the kernel returned mis-indexed rows.
+Element-wise, its output had cosine ≈ −1e-4 against the softmax-CE
+pullback of its own input logits, and even the `i == sequence-1` guard
+rows (which must be exactly zero) came back nonzero. The forward loss is
+a separate, correctly-compiled entry, so every run reported correct
+losses while stepping on garbage: AdamW normalized the garbage per
+coordinate to lr-scale updates — the smooth monotone rise. The identical
+source compiles correctly on the C backend (CPU dumps match the exact
+f64 gradient to cos 1.000000).
+
+**Why every earlier check passed.**
+- The bpe10m "bit-exact" references are LOSSES; the loss path was fine.
+- Gradient conformance ran at vocab 5 / d 4 (gemm-conformance) — the
+  mis-lowering does not trigger there, nor at gla-small dims.
+- The kernel-check "ce_bwd at vocab 8192 agrees" compared max-abs
+  STATISTICS — permutation-invariant, blind to row scrambling — and
+  compiled its own instance of the definition rather than exercising the
+  production pieces library entry.
+- Lineage independence (v2 vs v4 same curve) held because both lineages
+  shared the one broken kernel.
+
+**The evidence chain** (tools now in-tree):
+1. FREEZE_TRUNK + INIT_ZERO_OUT makes the trunk exactly identity both
+   directions, so the model reduces to embedding → rms → tied logits,
+   whose gradient has an exact closed form. In-runtime this probe ROSE
+   11.80 → 12.72 val over 1000 steps; the same problem in exact f64
+   (`head-probe`) descends ~4 nats in 500. tf32 vs fp32 reruns were
+   identical to 7-8 digits — numerics exonerated.
+2. `DUMP_GRAD_VECTOR=path` (train env) dumps the raw step-1 gradient +
+   batch; `grad-compare` (sequential binary) recomputes the exact f64
+   gradient for that batch: CUDA cos = −0.019 (garbage, plausible norm);
+   CPU fused backend cos = 1.000000 on the identical batch.
+3. `head-path-probe` (gemm-cuda binary) isolates each head-path op at
+   production dims against host references: dense fwd/bwd and rms bwd
+   and embed scatter/gather all exact; `piece_ce_bwd` alone garbage.
+
+**The fix.** `piece_ce_dlogits` rewritten as hoisted per-row softmax
+statistics (same expressions and reduction order as the forward) plus a
+single flat regular `tabulate` over `batch*sequence*v` with index math —
+the shape every other piece uses. Values are bit-identical on CPU; the
+CPU gemm-conformance suite stays green.
+
+**Verification after the fix** (box, 5060 Ti):
+- `head-path-probe`: ce_bwd cos 0.99999999999999, max-abs-diff 4e-11,
+  guard rows exactly zero.
+- Step-1 gradient vs exact f64: cos = 1.000000, norm ratio 1.0000 (tf32).
+- Frozen-trunk probe: 11.80 → 7.40 val in 1000 steps (beats the unigram
+  floor 7.48; previously rose to 12.72).
+- Full hybrid, era-matched (sin 0.02, lr 3e-4, b8, tf32): 9.14 init →
+  7.72 val @ step 200 → 7.43 @ 400, descending — the first real bpe10m
+  learning on this runtime. The GLA hybrid attention is exonerated.
+
+Lesson recorded: verify kernels ELEMENT-WISE at production dims through
+the production library entries; permutation-invariant statistics (max-abs)
+cannot see index scrambling.

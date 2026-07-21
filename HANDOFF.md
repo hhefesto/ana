@@ -2,7 +2,25 @@
 
 Everything needed to continue this work from another machine and account.
 
-## ▶ CONTINUE HERE (2026-07-20)
+## ▶ CONTINUE HERE (2026-07-21) — divergence SOLVED, training relaunch
+
+The bpe10m divergence is **resolved**: it was never the model or the GLA
+hybrid attention — the CUDA compilation of `piece_ce_dlogits`
+(`backend/futhark/pieces-defs.fut`) mis-indexed its output rows at
+production dims (correct loss, garbage gradient; cosine −0.02 against
+the exact gradient). Fixed by rewriting the pullback as hoisted per-row
+softmax stats + one flat regular tabulate. After the fix the step-1
+gradient matches the exact f64 closed form to cos 1.000000 and the full
+hybrid descends (9.14 → below 7 within 1000 steps, era-matched
+settings). Full story, evidence chain, and the new diagnostic tools
+(`DUMP_GRAD_VECTOR`, `grad-compare`, `head-path-probe`): the
+"2026-07-21: Root cause found" section of
+`docs/RUN-2026-07-20-TENSOR-CORE.md`. The GLA fix arms
+(`gateTemperature`/`glaOutputNorm` in `Config.hs`, mirrored in
+`model.fut`) are implemented, conformance-verified ON and OFF, and left
+OFF by default — optional experiments, not needed for training to work.
+
+## ▶ Previous position (2026-07-20)
 
 **`PLAN.md` is now stale** — it still reads "Stage B NEXT" / "Stage C blocked
 on hardware". Both are done; a fresh session should refresh `PLAN.md`'s
