@@ -701,8 +701,37 @@
           # the most recently updated checkpoint in the run directory.
           wikiGenerate = pkgs.writeShellApplication {
             name = "wiki-generate";
-            runtimeInputs = [ pkgs.coreutils ];
+            runtimeInputs = [
+              pkgs.coreutils
+              pkgs.openssh
+              pkgs.rsync
+            ];
             text = ''
+              # Pull the freshest trained weights first when a training box is
+              # configured: set WIKI_REMOTE=user@host (plus WIKI_REMOTE_PORT and
+              # WIKI_REMOTE_CHECKPOINT as needed), or drop the same assignments
+              # in run/remote-box.env (git-ignored; boxes are ephemeral).
+              # WIKI_PULL=0 skips the pull; an unreachable box degrades to the
+              # local checkpoints with a note. rsync writes a temp file and
+              # renames, so a torn transfer never replaces good local weights.
+              if [ "''${WIKI_PULL:-1}" != 0 ]; then
+                if [ -z "''${WIKI_REMOTE:-}" ] && [ -f run/remote-box.env ]; then
+                  # shellcheck disable=SC1091
+                  . run/remote-box.env
+                fi
+                if [ -n "''${WIKI_REMOTE:-}" ]; then
+                  remote_port="''${WIKI_REMOTE_PORT:-22}"
+                  remote_ckpt="''${WIKI_REMOTE_CHECKPOINT:-/root/ana/run/wiki-bpe10m-global.checkpoint}"
+                  echo "wiki-generate: pulling latest weights from $WIKI_REMOTE:$remote_ckpt" >&2
+                  if rsync -zt \
+                       -e "ssh -p $remote_port -o ConnectTimeout=10 -o BatchMode=yes" \
+                       "$WIKI_REMOTE:$remote_ckpt" run/ 2>/dev/null; then
+                    echo "wiki-generate: pull complete" >&2
+                  else
+                    echo "wiki-generate: pull failed (box offline?); using local checkpoints" >&2
+                  fi
+                fi
+              fi
               if [ -n "''${WIKI_PROMPT:-}" ]; then
                 prompt="$WIKI_PROMPT"
               elif [ -t 0 ]; then
