@@ -37,26 +37,72 @@ real tensor-core hardware:
   fused-oracle golden and the old runtime's trajectory).
 
 **Open and unresolved — the very next thing to do:**
-1. **`bench bpe10m` (batch 8, the shapes meant to actually engage tensor
-   cores) hangs** on the device-resident runtime: 100% reported GPU util,
-   ~15.8 GB device memory held, zero step output after 15+ minutes. Never
-   diagnosed — this is a real bug (likely a synchronization deadlock or a
-   missing barrier at a larger-microbatch shape) and blocks the entire
-   point of this rewrite: an honest MFU number at a shape where tensor
-   cores matter, and the GEMM-BACKEND.md shape-smoke gate at bpe10m/gla
-   microbatch 1 and 8. **Diagnose this first.**
-2. **The full Wikipedia corpus is not present anywhere.** Despite
-   `deploy/cloud-fast-path.md` describing 1,465 prepared shards (~9.3 GB)
-   as done, `run/wiki-bpe10m/` does not exist locally, was never
-   transferred to the rented box, and the 18 GB source JSONL dump isn't
-   present either — that doc reflects a *prior* session's state, not this
-   one. All Stage C benchmarking above used tiny synthetic corpora built
-   from this repo's own docs. Before any real training run or a
-   "how long to train the whole corpus" estimate, the plan+shards must be
-   regenerated (or the source dump located) via the `wiki-train` app.
-3. **Check whether the rented box is still up** (it was mid-diagnostic
-   when this session ended) — destroy it if idle and not actively needed,
-   per the cost discipline in `docs/CLOUD-TRAINING.md`.
+1. **RESOLVED (2026-07-20, this session): the `bench bpe10m` hang was
+   diagnosed and fixed.** It was never a deadlock or batching bug — it
+   reproduced at `TRAIN_BATCH=1 MICRO_BATCH=1`, while `gla-small` with
+   `GEMM_CHUNK=16/32` (forcing 2 and 4 GLA chunks) passed, exonerating the
+   multi-chunk state loop. A new `GEMM_TRACE=1` diagnostic (env-gated
+   stderr trace in `ProductionPieces.deviceOutputs`, both sync barriers,
+   and the GEMM enqueue path — kept, it costs nothing when off) showed the
+   driver blocked in `syncFutharkIfDirty` with exactly one non-trivial
+   kernel pending: **`piece_ce_bwd`**. Root cause in
+   `backend/futhark/pieces-defs.fut` `piece_ce_dlogits`: the per-element
+   `(softmax checked[b,i])[word]` recomputed a full vocab-length softmax
+   for *every* output element — O(batch·seq·v²). Invisible at conformance
+   and `gla-small` vocab 258; at vocab 8192 it is a ~8192× work
+   amplification (~17e9 softmax-element evaluations plus multi-GB internal
+   materialization = the observed "15.8 GB held, no progress"). Fix: hoist
+   the row softmax one level (pure let-floating, same per-element
+   expressions — the exact policy already documented in `model.fut`
+   "computed once per head"). Verified by CPU conformance
+   (`nix build .#gemm-conformance`) and on-hardware benches (see
+   `docs/RUN-2026-07-20-TENSOR-CORE.md`).
+2. **RESOLVED (2026-07-20, this session): the full Wikipedia corpus IS
+   present and is now on the box.** The item below was stale — 
+   `run/wiki-bpe10m/` exists locally (1,465 shards, 9,973,617,809 bytes)
+   and was rsynced to the box at `/root/ana/run/wiki-bpe10m/` with exact
+   byte-count verification, plus `enwiki-8k.bpe` and
+   `plan-bpe10m-b8-s4000.tsv`.
+3. **The rented box is up; training was launched and then STOPPED after
+   the loss diverged** (vast.ai RTX 5060 Ti,
+   `ssh -p 56861 root@115.73.216.179`). The launch itself worked
+   perfectly: `deploy/train-cloud.sh`, `Tf32TensorCores`, batch 8 /
+   micro 8, global_total=1,833,157 updates, ~138 ms/step ≈ 14,770 tok/s
+   ≈ 2.9 days for a full pass. **But the bpe10m hybrid model anti-learns
+   at this scale** — loss rose 9.13 → 23.6 by step 1700 — and an
+   exhaustive investigation exonerated every layer of the runtime and
+   pinned it as a model-scale property (see
+   `docs/RUN-2026-07-20-TENSOR-CORE.md` "The training run diverged").
+   The pipeline is ready to relaunch the moment the model is fixed
+   (`TRAIN_LR`/`TRAIN_WD`/`TRAIN_WARMUP` env overrides now exist for
+   schedule experiments; `backend/futhark/kernel-check.fut` and
+   `intra-check.fut` are the cross-backend numeric probes). Repo at
+   `/root/ana`; the 9.3 GB corpus was MOVED to `/root/wiki-bpe10m` with a
+   symlink at `run/wiki-bpe10m` — it must stay outside the repo tree or
+   every `nix build` copies it into the store (the repo is a PATH flake on
+   the box, no .git; this caused repeated disk exhaustion). Store hygiene:
+   `keep-outputs = true` is set, `/root/gc.sh` after builds, and
+   `nix store optimise` reclaimed 28 GiB of duplicated CUDA closures.
+   **Top leads for the model track**: gradient norms collapse from ~4 to
+   ~0.35 within 50 steps at bpe10m (init scaling at d=320? gate
+   saturation?) while gla-small holds 1-2 and trains fine; weight decay
+   strongly amplifies the divergence rate (EMA 10.67 with wd .01 vs 9.51
+   with wd 0 at 3e-4/300 steps); no tested schedule descends below the
+   9.13 init.
+
+4. **Performance: 61x in one session, all loss-exact.** bpe10m batch 8
+   went 243 -> 14,770 tok/s (v1 -> v4) via: forward-only layer stack;
+   handwritten `piece_gla_intra_bwd` (replacing a 194 ms/call vjp kernel
+   that was 93% of GPU time); zero-cotangent elimination in sub-blocks;
+   eager gradient-assembly frees (peak memory 12.4 -> 3.9 GB); hoisted
+   `piece_gla_intra_fwd` weight matrix. Every step was gated on exact
+   1-step train losses (gla-small 5.6614537, bpe10m 9.1370810) and the
+   CPU conformance matrix. `GEMM_ORDERING=stream` was implemented, proven
+   loss-exact and perf-neutral, and left off by default. Diagnostics
+   added: `GEMM_TRACE=1`, `FUT_PROFILE=1`. Full narrative + tables:
+   `docs/RUN-2026-07-20-TENSOR-CORE.md`. Remaining MFU levers (5.6% now):
+   the 608/step `replicate_f32` zero-fills, `piece_ce_bwd` (18 ms),
+   `l2norm_heads_bwd` vjp, small-kernel fusion, micro 16/32.
 
 Orientation for a fresh clone: `PLAN.md` (roadmap, needs refresh per above)
 → `docs/GEMM-BACKEND.md` (backend design/contract) →
