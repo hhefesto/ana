@@ -1,6 +1,7 @@
 module Main (main) where
 
 import Control.Monad (filterM, foldM)
+import Control.Parallel.Strategies (parListChunk, rseq, using)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
 import Data.Word (Word64)
@@ -132,43 +133,60 @@ prepareStdin = prepareStdinWith ByteTokenizer
 
 prepareStdinWith :: Tokenizer -> FilePath -> IO ()
 prepareStdinWith tokenizer output = do
-  result <- readNulDocuments tokenizer
+  result <- readNulDocuments
   case result of
     Left message -> putStrLn ("prepare-stdin: " ++ message)
     Right [] -> putStrLn "prepare-stdin: no documents on stdin (expected NUL-delimited id/text pairs)"
-    Right documents -> writeDocuments tokenizer output documents
+    Right sources -> writeDocuments tokenizer output (encodeDocuments tokenizer sources)
 
-readNulDocuments :: Tokenizer -> IO (Either String [Document])
-readNulDocuments tokenizer = readMore BS.empty Nothing []
+-- Tokenizing a corpus is per-document work with no cross-document dependency,
+-- and measurement says it is dominated by allocating each document's token
+-- list rather than by the BPE merges themselves.  Both facts point the same
+-- way: encode the documents in parallel chunks.  `sum` forces each token list
+-- to normal form inside its spark, so the work actually happens on the worker
+-- rather than being deferred to the serializer on the main thread.
+--
+-- The result is order-preserving and therefore byte-identical to the serial
+-- encoding, which the shard-0 regression in the run document checks exactly.
+encodeDocuments :: Tokenizer -> [(String, BS.ByteString)] -> [Document]
+encodeDocuments tokenizer sources =
+  map encodeOne sources `using` parListChunk 32 rseq
   where
-    readMore pending identifier documents = do
+    encodeOne (name, bytes) =
+      let tokens = encodeWith tokenizer bytes
+      in sum tokens `seq` Document name tokens
+
+-- Reads NUL-delimited (identifier, text) pairs, returning them unencoded so
+-- the caller can tokenize the batch in parallel.
+readNulDocuments :: IO (Either String [(String, BS.ByteString)])
+readNulDocuments = readMore BS.empty Nothing []
+  where
+    readMore pending identifier sources = do
       chunk <- BS.hGetSome stdin 65536
       if BS.null chunk
         then if BS.null pending && maybe True (const False) identifier
-          then pure (Right (reverse documents))
+          then pure (Right (reverse sources))
           else pure (Left "incomplete final NUL-delimited id/text pair")
-        else consume (pending <> chunk) identifier documents
+        else consume (pending <> chunk) identifier sources
 
-    consume bytes identifier documents = case BS.elemIndex 0 bytes of
-      Nothing -> readMore bytes identifier documents
+    consume bytes identifier sources = case BS.elemIndex 0 bytes of
+      Nothing -> readMore bytes identifier sources
       Just index ->
         let field = BS.take index bytes
             remaining = BS.drop (index + 1) bytes
         in case identifier of
           Nothing
             | BS.null field -> pure (Left "document id must not be empty")
-            | otherwise -> consume remaining (Just field) documents
+            | otherwise -> consume remaining (Just field) sources
           Just documentIdBytes ->
-            let document = Document
-                  ("curid-" ++ BSC.unpack documentIdBytes)
-                  (encodeWith tokenizer field)
-            in consume remaining Nothing (document : documents)
+            let source = ("curid-" ++ BSC.unpack documentIdBytes, field)
+            in consume remaining Nothing (source : sources)
 
 writeSources :: Tokenizer -> FilePath -> [(String, BS.ByteString)] -> IO ()
 writeSources tokenizer output sources = writeArtifact tokenizer output identity documents
   where
     identity = datasetFingerprint sources
-    documents = [Document name (encodeWith tokenizer bytes) | (name, bytes) <- sources]
+    documents = encodeDocuments tokenizer sources
 
 writeDocuments :: Tokenizer -> FilePath -> [Document] -> IO ()
 writeDocuments tokenizer output documents =

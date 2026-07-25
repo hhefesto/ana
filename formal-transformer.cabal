@@ -39,10 +39,14 @@ executable formal-transformer
   import:           common-settings
   hs-source-dirs:   backend/app
   main-is:          Main.hs
+  -- Corpus preparation encodes documents in parallel (see encodeDocuments);
+  -- without -threaded and -N the sparks all run on one capability.
+  ghc-options:      -threaded -rtsopts "-with-rtsopts=-N"
   build-depends:
       formal-transformer,
       bytestring >=0.10 && <0.13,
-      directory >=1.3 && <1.4
+      directory >=1.3 && <1.4,
+      parallel >=3.2 && <3.3
 
 test-suite formal-transformer-test
   import:           common-settings
