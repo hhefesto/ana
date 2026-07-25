@@ -10,15 +10,22 @@ Wikipedia** on a single rented consumer GPU.
 | Model | 10,571,840 parameters — GLA/softmax 3:1 hybrid, vocab 8192, context 256 |
 | Trained on | 5,857,550 articles, ~3.75B tokens, exactly one pass |
 | Cost | 92 h on one RTX 5060 Ti, roughly $10–25 |
-| Held-out quality | **~1.21 bits per byte**, corpus-wide, on documents it never saw |
+| In-domain quality | **1.21 bits per byte** on held-out Wikipedia prose |
+| External benchmark | **1.99 bits per byte** on enwik8 (GPT-2-small: 1.16) |
 
-For reference, GPT-2-small reports 1.16 BPB on enwik8 — so this is a little
-behind a model 11× its size, and behind by more than that gap suggests, since
-1.21 is measured in-distribution and GPT-2's number is zero-shot. Note the
-training log's own final-decile figure of 1.107 is *not* the model's quality:
-the log's deciles follow shard order, the dump is article-ordered, and the last
-shards are the stub tail. Measuring a fixed corpus-wide held-out set is what
-gives 1.21.
+Both numbers matter, and they say different things. On the domain it was
+trained on, a 10.6M-parameter model reaching 1.21 bpb for $20 is a genuinely
+good result. On enwik8 — the benchmark GPT-2 reported, and the only
+apples-to-apples comparison available — it scores 1.99 against GPT-2-small's
+1.16, so **it does not reach GPT-2-small quality**. The gap is mostly domain:
+enwik8 is raw MediaWiki XML, while this model saw extracted prose and its
+8,192-piece tokenizer shatters markup into byte fallbacks.
+
+Two earlier readings of this run were wrong and are worth flagging, because
+both flattered it: the training log's final-decile figure of 1.107 is not the
+model's quality (the log's deciles follow shard order, the dump is
+article-ordered, and the last shards are the stub tail), and comparing any
+in-domain figure to GPT-2's zero-shot number was never like-for-like.
 
 The weights are in this repository. The full record of the run — architecture
 rationale, results, an honest comparison against state-of-the-art training, and

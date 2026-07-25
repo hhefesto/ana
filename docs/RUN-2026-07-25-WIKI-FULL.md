@@ -179,17 +179,18 @@ checkpoints, and kernels checked against an Agda specification and a
 post-training at all: this is a raw base model, and it cannot follow an
 instruction because it has never seen one.
 
-**Against GPT-2-small, carefully.** The corpus-wide held-out figure is ~1.21 bpb
-(§6), against GPT-2-small's reported 1.16 BPB on enwik8. So this model is
-slightly *behind* GPT-2-small — and by more than that comparison admits, because
-1.21 is measured in-distribution on the corpus family it trained on while
-GPT-2's 1.16 is zero-shot on a different corpus with markup. An earlier reading
-of this run put it at 1.107 and therefore *ahead*; that reading was an artifact
-of which documents got scored, and §6 explains why.
+**Against GPT-2-small, measured rather than argued.** On enwik8 — the benchmark
+GPT-2 actually reported — this model scores **1.994 ± 0.019 bpb** against
+GPT-2-small's **1.16** (§6). That is roughly 70% worse in bits, and it is the
+only apples-to-apples comparison available. The project's stated objective of
+GPT-2-small quality is **not met**.
 
-What survives is still a real result: a 10.6M-parameter model within ~5% of a
-117M-parameter model's bits-per-byte on the one domain it was trained on, for
-about $20.
+The in-domain figure (~1.21 bpb on held-out Wikipedia prose) is the real
+achievement, and should be quoted as what it is: strong for 10.6M parameters, on
+the one domain the model was trained on, for about $20. It is not evidence about
+GPT-2. An earlier reading of this run put the in-domain figure at 1.107 and
+concluded the model was *ahead* of GPT-2-small; that was wrong twice over — the
+1.107 was population-biased, and the comparison was never like-for-like.
 
 **The Wikipedia-only ceiling is structural.** One language, one register, no
 instructions, no dialogue, no code, no reasoning chains. And the data is now
@@ -259,6 +260,42 @@ reading now agree that this model does not reach GPT-2-small.
 
 This is the entire reason step 1 came before scaling: the instrument disagreed
 with the headline by more than the improvement any single next step would buy.
+
+### The external benchmark: enwik8
+
+The in-domain number still cannot be compared to a published model, because
+every figure above is measured on the corpus family the model trained on. So
+score the benchmark GPT-2 actually reported — enwik8's conventional test split,
+the last 5 MB of the 100 MB file (md5 `a1fa5ffd…bb36a`), scored whole:
+
+| model | parameters | enwik8 BPB |
+|---|---|---|
+| this model | 10.6M | **1.994 ± 0.019** (7,339 windows, 1,871,445 predictions) |
+| GPT-2 small | 117M | 1.16 |
+| GPT-2 large | 762M | 0.97 |
+
+**It is not close.** Against the one measurement that is actually comparable,
+this model is at 1.99 where GPT-2-small is at 1.16 — not slightly behind, but
+roughly 70% worse in bits.
+
+The gap is mostly domain, not merely scale. enwik8 is raw MediaWiki *XML*:
+templates, link syntax, and tags. This model was trained on extracted natural
+language, and its 8,192-piece tokenizer was learned on that same clean text, so
+markup shatters into byte fallbacks — enwik8 tokenizes at 2.66 bytes/token here
+against 3.98 on Wikipedia prose. GPT-2 saw markup-rich WebText and a 50,257-piece
+vocabulary. So the comparison is unflattering for a reason that would partly
+survive scaling: **the corpus, not just the parameter count, is the limit.**
+
+Read together, the three figures tell the honest story:
+
+- **1.21 bpb** on held-out Wikipedia prose — genuinely good for 10.6M parameters
+- **1.16 bpb** — GPT-2-small, on a benchmark this model scores 1.99 on
+- **1.99 bpb** on that benchmark — what the model is worth outside its
+  distribution
+
+The first number is the achievement. The third is the ceiling. Any claim that
+this run "reaches GPT-2-small quality" is false, and the earlier 1.107 reading
+made that false claim look supported.
 
 ## 7. Using the trained model
 
@@ -394,9 +431,17 @@ depends on that host existing.
 
 ## 11. Next steps
 
-1. **Measure properly** — *done for the base case* (§6). What remains is a
-   standard external harness beyond enwik8, so claims become citable without
-   caveat.
+1. **Measure properly** — **done** (§6). A fixed held-out set, an `evaluate`
+   command that samples nothing, standard errors on every figure, and one
+   external benchmark. Everything below is now judgeable; nothing below was
+   before.
+
+   Its first result reorders the rest. The in-domain/external gap (1.21 vs
+   1.99) is far larger than anything one scaling step buys, and most of it is
+   corpus and tokenizer, not parameter count — a 10.6M model at 3.98
+   bytes/token on prose drops to 2.66 on markup. So **step 3 is now at least as
+   urgent as step 2**, and running step 2 alone would produce a bigger model
+   with the same ceiling.
 2. **Scale parameters, not epochs.** The data is spent. The next rung is
    `Config 8192 256 768 2048 12 12` — 96,553,728 parameters, `ff/d` 2.67 keeping
    the gated-FFN ratio, 12 layers giving 9 GLA + 3 softmax. On the same 3.75B
