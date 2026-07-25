@@ -70,14 +70,22 @@ for (( k = 0; k < shards; k++ )); do
     # shard (a duplicate document id, say) looks like success and only surfaces
     # as a confusing "corpus file not found" from plan-segment.
     # Web text contains occasional NUL bytes. JSON cannot hold a raw control
-    # character in a string, so they arrive as a six-character backslash-u
-    # escape; jq decodes that to a real NUL and --raw-output0 then refuses to
-    # emit it, because a NUL inside a field would break the very framing that
-    # separates fields. Stripping the escape from the raw line removes it before
-    # it is ever decoded. NUL carries no meaning for a language model, so
-    # dropping it loses nothing; leaving it in aborts the run thousands of
-    # shards deep (C4 shard 0 has exactly one such record, at document 19112).
-    prepared="$(sed 's/\\u0000//g' "$part" | jq --raw-output0 '.id, .text' \
+    # character in a string, so they arrive as a backslash-u escape; jq decodes
+    # that to a real NUL and --raw-output0 then refuses to emit it, because a
+    # NUL inside a field would break the framing that separates fields.
+    #
+    # They cannot be stripped textually: a record containing an escaped
+    # backslash followed by the literal text u0000 has the same six bytes, and
+    # deleting them leaves a dangling backslash -- invalid JSON. So remove the
+    # character after decoding, via explode/implode, which needs no escape in
+    # the filter. That is expensive, so it is only used on the rare parts that
+    # actually contain the escape (one record in C4 shard 0, at document 19112).
+    if grep -q '\\u0000' "$part"; then
+      filter='.id, (.text | explode | map(select(. != 0)) | implode)'
+    else
+      filter='.id, .text'
+    fi
+    prepared="$(jq --raw-output0 "$filter" < "$part" \
       | "$CLI" prepare-bpe-stdin "$TOKENIZER" "$corpus")"
     if [ ! -f "$corpus" ]; then
       echo "plan-corpus: shard $k failed to prepare from $part" >&2
@@ -94,6 +102,16 @@ for (( k = 0; k < shards; k++ )); do
   read -r tag planned_offset documents corpus_id train_windows validation_windows steps <<< "$record"
   if [ "$tag" != segment ] || [ "$planned_offset" != "$offset" ]; then
     echo "plan-corpus: invalid segment plan for shard $k: $record" >&2
+    exit 1
+  fi
+  # Assert the shard is complete. A producer that dies mid-stream (a jq parse
+  # error, say) leaves a corpus that is structurally valid but short, and
+  # nothing downstream would notice -- the plan would simply describe a corpus
+  # missing documents, and the run would train on it. This caught shard 83
+  # holding 1,625 of 4,000 documents.
+  if [ "$documents" != "$PER" ] && [ "$k" != "$(( shards - 1 ))" ]; then
+    echo "plan-corpus: shard $k is short: $documents of $PER documents" >&2
+    echo "  delete $corpus and re-run" >&2
     exit 1
   fi
   segment_start=$cumulative
