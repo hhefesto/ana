@@ -499,10 +499,12 @@ depends on that host existing.
    — hours on an A100/H100, gated on a measured `bench` MFU. Batch should rise to
    ~64 (semantic: needs a new plan), warmup from 100 to ~2,000 steps, and the
    gradient clip revisited given the 53.9% clip rate.
-3. **Broaden the corpus.** Ingestion is already generic; the real work is a
-   retrained, larger tokenizer (16k–32k), which changes the checkpoint identity
-   and so means a fresh run. Bits per byte stays comparable across tokenizers,
-   which is why it is the metric of record.
+3. **Broaden the corpus** — **done**. `run/mixed-bpe100m` holds 2,426 shards
+   over 9,700,651 documents: English Wikipedia interleaved 3:2 with FineWeb-Edu
+   `sample/10BT` (verified English-only from its own `language` column). The
+   plan is 359,314 steps at batch 64 = **5.89B tokens**, 51 tokens/parameter at
+   115M, 4.08 × 10¹⁸ FLOPs. Directly consumable:
+   `SIZE=bpe100m TRAIN_BATCH=64 RUN_DIR=run/mixed-bpe100m deploy/train-cloud.sh`.
 4. **Longer context**, with a caveat that must be tested first. The softmax
    layers are NoPE, and the decoder exploits the resulting permutation
    invariance over the cache. At 256 tokens this works. At 1024 those layers may
