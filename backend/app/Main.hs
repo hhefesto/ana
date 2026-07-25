@@ -43,13 +43,14 @@ main = do
       planSegment path offsetText batchText size
     ["build-eval", output, planPath, runDir, perShardText, strideText] ->
       buildEval output planPath runDir perShardText strideText
-    ["learn-bpe", output, vocabText] -> learnBpe output vocabText
+    ["learn-bpe", output, vocabText] -> learnBpe output vocabText "2"
+    ["learn-bpe", output, vocabText, minText] -> learnBpe output vocabText minText
     ["bigram-gate", path] -> bigramGateCommand path tinyPreset
     ["bigram-gate", path, "tiny"] -> bigramGateCommand path tinyPreset
     ["bigram-gate", path, "small"] -> bigramGateCommand path smallPreset
     ["bigram-gate", path, "bpe10m"] -> bigramGateCommand path bpe10mPreset
     ["bigram-gate", path, "bpe100m"] -> bigramGateCommand path bpe100mPreset
-    _ -> putStrLn "usage: formal-transformer (inspect | logits TOKENS | gradcheck | train-smoke | prepare-bytes OUTPUT INPUT... | prepare-stdin OUTPUT | prepare-bpe TOKENIZER OUTPUT INPUT... | prepare-bpe-stdin TOKENIZER OUTPUT | inspect-corpus PATH | inspect-checkpoint PATH | compact-checkpoint INPUT OUTPUT | plan-segment CORPUS DOCUMENT_OFFSET TRAIN_BATCH SIZE | build-eval OUTPUT PLAN RUN_DIR DOCS_PER_SHARD STRIDE | learn-bpe OUTPUT VOCABULARY | bigram-gate CORPUS [tiny|small|bpe10m|bpe100m])"
+    _ -> putStrLn "usage: formal-transformer (inspect | logits TOKENS | gradcheck | train-smoke | prepare-bytes OUTPUT INPUT... | prepare-stdin OUTPUT | prepare-bpe TOKENIZER OUTPUT INPUT... | prepare-bpe-stdin TOKENIZER OUTPUT | inspect-corpus PATH | inspect-checkpoint PATH | compact-checkpoint INPUT OUTPUT | plan-segment CORPUS DOCUMENT_OFFSET TRAIN_BATCH SIZE | build-eval OUTPUT PLAN RUN_DIR DOCS_PER_SHARD STRIDE | learn-bpe OUTPUT VOCABULARY [MIN_FREQUENCY] | bigram-gate CORPUS [tiny|small|bpe10m|bpe100m])"
 
 tinyConfig :: Config
 tinyConfig = Config 5 6 4 6 2 2
@@ -192,16 +193,28 @@ readNulDocuments = readMore BS.empty Nothing []
 -- table, so only distinct words need to be in memory. That is what makes
 -- training on a corpus far larger than RAM practical, and it is why the cost is
 -- set by vocabulary size rather than by corpus size.
-learnBpe :: FilePath -> String -> IO ()
-learnBpe output vocabText = case readMaybe vocabText of
-  Nothing -> putStrLn "learn-bpe: VOCABULARY must be an integer"
-  Just vocab -> do
+learnBpe :: FilePath -> String -> String -> IO ()
+learnBpe output vocabText minText = case (readMaybe vocabText, readMaybe minText) of
+  (Nothing, _) -> putStrLn "learn-bpe: VOCABULARY must be an integer"
+  (_, Nothing) -> putStrLn "learn-bpe: MIN_FREQUENCY must be an integer"
+  (Just vocab, Just minFrequency) -> do
     counted <- streamWordCounts
     case counted of
       Left message -> putStrLn ("learn-bpe: " ++ message)
-      Right frequencies -> do
+      Right counts -> do
+        -- Web text has an enormous tail of words seen exactly once -- URLs,
+        -- hashes, typos, digit strings.  They dominate the distinct-word count
+        -- (and hence memory, which is per word type) while contributing weight
+        -- 1 against merges whose weights run to millions, so they cannot change
+        -- which merges are chosen.  Dropping them is what makes training on a
+        -- mixed corpus fit in RAM at all: on a 370 MB Wikipedia+C4 sample the
+        -- unfiltered table reached 15.6 GB resident and was still growing.
+        let frequencies = Map.filter (>= minFrequency) counts
+        putStrLn ("learn-bpe: " ++ show (Map.size counts) ++ " distinct words, "
+          ++ show (sum (Map.elems counts)) ++ " occurrences")
         putStrLn ("learn-bpe: " ++ show (Map.size frequencies)
-          ++ " distinct words, " ++ show (sum (Map.elems frequencies)) ++ " occurrences")
+          ++ " kept at frequency >= " ++ show minFrequency
+          ++ " (" ++ show (Map.size counts - Map.size frequencies) ++ " dropped)")
         case learnBpeMerges vocab frequencies of
           Left message -> putStrLn ("learn-bpe: " ++ message)
           Right merges -> do
