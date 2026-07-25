@@ -234,16 +234,20 @@ volume if you don't want to keep it. Billing → zero.
 ## 6. Test locally — no GPU
 
 Checkpoints are backend-portable; the CPU host reads the CUDA-trained weights.
-`wiki-generate` auto-picks the newest `run/*.checkpoint`:
+`wiki-generate` defaults to the last pulled checkpoint and never contacts the
+network unless asked:
 
 ```bash
 cd ~/src/formalTransformer
-WIKI_TOKENIZER=~/datasets/wikipedia-en/enwiki-8k.bpe \
-WIKI_PROMPT="The theory of" WIKI_TOKENS=128 nix run .#wiki-generate
+nix run .#wiki-generate -- --prompt "The theory of" --tokens 128
+# refresh from the live box first:
+nix run .#wiki-generate -- --pull --host user@HOST --port PORT \
+  --prompt "The theory of"
 # compare an earlier stage:
-WIKI_CHECKPOINT=run/wiki-bpe10m-global.stage-1of4.checkpoint \
-WIKI_TOKENIZER=~/datasets/wikipedia-en/enwiki-8k.bpe \
-WIKI_PROMPT="The theory of" nix run .#wiki-generate
+nix run .#wiki-generate -- \
+  --checkpoint run/wiki-bpe10m-global.stage-1of4.checkpoint \
+  --tokenizer ~/datasets/wikipedia-en/enwiki-8k.bpe \
+  --prompt "The theory of"
 ```
 
 `inspect-checkpoint` on a pulled file confirms its global step and

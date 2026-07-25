@@ -697,8 +697,11 @@
               echo "wiki-train: all $shards shards complete - the entire dataset has been consumed"
             '';
           };
-          # Zero-argument generation: use an explicit checkpoint or discover
-          # the most recently updated checkpoint in the run directory.
+          # Generation is local and offline by default: with no arguments it
+          # uses the last pulled checkpoint (run/last-checkpoint), falling back
+          # to newest-compatible discovery.  Reaching a training box is opt-in
+          # via --pull, and every connection detail is an argument, so an
+          # arbitrary trainer can be named without editing anything.
           wikiGenerate = pkgs.writeShellApplication {
             name = "wiki-generate";
             runtimeInputs = [
@@ -707,59 +710,208 @@
               pkgs.rsync
             ];
             text = ''
-              # Pull the freshest trained weights first when a training box is
-              # configured: set WIKI_REMOTE=user@host (plus WIKI_REMOTE_PORT and
-              # WIKI_REMOTE_CHECKPOINT as needed), or drop the same assignments
-              # in run/remote-box.env (git-ignored; boxes are ephemeral).
-              # WIKI_PULL=0 skips the pull; an unreachable box degrades to the
-              # local checkpoints with a note. rsync writes a temp file and
-              # renames, so a torn transfer never replaces good local weights.
-              if [ "''${WIKI_PULL:-1}" != 0 ]; then
-                if [ -z "''${WIKI_REMOTE:-}" ] && [ -f run/remote-box.env ]; then
+              usage() {
+                cat >&2 <<'USAGE'
+wiki-generate [OPTIONS] [PROMPT]
+
+Generate text from a trained checkpoint.  With no options it uses the last
+pulled checkpoint and never contacts the network.
+
+Local:
+  --checkpoint PATH        generate from this checkpoint (skips discovery)
+  --tokenizer PATH         tokenizer artifact (default weights/enwiki-8k.bpe)
+  --tokens N               generation budget (default 128)
+  --prompt TEXT            prompt; also accepted as trailing arguments
+  --list                   list local checkpoints with compatibility, then exit
+  -h, --help               this message
+
+Pulling from a trainer (opt-in; nothing is contacted without --pull/--host):
+  --pull                   refresh weights from a trainer first
+  --host ADDR              trainer address: IP, hostname, or user@host
+                           (implies --pull)
+  --user NAME              ssh user when --host carries none (default root)
+  --port N                 ssh port (default 22)
+  --key PATH               ssh identity file
+  --remote-checkpoint PATH remote checkpoint path (default
+                           /root/ana/run/wiki-bpe10m-global.checkpoint)
+
+A pull lands in run/pulled-HOST-PORT-checkpoints/, never on top of an existing
+checkpoint, and records its destination in run/last-checkpoint - which is what
+a later no-argument run uses.
+
+Environment fallbacks (arguments win): WIKI_PROMPT, WIKI_TOKENS,
+WIKI_CHECKPOINT, WIKI_TOKENIZER, and for --pull: WIKI_REMOTE,
+WIKI_REMOTE_PORT, WIKI_REMOTE_KEY, WIKI_REMOTE_CHECKPOINT, or the same
+assignments in run/remote-box.env.  TEMPERATURE, TOP_K and SAMPLE_SEED shape
+decoding.
+USAGE
+              }
+
+              pull=0
+              list=0
+              host=
+              user=
+              port=
+              key=
+              remote_checkpoint=
+              checkpoint=
+              tokenizer=
+              tokens=
+              prompt=
+              prompt_set=0
+
+              need_value() {
+                if [ "$1" -lt 2 ]; then
+                  echo "wiki-generate: $2 needs a value" >&2
+                  exit 1
+                fi
+              }
+
+              while [ $# -gt 0 ]; do
+                case "$1" in
+                  --pull) pull=1 ;;
+                  --list) list=1 ;;
+                  --host) need_value $# "$1"; host="$2"; pull=1; shift ;;
+                  --user) need_value $# "$1"; user="$2"; shift ;;
+                  --port) need_value $# "$1"; port="$2"; shift ;;
+                  --key) need_value $# "$1"; key="$2"; shift ;;
+                  --remote-checkpoint) need_value $# "$1"; remote_checkpoint="$2"; shift ;;
+                  --checkpoint) need_value $# "$1"; checkpoint="$2"; shift ;;
+                  --tokenizer) need_value $# "$1"; tokenizer="$2"; shift ;;
+                  --tokens) need_value $# "$1"; tokens="$2"; shift ;;
+                  --prompt) need_value $# "$1"; prompt="$2"; prompt_set=1; shift ;;
+                  -h|--help) usage; exit 0 ;;
+                  --) shift
+                      while [ $# -gt 0 ]; do
+                        if [ "$prompt_set" = 1 ]; then prompt="$prompt $1"; else prompt="$1"; prompt_set=1; fi
+                        shift
+                      done
+                      break ;;
+                  -*) echo "wiki-generate: unknown option $1" >&2; usage; exit 1 ;;
+                  *)  if [ "$prompt_set" = 1 ]; then prompt="$prompt $1"; else prompt="$1"; prompt_set=1; fi ;;
+                esac
+                shift
+              done
+
+              if [ "$prompt_set" = 0 ] && [ -n "''${WIKI_PROMPT:-}" ]; then
+                prompt="$WIKI_PROMPT"
+                prompt_set=1
+              fi
+              if [ -z "$tokens" ]; then tokens="''${WIKI_TOKENS:-128}"; fi
+              if [ -z "$checkpoint" ]; then checkpoint="''${WIKI_CHECKPOINT:-}"; fi
+              if [ -z "$tokenizer" ]; then tokenizer="''${WIKI_TOKENIZER:-}"; fi
+              case "$tokens" in
+                ""|*[!0-9]*)
+                  echo "wiki-generate: --tokens must be a non-negative integer (got '$tokens')" >&2
+                  exit 1 ;;
+              esac
+
+              # The pull is opt-in.  Without --pull/--host this app makes no
+              # network call at all, so a destroyed training box costs nothing.
+              if [ "$pull" = 1 ]; then
+                if [ -z "$host" ]; then host="''${WIKI_REMOTE:-}"; fi
+                if [ -z "$host" ] && [ -f run/remote-box.env ]; then
                   # shellcheck disable=SC1091
                   . run/remote-box.env
+                  host="''${WIKI_REMOTE:-}"
+                  if [ -z "$port" ]; then port="''${WIKI_REMOTE_PORT:-}"; fi
+                  if [ -z "$remote_checkpoint" ]; then remote_checkpoint="''${WIKI_REMOTE_CHECKPOINT:-}"; fi
                 fi
-                if [ -n "''${WIKI_REMOTE:-}" ]; then
-                  remote_port="''${WIKI_REMOTE_PORT:-22}"
-                  remote_ckpt="''${WIKI_REMOTE_CHECKPOINT:-/root/ana/run/wiki-bpe10m-global.checkpoint}"
-                  echo "wiki-generate: pulling latest weights from $WIKI_REMOTE:$remote_ckpt" >&2
-                  if rsync -zt \
-                       -e "ssh -p $remote_port -o ConnectTimeout=10 -o BatchMode=yes" \
-                       "$WIKI_REMOTE:$remote_ckpt" run/ 2>/dev/null; then
-                    echo "wiki-generate: pull complete" >&2
-                  else
-                    echo "wiki-generate: pull failed (box offline?); using local checkpoints" >&2
-                  fi
-                fi
-              fi
-              if [ -n "''${WIKI_PROMPT:-}" ]; then
-                prompt="$WIKI_PROMPT"
-              elif [ -t 0 ]; then
-                printf 'prompt> ' >&2
-                IFS= read -r prompt || {
-                  echo "wiki-generate: no prompt entered" >&2
+                if [ -z "$host" ]; then
+                  echo "wiki-generate: --pull needs a trainer to pull from" >&2
+                  echo "  pass --host user@host (with --port/--key as needed)," >&2
+                  echo "  or set WIKI_REMOTE, or write run/remote-box.env" >&2
                   exit 1
-                }
-              else
-                echo "wiki-generate: WIKI_PROMPT is not set and stdin is not a terminal" >&2
-                echo "  set WIKI_PROMPT=... or run interactively to type a prompt" >&2
-                exit 1
+                fi
+                if [ -z "$port" ]; then port="''${WIKI_REMOTE_PORT:-22}"; fi
+                if [ -z "$key" ]; then key="''${WIKI_REMOTE_KEY:-}"; fi
+                if [ -z "$remote_checkpoint" ]; then
+                  remote_checkpoint="''${WIKI_REMOTE_CHECKPOINT:-/root/ana/run/wiki-bpe10m-global.checkpoint}"
+                fi
+                case "$port" in
+                  ""|*[!0-9]*)
+                    echo "wiki-generate: --port must be an integer (got '$port')" >&2
+                    exit 1 ;;
+                esac
+                case "$host" in
+                  *@*) ;;
+                  *) host="''${user:-root}@$host" ;;
+                esac
+                if [ -n "$key" ] && [ ! -f "$key" ]; then
+                  echo "wiki-generate: ssh key not found: $key" >&2
+                  exit 1
+                fi
+
+                # One directory per trainer, and never the shared run/ root: a
+                # pull can then not overwrite weights from a different box (or
+                # from a finished run) with whatever this box happens to hold.
+                slug="$(printf '%s-%s' "$host" "$port" | tr -c 'A-Za-z0-9._-' '-')"
+                dest_dir="run/pulled-$slug-checkpoints"
+                mkdir -p "$dest_dir"
+                ssh_command="ssh -p $port -o ConnectTimeout=10 -o BatchMode=yes"
+                if [ -n "$key" ]; then
+                  printf -v key_quoted '%q' "$key"
+                  ssh_command="$ssh_command -i $key_quoted"
+                fi
+                echo "wiki-generate: pulling $host:$remote_checkpoint -> $dest_dir/" >&2
+                # rsync writes a temp file and renames, so a torn transfer never
+                # replaces good local weights.
+                if rsync -zt -e "$ssh_command" "$host:$remote_checkpoint" "$dest_dir/"; then
+                  pulled="$dest_dir/$(basename "$remote_checkpoint")"
+                  echo "wiki-generate: pull complete: $pulled" >&2
+                  mkdir -p run
+                  printf '%s\n' "$pulled" > run/last-checkpoint
+                else
+                  echo "wiki-generate: pull failed (box offline?); using local checkpoints" >&2
+                fi
               fi
-              tokens="''${WIKI_TOKENS:-128}"
-              if [ -n "''${WIKI_CHECKPOINT:-}" ]; then
-                checkpoint="$WIKI_CHECKPOINT"
-              else
-                # Newest first, but only checkpoints this host's architecture
-                # can interpret: a checkpoint from another architecture (for
-                # example another branch's model/layout identity) is skipped
-                # with a note instead of aborting generation.
-                checkpoint=
-                candidates="$(
-                  for candidate in run/*.checkpoint run/*-checkpoints/*.checkpoint; do
-                    if [ ! -f "$candidate" ]; then continue; fi
-                    printf '%s %s\n' "$(stat -L --format=%Y -- "$candidate")" "$candidate"
-                  done | sort -rn | cut -d' ' -f2-
-                )"
+
+              # Newest first, but only checkpoints this host's architecture can
+              # interpret: a checkpoint from another architecture (for example
+              # another branch's model/layout identity) is skipped with a note
+              # instead of aborting generation.
+              candidates="$(
+                for candidate in run/*.checkpoint run/*-checkpoints/*.checkpoint; do
+                  if [ ! -f "$candidate" ]; then continue; fi
+                  printf '%s %s\n' "$(stat -L --format=%Y -- "$candidate")" "$candidate"
+                done | sort -rn | cut -d' ' -f2-
+              )"
+
+              pointer=
+              if [ -f run/last-checkpoint ]; then pointer="$(cat run/last-checkpoint)"; fi
+
+              if [ "$list" = 1 ]; then
+                found=0
+                for candidate in $candidates; do
+                  found=1
+                  if ${sequential} check-checkpoint "$candidate" >/dev/null 2>&1; then
+                    status=compatible
+                  else
+                    status=incompatible
+                  fi
+                  mark=" "
+                  if [ "$candidate" = "$pointer" ]; then mark="*"; fi
+                  printf '%s %-12s %12s bytes  %s\n' \
+                    "$mark" "$status" "$(stat -L --format=%s -- "$candidate")" "$candidate"
+                done
+                if [ "$found" = 0 ]; then
+                  echo "wiki-generate: no checkpoints under run/" >&2
+                fi
+                echo "(* marks run/last-checkpoint, the no-argument default)" >&2
+                exit 0
+              fi
+
+              # The default is the last pulled checkpoint; discovery is the
+              # fallback when no pull has happened or the pointer went stale.
+              if [ -z "$checkpoint" ] && [ -n "$pointer" ]; then
+                if [ -f "$pointer" ] && ${sequential} check-checkpoint "$pointer" >/dev/null 2>&1; then
+                  checkpoint="$pointer"
+                else
+                  echo "wiki-generate: run/last-checkpoint names an unusable checkpoint ($pointer)" >&2
+                  echo "  falling back to newest-compatible discovery" >&2
+                fi
+              fi
+              if [ -z "$checkpoint" ]; then
                 for candidate in $candidates; do
                   if ${sequential} check-checkpoint "$candidate" >/dev/null 2>&1; then
                     checkpoint="$candidate"
@@ -771,14 +923,34 @@
               fi
               if [ -z "$checkpoint" ]; then
                 echo "wiki-generate: no compatible checkpoint found under run/" >&2
-                echo "  train first: nix run .#wiki-train" >&2
+                echo "  vendored weights: ./weights/assemble.sh" >&2
+                echo "  pull from a trainer: wiki-generate --pull --host user@host --port N" >&2
+                echo "  or train first: nix run .#wiki-train" >&2
                 exit 1
               fi
-              if [ -z "''${WIKI_TOKENIZER:-}" ] && [ -f weights/enwiki-8k.bpe ]; then
-                export TOKENIZER_FILE="weights/enwiki-8k.bpe"
-              else
-                export TOKENIZER_FILE="''${WIKI_TOKENIZER:-$HOME/datasets/wikipedia-en/enwiki-8k.bpe}"
+              if [ ! -f "$checkpoint" ]; then
+                echo "wiki-generate: checkpoint not found: $checkpoint" >&2
+                exit 1
               fi
+
+              if [ -z "$prompt_set" ] || [ "$prompt_set" = 0 ]; then
+                if [ -t 0 ]; then
+                  printf 'prompt> ' >&2
+                  IFS= read -r prompt || {
+                    echo "wiki-generate: no prompt entered" >&2
+                    exit 1
+                  }
+                else
+                  echo "wiki-generate: no prompt given and stdin is not a terminal" >&2
+                  echo "  pass --prompt TEXT (or set WIKI_PROMPT), or run interactively" >&2
+                  exit 1
+                fi
+              fi
+
+              if [ -z "$tokenizer" ] && [ -f weights/enwiki-8k.bpe ]; then
+                tokenizer="weights/enwiki-8k.bpe"
+              fi
+              export TOKENIZER_FILE="''${tokenizer:-$HOME/datasets/wikipedia-en/enwiki-8k.bpe}"
               echo "wiki-generate: checkpoint=$checkpoint tokens=$tokens" >&2
               echo "wiki-generate: loading model; generated text streams after initialization" >&2
               exec ${sequential} generate "$checkpoint" "$prompt" "$tokens"

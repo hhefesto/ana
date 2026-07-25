@@ -2,7 +2,36 @@
 
 Everything needed to continue this work from another machine and account.
 
-## ▶ CONTINUE HERE (2026-07-21) — divergence SOLVED, training relaunch
+## ▶ CONTINUE HERE (2026-07-25) — full Wikipedia run COMPLETE, box destroyed
+
+The whole-of-English-Wikipedia run **finished**: global step 1,833,157 of
+1,833,157, all 1,465 shards consumed under one anchored cosine schedule,
+2026-07-21 09:25 → 2026-07-25 05:33 (92 h 08 min) on the rented RTX 5060 Ti.
+Held-out quality ended at **~1.107 bits per byte** (final-decile mean; the
+last log line's 1.5257 is an 8-window sampling artifact, not the result).
+Generations are fluent, correctly-registered Wikipedia prose with no factual
+grounding — the expected profile at 10.6M parameters. Full record, including
+the comparison against state-of-the-art training and what to do next:
+**`docs/RUN-2026-07-25-WIKI-FULL.md`**.
+
+The weights are safe in three verified copies, all sha256
+`ae775082a0c310422020fe063459ea280b9c1d6e777b3d710c962cdc5d145018`:
+`run/wiki-bpe10m-global.checkpoint` (read-only),
+`run/wiki-bpe10m-global.100pct-2026-07-25.checkpoint` (read-only backup), and
+the git-tracked `weights/*.part-0{0,1,2}` (reassemble with
+`weights/assemble.sh`). The 288 MB training log is archived at
+`run/train-cloud-relaunch-2026-07-25.log.gz` and its 2,379 validation
+observations at `docs/data/wiki-full-2026-07-25-validation.csv`.
+
+`wiki-generate` no longer assumes a live trainer: it is offline by default,
+uses `run/last-checkpoint` (the last pulled weights), and takes `--pull
+--host/--user/--port/--key/--remote-checkpoint` to reach an arbitrary box. A
+pull lands in a per-host directory and can never overwrite existing weights.
+`deploy/pull-latest-weights.sh` and `weights/assemble.sh` gained the same
+refuse-to-overwrite discipline. Nothing in the repo now depends on the
+destroyed host.
+
+## ▶ Previous position (2026-07-21) — divergence SOLVED, training relaunch
 
 The bpe10m divergence is **resolved**: it was never the model or the GLA
 hybrid attention — the CUDA compilation of `piece_ce_dlogits`
@@ -1236,3 +1265,57 @@ prior export).
 Everything through `396096d` is committed; branch not yet pushed
 upstream. The rented box's state (up/idle/billing) was not confirmed
 before this session ended — check and destroy-if-idle first thing.
+
+## 2026-07-25: the whole of English Wikipedia, once — and the box goes away
+
+Relaunched after the `piece_ce_dlogits` fix and let it run to completion.
+1,465/1,465 shards, global step **1,833,157/1,833,157**, ~3.75B tokens seen in
+exactly one pass over 5,857,550 articles, 92 h 08 min wall clock on the vast.ai
+RTX 5060 Ti at TF32, ~11.3K tokens/s end to end. Train loss EMA 9.135 → 2.986;
+held-out bits-per-byte 1.327 (first decile) → **1.107** (last). Numbers,
+per-decile table, sample generations, and an honest comparison against
+state-of-the-art training practice are in `docs/RUN-2026-07-25-WIKI-FULL.md`.
+
+Two measurement notes worth carrying forward. First, `VALIDATION_WINDOWS=8`
+makes any single validation reading swing ±0.15 bpb — the final step's
+`bits_per_byte=1.5257` is a hard-sample draw, not a regression, and the decile
+means are the only figures with standing. Raising that setting is the cheapest
+available improvement to knowing anything precisely. Second, the 1.107 bpb is
+measured **in-distribution** on held-out Wikipedia documents; GPT-2-small's
+comparable 1.16 BPB on enwik8 is zero-shot on a different corpus, so the
+supportable claim is "GPT-2-small-like bits-per-byte on the one domain it was
+trained on", not "GPT-2-small quality".
+
+**Teardown, done carefully.** Before destroying the instance: verified the
+local checkpoint byte-identical to the remote (sha256 `ae775082…5018`), made a
+second read-only local backup, `chmod 444` on both, pulled the 288 MB training
+log gzipped, distilled its 2,379 validation observations into
+`docs/data/wiki-full-2026-07-25-validation.csv`, and recreated the 1,465 shard
+`.done` markers locally so the tree records a completed run. Then re-vendored
+`weights/` — it had been holding the *pre-GLA softmax* checkpoint (sha
+`16aa1844…`), not this run, which would have left the real weights existing in
+exactly one gitignored place.
+
+**`wiki-generate` rewritten** (`flake.nix`). It previously rsynced from a
+configured box on every invocation, which after teardown is a guaranteed
+timeout, and it discovered checkpoints purely by mtime. Now:
+
+- offline by default — no network call without `--pull`/`--host`;
+- `--host/--user/--port/--key/--remote-checkpoint` name an arbitrary trainer,
+  so nothing is baked into the flake;
+- a pull lands in `run/pulled-HOST-PORT-checkpoints/`, never on top of an
+  existing checkpoint — one box can no longer overwrite another's weights, or a
+  finished run's;
+- the no-argument default is `run/last-checkpoint`, written by each successful
+  pull, with mtime discovery as the fallback;
+- `--list` shows local checkpoints and their architecture compatibility.
+
+`deploy/pull-latest-weights.sh` lost its dead hardcoded host, gained the same
+flags, and refuses to overwrite a destination without `FORCE=1`;
+`weights/assemble.sh` now verifies in a temp file before publishing and refuses
+to replace differing bytes without `FORCE=1`. All three changes exist because
+the only copy of a multi-day run can be sitting at the path being written.
+
+Still open, unchanged by this run: `watch-training` in `flake.nix` defaults to
+the long-dead `154.9.228.248:21300` endpoint (harmless — every setting is
+overridable — but misleading). `PLAN.md` remains stale on Stage B/C.
