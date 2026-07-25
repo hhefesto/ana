@@ -44,21 +44,24 @@ if [ -z "$(ls -A "$RUN_DIR/parts" 2>/dev/null)" ]; then
   echo "plan-corpus: splitting $DATA into ${PER}-document parts" >&2
   split -l "$PER" -d -a 6 "$DATA" "$RUN_DIR/parts/part-"
 fi
-parts=("$RUN_DIR/parts"/part-*)
-echo "plan-corpus: ${#parts[@]} shards" >&2
-
 echo "plan-corpus: hashing the dataset and tokenizer" >&2
 data_hash="$(sha256sum "$DATA" | cut -d ' ' -f 1)"
 tokenizer_hash="$(sha256sum "$TOKENIZER" | cut -d ' ' -f 1)"
 total="$(wc -l < "$DATA")"
+# Drive the loop from the document count, not from the surviving parts. Parts
+# are pruned as they are consumed, so on a resumed run the ones already done no
+# longer exist -- iterating over what is left would silently omit those shards
+# from the plan, producing a plan that trains on only part of the corpus.
+shards=$(( (total + PER - 1) / PER ))
+echo "plan-corpus: $shards shards" >&2
 global_id="mixed-global-v1:sha256=$data_hash:documents=$total:shard=$PER:batch=$BATCH:size=$SIZE:tokenizer=$tokenizer_hash"
 
 segments="$PLAN.segments.tmp"
 pending="$PLAN.tmp"
 rm -f "$segments" "$pending"
 cumulative=0
-k=0
-for part in "${parts[@]}"; do
+for (( k = 0; k < shards; k++ )); do
+  part="$(printf '%s/parts/part-%06d' "$RUN_DIR" "$k")"
   corpus="$RUN_DIR/shard-$k-$SIZE.corpus"
   offset=$(( k * PER ))
   if [ ! -f "$corpus" ]; then
@@ -66,7 +69,15 @@ for part in "${parts[@]}"; do
     # output has to be inspected rather than discarded -- otherwise a rejected
     # shard (a duplicate document id, say) looks like success and only surfaces
     # as a confusing "corpus file not found" from plan-segment.
-    prepared="$(jq --raw-output0 '.id, .text' < "$part" \
+    # Web text contains occasional NUL bytes. JSON cannot hold a raw control
+    # character in a string, so they arrive as a six-character backslash-u
+    # escape; jq decodes that to a real NUL and --raw-output0 then refuses to
+    # emit it, because a NUL inside a field would break the very framing that
+    # separates fields. Stripping the escape from the raw line removes it before
+    # it is ever decoded. NUL carries no meaning for a language model, so
+    # dropping it loses nothing; leaving it in aborts the run thousands of
+    # shards deep (C4 shard 0 has exactly one such record, at document 19112).
+    prepared="$(sed 's/\\u0000//g' "$part" | jq --raw-output0 '.id, .text' \
       | "$CLI" prepare-bpe-stdin "$TOKENIZER" "$corpus")"
     if [ ! -f "$corpus" ]; then
       echo "plan-corpus: shard $k failed to prepare from $part" >&2
@@ -91,9 +102,8 @@ for part in "${parts[@]}"; do
     "$k" "$offset" "$documents" "$corpus_id" "$train_windows" \
     "$validation_windows" "$steps" "$segment_start" "$cumulative" >> "$segments"
   if [ $(( k % 100 )) = 0 ]; then
-    echo "plan-corpus: shard $k/${#parts[@]}  cumulative steps $cumulative" >&2
+    echo "plan-corpus: shard $k/$shards  cumulative steps $cumulative" >&2
   fi
-  k=$(( k + 1 ))
 done
 
 printf 'plan 1 %s %s %s %s %s %s %s %s\n' \
@@ -102,4 +112,4 @@ printf 'plan 1 %s %s %s %s %s %s %s %s\n' \
 cat "$segments" >> "$pending"
 mv "$pending" "$PLAN"
 rm -f "$segments"
-echo "plan-corpus: wrote $PLAN ($cumulative global steps over ${#parts[@]} shards)" >&2
+echo "plan-corpus: wrote $PLAN ($cumulative global steps over $shards shards)" >&2
