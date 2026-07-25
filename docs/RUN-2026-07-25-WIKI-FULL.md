@@ -229,11 +229,15 @@ rejected rather than scored against the wrong vocabulary.
 Running this against the final checkpoint changed the headline number, and the
 reason is worth stating plainly.
 
-| held-out population | bits per byte | windows |
-|---|---|---|
-| **corpus-wide** (every 300th shard, whole documents) | **1.214 ± 0.024** | 730 |
-| final 10 shards only | 1.156 ± 0.041 | 146 |
-| *training log, final decile* | *1.107* | *8 per observation* |
+| held-out population | `build-eval` arguments | bits per byte | windows |
+|---|---|---|---|
+| **corpus-wide**, whole documents | `20 300` (every 300th shard) | **1.214 ± 0.024** | 730 |
+| final 10 shards only | `10 1` over a 10-segment plan | 1.156 ± 0.041 | 146 |
+| *training log, final decile* | *n/a — in-run sampling* | *1.107* | *8 per observation* |
+
+(The standard errors above are already tight enough to separate the rows; the
+`40 20` invocation shown earlier builds a 2,960-document, 8,789-window set that
+narrows the corpus-wide figure further at ~10× the CPU cost.)
 
 The training log's 1.107 is **not** Wikipedia-wide quality. The log's deciles are
 ordered by training step, training step follows shard order, and the dump is
