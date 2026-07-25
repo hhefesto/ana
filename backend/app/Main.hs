@@ -3,6 +3,7 @@ module Main (main) where
 import Control.Monad (filterM, foldM)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
+import Data.Word (Word64)
 import System.Directory (doesFileExist)
 import FormalTransformer.AD
 import FormalTransformer.Artifact
@@ -14,7 +15,7 @@ import FormalTransformer.Model
 import FormalTransformer.Optimizer
 import FormalTransformer.Tokenizer
 import System.Environment (getArgs)
-import System.IO (stdin)
+import System.IO (hPutStrLn, stderr, stdin)
 import Text.Read (readMaybe)
 
 main :: IO ()
@@ -38,11 +39,13 @@ main = do
     ["compact-checkpoint", input, output] -> compactCheckpoint input output
     ["plan-segment", path, offsetText, batchText, size] ->
       planSegment path offsetText batchText size
+    ["build-eval", output, planPath, runDir, perShardText, strideText] ->
+      buildEval output planPath runDir perShardText strideText
     ["bigram-gate", path] -> bigramGateCommand path tinyPreset
     ["bigram-gate", path, "tiny"] -> bigramGateCommand path tinyPreset
     ["bigram-gate", path, "small"] -> bigramGateCommand path smallPreset
     ["bigram-gate", path, "bpe10m"] -> bigramGateCommand path bpe10mPreset
-    _ -> putStrLn "usage: formal-transformer (inspect | logits TOKENS | gradcheck | train-smoke | prepare-bytes OUTPUT INPUT... | prepare-stdin OUTPUT | prepare-bpe TOKENIZER OUTPUT INPUT... | prepare-bpe-stdin TOKENIZER OUTPUT | inspect-corpus PATH | inspect-checkpoint PATH | compact-checkpoint INPUT OUTPUT | plan-segment CORPUS DOCUMENT_OFFSET TRAIN_BATCH SIZE | bigram-gate CORPUS [tiny|small|bpe10m])"
+    _ -> putStrLn "usage: formal-transformer (inspect | logits TOKENS | gradcheck | train-smoke | prepare-bytes OUTPUT INPUT... | prepare-stdin OUTPUT | prepare-bpe TOKENIZER OUTPUT INPUT... | prepare-bpe-stdin TOKENIZER OUTPUT | inspect-corpus PATH | inspect-checkpoint PATH | compact-checkpoint INPUT OUTPUT | plan-segment CORPUS DOCUMENT_OFFSET TRAIN_BATCH SIZE | build-eval OUTPUT PLAN RUN_DIR DOCS_PER_SHARD STRIDE | bigram-gate CORPUS [tiny|small|bpe10m])"
 
 tinyConfig :: Config
 tinyConfig = Config 5 6 4 6 2 2
@@ -266,6 +269,95 @@ planSegment path offsetText batchText size = case (readMaybe offsetText, readMay
     configFor "small" = Just smallPreset
     configFor "bpe10m" = Just bpe10mPreset
     configFor _ = Nothing
+
+-- Reconstruct the documents a whole-dataset run held out, as one fixed corpus.
+--
+-- Every shard's train/validation split is
+-- `splitDocumentsFrom offset trainerSplitSeed trainerValidationFraction`, the
+-- same function the trainer calls, so a shard's validation documents are
+-- exactly the ones that run never trained on.  Collecting them by walking the
+-- run's own plan therefore yields an evaluation set that is genuinely held out
+-- for any checkpoint that run produced -- no new split, and no retraining.
+--
+-- Taking every STRIDE-th shard keeps the sample spread across the whole corpus
+-- (shards are article-ordered, so a prefix would be a biased slice) while
+-- bounding its size; DOCS_PER_SHARD bounds the contribution of each.  The
+-- result is deterministic: same plan and shards, same corpus.
+buildEval :: FilePath -> FilePath -> FilePath -> String -> String -> IO ()
+buildEval output planPath runDir perShardText strideText =
+  case (readMaybe perShardText, readMaybe strideText) of
+    (Just perShard, Just stride) | perShard > 0 && stride > 0 -> do
+      planText <- readFile planPath
+      case parsePlan (lines planText) of
+        Left message -> putStrLn ("build-eval: " ++ message)
+        Right (size, segments) -> do
+          let chosen = everyNth stride segments
+          putStrLn ("build-eval: " ++ show (length chosen) ++ " of "
+            ++ show (length segments) ++ " shards, up to " ++ show perShard
+            ++ " held-out documents each")
+          gathered <- gather size perShard chosen [] Nothing
+          case gathered of
+            Left message -> putStrLn ("build-eval: " ++ message)
+            Right (documents, identityValue)
+              | null documents -> putStrLn "build-eval: no held-out documents collected"
+              | otherwise -> writeEvalCorpus output identityValue documents
+    _ -> putStrLn "build-eval: DOCS_PER_SHARD and STRIDE must be positive integers"
+  where
+    parsePlan [] = Left ("empty plan: " ++ planPath)
+    parsePlan (header : rest) = case words header of
+      ("plan" : _version : _total : _globalId : _hash : _articles : _per : _batch : size : _) ->
+        Right (size, [segment | line <- rest, Just segment <- [segmentOf line]])
+      _ -> Left ("bad plan header in " ++ planPath)
+
+    segmentOf line = case words line of
+      ("segment" : shardText : offsetText : _) ->
+        (,) <$> (readMaybe shardText :: Maybe Int)
+            <*> (readMaybe offsetText :: Maybe Word64)
+      _ -> Nothing
+
+    everyNth n values = [value | (i, value) <- zip [0 :: Int ..] values, i `mod` n == 0]
+
+    gather _ _ [] acc identityValue = pure (case identityValue of
+      Nothing -> Left "no shard corpora were readable"
+      Just value -> Right (concat (reverse acc), value))
+    gather size perShard ((shard, offset) : rest) acc identityValue = do
+      let path = runDir ++ "/shard-" ++ show shard ++ "-" ++ size ++ ".corpus"
+      exists <- doesFileExist path
+      if not exists
+        then do
+          hPutStrLn stderr ("build-eval: skipping missing " ++ path)
+          gather size perShard rest acc identityValue
+        else do
+          loaded <- loadCorpus path
+          case loaded of
+            Left message -> pure (Left (path ++ ": " ++ message))
+            Right corpus ->
+              let corpusIdentity = corpusTokenizerIdentity corpus
+              in if maybe False (/= corpusIdentity) identityValue
+                then pure (Left ("shard tokenizer identities disagree at " ++ path))
+                else case splitDocumentsFrom offset trainerSplitSeed
+                       trainerValidationFraction (corpusDocuments corpus) of
+                  Left message -> pure (Left (path ++ ": " ++ message))
+                  Right split -> gather size perShard rest
+                    (take perShard (validation split) : acc) (Just corpusIdentity)
+
+writeEvalCorpus :: FilePath -> String -> [Document] -> IO ()
+writeEvalCorpus output identityValue documents = do
+  let corpus = CorpusArtifact
+        { corpusVersion = corpusArtifactVersion
+        , corpusTokenizerIdentity = identityValue
+        , corpusDatasetIdentity = datasetFingerprintDocuments identityValue documents
+        , corpusDocuments = documents
+        }
+  result <- saveCorpusAtomic output corpus
+  case result of
+    Left message -> putStrLn ("build-eval: " ++ message)
+    Right () -> do
+      putStrLn ("wrote evaluation corpus: " ++ output)
+      putStrLn ("documents: " ++ show (length documents))
+      putStrLn ("ordinary tokens: " ++ show (sum (map (length . documentTokens) documents)))
+      putStrLn ("tokenizer: " ++ identityValue)
+      putStrLn ("dataset fingerprint: " ++ corpusDatasetIdentity corpus)
 
 bigramGateCommand :: FilePath -> Config -> IO ()
 bigramGateCommand path cfg = do

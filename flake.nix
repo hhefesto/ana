@@ -956,6 +956,101 @@ USAGE
               exec ${sequential} generate "$checkpoint" "$prompt" "$tokens"
             '';
           };
+          # Offline scoring on a fixed corpus. Same default-checkpoint rule as
+          # wiki-generate (run/last-checkpoint, then discovery), so "the model"
+          # means the same thing to both apps.
+          #
+          # Runs on the multicore host, not the sequential one: scoring every
+          # window of a real evaluation set is thousands of forward passes, and
+          # multicore produces step-for-step identical losses (docs/RUN-2026-07-25-WIKI-FULL.md)
+          # while using every core. It is still CPU-only, so it stays safe on a
+          # display GPU.
+          wikiEval = pkgs.writeShellApplication {
+            name = "wiki-eval";
+            runtimeInputs = [ pkgs.coreutils ];
+            text = ''
+              usage() {
+                cat >&2 <<'USAGE'
+wiki-eval [OPTIONS]
+
+Score a checkpoint on a fixed evaluation corpus and report bits per byte with
+a standard error.  Never samples: every full window in the corpus is scored.
+
+  --checkpoint PATH   checkpoint to score (default: run/last-checkpoint, then
+                      the newest compatible checkpoint under run/)
+  --corpus PATH       evaluation corpus (default run/eval/wiki-heldout.corpus)
+  --tokenizer PATH    tokenizer artifact (default weights/enwiki-8k.bpe)
+  --micro N           windows per forward chunk (default 8)
+  -h, --help          this message
+
+Build a held-out corpus first with:
+  formal-transformer build-eval run/eval/wiki-heldout.corpus \
+    run/wiki-bpe10m/plan-bpe10m-b8-s4000.tsv run/wiki-bpe10m 40 20
+USAGE
+              }
+
+              checkpoint=
+              corpus=
+              tokenizer=
+              micro=
+
+              while [ $# -gt 0 ]; do
+                case "$1" in
+                  --checkpoint) checkpoint="''${2:-}"; shift ;;
+                  --corpus) corpus="''${2:-}"; shift ;;
+                  --tokenizer) tokenizer="''${2:-}"; shift ;;
+                  --micro) micro="''${2:-}"; shift ;;
+                  -h|--help) usage; exit 0 ;;
+                  *) echo "wiki-eval: unknown argument $1" >&2; usage; exit 1 ;;
+                esac
+                shift
+              done
+
+              if [ -z "$corpus" ]; then corpus="run/eval/wiki-heldout.corpus"; fi
+              if [ -z "$micro" ]; then micro="''${MICRO_BATCH:-8}"; fi
+              case "$micro" in
+                ""|*[!0-9]*) echo "wiki-eval: --micro must be a positive integer" >&2; exit 1 ;;
+              esac
+
+              if [ -z "$checkpoint" ] && [ -f run/last-checkpoint ]; then
+                pointer="$(cat run/last-checkpoint)"
+                if [ -n "$pointer" ] && [ -f "$pointer" ] \
+                   && ${multicore} check-checkpoint "$pointer" >/dev/null 2>&1; then
+                  checkpoint="$pointer"
+                fi
+              fi
+              if [ -z "$checkpoint" ]; then
+                candidates="$(
+                  for candidate in run/*.checkpoint run/*-checkpoints/*.checkpoint; do
+                    if [ ! -f "$candidate" ]; then continue; fi
+                    printf '%s %s\n' "$(stat -L --format=%Y -- "$candidate")" "$candidate"
+                  done | sort -rn | cut -d' ' -f2-
+                )"
+                for candidate in $candidates; do
+                  if ${multicore} check-checkpoint "$candidate" >/dev/null 2>&1; then
+                    checkpoint="$candidate"
+                    break
+                  fi
+                done
+              fi
+              if [ -z "$checkpoint" ]; then
+                echo "wiki-eval: no compatible checkpoint found under run/" >&2
+                exit 1
+              fi
+              if [ ! -f "$corpus" ]; then
+                echo "wiki-eval: evaluation corpus not found: $corpus" >&2
+                echo "  build one with: formal-transformer build-eval ..." >&2
+                exit 1
+              fi
+
+              if [ -z "$tokenizer" ] && [ -f weights/enwiki-8k.bpe ]; then
+                tokenizer="weights/enwiki-8k.bpe"
+              fi
+              export TOKENIZER_FILE="''${tokenizer:-$HOME/datasets/wikipedia-en/enwiki-8k.bpe}"
+              export MICRO_BATCH="$micro"
+              exec ${multicore} evaluate "$checkpoint" "$corpus"
+            '';
+          };
           watchTraining = pkgs.writeShellApplication {
             name = "watch-training";
             runtimeInputs = [
@@ -1024,6 +1119,11 @@ USAGE
           type = "app";
           program = "${wikiGenerate}/bin/wiki-generate";
           meta.description = "Generate text from the latest Wikipedia checkpoint";
+        };
+        wiki-eval = {
+          type = "app";
+          program = "${wikiEval}/bin/wiki-eval";
+          meta.description = "Score a checkpoint on a fixed held-out corpus (bits per byte with a standard error)";
         };
         watch-training = {
           type = "app";

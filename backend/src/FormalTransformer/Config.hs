@@ -79,7 +79,7 @@ glaOutputNorm = False
 -- architecture (and hence of the model identity), not per-checkpoint data.
 -- Softmax layers use no positional encoding; position lives in the GLA
 -- gates (data-dependent transitions subsume rotations).  See
--- docs/ATTENTION-SEMANTICS.md.
+-- docs/RUN-2026-07-25-WIKI-FULL.md.
 isSoftmaxLayer :: Config -> Int -> Bool
 isSoftmaxLayer _ i = i `mod` 4 == 3
 

@@ -3,7 +3,7 @@
 -- with no positional encoding; the rest are gated linear attention (GLA)
 -- blocks whose data-dependent gates carry position.  The semantics and its
 -- proofs live in FormalTransformer/Attention/Linear.agda and
--- docs/ATTENTION-SEMANTICS.md.
+-- docs/RUN-2026-07-25-WIKI-FULL.md.
 --
 -- Layout:
 --   embedding [v][d]; then, for each block:
@@ -70,7 +70,7 @@ def softmax [n] (x: [n]f32): [n]f32 =
 -- components. Every output element is still the same expression as the
 -- per-component formulation (pure let-floating; no f32 reassociation), but the
 -- forward work and — critically — the reverse-AD adjoint accumulations into
--- the shared q/k slices shrink by a factor of hd (see HANDOFF.md 2026-07-16:
+-- the shared q/k slices shrink by a factor of hd (measured 2026-07-16:
 -- those accumulations compile to lock-guarded updates on GPUs).
 def causal_attention [n] [d]
     (h: i64)

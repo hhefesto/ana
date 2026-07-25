@@ -8,7 +8,7 @@
 -- Ordering follows the conservative ownership-transfer contract with
 -- dirty-flag elision: pending cuBLAS work is synchronized before any Futhark
 -- entry, host read, or free; pending Futhark work is synchronized before a
--- GEMM is enqueued (docs/GEMM-BACKEND.md, Synchronization and threading).
+-- GEMM is enqueued.
 module ProductionPieces
   ( Context
   , CContext

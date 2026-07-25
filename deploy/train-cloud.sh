@@ -25,14 +25,21 @@
 #   MAX_SHARDS=0     0 = whole plan; N = stop after N shards this run
 #   CHECKPOINT_EVERY=2000  checkpoint cadence (execution control; safe to change)
 #   VALIDATE_EVERY=2000    validation cadence (observation only)
-#   VALIDATION_WINDOWS=1   windows per validation observation (CUDA forward is slow)
+#   VALIDATION_WINDOWS=256 windows per validation observation. Matches the
+#                    trainer's own default: 256 windows put the standard error
+#                    near 0.01 nats, against +-0.07 at 8. Lowering it does not
+#                    speed up training (validation is off the trajectory), it
+#                    only makes the curve unreadable -- the 2026-07-25 run
+#                    shipped at 8 and its per-observation noise swamped the
+#                    signal. For a single number on a fixed held-out set, use
+#                    `evaluate` instead of reading these lines.
 #   RUN_DIR, SIZE, SHARD_ARTICLES, PLAN, CHECKPOINT, FUT_CACHE  (have defaults)
 #   TRAINER          override the trainer binary; point it at
 #                    result-gemm/bin/formal-transformer-gemm-cuda (built with
 #                    BUILD_GEMM_CUDA=1 cloud-init.sh) for cuBLAS tensor-core
 #                    GEMMs, and set GEMM_NUMERICS=fp32|tf32|bf16 — it reaches
 #                    the trainer through the environment. See
-#                    docs/TENSOR-CORE-RUNTIME.md for the gates to run first.
+#                    docs/RUN-2026-07-25-WIKI-FULL.md for the gates to run first.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -77,7 +84,7 @@ export TRAIN_BATCH="$BATCH"
 export MICRO_BATCH="${MICRO_BATCH:-1}"
 export CHECKPOINT_EVERY="${CHECKPOINT_EVERY:-2000}"
 export VALIDATE_EVERY="${VALIDATE_EVERY:-2000}"
-export VALIDATION_WINDOWS="${VALIDATION_WINDOWS:-1}"
+export VALIDATION_WINDOWS="${VALIDATION_WINDOWS:-256}"
 export SKIP_BIGRAM_GATE="${SKIP_BIGRAM_GATE:-1}"
 export FUT_CACHE="${FUT_CACHE:-run/futhark-cuda.cache}"
 

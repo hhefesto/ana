@@ -3,7 +3,7 @@
 #
 # Works on both a bare VM (Verda: systemd present -> multi-user Nix) and a
 # Docker container (vast.ai: no systemd -> single-user Nix). Run it AFTER the
-# repo has been transferred (see deploy/cloud-fast-path.md). Safe to re-run
+# repo has been transferred (see docs/RUN-2026-07-25-WIKI-FULL.md). Safe to re-run
 # after an interruption/reboot; it never trains, so it costs only build time.
 #
 # Steps:
@@ -122,7 +122,7 @@ echo "cloud-init: building formal-transformer-cuda..."
 NIX build .#formal-transformer-cuda
 
 # Opt-in: also build the cuBLAS tensor-core trainer + its GPU smoke test
-# (docs/TENSOR-CORE-RUNTIME.md). Kept separate from result/ so train-cloud.sh
+# (docs/RUN-2026-07-25-WIKI-FULL.md). Kept separate from result/ so train-cloud.sh
 # defaults stay on the fused Futhark trainer until the gates pass.
 if [ "${BUILD_GEMM_CUDA:-0}" = 1 ]; then
   echo "cloud-init: building formal-transformer-gemm-cuda (BUILD_GEMM_CUDA=1)..."

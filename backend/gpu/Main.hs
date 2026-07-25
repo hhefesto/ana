@@ -85,6 +85,7 @@ main = do
     ["generate", checkpoint, text] -> generate checkpoint text 128
     ["generate", checkpoint, text, budgetText] -> parseNonnegative "MAXTOKENS" budgetText >>= generate checkpoint text
     ["check-checkpoint", checkpoint] -> checkCheckpoint checkpoint
+    ["evaluate", checkpoint, corpus] -> evaluate checkpoint corpus
     ["bench", corpus] -> bench corpus tinyPreset
     ["bench", corpus, size] -> chooseConfig size >>= bench corpus
     ["act-stats", corpus, checkpoint] -> actStats corpus checkpoint bpe10mPreset
@@ -95,7 +96,7 @@ main = do
     ["grad-compare", gradFile, tokensFile, size] -> chooseConfig size >>= gradCompare gradFile tokensFile
     ["head-path-probe"] -> headPathProbe bpe10mPreset
     ["head-path-probe", size] -> chooseConfig size >>= headPathProbe
-    _ -> die "usage: formal-transformer-gpu inspect [tiny|small|bpe10m|gla-small|gla] | warm-context [tiny|small|bpe10m|gla-small|gla] | train CORPUS CHECKPOINT (STEPS|epoch) [tiny|small|bpe10m|gla-small|gla] | train-segment CORPUS CHECKPOINT GLOBAL_TOTAL START END DOCUMENT_OFFSET GLOBAL_ID EXPECTED_CORPUS_ID SIZE | generate CHECKPOINT TEXT [MAXTOKENS] | check-checkpoint CHECKPOINT | bench CORPUS [tiny|small|bpe10m|gla-small|gla]"
+    _ -> die "usage: formal-transformer-gpu inspect [tiny|small|bpe10m|gla-small|gla] | warm-context [tiny|small|bpe10m|gla-small|gla] | train CORPUS CHECKPOINT (STEPS|epoch) [tiny|small|bpe10m|gla-small|gla] | train-segment CORPUS CHECKPOINT GLOBAL_TOTAL START END DOCUMENT_OFFSET GLOBAL_ID EXPECTED_CORPUS_ID SIZE | generate CHECKPOINT TEXT [MAXTOKENS] | check-checkpoint CHECKPOINT | evaluate CHECKPOINT CORPUS | bench CORPUS [tiny|small|bpe10m|gla-small|gla]"
 
 chooseConfig :: String -> IO Config
 chooseConfig "tiny" = pure tinyPreset
@@ -1109,6 +1110,87 @@ checkCheckpoint path = do
         || manifestLayoutVersion manifest /= canonicalLayoutVersion)
     (die "checkpoint layout identity is not supported by this host")
   putStrLn ("compatible: " ++ path)
+
+-- Offline evaluation on a fixed corpus: the measurement the training loop's
+-- periodic validation only samples, run once over every window instead.
+--
+-- The corpus is consumed as-is -- deliberately NOT through
+-- trainingSequencesFrom, which would re-split an already-held-out set and
+-- silently score 90% of it.  The caller supplies a corpus that is held out by
+-- construction (see `formal-transformer build-eval`).
+--
+-- Reported with a standard error, because a bits-per-byte figure without one
+-- invites exactly the mistake the 2026-07-25 run's last log line encourages:
+-- reading a small sample's draw as the model's quality.  Chunk means are
+-- independent samples of equal size, so sd(chunk means)/sqrt(chunks) is the
+-- standard error of the overall mean.
+evaluate :: FilePath -> FilePath -> IO ()
+evaluate checkpointPath corpusPath = do
+  microSize <- positiveEnv "MICRO_BATCH" 8
+  checkpoint <- loadCheckpoint checkpointPath >>= either die pure
+  let manifest = checkpointManifest checkpoint
+      cfg = manifestConfig manifest
+      identity = manifestIdentity manifest
+  when (modelIdentity identity /= modelId cfg)
+    (die "checkpoint model identity is not supported by this host")
+  corpus <- loadCorpus corpusPath >>= either die pure
+  when (corpusTokenizerIdentity corpus /= tokenizerIdentity identity)
+    (die ("corpus tokenizer identity does not match the checkpoint\n  corpus:     "
+      ++ corpusTokenizerIdentity corpus
+      ++ "\n  checkpoint: " ++ tokenizerIdentity identity))
+  tokenizer <- tokenizerForIdentity (tokenizerIdentity identity)
+  when (tokenizerVocabSize tokenizer /= vocabSize cfg)
+    (die "checkpoint tokenizer vocabulary does not match its model configuration")
+  let windows = map (map fromIntegral)
+        (concatMap (fullWindows (contextSize cfg)) (corpusDocuments corpus)) :: [[Int64]]
+  when (null windows) (die "evaluation corpus yields no full context windows")
+  scale <- either die pure (bitsPerByteScale tokenizer windows)
+  gpuCfg <- gpuConfigIO cfg >>= either die pure
+  let chunks = chunksOf microSize windows
+      completed = adamStep (checkpointOptimizer checkpoint)
+      scheduled = totalSteps (manifestOptimizerConfig manifest)
+  hPutStrLn stderr ("evaluate: " ++ show (length windows) ++ " windows, "
+    ++ show (length chunks) ++ " chunks of at most " ++ show microSize)
+  results <- withContext $ \ctx ->
+    withF32 ctx (map realToFrac (checkpointParameters checkpoint)) $ \params ->
+      mapM (chunkMean ctx gpuCfg params) chunks
+  let totalWindows = sum (map fst results)
+      predictions = sum (map (\w -> length w - 1) windows)
+      meanLoss = sum [fromIntegral n * m | (n, m) <- results]
+        / fromIntegral totalWindows :: Double
+      full = [m | (n, m) <- results, n == microSize]
+      standardError
+        | length full < 2 = Nothing
+        | otherwise =
+            let k = length full
+                centre = sum full / fromIntegral k
+                variance = sum [(m - centre) * (m - centre) | m <- full]
+                  / fromIntegral (k - 1)
+            in Just (sqrt (variance / fromIntegral k))
+      showError formatter = maybe "n/a" formatter standardError
+  printf "=== evaluation: %s on %s ===\n" checkpointPath corpusPath
+  printf "checkpoint step: %d/%d (%.3f%% of the scheduled run)\n"
+    completed scheduled
+    (100 * fromIntegral completed / fromIntegral scheduled :: Double)
+  printf "config: %s\n" (show cfg)
+  printf "dataset fingerprint: %s\n" (corpusDatasetIdentity corpus)
+  printf "documents: %d  windows: %d  predictions: %d\n"
+    (length (corpusDocuments corpus)) totalWindows predictions
+  printf "loss: %.6f nats/token (standard error %s)\n"
+    meanLoss (showError (printf "%.6f" :: Double -> String))
+  printf "bits_per_byte: %.6f (standard error %s)\n"
+    (meanLoss * scale) (showError ((printf "%.6f" :: Double -> String) . (* scale)))
+  printf "perplexity: %.4f\n" (exp meanLoss)
+
+-- One evaluation chunk: window count and mean loss over that chunk.
+chunkMean :: Context -> GpuConfig -> F32Array -> [[Int64]] -> IO (Int, Double)
+chunkMean ctx gpuCfg params chunk = do
+  width <- case chunk of
+    [] -> die "internal error: empty evaluation chunk"
+    first : _ -> pure (length first)
+  value <- withI64_2d ctx (length chunk) width (concat chunk)
+    (batchMeanLoss ctx gpuCfg params)
+  pure (length chunk, realToFrac value)
 
 generate :: FilePath -> String -> Int -> IO ()
 generate checkpointPath text budget = do

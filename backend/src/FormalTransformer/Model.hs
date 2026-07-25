@@ -199,7 +199,7 @@ embeddingRow c table token
   | otherwise = Right (take d (drop (token * d) table))
   where d = modelDim c
 
--- Hybrid token mixer (docs/ATTENTION-SEMANTICS.md): GLA layers step a
+-- Hybrid token mixer (docs/RUN-2026-07-25-WIKI-FULL.md): GLA layers step a
 -- per-head dk x dv state; every fourth layer is softmax full attention with
 -- no positional encoding — position lives in the GLA gates.
 runBlock :: (Floating a, Ord a) => Config -> [a] -> [Slice] -> [[a]] -> Int -> Either String [[a]]
