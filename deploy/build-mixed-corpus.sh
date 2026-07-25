@@ -40,12 +40,19 @@ mkfifo "$work/wiki" "$work/c4"
 cat "$WIKI" > "$work/wiki" &
 
 # C4 has no id field; synthesise a stable one from the shard name and the
-# record's line number, so the same inputs always produce the same ids.
+# record's ordinal, so the same inputs always produce the same ids.
+#
+# The ordinal comes from an explicit `foreach` counter rather than jq's
+# `input_line_number`, which is not a record counter: on C4 shard 0 it repeats a
+# value at record 11243, and a duplicate id makes the whole corpus artifact
+# invalid ("corpus document IDs must be unique") only once the shard containing
+# it is prepared -- thousands of shards later.
 {
   for shard in "${shards[@]}"; do
     name="$(basename "$shard" .json.gz)"
     gunzip -c "$shard" \
-      | jq -c --arg p "$name" '{id: ($p + "-" + (input_line_number|tostring)), text: .text}'
+      | jq -cn --arg p "$name" \
+          'foreach inputs as $r (0; . + 1; {id: ($p + "-" + (.|tostring)), text: $r.text})'
   done
 } > "$work/c4" &
 
