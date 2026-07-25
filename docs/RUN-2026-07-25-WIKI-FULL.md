@@ -354,10 +354,59 @@ full-batch gradient up to f32 summation order — the `batch-pullback` theorem,
 checked by the conformance oracle.
 
 Ingestion is generic: any dataset expressible as JSONL `{id, text}` can be piped
-through `prepare-bpe-stdin`, so a different corpus needs no code change. The
-tokenizer is only *loaded* here, never trained — `enwiki-8k.bpe` was produced
-externally with fastBPE — and the corpus format stores tokens as `Word16`, so
+through `prepare-bpe-stdin`. The corpus format stores tokens as `Word16`, so
 vocabulary is capped at 65,535.
+
+### Building a corpus and a tokenizer
+
+```bash
+# 1. assemble sources, interleaved
+deploy/build-mixed-corpus.sh run/mixed-corpus.jsonl WIKI.jsonl run/c4 3 4
+# 2. learn a tokenizer from a sample of it
+formal-transformer learn-bpe run/mix-32k.bpe 32768 3 < sample.nul
+# 3. shard and plan in one pass
+TOKENIZER=run/mix-32k.bpe deploy/plan-corpus.sh \
+  run/mixed-corpus.jsonl run/mixed-bpe100m bpe100m 64 4000
+```
+
+Three things about this pipeline are easy to get wrong and were:
+
+**Interleave, never concatenate.** The trainer consumes shards in file order
+under one cosine schedule, so concatenating sources makes the run a curriculum —
+all encyclopedia first, all web text last. This run is the cautionary case: the
+Wikipedia dump is article-ordered, its final shards are the stub tail, and
+reading the log's last decile as "quality" overstated it by ~0.1 bpb (§6).
+Interleaving makes every shard, held-out split, and loss-curve point a
+representative sample.
+
+**`wiki-train`'s planner is quadratic.** It extracts each shard with
+`awk 'NR>b{exit} NR>=a' "$data"`, rescanning from line 1 every time. At 18.9 GB
+and 1,465 shards that survived only because the file fits in page cache — and it
+is the likely explanation for corpus preparation appearing to take three days
+when tokenizing itself takes 2.3 hours. At 37 GB it would read tens of terabytes.
+`plan-corpus.sh` splits once instead; the plan format is unchanged.
+
+**Two silent failure modes.** jq's `input_line_number` is not a record counter —
+it repeats a value at record 11243 of C4 shard 0, and a duplicate document id
+invalidates a whole corpus artifact, but only when that shard is prepared,
+thousands of shards later. And `prepare-bpe-stdin` reports failures on stdout
+while still exiting 0, so discarding its output turns a rejected shard into a
+misleading "corpus file not found" much further downstream.
+
+### Learning a tokenizer
+
+`learn-bpe VOCABULARY [MIN_FREQUENCY]` trains from the word-frequency table, so
+its cost is set by the number of distinct words rather than corpus size, and the
+corpus is streamed without being retained. It calls the same `pretokenize` the
+encoder calls, so trainer and encoder agree on what a word is by construction —
+an external trainer with its own pretokenization would emit merges the encoder
+can never apply, and that failure would be silent.
+
+`MIN_FREQUENCY` matters on web text: the unfiltered table reached 15.6 GB
+resident on a 370 MB Wikipedia+C4 sample and was still climbing, because URLs,
+hashes and typos dominate the *distinct*-word count while carrying weight 1
+against merges whose weights run to millions. At frequency ≥ 3 that sample keeps
+449,829 of 1,818,202 words and trains in under four minutes.
 
 ### GEMM numerics
 
@@ -442,9 +491,10 @@ depends on that host existing.
    bytes/token on prose drops to 2.66 on markup. So **step 3 is now at least as
    urgent as step 2**, and running step 2 alone would produce a bigger model
    with the same ceiling.
-2. **Scale parameters, not epochs.** The data is spent. The next rung is
-   `Config 8192 256 768 2048 12 12` — 96,553,728 parameters, `ff/d` 2.67 keeping
-   the gated-FFN ratio, 12 layers giving 9 GLA + 3 softmax. On the same 3.75B
+2. **Scale parameters, not epochs** — preset landed as `bpe100m`,
+   `Config 32768 256 768 2048 12 12`, 115,428,096 parameters. The vocabulary
+   moved from 8192 to 32,768 (25.2M of the budget, embeddings being tied),
+   which is what takes it to GPT-2-small scale and stops markup shattering. On the same 3.75B
    tokens that is ~39 tokens/param, still a good regime, and ~2.17 × 10¹⁸ FLOPs
    — hours on an A100/H100, gated on a measured `bench` MFU. Batch should rise to
    ~64 (semantic: needs a new plan), warmup from 100 to ~2,000 steps, and the

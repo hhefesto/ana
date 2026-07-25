@@ -73,6 +73,11 @@ for part in "${parts[@]}"; do
       echo "  $prepared" >&2
       exit 1
     fi
+    # The split doubles the corpus on disk, which a 37 GB source cannot afford
+    # alongside its shards. Drop each part once its corpus exists; an
+    # interrupted run re-splits from the source and skips shards already
+    # prepared, so this costs a rescan rather than correctness.
+    [ "${PRUNE_PARTS:-1}" = 1 ] && rm -f "$part"
   fi
   record="$("$CLI" plan-segment "$corpus" "$offset" "$BATCH" "$SIZE")"
   read -r tag planned_offset documents corpus_id train_windows validation_windows steps <<< "$record"
