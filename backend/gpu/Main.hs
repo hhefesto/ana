@@ -96,16 +96,17 @@ main = do
     ["grad-compare", gradFile, tokensFile, size] -> chooseConfig size >>= gradCompare gradFile tokensFile
     ["head-path-probe"] -> headPathProbe bpe10mPreset
     ["head-path-probe", size] -> chooseConfig size >>= headPathProbe
-    _ -> die "usage: formal-transformer-gpu inspect [tiny|small|bpe10m|gla-small|gla] | warm-context [tiny|small|bpe10m|gla-small|gla] | train CORPUS CHECKPOINT (STEPS|epoch) [tiny|small|bpe10m|gla-small|gla] | train-segment CORPUS CHECKPOINT GLOBAL_TOTAL START END DOCUMENT_OFFSET GLOBAL_ID EXPECTED_CORPUS_ID SIZE | generate CHECKPOINT TEXT [MAXTOKENS] | check-checkpoint CHECKPOINT | evaluate CHECKPOINT CORPUS | bench CORPUS [tiny|small|bpe10m|gla-small|gla]"
+    _ -> die "usage: formal-transformer-gpu inspect [tiny|small|bpe10m|bpe100m|gla-small|gla] | warm-context [tiny|small|bpe10m|bpe100m|gla-small|gla] | train CORPUS CHECKPOINT (STEPS|epoch) [tiny|small|bpe10m|bpe100m|gla-small|gla] | train-segment CORPUS CHECKPOINT GLOBAL_TOTAL START END DOCUMENT_OFFSET GLOBAL_ID EXPECTED_CORPUS_ID SIZE | generate CHECKPOINT TEXT [MAXTOKENS] | check-checkpoint CHECKPOINT | evaluate CHECKPOINT CORPUS | bench CORPUS [tiny|small|bpe10m|bpe100m|gla-small|gla]"
 
 chooseConfig :: String -> IO Config
 chooseConfig "tiny" = pure tinyPreset
 chooseConfig "small" = pure smallPreset
 chooseConfig "small4" = pure small4Preset
 chooseConfig "bpe10m" = pure bpe10mPreset
+chooseConfig "bpe100m" = pure bpe100mPreset
 chooseConfig "gla-small" = pure glaSmallPreset
 chooseConfig "gla" = pure glaPreset
-chooseConfig value = die ("unknown model size: " ++ value ++ " (expected tiny, small, bpe10m, gla-small, or gla)")
+chooseConfig value = die ("unknown model size: " ++ value ++ " (expected tiny, small, small4, bpe10m, bpe100m, gla-small, or gla)")
 
 inspect :: Config -> IO ()
 inspect cfg = either die (mapM_ print) (namedLayout cfg) >> do

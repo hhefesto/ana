@@ -11,6 +11,7 @@ module FormalTransformer.Config
   , smallPreset
   , small4Preset
   , bpe10mPreset
+  , bpe100mPreset
   , glaSmallPreset
   , glaPreset
   , gateTemperature
@@ -32,12 +33,24 @@ data Config = Config
 instance Binary Config
 
 -- The trainer presets live here so every host and gate shares one value.
-tinyPreset, smallPreset, small4Preset, bpe10mPreset, glaSmallPreset, glaPreset :: Config
+tinyPreset, smallPreset, small4Preset, bpe10mPreset, bpe100mPreset, glaSmallPreset, glaPreset :: Config
 tinyPreset = Config 258 16 16 48 1 2
 smallPreset = Config 258 64 64 192 2 4
 -- Depth-matched softmax control for the hybrid A/B (gla-small is 4-layer).
 small4Preset = Config 258 64 64 192 4 4
 bpe10mPreset = Config 8192 256 320 864 6 5
+
+-- The scale-up rung, sized against GPT-2-small (124M) so the comparison is
+-- like-for-like: 115,428,096 parameters, of which the 32,768-piece vocabulary
+-- costs 25.2M because embeddings are tied.  A larger vocabulary is the point --
+-- at 8192 pieces, learned on clean prose, unfamiliar text shatters into byte
+-- fallbacks (enwik8 tokenized at 2.66 bytes/token against 3.98 on Wikipedia),
+-- and that showed up directly as the 1.99 bpb external score.
+--
+-- ff/d stays at the repo's 2.67, which is the parameter-matched ratio for a
+-- gated FFN (three d*f matrices, not two); 12 layers give 9 GLA and 3 softmax,
+-- holding the 3:1 rule; head dim is 64.
+bpe100mPreset = Config 32768 256 768 2048 12 12
 
 -- Hybrid presets sized for the 3:1 rule below: four layers give three GLA
 -- and one softmax layer; eight give six and two.

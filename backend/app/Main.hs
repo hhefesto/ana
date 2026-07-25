@@ -48,7 +48,8 @@ main = do
     ["bigram-gate", path, "tiny"] -> bigramGateCommand path tinyPreset
     ["bigram-gate", path, "small"] -> bigramGateCommand path smallPreset
     ["bigram-gate", path, "bpe10m"] -> bigramGateCommand path bpe10mPreset
-    _ -> putStrLn "usage: formal-transformer (inspect | logits TOKENS | gradcheck | train-smoke | prepare-bytes OUTPUT INPUT... | prepare-stdin OUTPUT | prepare-bpe TOKENIZER OUTPUT INPUT... | prepare-bpe-stdin TOKENIZER OUTPUT | inspect-corpus PATH | inspect-checkpoint PATH | compact-checkpoint INPUT OUTPUT | plan-segment CORPUS DOCUMENT_OFFSET TRAIN_BATCH SIZE | build-eval OUTPUT PLAN RUN_DIR DOCS_PER_SHARD STRIDE | learn-bpe OUTPUT VOCABULARY | bigram-gate CORPUS [tiny|small|bpe10m])"
+    ["bigram-gate", path, "bpe100m"] -> bigramGateCommand path bpe100mPreset
+    _ -> putStrLn "usage: formal-transformer (inspect | logits TOKENS | gradcheck | train-smoke | prepare-bytes OUTPUT INPUT... | prepare-stdin OUTPUT | prepare-bpe TOKENIZER OUTPUT INPUT... | prepare-bpe-stdin TOKENIZER OUTPUT | inspect-corpus PATH | inspect-checkpoint PATH | compact-checkpoint INPUT OUTPUT | plan-segment CORPUS DOCUMENT_OFFSET TRAIN_BATCH SIZE | build-eval OUTPUT PLAN RUN_DIR DOCS_PER_SHARD STRIDE | learn-bpe OUTPUT VOCABULARY | bigram-gate CORPUS [tiny|small|bpe10m|bpe100m])"
 
 tinyConfig :: Config
 tinyConfig = Config 5 6 4 6 2 2
@@ -315,7 +316,7 @@ planSegment path offsetText batchText size = case (readMaybe offsetText, readMay
     case result of
       Left message -> putStrLn message
       Right corpus -> case configFor size of
-        Nothing -> putStrLn "unknown model size (expected tiny, small, or bpe10m)"
+        Nothing -> putStrLn "unknown model size (expected tiny, small, bpe10m, or bpe100m)"
         Just cfg -> case trainerWindowSplitFrom offset (contextSize cfg) (corpusDocuments corpus) of
           Left message -> putStrLn message
           Right split -> do
@@ -336,6 +337,7 @@ planSegment path offsetText batchText size = case (readMaybe offsetText, readMay
     configFor "tiny" = Just tinyPreset
     configFor "small" = Just smallPreset
     configFor "bpe10m" = Just bpe10mPreset
+    configFor "bpe100m" = Just bpe100mPreset
     configFor _ = Nothing
 
 -- Reconstruct the documents a whole-dataset run held out, as one fixed corpus.

@@ -577,12 +577,12 @@
               rundir="''${WIKI_RUN_DIR:-run/wiki}"
               per="''${WIKI_SHARD_ARTICLES:-4000}"
               tokenizer="''${WIKI_TOKENIZER:-$HOME/datasets/wikipedia-en/enwiki-8k.bpe}"
-              if [ "$size" = bpe10m ] && [ ! -f "$tokenizer" ]; then
+              if { [ "$size" = bpe10m ] || [ "$size" = bpe100m ]; } && [ ! -f "$tokenizer" ]; then
                 echo "wiki-train: BPE tokenizer not found: $tokenizer" >&2
                 echo "  set WIKI_TOKENIZER to the versioned 8192-token .bpe artifact" >&2
                 exit 1
               fi
-              if [ "$size" = bpe10m ]; then
+              if { [ "$size" = bpe10m ] || [ "$size" = bpe100m ]; }; then
                 export TOKENIZER_FILE="$tokenizer"
               fi
               mkdir -p "$rundir"
@@ -595,7 +595,7 @@
               shards=$(( (total + per - 1) / per ))
               echo "wiki-train: $total articles, $per per shard -> $shards shards, size=$size backend=$backend"
               data_hash="$(sha256sum "$data" | cut -d ' ' -f 1)"
-              if [ "$size" = bpe10m ]; then
+              if { [ "$size" = bpe10m ] || [ "$size" = bpe100m ]; }; then
                 tokenizer_hash="$(sha256sum "$tokenizer" | cut -d ' ' -f 1)"
               else
                 tokenizer_hash=lossless-byte-v1
@@ -621,7 +621,7 @@
                   if [ ! -f "$corpus" ]; then
                     awk -v a="$first" -v b="$last" 'NR>b{exit} NR>=a' "$data" \
                       | jq -j '.id, "\u0000", .text, "\u0000"' \
-                      | if [ "$size" = bpe10m ]; then
+                      | if { [ "$size" = bpe10m ] || [ "$size" = bpe100m ]; }; then
                           ${cli} prepare-bpe-stdin "$tokenizer" "$corpus"
                         else
                           ${cli} prepare-stdin "$corpus"
@@ -682,7 +682,7 @@
                   echo "wiki-train: preparing shard $k (articles $first..$last)"
                   awk -v a="$first" -v b="$last" 'NR>b{exit} NR>=a' "$data" \
                     | jq -j '.id, "\u0000", .text, "\u0000"' \
-                    | if [ "$size" = bpe10m ]; then
+                    | if { [ "$size" = bpe10m ] || [ "$size" = bpe100m ]; }; then
                         ${cli} prepare-bpe-stdin "$tokenizer" "$corpus"
                       else
                         ${cli} prepare-stdin "$corpus"

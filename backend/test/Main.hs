@@ -51,7 +51,25 @@ tests =
   , ("bigram with no evidence is uniform", testBigramUniform)
   , ("trainer window split is shared and deterministic", testTrainerWindowSplit)
   , ("learned BPE is parseable, deterministic and lossless", testLearnBpe)
+  , ("100M preset is GPT-2-small scale and tiles 3:1", testBpe100mPreset)
   ]
+
+-- The scale-up rung. Pinning the exact count here is the point: vocabulary is
+-- 22% of the budget at 32k pieces with tied embeddings, so a silent change to
+-- either the vocabulary or the FFN ratio would move the model off GPT-2-small
+-- scale without anything else noticing.
+testBpe100mPreset :: IO ()
+testBpe100mPreset = do
+  _ <- expectRight (validateConfig bpe100mPreset)
+  layout <- expectRight (namedLayout bpe100mPreset)
+  assert (bpe100mPreset == Config 32768 256 768 2048 12 12) "100M preset dimensions differ"
+  assert (headDim bpe100mPreset == 64) "100M preset head dimension differs"
+  assert (glaLayerCount bpe100mPreset == 9) "100M preset should have 9 GLA layers of 12"
+  assert (paramCount bpe100mPreset == 115428096) "100M preset parameter count differs"
+  assert (sum (map sliceLength layout) == 115428096) "100M layout does not cover parameters"
+  -- Tied embeddings: the vocabulary is one d-wide row per piece and nothing else.
+  assert (vocabSize bpe100mPreset * modelDim bpe100mPreset == 25165824)
+    "100M embedding cost differs"
 
 -- A learned tokenizer has to satisfy three things, and all three are checkable
 -- without a reference implementation: the artifact must be readable by the very
