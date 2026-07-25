@@ -1,8 +1,9 @@
 module Main (main) where
 
-import Control.Monad (filterM, foldM)
+import Control.Monad (filterM, foldM, when)
 import Control.Parallel.Strategies (parListChunk, rseq, using)
 import qualified Data.ByteString as BS
+import qualified Data.Map.Strict as Map
 import qualified Data.ByteString.Char8 as BSC
 import Data.Word (Word64)
 import System.Directory (doesFileExist)
@@ -42,11 +43,12 @@ main = do
       planSegment path offsetText batchText size
     ["build-eval", output, planPath, runDir, perShardText, strideText] ->
       buildEval output planPath runDir perShardText strideText
+    ["learn-bpe", output, vocabText] -> learnBpe output vocabText
     ["bigram-gate", path] -> bigramGateCommand path tinyPreset
     ["bigram-gate", path, "tiny"] -> bigramGateCommand path tinyPreset
     ["bigram-gate", path, "small"] -> bigramGateCommand path smallPreset
     ["bigram-gate", path, "bpe10m"] -> bigramGateCommand path bpe10mPreset
-    _ -> putStrLn "usage: formal-transformer (inspect | logits TOKENS | gradcheck | train-smoke | prepare-bytes OUTPUT INPUT... | prepare-stdin OUTPUT | prepare-bpe TOKENIZER OUTPUT INPUT... | prepare-bpe-stdin TOKENIZER OUTPUT | inspect-corpus PATH | inspect-checkpoint PATH | compact-checkpoint INPUT OUTPUT | plan-segment CORPUS DOCUMENT_OFFSET TRAIN_BATCH SIZE | build-eval OUTPUT PLAN RUN_DIR DOCS_PER_SHARD STRIDE | bigram-gate CORPUS [tiny|small|bpe10m])"
+    _ -> putStrLn "usage: formal-transformer (inspect | logits TOKENS | gradcheck | train-smoke | prepare-bytes OUTPUT INPUT... | prepare-stdin OUTPUT | prepare-bpe TOKENIZER OUTPUT INPUT... | prepare-bpe-stdin TOKENIZER OUTPUT | inspect-corpus PATH | inspect-checkpoint PATH | compact-checkpoint INPUT OUTPUT | plan-segment CORPUS DOCUMENT_OFFSET TRAIN_BATCH SIZE | build-eval OUTPUT PLAN RUN_DIR DOCS_PER_SHARD STRIDE | learn-bpe OUTPUT VOCABULARY | bigram-gate CORPUS [tiny|small|bpe10m])"
 
 tinyConfig :: Config
 tinyConfig = Config 5 6 4 6 2 2
@@ -181,6 +183,54 @@ readNulDocuments = readMore BS.empty Nothing []
           Just documentIdBytes ->
             let source = ("curid-" ++ BSC.unpack documentIdBytes, field)
             in consume remaining Nothing (source : sources)
+
+-- Train a BPE tokenizer from the same NUL-delimited id/text stream that
+-- prepare-bpe-stdin consumes, so one corpus pipeline feeds both.
+--
+-- The corpus is streamed and never retained: BPE learns from the word-frequency
+-- table, so only distinct words need to be in memory. That is what makes
+-- training on a corpus far larger than RAM practical, and it is why the cost is
+-- set by vocabulary size rather than by corpus size.
+learnBpe :: FilePath -> String -> IO ()
+learnBpe output vocabText = case readMaybe vocabText of
+  Nothing -> putStrLn "learn-bpe: VOCABULARY must be an integer"
+  Just vocab -> do
+    counted <- streamWordCounts
+    case counted of
+      Left message -> putStrLn ("learn-bpe: " ++ message)
+      Right frequencies -> do
+        putStrLn ("learn-bpe: " ++ show (Map.size frequencies)
+          ++ " distinct words, " ++ show (sum (Map.elems frequencies)) ++ " occurrences")
+        case learnBpeMerges vocab frequencies of
+          Left message -> putStrLn ("learn-bpe: " ++ message)
+          Right merges -> do
+            let achieved = byteVocabSize + length merges
+            BS.writeFile output (renderBpeArtifact merges)
+            putStrLn ("wrote tokenizer: " ++ output)
+            putStrLn ("merges: " ++ show (length merges) ++ "  vocabulary: " ++ show achieved)
+            when (achieved < vocab) (putStrLn
+              ("learn-bpe: corpus exhausted its merges before reaching " ++ show vocab))
+
+-- Folds word counts over the stream without holding any document.
+streamWordCounts :: IO (Either String (Map.Map BS.ByteString Int))
+streamWordCounts = readMore BS.empty False Map.empty
+  where
+    readMore pending isText acc = do
+      chunk <- BS.hGetSome stdin 1048576
+      if BS.null chunk
+        then if BS.null pending
+          then pure (Right acc)
+          else pure (Left "incomplete final NUL-delimited id/text pair")
+        else consume (pending <> chunk) isText acc
+
+    -- Fields alternate id, text, id, text ...; only the text is counted.
+    consume bytes isText acc = case BS.elemIndex 0 bytes of
+      Nothing -> readMore bytes isText acc
+      Just index ->
+        let field = BS.take index bytes
+            remaining = BS.drop (index + 1) bytes
+            acc' = if isText then countWords acc field else acc
+        in acc' `seq` consume remaining (not isText) acc'
 
 writeSources :: Tokenizer -> FilePath -> [(String, BS.ByteString)] -> IO ()
 writeSources tokenizer output sources = writeArtifact tokenizer output identity documents

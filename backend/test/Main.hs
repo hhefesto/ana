@@ -50,7 +50,55 @@ tests =
   , ("bigram gate matches weighted-language semantics", testBigramLanguage)
   , ("bigram with no evidence is uniform", testBigramUniform)
   , ("trainer window split is shared and deterministic", testTrainerWindowSplit)
+  , ("learned BPE is parseable, deterministic and lossless", testLearnBpe)
   ]
+
+-- A learned tokenizer has to satisfy three things, and all three are checkable
+-- without a reference implementation: the artifact must be readable by the very
+-- parser that validates contiguity and merge ordering, learning must be
+-- deterministic given a word table, and encoding must remain lossless.  The
+-- last is the one that matters most in practice -- a trainer whose merges the
+-- encoder cannot reproduce would corrupt a corpus silently.
+testLearnBpe :: IO ()
+testLearnBpe = do
+  let text = BSC.pack (concat (replicate 40
+        ("the theory of language is a theory of structure; "
+          ++ "the structure of a language is the language of structures\n")))
+      frequencies = countWords mempty text
+      vocabulary = 320
+  merges <- either (throwIO . TestException) pure (learnBpeMerges vocabulary frequencies)
+  assert (not (null merges)) "learned no merges at all"
+  assert (map snd merges == take (length merges) [byteVocabSize ..])
+    "merge ids are not contiguous from the first non-byte token"
+
+  again <- either (throwIO . TestException) pure (learnBpeMerges vocabulary frequencies)
+  assert (again == merges) "learning is not deterministic for a fixed word table"
+
+  -- Round-trip through the artifact the parser accepts, then through the
+  -- encoder, so the trainer is checked against the real reader and writer.
+  directory <- getTemporaryDirectory
+  let path = directory </> "formal-transformer-learned.bpe"
+      cleanup = do
+        present <- doesFileExist path
+        if present then removeFile path else pure ()
+  (do
+    BS.writeFile path (renderBpeArtifact merges)
+    loaded <- loadFastBpe path >>= either (throwIO . TestException) pure
+    let tokenizer = FastBpeTokenizer loaded
+    assert (tokenizerVocabSize tokenizer == byteVocabSize + length merges)
+      "loaded vocabulary disagrees with the number of learned merges"
+    let tokens = encodeWith tokenizer text
+    assert (not (null tokens)) "encoding produced no tokens"
+    either (throwIO . TestException) (\back -> assert (back == text)
+      "decode . encode is not the identity under the learned tokenizer")
+      (decodeWith tokenizer tokens)
+    -- Merges must actually be used, or the learner produced a table the
+    -- encoder silently ignores.
+    assert (any (>= byteVocabSize) tokens)
+      "no learned merge was applied when encoding the training text"
+    assert (length tokens < BS.length text)
+      "encoding was no shorter than the raw bytes, so no compression happened")
+    `finally` cleanup
 
 runTest :: (String, IO ()) -> IO Bool
 runTest (name, action) = do
