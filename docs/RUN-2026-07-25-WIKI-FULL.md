@@ -458,6 +458,25 @@ algebra over the vocabulary, an exact sufficient-statistics instance of the same
 weighted-language semantics — sharing the trainer's split and windowing, as the
 honest floor for validation loss.
 
+**The checkpoint format is pinned by the weights themselves.** When the
+in-memory representation of the parameter and moment arrays changed from boxed
+lists to unboxed vectors (§11.2), the acceptance test was that this run's own
+checkpoint still reads and re-writes bit for bit:
+
+```
+formal-transformer compact-checkpoint \
+  run/wiki-bpe10m-global.checkpoint /tmp/roundtrip.checkpoint
+sha256sum run/wiki-bpe10m-global.checkpoint /tmp/roundtrip.checkpoint
+# both ae775082a0c310422020fe063459ea280b9c1d6e777b3d710c962cdc5d145018
+```
+
+`compact-checkpoint` is a decode followed by an encode, so an identical digest
+says the change was representation and not format. The pre-compact artifact
+format is still exercised too: `wiki-small-sequential-smoke.checkpoint` is a
+version-1 checkpoint and still decodes (it then fails *validation*, on a
+parameter count from a pre-GLA layout generation — which is the point: the
+decoder ran).
+
 ## 10. Artifacts
 
 | artifact | path |
@@ -499,6 +518,23 @@ depends on that host existing.
    — hours on an A100/H100, gated on a measured `bench` MFU. Batch should rise to
    ~64 (semantic: needs a new plan), warmup from 100 to ~2,000 steps, and the
    gradient clip revisited given the 53.9% clip rate.
+
+   **A blocker found and fixed while smoke-testing this preset**, worth naming
+   because scale exposed it and nothing at 10.6M could have: every
+   parameter-sized array was a boxed Haskell list. A `[Double]` costs ~40 bytes
+   an element against 8 in an unboxed vector, and a checkpoint holds three of
+   them (parameters, and both Adam moments) — so saving at 115M peaked near
+   28 GB to write a 1.4 GB file, and the same shape sat on the load and upload
+   paths. The 10.6M run never noticed because the cost is exactly linear: the
+   same code peaks at ~2.5 GB there.
+
+   The fix is representation-only — `Data.Vector.Unboxed.Vector Double` for
+   `checkpointParameters` and the two moments, `Vector Bool` for the decay mask,
+   and storable-vector staging at the Futhark boundary in place of
+   `peekArray`/`withArray`. The optimizer is the same function of the same
+   `Double`s, and the on-disk format is untouched. Measured after: a 115M
+   train-plus-save step peaks at **8.8 GB** (was ~28 GB for the save alone) and
+   the checkpoint loads in 5.5 s at 4.1 GB. The acceptance test is in §9.
 3. **Broaden the corpus** — **done**. `run/mixed-bpe100m` holds 2,426 shards
    over 9,700,651 documents: English Wikipedia interleaved 3:2 with FineWeb-Edu
    `sample/10BT` (verified English-only from its own `language` column). The

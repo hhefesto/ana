@@ -33,7 +33,8 @@ library
       cryptohash-sha256 >=0.11 && <0.12,
       directory >=1.3 && <1.4,
       filepath >=1.4 && <1.6,
-      parallel >=3.2 && <3.3
+      parallel >=3.2 && <3.3,
+      vector >=0.12 && <0.14
 
 executable formal-transformer
   import:           common-settings
@@ -47,7 +48,8 @@ executable formal-transformer
       bytestring >=0.10 && <0.13,
       containers >=0.6 && <0.8,
       directory >=1.3 && <1.4,
-      parallel >=3.2 && <3.3
+      parallel >=3.2 && <3.3,
+      vector >=0.12 && <0.14
 
 test-suite formal-transformer-test
   import:           common-settings
@@ -58,4 +60,5 @@ test-suite formal-transformer-test
       formal-transformer,
       bytestring >=0.10 && <0.13,
       directory >=1.3 && <1.4,
-      filepath >=1.4 && <1.6
+      filepath >=1.4 && <1.6,
+      vector >=0.12 && <0.14

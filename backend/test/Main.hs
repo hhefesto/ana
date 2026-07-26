@@ -5,6 +5,7 @@ import Control.Monad (forM_, unless)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
 import Data.Monoid (Sum (..))
+import qualified Data.Vector.Unboxed as VU
 import FormalTransformer.AD
 import FormalTransformer.Artifact
 import FormalTransformer.Bigram
@@ -160,7 +161,7 @@ testLayout = do
   mask <- expectRight (decayMask config)
   assert (sum (map sliceLength layout) == paramCount config) "slice lengths do not cover parameter vector"
   assert (map sliceOffset layout == scanl (+) 0 (map sliceLength (init layout))) "slice offsets are not contiguous"
-  assert (length mask == paramCount config) "decay mask length differs from parameter count"
+  assert (VU.length mask == paramCount config) "decay mask length differs from parameter count"
   assert (paramCount config == vocabSize config * modelDim config
     + layerCount config * (4 * modelDim config ^ (2 :: Int) + 3 * ffDim config * modelDim config + 2 * modelDim config)
     + glaLayerCount config * modelDim config ^ (2 :: Int)
@@ -282,14 +283,15 @@ testAdamW :: IO ()
 testAdamW = do
   let cfg = AdamWConfig 0.01 0.9 0.99 1e-8 0.1 0 10
       state = initAdamW 2
-  (updated, nextState) <- expectRight (adamWStep cfg [True, False] state [2, -3] [0.5, -0.25])
+  (updated, nextState) <- expectRight
+    (adamWStep cfg (VU.fromList [True, False]) state (VU.fromList [2, -3]) (VU.fromList [0.5, -0.25]))
   let rate = learningRate cfg 1
       expected0 = 2 - rate * (0.5 / (sqrt (0.25) + 1e-8) + 0.1 * 2)
       expected1 = -3 - rate * ((-0.25) / (sqrt (0.0625) + 1e-8))
-  assertVectorsNear 1e-12 [expected0, expected1] updated "AdamW first update differs"
+  assertVectorsNear 1e-12 [expected0, expected1] (VU.toList updated) "AdamW first update differs"
   assert (adamStep nextState == 1) "AdamW step was not incremented"
-  assertVectorsNear 1e-12 [0.05, -0.025] (firstMoment nextState) "AdamW first moment differs"
-  assertVectorsNear 1e-12 [0.0025, 0.000625] (secondMoment nextState) "AdamW second moment differs"
+  assertVectorsNear 1e-12 [0.05, -0.025] (VU.toList (firstMoment nextState)) "AdamW first moment differs"
+  assertVectorsNear 1e-12 [0.0025, 0.000625] (VU.toList (secondMoment nextState)) "AdamW second moment differs"
 
 testSplit :: IO ()
 testSplit = do
@@ -395,14 +397,14 @@ testCheckpoint = do
       optimizerConfig = AdamWConfig 0.0025 0.8 0.95 1e-7 0.025 3 37
       manifest = Manifest artifactVersion config (paramCount config) canonicalLayoutIdentity
         canonicalLayoutVersion optimizerConfig identity 0.75 Tf32TensorCores
-      checkpoint = Checkpoint manifest params (initAdamW (paramCount config)) (Just 1.2345) (PRNGState 1 2 3 4)
+      checkpoint = Checkpoint manifest (VU.fromList params) (initAdamW (paramCount config)) (Just 1.2345) (PRNGState 1 2 3 4)
       cleanup = do exists <- doesFileExist path; if exists then removeFile path else pure ()
   cleanup
   (do
       saved <- saveCheckpointAtomic path checkpoint
       _ <- expectRight saved
       loaded <- loadCheckpoint path >>= expectRight
-      let quantize = map (realToFrac . (realToFrac :: Double -> Float))
+      let quantize = VU.fromList . map (realToFrac . (realToFrac :: Double -> Float))
       assert (checkpointManifest loaded == manifest) "checkpoint manifest did not roundtrip exactly"
       assert (checkpointParameters loaded == quantize params) "checkpoint parameters did not roundtrip as f32"
       assert (checkpointOptimizer loaded == initAdamW (paramCount config)) "checkpoint optimizer did not roundtrip"
@@ -418,7 +420,7 @@ testCheckpointMetadata = do
       optimizerConfig = AdamWConfig 1e-3 0.9 0.999 1e-8 0.01 2 10
       manifest = Manifest artifactVersion config (paramCount config) canonicalLayoutIdentity
         canonicalLayoutVersion optimizerConfig identity 1 Fp32IEEE
-      checkpoint = Checkpoint manifest params (initAdamW (paramCount config)) Nothing (PRNGState 1 2 3 4)
+      checkpoint = Checkpoint manifest (VU.fromList params) (initAdamW (paramCount config)) Nothing (PRNGState 1 2 3 4)
       withManifest update = checkpoint { checkpointManifest = update manifest }
   assert (isLeft (validateCheckpoint (withManifest (\m -> m { manifestOptimizerConfig = optimizerConfig { warmupSteps = 11 } }))))
     "checkpoint accepted warmup beyond total steps"

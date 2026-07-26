@@ -23,14 +23,16 @@ module FormalTransformer.Artifact
 
 import Control.Exception (IOException, bracketOnError, try)
 import Control.Monad (replicateM, unless)
-import Data.Bits (xor)
+import Data.Bits (shiftL, xor, (.|.))
 import Data.Binary (Binary, decodeOrFail, encode, get, put)
-import Data.Binary.Get (getFloatbe, getWord8, getWord16be, getWord32be, getWord64be, runGetOrFail)
+import Data.Binary.Get (getByteString, getWord8, getWord16be, getWord32be, getWord64be, runGetOrFail)
 import Data.Binary.Put (putFloatbe, putWord8, putWord16be, putWord32be, putWord64be, runPut)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
 import Data.List (sortOn)
+import qualified Data.Vector.Unboxed as VU
 import Data.Word (Word32, Word64)
+import GHC.Float (castWord32ToFloat, double2Float, float2Double)
 import FormalTransformer.Config
 import FormalTransformer.Data (Document (..))
 import FormalTransformer.Layout (canonicalLayoutIdentity, canonicalLayoutVersion)
@@ -120,12 +122,15 @@ instance Binary Manifest where
 
 data Checkpoint = Checkpoint
   { checkpointManifest :: !Manifest
-  , checkpointParameters :: ![Double]
+  , checkpointParameters :: !(VU.Vector Double)
   , checkpointOptimizer :: !AdamWState
   , checkpointBestValidationLoss :: !(Maybe Double)
   , checkpointPRNG :: !PRNGState
   } deriving (Eq, Show, Generic)
 
+-- The pre-compact wire format. Its parameter field stays a list because that
+-- is what the derived instance encodes; the conversion to the in-memory
+-- representation happens at the decode boundary in loadCheckpoint.
 data LegacyCheckpoint = LegacyCheckpoint
   !Manifest ![Double] !AdamWState !(Maybe Double) !PRNGState
   deriving (Generic)
@@ -164,12 +169,15 @@ validateCheckpoint checkpoint = do
   unless (not (null (manifestLayoutIdentity manifest))) (Left "checkpoint layout identity must be non-empty")
   unless (manifestLayoutIdentity manifest == canonicalLayoutIdentity) (Left "unsupported checkpoint model layout identity")
   unless (manifestLayoutVersion manifest == canonicalLayoutVersion) (Left "unsupported checkpoint model layout version")
-  unless (length (checkpointParameters checkpoint) == expected) (Left "checkpoint parameter vector has wrong length")
-  unless (length (firstMoment optimizer) == expected && length (secondMoment optimizer) == expected)
+  unless (VU.length (checkpointParameters checkpoint) == expected) (Left "checkpoint parameter vector has wrong length")
+  unless (VU.length (firstMoment optimizer) == expected && VU.length (secondMoment optimizer) == expected)
     (Left "checkpoint optimizer vectors have wrong length")
   unless (adamStep optimizer >= 0) (Left "checkpoint optimizer step is negative")
   unless (adamStep optimizer <= totalSteps optimizerConfig) (Left "checkpoint optimizer step exceeds configured total steps")
-  unless (all finite (checkpointParameters checkpoint ++ firstMoment optimizer ++ secondMoment optimizer))
+  -- Checked array by array rather than over a concatenation: the three are as
+  -- long as the parameter vector, and appending them would build a third copy.
+  unless (all (VU.all finite)
+            [checkpointParameters checkpoint, firstMoment optimizer, secondMoment optimizer])
     (Left "checkpoint contains non-finite numbers")
   let identity = manifestIdentity manifest
   unless (all (not . null) [modelIdentity identity, tokenizerIdentity identity, datasetIdentity identity])
@@ -209,7 +217,8 @@ loadCheckpoint path = readArtifactFile "checkpoint" hint path decode
             ++ " (is " ++ path ++ " really a checkpoint written by train?)")
           Right (remaining, _, LegacyCheckpoint manifest params optimizer best rng)
             | not (LBS.null remaining) -> Left "checkpoint has trailing bytes"
-            | otherwise -> validateCheckpoint (Checkpoint manifest params optimizer best rng)
+            | otherwise ->
+                validateCheckpoint (Checkpoint manifest (VU.fromList params) optimizer best rng)
 
 checkpointCompactMagic :: Word32
 checkpointCompactMagic = 0x46544332
@@ -218,17 +227,23 @@ encodeCheckpointCompact :: Checkpoint -> LBS.ByteString
 encodeCheckpointCompact checkpoint = runPut $ do
   putWord32be checkpointCompactMagic
   put (checkpointManifest checkpoint)
-  putF32List (checkpointParameters checkpoint)
+  putF32Vector (checkpointParameters checkpoint)
   let optimizer = checkpointOptimizer checkpoint
   put (adamStep optimizer)
-  putF32List (firstMoment optimizer)
-  putF32List (secondMoment optimizer)
+  putF32Vector (firstMoment optimizer)
+  putF32Vector (secondMoment optimizer)
   put (checkpointBestValidationLoss checkpoint)
   put (checkpointPRNG checkpoint)
   where
-    putF32List values = do
-      putWord64be (fromIntegral (length values))
-      mapM_ (putFloatbe . realToFrac) values
+    -- An index walk rather than a fold over a list: runPut's builder is
+    -- consumed incrementally by LBS.hPut, so the file streams out without a
+    -- second copy of the array ever existing.
+    putF32Vector values = putWord64be (fromIntegral count) >> go 0
+      where
+        count = VU.length values
+        go i
+          | i >= count = pure ()
+          | otherwise = putFloatbe (double2Float (VU.unsafeIndex values i)) >> go (i + 1)
 
 decodeCheckpointCompact :: LBS.ByteString -> Either String Checkpoint
 decodeCheckpointCompact bytes = case runGetOrFail getCheckpoint bytes of
@@ -241,16 +256,38 @@ decodeCheckpointCompact bytes = case runGetOrFail getCheckpoint bytes of
       magic <- getWord32be
       unless (magic == checkpointCompactMagic) (fail "wrong compact checkpoint magic")
       manifest <- get
-      params <- getF32List
+      params <- getF32Vector
       step <- get
-      first <- getF32List
-      second <- getF32List
+      first <- getF32Vector
+      second <- getF32Vector
       best <- get
       rng <- get
       pure (Checkpoint manifest params (AdamWState step first second) best rng)
-    getF32List = do
-      count <- getWord64be
-      replicateM (fromIntegral count) (realToFrac <$> getFloatbe)
+    -- The payload is a contiguous run of big-endian f32, so it is taken as one
+    -- ByteString and widened in place. Reading it element-wise through Get
+    -- would build a boxed list first -- 4.6 GB for one 115M-parameter array,
+    -- and a checkpoint holds three.
+    getF32Vector = do
+      declared <- getWord64be
+      -- Bounded before allocating: on a corrupt length field, asking
+      -- getByteString for the amount claimed would try to size a buffer from
+      -- it. No array can be longer than the file that carries it.
+      unless (declared <= fromIntegral (LBS.length bytes `div` 4))
+        (fail "compact checkpoint array length exceeds the input")
+      let count = fromIntegral declared
+      payload <- getByteString (count * 4)
+      pure (VU.generate count (\i -> float2Double (beFloatAt payload (i * 4))))
+
+-- Big-endian f32 at a byte offset, reinterpreted rather than converted --
+-- the same bits Data.Binary.Get.getFloatbe would have produced.
+beFloatAt :: BS.ByteString -> Int -> Float
+beFloatAt bytes offset = castWord32ToFloat
+  (   byte offset       `shiftL` 24
+  .|. byte (offset + 1) `shiftL` 16
+  .|. byte (offset + 2) `shiftL` 8
+  .|. byte (offset + 3) )
+  where
+    byte i = fromIntegral (BS.index bytes i) :: Word32
 
 corpusArtifactVersion :: Word32
 corpusArtifactVersion = 2

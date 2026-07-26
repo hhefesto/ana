@@ -23,10 +23,13 @@ module ProductionPieces
   , rawContext
   , uploadF32
   , downloadF32
+  , uploadF32Vector
+  , downloadF32Vector
   , freeF32
   , uploadI64
   , freeI64
   , uploadBool
+  , uploadBoolVector
   , freeBool
   , deviceZeros
   , deviceRawPointer
@@ -49,11 +52,15 @@ import CudaBlasOps (cublasContextSync)
 import Data.IORef
 import Data.Int (Int64)
 import Data.List (nub)
+import qualified Data.Vector.Storable as VS
+import qualified Data.Vector.Storable.Mutable as VSM
+import qualified Data.Vector.Unboxed as VU
 import Data.Word (Word64, Word8)
 import Decomposed (PieceOps (..))
 import Foreign
 import Foreign.C.String (CString, peekCString)
 import Foreign.C.Types (CInt (..))
+import GHC.Float (double2Float, float2Double)
 import System.Environment (lookupEnv)
 import System.IO (hFlush, hPutStrLn, stderr)
 import System.IO.Unsafe (unsafePerformIO)
@@ -521,6 +528,47 @@ downloadF32 ctx (DevF32 arr count) = do
       >>= check (rawContext ctx) "download f32[1]"
     sync ctx "download f32[1]"
     peekArray count host
+
+-- Parameter-sized transfers stage through a storable f32 vector instead of a
+-- boxed [Float]: 4 bytes an element rather than 40, which at 115M parameters
+-- is 462 MB against 4.6 GB. See the same pair in FutharkKernels.
+
+uploadF32Vector :: Context -> VU.Vector Double -> IO DevF32
+uploadF32Vector ctx values = do
+  let count = VU.length values
+      staged = VS.generate count (double2Float . VU.unsafeIndex values)
+  traceOp ("upload f32 count=" ++ show count)
+  syncBlasIfDirty ctx
+  VS.unsafeWith staged $ \host -> do
+    arr <- cNewF32 (rawContext ctx) host (f count)
+    whenNull arr "upload f32[1] returned null"
+    sync ctx "upload f32[1]" `onException` (cFreeF32 (rawContext ctx) arr >> pure ())
+    registerArenaIfActive ctx arr
+    pure (DevF32 arr count)
+
+downloadF32Vector :: Context -> DevF32 -> IO (VU.Vector Double)
+downloadF32Vector ctx (DevF32 arr count) = do
+  syncBlasIfDirty ctx
+  syncFutharkIfDirty ctx
+  staged <- VSM.new count
+  VSM.unsafeWith staged $ \host -> do
+    cValuesF32 (rawContext ctx) arr host
+      >>= check (rawContext ctx) "download f32[1]"
+    sync ctx "download f32[1]"
+  frozen <- VS.unsafeFreeze staged
+  pure (VU.generate count (float2Double . VS.unsafeIndex frozen))
+
+uploadBoolVector :: Context -> VU.Vector Bool -> IO (Ptr CBool_1d)
+uploadBoolVector ctx values = do
+  let count = VU.length values
+      staged = VS.generate count (\i -> if VU.unsafeIndex values i then 1 else 0 :: Word8)
+  syncBlasIfDirty ctx
+  VS.unsafeWith staged $ \host -> do
+    arr <- cNewBool (rawContext ctx) host (f count)
+    whenNull arr "upload bool[1] returned null"
+    sync ctx "upload bool[1]"
+      `onException` (cFreeBool (rawContext ctx) arr >> pure ())
+    pure arr
 
 freeF32 :: Context -> DevF32 -> IO ()
 freeF32 ctx (DevF32 arr _) = do

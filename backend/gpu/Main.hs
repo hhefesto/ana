@@ -143,7 +143,7 @@ actStats corpusPath checkpointPath cfg = do
   when (manifestConfig manifest /= cfg) (die
     ("checkpoint config " ++ show (manifestConfig manifest)
       ++ " does not match requested size " ++ show cfg))
-  let params = checkpointParameters checkpoint
+  let params = U.toList (checkpointParameters checkpoint)
       step = adamStep (checkpointOptimizer checkpoint)
   results <- mapM (either die pure . fullSequenceStats cfg params) windows
   let mean xs = sum xs / fromIntegral (length xs) :: Double
@@ -583,7 +583,7 @@ train corpusPath checkpointPath mode cfg = do
     (die "checkpoint has already passed this segment's target step")
   gpuCfg <- gpuConfigIO cfg >>= either die pure
   mask <- either die pure (decayMask cfg)
-  let params0 = map realToFrac (checkpointParameters checkpoint)
+  let params0 = checkpointParameters checkpoint
       state0 = checkpointOptimizer checkpoint
       n = paramCount cfg
   logTraining ("training config=" ++ show cfg
@@ -602,17 +602,17 @@ train corpusPath checkpointPath mode cfg = do
     Just g -> logTraining ("bigram gate: sample=" ++ show (gateSampleCrossEntropy g)
       ++ " nats full=" ++ show (gateFullCrossEntropy g) ++ " nats")
   withContext $ \ctx -> do
-    params <- uploadF32 ctx params0
-    m <- uploadF32 ctx (map realToFrac (firstMoment state0))
-    v <- uploadF32 ctx (map realToFrac (secondMoment state0))
-    withBool ctx mask $ \deviceMask -> do
+    params <- uploadF32Vector ctx params0
+    m <- uploadF32Vector ctx (firstMoment state0)
+    v <- uploadF32Vector ctx (secondMoment state0)
+    withBoolVector ctx mask $ \deviceMask -> do
       -- DUMP_CHECKPOINTS=1: keep a step-suffixed copy of every snapshot so
       -- the act-stats diagnostic can walk the trajectory afterwards.
       dumpCheckpoints <- (== Just "1") <$> lookupEnv "DUMP_CHECKPOINTS"
       let saveSnapshot step rng best deviceParams deviceM deviceV = do
-            hostParams <- map realToFrac <$> downloadF32 ctx n deviceParams
-            hostM <- map realToFrac <$> downloadF32 ctx n deviceM
-            hostV <- map realToFrac <$> downloadF32 ctx n deviceV
+            hostParams <- downloadF32Vector ctx n deviceParams
+            hostM <- downloadF32Vector ctx n deviceM
+            hostV <- downloadF32Vector ctx n deviceV
             let snapshot = checkpoint
                   { checkpointParameters = hostParams
                   , checkpointOptimizer = AdamWState step hostM hostV
@@ -633,12 +633,11 @@ train corpusPath checkpointPath mode cfg = do
       let layoutSlices = either (const []) id (namedLayout cfg)
           dumpSlices step gradientDevice paramsDevice =
             when (dumpEvery > 0 && step `mod` dumpEvery == 0) $ do
-              gradientHost <- downloadF32 ctx n gradientDevice
-              paramsHost <- downloadF32 ctx n paramsDevice
-              let sliceNorm values slice = sqrt (sum
-                    [ realToFrac x * realToFrac x
-                    | x <- take (sliceLength slice) (drop (sliceOffset slice) values)
-                    ]) :: Double
+              gradientHost <- downloadF32Vector ctx n gradientDevice
+              paramsHost <- downloadF32Vector ctx n paramsDevice
+              let sliceNorm values slice = sqrt
+                    (U.sum (U.map (\x -> x * x)
+                      (U.slice (sliceOffset slice) (sliceLength slice) values))) :: Double
               mapM_ (\slice -> hPutStrLn stderr ("slice step=" ++ show step
                 ++ " name=" ++ sliceName slice
                 ++ printf " grad=%.6g" (sliceNorm gradientHost slice)
@@ -650,11 +649,8 @@ train corpusPath checkpointPath mode cfg = do
                 [s] | modelDim cfg > 0 && sliceLength s `mod` modelDim cfg == 0 -> do
                   let d0 = modelDim cfg
                       rows0 = sliceLength s `div` d0
-                      values = map realToFrac (take (sliceLength s)
-                        (drop (sliceOffset s) gradientHost)) :: [Double]
-                      rowChunks [] = []
-                      rowChunks xs = take d0 xs : rowChunks (drop d0 xs)
-                      rowsL = rowChunks values
+                      values = U.slice (sliceOffset s) (sliceLength s) gradientHost
+                      rowsL = [ U.toList (U.slice (r * d0) d0 values) | r <- [0 .. rows0 - 1] ]
                       meanRow = map (/ fromIntegral rows0)
                         (foldl' (zipWith (+)) (replicate d0 0) rowsL)
                       rowNorm r = sqrt (sum (map (\x -> x * x) r))
@@ -681,20 +677,21 @@ train corpusPath checkpointPath mode cfg = do
       let maskGradient g
             | trunkScale == 1 = pure g
             | otherwise = do
-                hostG <- downloadF32 ctx n g
+                hostG <- downloadF32Vector ctx n g
                 freeF32 ctx g
-                let (embedPart, trunkPart) = splitAt embeddingLength hostG
-                uploadF32 ctx (embedPart ++ map (* realToFrac trunkScale) trunkPart)
+                uploadF32Vector ctx (U.imap
+                  (\i x -> if i < embeddingLength then x else x * realToFrac trunkScale)
+                  hostG)
       -- DUMP_GRAD_VECTOR=path: at step 1 write the RAW model gradient
       -- (pre-mask, pre-clip) and the exact batch tokens, so an offline f64
       -- oracle can recompute the same step's gradient and compare.
       dumpVectorPath <- lookupEnv "DUMP_GRAD_VECTOR"
       let dumpVector step batch g = case dumpVectorPath of
             Just path | step == 1 -> do
-              hostG <- downloadF32 ctx n g
+              hostG <- downloadF32Vector ctx n g
               writeFile (path ++ ".tokens")
                 (unlines (map (unwords . map show) batch))
-              writeFile path (unlines (map show hostG))
+              writeFile path (unlines (map show (U.toList hostG)))
               logTraining ("dumped step-1 gradient (" ++ show n
                 ++ " floats) and batch to " ++ path)
             _ -> pure ()
@@ -756,10 +753,10 @@ bench corpusPath cfg = do
     ++ " warmup=" ++ show warmupSteps
     ++ " steps=" ++ show benchSteps)
   withContext $ \ctx -> do
-    params <- uploadF32 ctx (map realToFrac (checkpointParameters fresh))
-    m <- uploadF32 ctx (map realToFrac (firstMoment state0))
-    v <- uploadF32 ctx (map realToFrac (secondMoment state0))
-    withBool ctx mask $ \deviceMask -> do
+    params <- uploadF32Vector ctx (checkpointParameters fresh)
+    m <- uploadF32Vector ctx (firstMoment state0)
+    v <- uploadF32Vector ctx (secondMoment state0)
+    withBoolVector ctx mask $ \deviceMask -> do
       let o field = realToFrac (field optCfg)
           benchStep step (rng, ps, ms, vs) = do
             let (batch, rng') = sampler step rng
@@ -1020,14 +1017,14 @@ newCheckpoint cfg identity optCfg clipNorm numerics =
     count = paramCount cfg
     manifest = Manifest artifactVersion cfg count canonicalLayoutIdentity canonicalLayoutVersion
       optCfg identity (realToFrac clipNorm) numerics
-    params = either error (concatMap initialize) (namedLayout cfg)
+    params = either error (U.concat . map initialize) (namedLayout cfg)
     initialize slice
       | initZeroOutput && (".wo" `isSuffixOf` sliceName slice
           || ".wdown" `isSuffixOf` sliceName slice) =
-          replicate (sliceLength slice) 0
+          U.replicate (sliceLength slice) 0
       | sliceDecay slice =
-          [initNoise (sliceOffset slice + i + 1) | i <- [0 .. sliceLength slice - 1]]
-      | otherwise = replicate (sliceLength slice) 1
+          U.generate (sliceLength slice) (\i -> initNoise (sliceOffset slice + i + 1))
+      | otherwise = U.replicate (sliceLength slice) 1
 
 -- Init experiment overrides (probes only; the initialization is part of a
 -- run's identity, so record any override with a published run).
@@ -1153,7 +1150,7 @@ evaluate checkpointPath corpusPath = do
   hPutStrLn stderr ("evaluate: " ++ show (length windows) ++ " windows, "
     ++ show (length chunks) ++ " chunks of at most " ++ show microSize)
   results <- withContext $ \ctx ->
-    withF32 ctx (map realToFrac (checkpointParameters checkpoint)) $ \params ->
+    withF32Vector ctx (checkpointParameters checkpoint) $ \params ->
       mapM (chunkMean ctx gpuCfg params) chunks
   let totalWindows = sum (map fst results)
       predictions = sum (map (\w -> length w - 1) windows)
@@ -1227,7 +1224,7 @@ generate checkpointPath text budget = do
     progress completed scheduled
   BS.putStr promptBytes
   hFlush stdout
-  _ <- withContext $ \ctx -> withF32 ctx (map realToFrac (checkpointParameters checkpoint)) $ \params ->
+  _ <- withContext $ \ctx -> withF32Vector ctx (checkpointParameters checkpoint) $ \params ->
     generateLoop ctx gpuCfg cfg params (pickToken temperature topK) emit budget rng prompt []
   putStrLn ""
 

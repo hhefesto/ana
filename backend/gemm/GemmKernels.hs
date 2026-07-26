@@ -22,6 +22,10 @@ module FutharkKernels
   , withI64_2d
   , withBool
   , downloadF32
+  , withF32Vector
+  , uploadF32Vector
+  , downloadF32Vector
+  , withBoolVector
   , freeF32
   , batchMeanLoss
   , microBatchLossGrad
@@ -163,6 +167,25 @@ downloadF32 ctx expected (F32Array dev@(DevF32 _ count)) = do
     ioError (userError ("download f32[1] length mismatch: expected "
       ++ show expected ++ ", got " ++ show count))
   PP.downloadF32 ctx dev
+
+-- Parameter-sized transfers; see the note on the same pair in ProductionPieces.
+
+withF32Vector :: Context -> UV.Vector Double -> (F32Array -> IO a) -> IO a
+withF32Vector ctx values = bracket (uploadF32Vector ctx values) (freeF32 ctx)
+
+uploadF32Vector :: Context -> UV.Vector Double -> IO F32Array
+uploadF32Vector ctx values = F32Array <$> PP.uploadF32Vector ctx values
+
+downloadF32Vector :: Context -> Int -> F32Array -> IO (UV.Vector Double)
+downloadF32Vector ctx expected (F32Array dev@(DevF32 _ count)) = do
+  unless (count == expected) $
+    ioError (userError ("download f32[1] length mismatch: expected "
+      ++ show expected ++ ", got " ++ show count))
+  PP.downloadF32Vector ctx dev
+
+withBoolVector :: Context -> UV.Vector Bool -> (BoolArray -> IO a) -> IO a
+withBoolVector ctx values action =
+  bracket (PP.uploadBoolVector ctx values) (freeBool ctx) (action . BoolArray)
 
 freeF32 :: Context -> F32Array -> IO ()
 freeF32 ctx (F32Array dev) = PP.freeF32 ctx dev

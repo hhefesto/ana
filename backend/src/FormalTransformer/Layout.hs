@@ -8,6 +8,7 @@ module FormalTransformer.Layout
   ) where
 
 import FormalTransformer.Config
+import qualified Data.Vector.Unboxed as VU
 import Data.Word (Word32)
 
 canonicalLayoutIdentity :: String
@@ -59,5 +60,9 @@ sliceValues s xs
   | length xs < sliceOffset s + sliceLength s = Left ("parameter vector too short for " ++ sliceName s)
   | otherwise = Right (take (sliceLength s) (drop (sliceOffset s) xs))
 
-decayMask :: Config -> Either String [Bool]
-decayMask c = concatMap (\s -> replicate (sliceLength s) (sliceDecay s)) <$> namedLayout c
+-- One flag per parameter, so this is as long as the parameter vector: unboxed
+-- for the same reason AdamWState's moments are (a boxed [Bool] of 115M
+-- elements is 2.8 GB of cons cells).
+decayMask :: Config -> Either String (VU.Vector Bool)
+decayMask c =
+  VU.concat . map (\s -> VU.replicate (sliceLength s) (sliceDecay s)) <$> namedLayout c

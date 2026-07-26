@@ -9,7 +9,8 @@ module FormalTransformer.Optimizer
   , adamWStep
   ) where
 
-import Data.Binary (Binary)
+import Data.Binary (Binary, get, put)
+import qualified Data.Vector.Unboxed as VU
 import GHC.Generics (Generic)
 
 data AdamWConfig = AdamWConfig
@@ -24,13 +25,30 @@ data AdamWConfig = AdamWConfig
 
 instance Binary AdamWConfig
 
+-- The moments are one Double per parameter, so at GPT-2-small scale each is
+-- 115M elements. As a boxed [Double] that is 4.6 GB per moment -- 40 bytes an
+-- element, against 8 in an unboxed vector -- and a checkpoint holds three such
+-- arrays at once. Representation, not denotation: the optimizer is still the
+-- same function of the same Doubles.
 data AdamWState = AdamWState
   { adamStep :: !Int
-  , firstMoment :: ![Double]
-  , secondMoment :: ![Double]
+  , firstMoment :: !(VU.Vector Double)
+  , secondMoment :: !(VU.Vector Double)
   } deriving (Eq, Show, Generic)
 
-instance Binary AdamWState
+-- Written out rather than derived so it stays byte-identical to the instance
+-- GHC.Generics produced when the moments were lists: legacy checkpoints
+-- (Section "LegacyCheckpoint" in Artifact) are still decoded with it.
+instance Binary AdamWState where
+  put state = do
+    put (adamStep state)
+    put (VU.toList (firstMoment state))
+    put (VU.toList (secondMoment state))
+  get = do
+    step <- get
+    first <- get
+    second <- get
+    pure (AdamWState step (VU.fromList first) (VU.fromList second))
 
 validateAdamWConfig :: AdamWConfig -> Either String AdamWConfig
 validateAdamWConfig cfg
@@ -47,7 +65,7 @@ validateAdamWConfig cfg
   where nonFinite value = isNaN value || isInfinite value
 
 initAdamW :: Int -> AdamWState
-initAdamW n = AdamWState 0 (replicate n 0) (replicate n 0)
+initAdamW n = AdamWState 0 (VU.replicate n 0) (VU.replicate n 0)
 
 learningRate :: AdamWConfig -> Int -> Double
 learningRate cfg step
@@ -62,31 +80,28 @@ learningRate cfg step
 
 adamWStep
   :: AdamWConfig
-  -> [Bool]
+  -> VU.Vector Bool
   -> AdamWState
-  -> [Double]
-  -> [Double]
-  -> Either String ([Double], AdamWState)
+  -> VU.Vector Double
+  -> VU.Vector Double
+  -> Either String (VU.Vector Double, AdamWState)
 adamWStep cfg decay state params gradients
   | Left message <- validateAdamWConfig cfg = Left message
-  | any (/= n) [length decay, length (firstMoment state), length (secondMoment state), length gradients] =
+  | any (/= n) [ VU.length decay, VU.length (firstMoment state)
+               , VU.length (secondMoment state), VU.length gradients ] =
       Left "AdamW vectors must have identical lengths"
   | adamStep state < 0 = Left "AdamW step must be nonnegative"
   | adamStep state >= totalSteps cfg = Left "AdamW step has reached the configured total steps"
   | otherwise = Right (updated, AdamWState step m v)
   where
-    n = length params
+    n = VU.length params
     step = adamStep state + 1
     lr = learningRate cfg step
-    m = zipWith (\old g -> beta1 cfg * old + (1 - beta1 cfg) * g) (firstMoment state) gradients
-    v = zipWith (\old g -> beta2 cfg * old + (1 - beta2 cfg) * g * g) (secondMoment state) gradients
+    m = VU.zipWith (\old g -> beta1 cfg * old + (1 - beta1 cfg) * g) (firstMoment state) gradients
+    v = VU.zipWith (\old g -> beta2 cfg * old + (1 - beta2 cfg) * g * g) (secondMoment state) gradients
     b1Correction = 1 - beta1 cfg ** fromIntegral step
     b2Correction = 1 - beta2 cfg ** fromIntegral step
     update p mi vi shouldDecay =
       p - lr * (mi / b1Correction / (sqrt (vi / b2Correction) + adamEpsilon cfg)
         + (if shouldDecay then weightDecay cfg * p else 0))
-    updated = zipWith4 update params m v decay
-
-zipWith4 :: (a -> b -> c -> d -> e) -> [a] -> [b] -> [c] -> [d] -> [e]
-zipWith4 f (a:as) (b:bs) (c:cs) (d:ds) = f a b c d : zipWith4 f as bs cs ds
-zipWith4 _ _ _ _ _ = []
+    updated = VU.zipWith4 update params m v decay

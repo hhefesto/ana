@@ -3,6 +3,7 @@ module Main (main) where
 import Control.Exception (SomeException, bracket, try)
 import Control.Monad (foldM, unless)
 import Data.Int (Int64)
+import qualified Data.Vector.Unboxed as VU
 import FormalTransformer.Config
 import FormalTransformer.Layout
 import FormalTransformer.Model
@@ -47,8 +48,10 @@ main = do
       optimizerConfig = AdamWConfig 0.002 0.9 0.99 1e-6 0.03 0 10
       oldM = zipWith (\i _ -> 0.0002 * sin (fromIntegral i)) [1 :: Int ..] parameters
       oldV = zipWith (\i _ -> 0.0003 + 0.00001 * fromIntegral (i `mod` 7)) [1 :: Int ..] parameters
-      oldState = AdamWState 2 oldM oldV
-  (referenceUpdated, referenceState) <- either die pure (adamWStep optimizerConfig mask oldState parameters referenceGradient)
+      oldState = AdamWState 2 (VU.fromList oldM) (VU.fromList oldV)
+  (referenceUpdatedV, referenceState) <- either die pure (adamWStep optimizerConfig mask oldState
+    (VU.fromList parameters) (VU.fromList referenceGradient))
+  let referenceUpdated = VU.toList referenceUpdatedV
   withContext $ \ctx -> do
     futharkCount <- futharkParameterCount ctx gpuCfg
     assertExact "parameter count: config" (fromIntegral (paramCount config)) futharkCount
@@ -68,7 +71,7 @@ main = do
           compareVector "full gradient" 2e-3 2e-2 referenceGradient futharkGradient
           withF32 ctx (map realToFrac oldM) $ \deviceM ->
             withF32 ctx (map realToFrac oldV) $ \deviceV ->
-              withBool ctx mask $ \deviceMask -> do
+              withBoolVector ctx mask $ \deviceMask -> do
                 (updated, newM, newV) <- adamwStep ctx 3 (realToFrac (learningRate optimizerConfig 3)) 0.9 0.99 1e-6 0.03 deviceParameters gradient deviceM deviceV deviceMask
                 bracket (pure updated) (freeF32 ctx) $ \deviceUpdated ->
                   bracket (pure newM) (freeF32 ctx) $ \deviceNewM ->
@@ -77,8 +80,8 @@ main = do
                       futharkM <- map realToFrac <$> downloadF32 ctx (paramCount config) deviceNewM
                       futharkV <- map realToFrac <$> downloadF32 ctx (paramCount config) deviceNewV
                       compareVector "AdamW parameters" 2e-5 2e-4 referenceUpdated futharkUpdated
-                      compareVector "AdamW first moment" 2e-6 2e-4 (firstMoment referenceState) futharkM
-                      compareVector "AdamW second moment" 2e-7 3e-4 (secondMoment referenceState) futharkV
+                      compareVector "AdamW first moment" 2e-6 2e-4 (VU.toList (firstMoment referenceState)) futharkM
+                      compareVector "AdamW second moment" 2e-7 3e-4 (VU.toList (secondMoment referenceState)) futharkV
   microBatchConformance
   decodeConformance
   sizeRejectionConformance

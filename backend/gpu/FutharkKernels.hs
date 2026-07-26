@@ -23,6 +23,10 @@ module FutharkKernels
   , withI64_2d
   , withBool
   , downloadF32
+  , withF32Vector
+  , uploadF32Vector
+  , downloadF32Vector
+  , withBoolVector
   , freeF32
 #ifndef REDUCED_GPU_BACKEND
   , batchLossGrad
@@ -48,8 +52,12 @@ import Control.Exception (bracket, throwIO)
 import Control.Monad (forM_, when)
 import Data.Int (Int64)
 import Data.List (isInfixOf)
+import qualified Data.Vector.Storable as VS
+import qualified Data.Vector.Storable.Mutable as VSM
+import qualified Data.Vector.Unboxed as VU
 import Data.Word (Word64, Word8)
 import Foreign
+import GHC.Float (double2Float, float2Double)
 import Foreign.C.String (CString, peekCString, withCString)
 import Foreign.C.Types
 import FormalTransformer.Config (Config (..), contextSize, validateConfig)
@@ -222,6 +230,41 @@ downloadF32 :: Context -> Int -> F32Array -> IO [Float]
 downloadF32 (Context ctx) n (F32Array arr) = allocaArray n $ \out -> do
   c_values_f32_1d ctx arr out >>= check ctx "download f32[1]"
   peekArray n out
+
+-- The list-shaped transfers above are fine for activations and the
+-- conformance harness, but not for anything as long as the parameter vector:
+-- peekArray/withArray build a boxed [Float], which is 40 bytes an element
+-- against 4 in a storable vector. At 115M parameters that is the difference
+-- between 4.6 GB and 462 MB per transfer, and the trainer moves six such
+-- arrays. These variants stage through a storable f32 vector and hand its
+-- buffer straight to Futhark.
+
+withF32Vector :: Context -> VU.Vector Double -> (F32Array -> IO a) -> IO a
+withF32Vector ctx values = bracket (uploadF32Vector ctx values) (freeF32 ctx)
+
+uploadF32Vector :: Context -> VU.Vector Double -> IO F32Array
+uploadF32Vector (Context ctx) values =
+  VS.unsafeWith staged $ \p ->
+    checkedPtr ctx "upload f32[1]" (c_new_f32_1d ctx p (fromIntegral (VU.length values))) F32Array
+  where
+    staged = VS.generate (VU.length values) (double2Float . VU.unsafeIndex values)
+
+downloadF32Vector :: Context -> Int -> F32Array -> IO (VU.Vector Double)
+downloadF32Vector (Context ctx) n (F32Array arr) = do
+  staged <- VSM.new n
+  VSM.unsafeWith staged $ \out ->
+    c_values_f32_1d ctx arr out >>= check ctx "download f32[1]"
+  frozen <- VS.unsafeFreeze staged
+  pure (VU.generate n (float2Double . VS.unsafeIndex frozen))
+
+withBoolVector :: Context -> VU.Vector Bool -> (BoolArray -> IO a) -> IO a
+withBoolVector (Context ctx) values = bracket acquire release
+  where
+    staged = VS.generate (VU.length values)
+      (\i -> if VU.unsafeIndex values i then 1 else 0 :: Word8)
+    acquire = VS.unsafeWith staged $ \p ->
+      checkedPtr ctx "upload bool[1]" (c_new_bool_1d ctx p (fromIntegral (VU.length values))) BoolArray
+    release (BoolArray p) = c_free_bool_1d ctx p >>= check ctx "free bool[1]"
 
 freeF32 :: Context -> F32Array -> IO ()
 freeF32 (Context ctx) (F32Array arr) = c_free_f32_1d ctx arr >>= check ctx "free f32[1]"

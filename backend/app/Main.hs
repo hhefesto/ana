@@ -5,6 +5,7 @@ import Control.Parallel.Strategies (parListChunk, rseq, using)
 import qualified Data.ByteString as BS
 import qualified Data.Map.Strict as Map
 import qualified Data.ByteString.Char8 as BSC
+import qualified Data.Vector.Unboxed as VU
 import Data.Word (Word64)
 import System.Directory (doesFileExist)
 import FormalTransformer.AD
@@ -95,11 +96,11 @@ trainSmoke = do
       state = initAdamW (paramCount tinyConfig)
   case decayMask tinyConfig of
     Left message -> putStrLn message
-    Right mask -> case foldM (step cfg mask) (initialParameters, state) (take 8 (cycle examples)) of
+    Right mask -> case foldM (step cfg mask) (VU.fromList initialParameters, state) (take 8 (cycle examples)) of
       Left message -> putStrLn message
       Right (params, finalState) -> do
         putStrLn ("completed steps: " ++ show (adamStep finalState))
-        case nextTokenCE tinyConfig params [0, 2] 3 of
+        case nextTokenCE tinyConfig (VU.toList params) [0, 2] 3 of
           Left message -> putStrLn message
           Right loss -> do
             print loss
@@ -112,8 +113,8 @@ trainSmoke = do
               Right _ -> putStrLn "checkpoint contract valid"
   where
     step cfg mask (params, state) (prefix, target) = do
-      gradient <- lossGradient tinyConfig params prefix target
-      adamWStep cfg mask state params gradient
+      gradient <- lossGradient tinyConfig (VU.toList params) prefix target
+      adamWStep cfg mask state params (VU.fromList gradient)
 
 prepareBytes :: FilePath -> [FilePath] -> IO ()
 prepareBytes = prepareFiles ByteTokenizer
