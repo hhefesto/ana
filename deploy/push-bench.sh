@@ -31,7 +31,11 @@ port=${2:-22}
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-shard=${SHARD:-run/mixed-bpe100m/shard-0-bpe100m.corpus}
+# A typical mid-corpus shard (44 MB) rather than shard 0 (180 MB): the dump is
+# article-ordered, so the early shards hold the long articles and are ~4x the
+# average. bench only samples windows, so a representative shard is the right
+# one and it uploads faster.
+shard=${SHARD:-run/mixed-bpe100m-s32000/shard-150-bpe100m.corpus}
 tokenizer=${TOKENIZER:-run/enwiki-fineweb-32k.bpe}
 remote_dir=${REMOTE_DIR:-formalTransformer}
 data_dir=${DATA_DIR:-bench-data}
