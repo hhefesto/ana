@@ -46,12 +46,12 @@ module ProductionPieces
   , traceOp
   ) where
 
+import Arena (arenaForget, arenaPop, arenaPush, arenaRegister)
 import Control.Exception (bracket, onException, throwIO)
 import Control.Monad (forM_, unless, when)
 import CudaBlasOps (cublasContextSync)
 import Data.IORef
 import Data.Int (Int64)
-import Data.List (nub)
 import qualified Data.Vector.Storable as VS
 import qualified Data.Vector.Storable.Mutable as VSM
 import qualified Data.Vector.Unboxed as VU
@@ -71,9 +71,12 @@ data CF32_1d
 data CI64_1d
 data CBool_1d
 
+-- ctxArena is a stack of windows, innermost first; [] means no window is
+-- open. Nesting is what lets a layer's intermediates be reclaimed as the
+-- traversal advances instead of at the end of the whole micro-batch.
 data Context = Context
   { rawContext :: !(Ptr CContext)
-  , ctxArena :: !(IORef (Maybe [Ptr CF32_1d]))
+  , ctxArena :: !(IORef [[Ptr CF32_1d]])
   , ctxFutharkDirty :: !(IORef Bool)
   , ctxBlasDirty :: !(IORef Bool)
   }
@@ -122,6 +125,11 @@ productionPieceOpsWith extend ctx = extend PieceOps
   , opsLength = \(DevF32 _ count) -> count
   , opsTokenCount = \(DevI64 _ count) -> count
   , opsFree = freeF32 ctx
+  , opsScope = \action -> do
+      pushArena ctx
+      (result, survivors) <- action `onException` popArenaKeeping ctx []
+      popArenaKeeping ctx survivors
+      pure result
   , opsReadSlice = readSlice ctx
   , opsWriteSlice = writeSlice ctx
   , opsGatherChunk = gatherChunkDevice ctx
@@ -136,7 +144,7 @@ withProductionContext action = bracket newConfig cConfigFree $ \cfg -> do
   bracket (cContextNew cfg) freeContext $ \rawCtx -> do
     whenNull rawCtx "Futhark context allocation failed"
     check rawCtx "Futhark context creation" =<< cContextSync rawCtx
-    arena <- newIORef Nothing
+    arena <- newIORef []
     futharkDirty <- newIORef False
     blasDirty <- newIORef False
     action (Context rawCtx arena futharkDirty blasDirty)
@@ -164,28 +172,26 @@ withProductionContext action = bracket newConfig cConfigFree $ \cfg -> do
 -- before anything is freed. Uploads and entry outputs outside a window are
 -- caller-owned.
 pushArena :: Context -> IO ()
-pushArena ctx = do
-  previous <- readIORef (ctxArena ctx)
-  case previous of
-    Just _ -> throwIO (userError "device arena windows do not nest")
-    Nothing -> writeIORef (ctxArena ctx) (Just [])
+pushArena ctx = modifyIORef' (ctxArena ctx) arenaPush
 
+-- The policy lives in Arena; this enacts it.  Pending work is completed
+-- before anything is released, because a GEMM may still be reading a buffer
+-- the frame is about to free.
 popArenaKeeping :: Context -> [DevF32] -> IO ()
 popArenaKeeping ctx survivors = do
-  entries <- readIORef (ctxArena ctx)
-  case entries of
+  frames <- readIORef (ctxArena ctx)
+  let kept = [pointer | DevF32 pointer _ <- survivors]
+  case arenaPop kept frames of
     Nothing -> throwIO (userError "device arena pop without a window")
-    Just pointers -> do
-      writeIORef (ctxArena ctx) Nothing
+    Just (stack, released) -> do
       syncDevice ctx
-      let kept = [pointer | DevF32 pointer _ <- survivors]
-      forM_ (nub pointers) $ \pointer ->
-        unless (pointer `elem` kept) $
-          cFreeF32 (rawContext ctx) pointer
-            >>= check (rawContext ctx) "arena free f32[1]"
+      writeIORef (ctxArena ctx) stack
+      forM_ released $ \pointer ->
+        cFreeF32 (rawContext ctx) pointer
+          >>= check (rawContext ctx) "arena free f32[1]"
 
 registerArena :: Context -> Ptr CF32_1d -> IO ()
-registerArena ctx pointer = modifyIORef' (ctxArena ctx) (fmap (pointer :))
+registerArena ctx pointer = modifyIORef' (ctxArena ctx) (arenaRegister pointer)
 
 markFutharkDirty :: Context -> IO ()
 markFutharkDirty ctx = writeIORef (ctxFutharkDirty ctx) True
@@ -574,11 +580,9 @@ freeF32 :: Context -> DevF32 -> IO ()
 freeF32 ctx (DevF32 arr _) = do
   syncBlasIfDirty ctx
   syncFutharkIfDirty ctx
-  arena <- readIORef (ctxArena ctx)
-  case arena of
-    Just pointers ->
-      writeIORef (ctxArena ctx) (Just (filter (/= arr) pointers))
-    Nothing -> pure ()
+  -- Deregister from every open window before freeing, so a later pop does
+  -- not free the same pointer a second time.
+  modifyIORef' (ctxArena ctx) (arenaForget arr)
   cFreeF32 (rawContext ctx) arr >>= check (rawContext ctx) "free f32[1]"
 
 freeI64 :: Context -> DevI64 -> IO ()
@@ -591,10 +595,8 @@ freeBool ctx arr =
 
 registerArenaIfActive :: Context -> Ptr CF32_1d -> IO ()
 registerArenaIfActive ctx pointer = do
-  arena <- readIORef (ctxArena ctx)
-  case arena of
-    Just _ -> registerArena ctx pointer
-    Nothing -> pure ()
+  frames <- readIORef (ctxArena ctx)
+  unless (null frames) (registerArena ctx pointer)
 
 freeIfNonNull :: Context -> Ptr CF32_1d -> IO ()
 freeIfNonNull ctx arr = when (arr /= nullPtr) $

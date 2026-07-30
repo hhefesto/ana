@@ -1,3 +1,5 @@
+{-# LANGUAGE RankNTypes #-}
+
 module Decomposed
   ( PieceOps (..)
   , FeedForwardResult (..)
@@ -91,6 +93,12 @@ data PieceOps buf tok = PieceOps
   , opsLength :: buf -> Int
   , opsTokenCount :: tok -> Int
   , opsFree :: buf -> IO ()
+    -- Runs an action inside a nested allocation window: everything it
+    -- allocates is released when it returns, except the buffers it names as
+    -- survivors.  This is what keeps peak memory at one layer's working set
+    -- rather than the whole traversal's.  On host-list backends it is just
+    -- `fmap fst` -- the garbage collector already does the job.
+  , opsScope :: forall a. IO (a, [buf]) -> IO a
   , opsReadSlice :: Int -> Int -> buf -> IO buf
   , opsWriteSlice :: Int -> buf -> buf -> IO buf
   , opsGatherChunk :: Int -> Int -> Int -> Int -> buf -> IO buf
@@ -714,27 +722,43 @@ writeNamedSlice ops layout gradient (name, values) =
 forwardLayer
   :: PieceOps buf tok -> Int -> Int -> Int -> Int -> Int -> Int
   -> ([buf], buf) -> LayerWeights buf -> IO ([buf], buf)
+-- The block's intermediates die with its window; only its output crosses into
+-- the next layer.  The input `x` was allocated by the caller and is retained
+-- there, which is what the backward pass recomputes from.
 forwardLayer ops batch n heads hd chunk f (inputs, x) layer = do
-  output <- case layer of
-    GlaLayerWeights weights ->
-      glaBlockForwardOutput ops batch n heads hd chunk f x weights
-    SoftmaxLayerWeights weights ->
-      softmaxBlockForwardOutput ops batch n heads hd f x weights
+  output <- opsScope ops $ do
+    out <- case layer of
+      GlaLayerWeights weights ->
+        glaBlockForwardOutput ops batch n heads hd chunk f x weights
+      SoftmaxLayerWeights weights ->
+        softmaxBlockForwardOutput ops batch n heads hd f x weights
+    pure (out, [out])
   pure (x : inputs, output)
 
 reverseLayer
   :: PieceOps buf tok -> Int -> Int -> Int -> Int -> Int -> Int
   -> (buf, [[(String, buf)]]) -> (Int, LayerWeights buf, buf)
   -> IO (buf, [[(String, buf)]])
+-- This is where the memory goes: the block backward recomputes the whole
+-- forward and then runs every pullback, so its working set is the largest of
+-- the traversal.  Scoping it per layer means one layer's worth is live at a
+-- time instead of all of them.  The survivors are exactly what the caller
+-- still needs: the input cotangent that feeds the next layer down, and the
+-- parameter cotangents that gradient assembly consumes (and frees itself).
 reverseLayer ops batch n heads hd chunk f (outputBar, gradients)
-    (layerIndex, layer, x) =
-  case layer of
+    (layerIndex, layer, x) = do
+  (xBar, named) <- opsScope ops $ case layer of
     GlaLayerWeights weights -> do
       result <- glaBlockDecomposed ops batch n heads hd chunk f x weights outputBar
-      pure (fullGlaXBar result, glaNamedGradient layerIndex result : gradients)
+      let bar = fullGlaXBar result
+          slices = glaNamedGradient layerIndex result
+      pure ((bar, slices), bar : map snd slices)
     SoftmaxLayerWeights weights -> do
       result <- softmaxBlockDecomposed ops batch n heads hd f x weights outputBar
-      pure (fullSoftmaxXBar result, softmaxNamedGradient layerIndex result : gradients)
+      let bar = fullSoftmaxXBar result
+          slices = softmaxNamedGradient layerIndex result
+      pure ((bar, slices), bar : map snd slices)
+  pure (xBar, named : gradients)
 
 glaNamedGradient :: Int -> GlaBlockResult buf -> [(String, buf)]
 glaNamedGradient layer result =

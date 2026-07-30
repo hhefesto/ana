@@ -1,8 +1,10 @@
 module Main (main) where
 
+import Arena (arenaForget, arenaPop, arenaPush, arenaRegister)
 import Control.Monad (unless)
 import Buffer
 import Data.Int (Int64)
+import Data.List (sort)
 import Decomposed
 import FormalTransformer.Config
 import FormalTransformer.Layout
@@ -32,11 +34,76 @@ parameters = either error (concatMap initialize) (namedLayout config)
 main :: IO ()
 main = do
   parameterViewSmoke
+  arenaSmoke
   withContext $ \ctx -> do
     pieceSmoke ctx
     dataMovementSmoke ctx
     oracleSmoke ctx
     putStrLn "gemm conformance: initial piece/oracle smoke passed"
+
+-- The nested-arena rules decide what the CUDA runtime frees and when, and a
+-- mistake there is a use-after-free or a leak rather than a wrong number --
+-- invisible to every other check here.  The rules are pure (Arena) precisely
+-- so they can be exercised without a GPU.
+arenaSmoke :: IO ()
+arenaSmoke = do
+  -- A window releases what it allocated and keeps what it is told to.
+  case arenaPop [2 :: Int] (arenaRegister 2 (arenaRegister 1 (arenaPush []))) of
+    Nothing -> die "arena: pop of an open window returned Nothing"
+    Just (stack, released) -> do
+      expectSet "arena releases non-survivors" [1] released
+      expectSet "arena outermost survivors are caller-owned" [] (concat stack)
+
+  -- A survivor allocated inside becomes the enclosing window's
+  -- responsibility.  If it were dropped instead, it would leak.
+  let outer0, inner0 :: [[Int]]
+      outer0 = arenaRegister 10 (arenaPush [])
+      inner0 = arenaRegister 12 (arenaRegister 11 (arenaPush outer0))
+  case arenaPop [11] inner0 of
+    Nothing -> die "arena: nested pop returned Nothing"
+    Just (stack, released) -> do
+      expectSet "arena nested release" [12] released
+      expectSet "arena promotes inner survivor" [11, 10] (concat stack)
+      -- ...and the enclosing window then releases it exactly once.
+      case arenaPop [] stack of
+        Nothing -> die "arena: outer pop returned Nothing"
+        Just (_, outerReleased) ->
+          expectSet "arena outer frees the promoted survivor" [11, 10] outerReleased
+
+  -- A survivor that came from an enclosing window must not be re-registered,
+  -- or closing the two windows would free it twice.
+  let outer1, inner1 :: [[Int]]
+      outer1 = arenaRegister 20 (arenaPush [])
+      inner1 = arenaRegister 21 (arenaPush outer1)
+  case arenaPop [20, 21] inner1 of
+    Nothing -> die "arena: pass-through pop returned Nothing"
+    Just (stack, released) -> do
+      expectSet "arena keeps pass-through survivors" [] released
+      expectSet "arena does not duplicate an outer survivor" [21, 20] (concat stack)
+
+  -- An explicit free deregisters everywhere, so no later pop repeats it.
+  let dropped :: [[Int]]
+      dropped = arenaForget 31 (arenaRegister 31 (arenaRegister 30 (arenaPush [])))
+  case arenaPop [] dropped of
+    Nothing -> die "arena: pop after forget returned Nothing"
+    Just (_, released) ->
+      expectSet "arena does not re-release an explicitly freed pointer" [30] released
+
+  -- Allocations outside any window are the caller's, not the arena's.
+  expectSet "arena ignores allocations with no window open"
+    [] (concat (arenaRegister (40 :: Int) []))
+
+  case arenaPop ([] :: [Int]) [] of
+    Just _ -> die "arena: pop without a window should fail"
+    Nothing -> pure ()
+
+  putStrLn "gemm conformance: nested arena rules passed"
+
+expectSet :: (Ord a, Show a) => String -> [a] -> [a] -> IO ()
+expectSet label expected actual
+  | sort expected == sort actual = putStrLn (label ++ ": ok")
+  | otherwise = die (label ++ ": expected " ++ show (sort expected)
+      ++ " but got " ++ show (sort actual))
 
 parameterViewSmoke :: IO ()
 parameterViewSmoke = do
@@ -291,6 +358,8 @@ conformancePieceOps ctx = PieceOps
   , opsLength = length
   , opsTokenCount = length
   , opsFree = const (pure ())
+    -- Host lists are garbage collected, so a window is just its result.
+  , opsScope = fmap fst
   , opsReadSlice = \offset count values -> pure (readSliceList offset count values)
   , opsWriteSlice = \offset destination source ->
       pure (writeSliceList offset destination source)
