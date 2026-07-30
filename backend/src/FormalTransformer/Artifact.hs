@@ -30,6 +30,7 @@ import Data.Binary.Put (putFloatbe, putWord8, putWord16be, putWord32be, putWord6
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
 import Data.List (sortOn)
+import qualified Data.Set as Set
 import qualified Data.Vector.Unboxed as VU
 import Data.Word (Word32, Word64)
 import GHC.Float (castWord32ToFloat, double2Float, float2Double)
@@ -332,8 +333,10 @@ validateCorpusArtifact corpus = do
     validateBounds vocabulary tokens = unless
       (all (\token -> token >= 2 && token < vocabulary) tokens)
       (Left ("corpus tokens must lie in [2," ++ show (vocabulary - 1) ++ "]"))
-    unique [] = True
-    unique (value : remaining) = value `notElem` remaining && unique remaining
+    -- Quadratic in document count when written as a notElem recursion, which
+    -- put a corpus load at 156 s for 32,000 documents against 2.2 s for 4,000.
+    -- Every shard load pays it, on the training box as well as the planner.
+    unique values = Set.size (Set.fromList values) == length values
 
 validateCorpusForTokenizer :: Tokenizer -> CorpusArtifact -> Either String CorpusArtifact
 validateCorpusForTokenizer tokenizer corpus = do
