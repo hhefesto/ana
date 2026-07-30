@@ -81,6 +81,7 @@ gpu_slug="$(echo "$gpu_name" | tr ' ' '-' | tr -cd 'A-Za-z0-9-')"
 # These only scale the mfu column; they do not affect tokens/s or the cost
 # projection. Override with PEAK_TF32/PEAK_BF16 if a datasheet disagrees.
 case "$gpu_name" in
+  *"RTX 5090"*)    def_tf32=104.8; def_bf16=209.5 ; def_fp32=104.8 ;;
   *"RTX 4090"*)    def_tf32=82.6 ; def_bf16=165.2 ; def_fp32=82.6 ;;
   *"RTX A6000"*)   def_tf32=77.4 ; def_bf16=154.8 ; def_fp32=38.7 ;;
   *"RTX 3090"*)    def_tf32=35.6 ; def_bf16=71.0  ; def_fp32=35.6 ;;
