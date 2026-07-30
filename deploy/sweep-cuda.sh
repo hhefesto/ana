@@ -74,9 +74,15 @@ gpu_slug="$(echo "$gpu_name" | tr ' ' '-' | tr -cd 'A-Za-z0-9-')"
 
 # Dense (non-sparse) tensor-core peaks. cuBLAS here accumulates in FP32
 # (CUBLAS_COMPUTE_32F_FAST_TF32 / _FAST_16BF), which on GeForce Ampere runs at
-# half the FP16-accumulate rate -- hence the 3090's 71.0 rather than 142.
+# half the FP16-accumulate rate -- hence the 3090's 71.0 rather than 142. The
+# A6000 is the same GA102 die without that restriction, so it lists roughly
+# twice the 3090's tensor rates despite similar FP32.
+#
+# These only scale the mfu column; they do not affect tokens/s or the cost
+# projection. Override with PEAK_TF32/PEAK_BF16 if a datasheet disagrees.
 case "$gpu_name" in
   *"RTX 4090"*)    def_tf32=82.6 ; def_bf16=165.2 ; def_fp32=82.6 ;;
+  *"RTX A6000"*)   def_tf32=77.4 ; def_bf16=154.8 ; def_fp32=38.7 ;;
   *"RTX 3090"*)    def_tf32=35.6 ; def_bf16=71.0  ; def_fp32=35.6 ;;
   *"RTX 5060 Ti"*) def_tf32=23.7 ; def_bf16=47.4  ; def_fp32=23.7 ;;
   *"A100"*)        def_tf32=156.0; def_bf16=312.0 ; def_fp32=19.5 ;;
