@@ -16,6 +16,10 @@
 # loader. cloud-init.sh detects the result symlinks and skips its install and
 # build steps entirely.
 #
+# The transfer is small -- the runtime closure of both hosts measures 1.22 GB
+# over 40 store paths, against the tens of GB of GHC and CUDA toolkit that
+# building would have to fetch.
+#
 # usage: ./deploy/push-prebuilt.sh [user@]host [port]
 #
 # Env:

@@ -386,7 +386,7 @@ every instance measured — on one that advertised 72 cores but allocated 8.64.
 
 | | |
 |---|---|
-| Disk | **50 GB is enough when nothing is built there** — ~5 GB runtime closure, 15 GB corpus, 5.6 GB of checkpoint and snapshots, ~26 GB total. Building on the box is what needed 100 GB: GHC and the CUDA toolkit dwarf the runtime closure. Note both boxes measured gave 50 GB of container overlay regardless of what the listing advertised. |
+| Disk | **50 GB is enough when nothing is built there** — the runtime closure of both CUDA hosts measures **1.22 GB over 40 store paths**, against 15 GB of corpus and 5.6 GB of checkpoint plus snapshots: ~22 GB total. Building on the box is what needed 100 GB, since GHC and the CUDA toolkit dwarf what the loader actually needs. Both boxes measured gave 50 GB of container overlay regardless of the listing. |
 | Network | Verify it. One box advertised 2369 Mbps inbound and delivered ~50 KB/s, which would make the 15 GB corpus push take days. |
 | Host RAM | Shards of 32,000 documents are read into memory, not streamed; tokenizing the heaviest peaked at 7.3 GB. Cap corpus jobs with `GHCRTS=-M20g`. |
 | Max duration | Longer than the run. One 5090 listing capped at 16 hours. |
