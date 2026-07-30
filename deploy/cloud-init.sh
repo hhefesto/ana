@@ -63,6 +63,20 @@ echo "cloud-init: GPU compute capability=${compute_cap:-unknown}"
 # ---------------------------------------------------------------------------
 # 2. Nix install + config (mode depends on VM vs container).
 # ---------------------------------------------------------------------------
+# Skipped entirely when deploy/push-prebuilt.sh has already shipped the
+# binaries and their runtime closure: nothing here needs to be compiled or
+# fetched, and the installer below would `rm -rf /nix` and delete the very
+# closure that was just copied in.  Rented GPUs measured ~50 minutes from
+# boot to first training step with this path taken; prebuilt makes it ~1.
+prebuilt=0
+if [ -x result/bin/formal-transformer-cuda ] \
+  && { [ "${BUILD_GEMM_CUDA:-0}" != 1 ] \
+    || [ -x result-gemm/bin/formal-transformer-gemm-cuda ]; }; then
+  prebuilt=1
+  echo "cloud-init: prebuilt binaries present — skipping Nix install and build."
+fi
+
+if [ "$prebuilt" = 0 ]; then
 # The Nix installer needs curl; a minimal base image (e.g. vastai/base-image)
 # may not ship it.
 if ! command -v curl >/dev/null; then
@@ -116,7 +130,8 @@ NIX() { nix --extra-experimental-features "$features" "$@"; }
 
 # ---------------------------------------------------------------------------
 # 3. Build the CUDA host (most deps come from cache.nixos.org; only our small
-#    derivation compiles). GPU is NOT needed to build — only to run.
+#    derivation compiles). GPU is NOT needed to build — only to run, which is
+#    what lets deploy/push-prebuilt.sh do this on a developer machine instead.
 # ---------------------------------------------------------------------------
 echo "cloud-init: building formal-transformer-cuda..."
 NIX build .#formal-transformer-cuda
@@ -137,6 +152,7 @@ if NIX shell nixpkgs#patchelf -c \
   echo "cloud-init: CUDA driver stubs leaked into the runtime RPATH" >&2
   exit 1
 fi
+fi  # end: not prebuilt
 
 # ---------------------------------------------------------------------------
 # 5. libcuda.so.1 resolution.  `inspect` execs the CUDA binary, forcing the

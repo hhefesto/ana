@@ -105,6 +105,15 @@ On rented hardware, `deploy/train-cloud.sh` drives training per shard from a
 pre-built plan; `nix run .#wiki-generate -- --pull --host user@HOST --port N`
 fetches weights into a per-host directory that can never overwrite existing ones.
 
+**Build locally, never on the rented box.** The CUDA hosts need a GPU to run but
+not to build, so `deploy/push-prebuilt.sh user@HOST PORT` compiles here and
+rsyncs the runtime closure into the box's `/nix/store`; `cloud-init.sh` then
+detects the binaries and skips its install and build. Compiling on the instance
+instead cost ~50 minutes of paid GPU time every time. Before a long run,
+`deploy/sweep-cuda.sh` records throughput, peak memory, GPU utilization, and
+projected cost per completed run — see §8 of the run document for what to ask
+for when renting.
+
 ## Build and verify
 
 ```bash

@@ -89,10 +89,31 @@ wikipedia-global-v1:sha256=989fe1b303e4ed03d9509e798b18973767619dd6c3a350af0b5bb
 | Achieved | ~0.72 TFLOP/s ≈ **3.0% MFU** against 23.7 TFLOPS TF32 peak |
 | Cost | roughly $10–25 of rental |
 
-The 3% MFU is a consequence of model size, not of the runtime: at `modelDim` 320
-the GEMMs are far too small to engage tensor cores, so the run is launch-bound.
-The same runtime had already been taken through a 61× optimization ladder, every
-rung gated on bit-identical loss.
+**The 3% MFU was never diagnosed, and the explanation first recorded here — "a
+consequence of model size, not of the runtime" — was a guess.** It is repeated
+in enough places to be worth retracting explicitly. Three separable things are
+folded into that one number, and only the third is about model size:
+
+1. **~24% of the wall clock was not training at all.** `bench` measured 14,770
+   tok/s; the run delivered 11,300 end-to-end. Independently: 1,833,157 steps at
+   0.138 s/step is 70.3 h against 92.1 h elapsed. `train-cloud.sh` starts a
+   fresh process per shard, and each pays CUDA context creation, Futhark cache
+   load, checkpoint load, checkpoint save, and corpus load.
+2. **The figure is `6ND / wall`, but the backward recomputes each layer's
+   forward**, so the GPU issues roughly 8ND. Hardware utilization was therefore
+   strictly higher than the quoted 3%, and `bench` separately showed 5.6%.
+3. **What is left is kernel efficiency, and it is still unmeasured.** No profile
+   was ever taken and `nvidia-smi` utilization was never recorded — which is the
+   one number that separates "the card is busy doing inefficient work" from "the
+   card is idle waiting on the host". The first is an open-ended kernel problem;
+   the second is cheap. A later 5090 measurement at `MICRO_BATCH=1` showed
+   **9.6% GPU utilization**, pointing at the second, but one point at the
+   smallest batch size is not a conclusion. `deploy/sweep-cuda.sh` records both
+   columns; run it before believing any story about where the time goes.
+
+The runtime itself had already been taken through a 61× optimization ladder,
+every rung gated on bit-identical loss — so the remaining cost is not naive
+code. It is simply not yet attributed.
 
 **53.9% of the 1,833,157 steps hit the gradient clip.** For over half the run the
 update was a normalized direction rather than the scheduled one. That is a real
@@ -345,6 +366,36 @@ format, so a run started on one continues on another. On rented hardware,
 `deploy/train-cloud.sh` drives `train-segment` per shard directly from a
 pre-built plan, bypassing the 18 GB source JSONL.
 
+### Renting a box
+
+**Build here, not there.** The CUDA hosts need a GPU to *run* but not to
+*build*, so compile locally and ship the closure:
+
+```bash
+./deploy/push-prebuilt.sh root@HOST PORT     # binaries + runtime closure
+./deploy/push-bench.sh    root@HOST PORT     # source + a corpus shard
+ssh -p PORT root@HOST 'cd formalTransformer && BUILD_GEMM_CUDA=1 ./deploy/cloud-init.sh'
+```
+
+`cloud-init.sh` detects the prebuilt binaries and skips both the Nix install and
+the build, going straight to the `libcuda.so.1` resolution it still has to do.
+Letting it build on the box instead cost **~50 minutes of paid GPU time** on
+every instance measured — on one that advertised 72 cores but allocated 8.64.
+
+**What to ask for**, learned the expensive way:
+
+| | |
+|---|---|
+| Disk | **50 GB is enough when nothing is built there** — ~5 GB runtime closure, 15 GB corpus, 5.6 GB of checkpoint and snapshots, ~26 GB total. Building on the box is what needed 100 GB: GHC and the CUDA toolkit dwarf the runtime closure. Note both boxes measured gave 50 GB of container overlay regardless of what the listing advertised. |
+| Network | Verify it. One box advertised 2369 Mbps inbound and delivered ~50 KB/s, which would make the 15 GB corpus push take days. |
+| Host RAM | Shards of 32,000 documents are read into memory, not streamed; tokenizing the heaviest peaked at 7.3 GB. Cap corpus jobs with `GHCRTS=-M20g`. |
+| Max duration | Longer than the run. One 5090 listing capped at 16 hours. |
+
+Measure before committing to a long run: `deploy/sweep-cuda.sh` sweeps
+`MICRO_BATCH` × `GEMM_NUMERICS` and records throughput, peak memory, **GPU
+utilization**, and projected cost per completed run. Utilization beside MFU is
+what distinguishes a busy card from an idle one (§3).
+
 **Contract notes.** A run's schedule is anchored at creation, and `TRAIN_BATCH`
 is *semantic* — it enters the plan identity, so changing it requires a new plan.
 `MICRO_BATCH`, checkpoint cadence, and validation cadence are execution-only:
@@ -364,12 +415,20 @@ vocabulary is capped at 65,535.
 deploy/build-mixed-corpus.sh run/mixed-corpus.jsonl WIKI.jsonl run/c4 3 4
 # 2. learn a tokenizer from a sample of it
 formal-transformer learn-bpe run/mix-32k.bpe 32768 3 < sample.nul
-# 3. shard and plan in one pass
+# 3. shard and plan in one pass (last argument is documents per shard)
 TOKENIZER=run/mix-32k.bpe deploy/plan-corpus.sh \
-  run/mixed-corpus.jsonl run/mixed-bpe100m bpe100m 64 4000
+  run/mixed-corpus.jsonl run/mixed-bpe100m-s32000 bpe100m 64 32000
 ```
 
-Three things about this pipeline are easy to get wrong and were:
+Four things about this pipeline are easy to get wrong and were:
+
+**Size the shards against the checkpoint, not the RAM.** Shard size enters the
+plan identity, so it is fixed before step one and cannot be tuned later. Every
+boundary costs a process start plus a checkpoint round trip — 1.385 GB at 115M —
+so it has to be amortized over enough steps. The first bpe100m plan used 4,000
+documents and got 148 steps per shard; 32,000 gives ~1,180. Larger shards do
+cost host memory, since `prepareStdinWith` reads a whole shard rather than
+streaming (7.3 GB peak on the largest), so cap corpus jobs with `GHCRTS=-M20g`.
 
 **Interleave, never concatenate.** The trainer consumes shards in file order
 under one cosine schedule, so concatenating sources makes the run a curriculum —
@@ -519,28 +578,65 @@ depends on that host existing.
    ~64 (semantic: needs a new plan), warmup from 100 to ~2,000 steps, and the
    gradient clip revisited given the 53.9% clip rate.
 
-   **A blocker found and fixed while smoke-testing this preset**, worth naming
-   because scale exposed it and nothing at 10.6M could have: every
-   parameter-sized array was a boxed Haskell list. A `[Double]` costs ~40 bytes
-   an element against 8 in an unboxed vector, and a checkpoint holds three of
-   them (parameters, and both Adam moments) — so saving at 115M peaked near
-   28 GB to write a 1.4 GB file, and the same shape sat on the load and upload
-   paths. The 10.6M run never noticed because the cost is exactly linear: the
-   same code peaks at ~2.5 GB there.
+   **Two memory blockers found at this scale, both invisible at 10.6M because
+   the cost is linear in size and neither had a wrong-answer symptom.** Both
+   fixes are representation-only: same arithmetic, same on-disk format, gated on
+   bit-identical loss.
 
-   The fix is representation-only — `Data.Vector.Unboxed.Vector Double` for
-   `checkpointParameters` and the two moments, `Vector Bool` for the decay mask,
-   and storable-vector staging at the Futhark boundary in place of
-   `peekArray`/`withArray`. The optimizer is the same function of the same
-   `Double`s, and the on-disk format is untouched. Measured after: a 115M
-   train-plus-save step peaks at **8.8 GB** (was ~28 GB for the save alone) and
-   the checkpoint loads in 5.5 s at 4.1 GB. The acceptance test is in §9.
-3. **Broaden the corpus** — **done**. `run/mixed-bpe100m` holds 2,426 shards
-   over 9,700,651 documents: English Wikipedia interleaved 3:2 with FineWeb-Edu
-   `sample/10BT` (verified English-only from its own `language` column). The
-   plan is 359,314 steps at batch 64 = **5.89B tokens**, 51 tokens/parameter at
-   115M, 4.08 × 10¹⁸ FLOPs. Directly consumable:
-   `SIZE=bpe100m TRAIN_BATCH=64 RUN_DIR=run/mixed-bpe100m deploy/train-cloud.sh`.
+   - **Host: every parameter-sized array was a boxed list.** `[Double]` costs
+     ~40 bytes an element against 8 unboxed, and a checkpoint holds three
+     (parameters, both Adam moments), so saving at 115M peaked near 28 GB to
+     write a 1.4 GB file. Now `Data.Vector.Unboxed`, with storable staging at
+     the Futhark boundary in place of `peekArray`/`withArray`. Measured after: a
+     train-plus-save step peaks at **8.8 GB**, and the checkpoint loads in 5.5 s
+     at 4.1 GB. Acceptance test in §9.
+   - **Device: the arena never freed inside a step.** `withArena` wrapped a
+     whole micro-batch and everything allocated inside registered there —
+     including every cuBLAS output, since `deviceBatchedGemmForward` allocates
+     its result through `deviceZeros`, itself a Futhark entry. Peak was
+     therefore every intermediate from all twelve layers, forward and backward,
+     at once: ~20 GB at `MICRO_BATCH=8` and ~142 GB at 64, which is why the
+     batch was capped by memory rather than chosen for GEMM efficiency. The
+     arena is now a stack of windows and each layer opens one, which should put
+     micro 8 near 4.7 GB and bring micro 32 inside a 24 GB card.
+
+     Survivor handling is the subtle part — promote one allocated inside the
+     closing window or it leaks; leave one from further out alone or it is freed
+     twice — so the rules live in `backend/gemm/Arena.hs`, which has no CUDA
+     dependency, and the conformance harness checks all nine cases on any
+     machine. That matters because the CUDA runtime cannot be built without a
+     GPU toolchain and a mistake here is a use-after-free, not a wrong number.
+3. **Broaden the corpus** — **done**. English Wikipedia interleaved 3:2 with
+   FineWeb-Edu `sample/10BT` (verified English-only from its own `language`
+   column): 9,700,651 documents, 22,920,003 training windows, **5.86B tokens**,
+   51 tokens/parameter at 115M, 4.06 × 10¹⁸ FLOPs.
+
+   **Train from `run/mixed-bpe100m-s32000`** (304 shards, 358,276 steps):
+   `SIZE=bpe100m TRAIN_BATCH=64 RUN_DIR=run/mixed-bpe100m-s32000 deploy/train-cloud.sh`.
+   The original `run/mixed-bpe100m` sharded at 4,000 documents is the same data
+   — identical dataset hash, identical window totals — but 2,426 shards over
+   359,314 steps is **148 steps per shard**, and per §3.1 every shard boundary
+   costs a process start and a 1.385 GB checkpoint round trip. Re-sharding at
+   32,000 restores ~1,180 steps per shard.
+
+   Two things that re-sharding exposed, both fixed:
+
+   - **`validateCorpusArtifact` tested document-ID uniqueness with a `notElem`
+     recursion**, quadratic in shard size: a corpus load took 2.2 s at 4,000
+     documents and 156 s at 32,000. Every shard load paid it, on the training
+     box as well as the planner, so at 32k shards it would have added ~13 h of
+     pure loading and cancelled most of the win. Now a `Set`: 1.8 s / 14.9 s,
+     i.e. linear.
+   - **Plan steps are `ceil(train_windows / batch)` per shard, not floor**, so
+     every shard boundary creates one partial trailing batch and *fewer* shards
+     means *fewer* total steps (359,314 → 358,276). Expecting the opposite is an
+     easy mistake.
+
+   Regression fingerprint for any corpus change: the first 4,000 documents of
+   `run/mixed-corpus.jsonl` tokenize to
+   `fnv1a64-token-documents-v1:475873f12879ec40` over 12,681,240 ordinary
+   tokens. `run/mixed-corpus.jsonl` (37.5 GB) is only needed to build plans and
+   never goes to the training box.
 4. **Longer context**, with a caveat that must be tested first. The softmax
    layers are NoPE, and the decoder exploits the resulting permutation
    invariance over the cache. At 256 tokens this works. At 1024 those layers may
