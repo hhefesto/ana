@@ -41,9 +41,23 @@ cd "$repo_root"
 
 ssh_cmd="ssh -p $port"
 
-if [ "${SKIP_BUILD:-0}" != 1 ]; then
-  echo "push-prebuilt: building both CUDA hosts locally (no GPU needed)..."
+# Gate on the link before spending anything. A box that accepts SSH but resets
+# sustained transfers is unusable, and that has to be discovered in seconds
+# rather than after an hour of billed retries. SKIP_LINK_CHECK=1 to override.
+if [ "${SKIP_LINK_CHECK:-0}" != 1 ]; then
+  "$repo_root/deploy/check-link.sh" "$host" "$port" || {
+    echo "push-prebuilt: aborting — this box cannot carry the transfer." >&2
+    exit 1
+  }
 fi
+
+# Build BEFORE renting.  The flake's source is the git tree, so committing
+# changes its hash and the next build starts from scratch even when the file
+# contents are identical -- roughly 15 minutes, most of it Futhark's CUDA
+# codegen.  That is cheap on a workstation and pure waste with an instance
+# already billing, so run `nix build .#formal-transformer-cuda
+# .#formal-transformer-gemm-cuda` once the tree is committed and only then rent.
+echo "push-prebuilt: resolving local build (rebuilds if the tree changed since the last one)..."
 cuda=$(nix build --no-link --print-out-paths .#formal-transformer-cuda | tail -1)
 gemm=$(nix build --no-link --print-out-paths .#formal-transformer-gemm-cuda | tail -1)
 test -n "$cuda" && test -n "$gemm" || { echo "push-prebuilt: build produced no output paths" >&2; exit 1; }

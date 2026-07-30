@@ -43,11 +43,28 @@ data_dir=${DATA_DIR:-bench-data}
 test -f "$shard" || { echo "push-bench: shard not found: $shard" >&2; exit 1; }
 test -f "$tokenizer" || { echo "push-bench: tokenizer not found: $tokenizer" >&2; exit 1; }
 
-ssh_cmd="ssh -p $port"
+ssh_cmd="ssh -p $port -o ServerAliveInterval=15 -o ServerAliveCountMax=4"
+
+# Rented boxes reset long transfers: the rate bursts, collapses, and the peer
+# drops the connection partway.  One rsync invocation is therefore not a
+# transfer -- --partial keeps what arrived so each attempt resumes, and the
+# caller checks the result by size rather than trusting an exit code.
+retry_rsync() {
+  local attempt=1
+  until rsync -az --partial --timeout=120 --info=progress2 -e "$ssh_cmd" "$@"; do
+    attempt=$((attempt + 1))
+    if [ "$attempt" -gt 8 ]; then
+      echo "push-bench: transfer failed after 8 attempts" >&2
+      return 1
+    fi
+    echo "push-bench: interrupted, resuming ($attempt/8)..." >&2
+    sleep 5
+  done
+}
 
 echo "push-bench: target $host:$port"
 echo "push-bench: source tree -> ~/$remote_dir"
-rsync -az --info=progress2 -e "$ssh_cmd" \
+retry_rsync \
   --exclude='run/' \
   --exclude='weights/' \
   --exclude='.git/' \
@@ -62,8 +79,19 @@ rsync -az --info=progress2 -e "$ssh_cmd" \
 
 echo "push-bench: corpus + tokenizer -> ~/$data_dir"
 $ssh_cmd "$host" "mkdir -p '$data_dir'"
-rsync -az --info=progress2 -e "$ssh_cmd" \
-  "$shard" "$tokenizer" "$host:$data_dir/"
+# Rented links drop mid-transfer often enough that one attempt is not a
+# transfer.  --partial keeps what arrived so a retry resumes rather than
+# restarts, and the size check below is the actual acceptance test: rsync
+# exiting 0 through a pipeline has reported success on a missing file before.
+retry_rsync "$shard" "$tokenizer" "$host:$data_dir/"
+
+expected=$(stat -c %s "$shard")
+actual=$($ssh_cmd "$host" "stat -c %s '$data_dir/$(basename "$shard")' 2>/dev/null || echo 0" | tr -d '\r')
+if [ "$expected" != "$actual" ]; then
+  echo "push-bench: corpus is $actual bytes on the box, expected $expected" >&2
+  exit 1
+fi
+echo "push-bench: corpus verified ($actual bytes)"
 
 shard_base="$(basename "$shard")"
 tokenizer_base="$(basename "$tokenizer")"
