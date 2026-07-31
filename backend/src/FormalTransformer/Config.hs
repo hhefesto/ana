@@ -83,6 +83,36 @@ headDim c = modelDim c `div` headCount c
 -- per-head L2 normalization as q/k to the attended output before Wo,
 -- bounding the readout once the gates open (the unnormalized sum grows
 -- like 1/(1-alpha)).
+--
+-- MEASURED 2026-07-31, three arms at glaSmallPreset, 600 steps, batch 8, on
+-- 715K byte tokens, sequential backend (multicore is not reproducible), same
+-- schedule and same PRNG throughout.  Numbers are per-GLA-layer from act-stats.
+--
+--   arm            alpha_mean   frac>0.9   att_rms   clipped   final val
+--   tau=1  (ships) 0.41-0.49    0.0000     0.25-0.48 539/600   3.2251
+--   tau=16         0.93-0.94    0.88-0.93  1.58-2.02 228/600   3.3079
+--   tau=16 + norm  0.94-0.95    0.88-0.99  0.25000   525/600   3.2438
+--
+-- The diagnosis above is CONFIRMED and is worse than it reads: at tau=1 the
+-- fraction of gates above 0.9 is exactly 0.0000 in every GLA layer after 600
+-- steps.  Training does not open them.  Memory half-life is ~0.8 tokens, so
+-- the GLA layers are very nearly memoryless -- they are not doing the thing
+-- GLA exists to do.  tau=16 opens them (half-life ~9.5 tokens) and
+-- glaOutputNorm pins att_rms to exactly 1/sqrt(headDim), giving the tightest
+-- residual stream of the three.
+--
+-- But NEITHER ARM WINS on loss at this horizon, so both stay off.  tau=16
+-- alone is 2.5% worse and its apparently-halved clip rate is misleading: the
+-- median gradient norm merely fell below the clip (0.91 vs 1.43) while the
+-- tail got 8x WORSE (max 54.1 vs 6.67).  tau=16+norm lands within 0.6% of
+-- baseline with max 22.1.  600 steps of code and markdown at 242K parameters
+-- is a mechanism probe, not a quality verdict -- a longer memory cannot pay
+-- off in a horizon barely longer than the memory span.  The real experiment is
+-- a bpe10m/bpe100m A/B on a GPU.
+--
+-- These are architecture, so modelId (backend/gpu/Main.hs) folds them into the
+-- model identity: moving either one makes every existing checkpoint fail
+-- validateResume rather than being silently reinterpreted.
 gateTemperature :: Double
 gateTemperature = 1
 
