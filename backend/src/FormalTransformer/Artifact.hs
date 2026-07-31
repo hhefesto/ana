@@ -21,7 +21,7 @@ module FormalTransformer.Artifact
   , loadCorpusWithTokenizer
   ) where
 
-import Control.Exception (IOException, bracketOnError, try)
+import Control.Exception (IOException, bracket, bracketOnError, try)
 import Control.Monad (replicateM, unless)
 import Data.Bits (shiftL, xor, (.|.))
 import Data.Binary (Binary, decodeOrFail, encode, get, put)
@@ -50,7 +50,9 @@ import GHC.Generics (Generic)
 import Numeric (showHex)
 import System.Directory (doesFileExist, removeFile, renameFile)
 import System.FilePath (takeDirectory, takeFileName)
-import System.IO (hClose, hFlush, openBinaryTempFile)
+import System.IO (Handle, hClose, hFlush, openBinaryTempFile)
+import System.Posix.IO (OpenMode (ReadOnly), closeFd, defaultFileFlags, handleToFd, openFd)
+import System.Posix.Unistd (fileSynchronise, fileSynchroniseDataOnly)
 
 data Identity = Identity
   { modelIdentity :: !String
@@ -201,9 +203,37 @@ saveCheckpointAtomic path checkpoint = case validateCheckpoint checkpoint of
       (\(temporary, handle) -> do
         LBS.hPut handle (encodeCheckpointCompact valid)
         hFlush handle
-        hClose handle
-        renameFile temporary path)
+        -- hFlush only pushes the Handle's buffer into the page cache, so the
+        -- rename below was atomic against a crash but not durable against
+        -- power loss -- and a rented box dies by vanishing, not by exiting.
+        -- Sync the data, then sync the directory so the rename is on disk too.
+        -- handleToFd takes ownership of the descriptor and leaves the Handle
+        -- closed, which is why hClose is gone from here; the cleanup above
+        -- stays correct because hClose on a closed Handle is a no-op.
+        synchronizeHandle handle
+        renameFile temporary path
+        synchronizeDirectory directory)
     pure (Right ())
+
+-- fdatasync: the file's contents, without waiting on unrelated metadata.
+synchronizeHandle :: Handle -> IO ()
+synchronizeHandle handle =
+  bracket (handleToFd handle) closeFd fileSynchroniseDataOnly
+
+-- A rename is only durable once the containing directory has been synced.
+-- A failure here is not worth losing a completed shard over: by this point the
+-- data is on disk and the rename has happened, so swallowing it leaves exactly
+-- the pre-existing behaviour rather than turning a saved checkpoint into an
+-- error.
+synchronizeDirectory :: FilePath -> IO ()
+synchronizeDirectory directory = do
+  attempted <- try (bracket
+    (openFd directory ReadOnly defaultFileFlags)
+    closeFd
+    fileSynchronise)
+  case attempted of
+    Left exception -> const (pure ()) (exception :: IOException)
+    Right () -> pure ()
 
 loadCheckpoint :: FilePath -> IO (Either String Checkpoint)
 loadCheckpoint path = readArtifactFile "checkpoint" hint path decode

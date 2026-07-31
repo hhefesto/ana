@@ -23,6 +23,12 @@
 #   TRAIN_BATCH=8    must match the plan identity (batch is semantic)
 #   MICRO_BATCH=1    raise toward TRAIN_BATCH on a headless GPU (no watchdog)
 #   MAX_SHARDS=0     0 = whole plan; N = stop after N shards this run
+#   PERSISTENT=0     1 = train every remaining shard in ONE process and ONE
+#                    device context (train-plan) instead of one process per
+#                    shard. Saves the per-shard CUDA context creation, kernel
+#                    cache load, and process startup -- ~26 min of paid GPU
+#                    time over a 304-shard plan. Resume is by the checkpoint's
+#                    completed step, so the two modes are interchangeable.
 #   CHECKPOINT_EVERY=2000  checkpoint cadence (execution control; safe to change)
 #   VALIDATE_EVERY=2000    validation cadence (observation only)
 #   VALIDATION_WINDOWS=256 windows per validation observation. Matches the
@@ -87,6 +93,23 @@ export VALIDATE_EVERY="${VALIDATE_EVERY:-2000}"
 export VALIDATION_WINDOWS="${VALIDATION_WINDOWS:-256}"
 export SKIP_BIGRAM_GATE="${SKIP_BIGRAM_GATE:-1}"
 export FUT_CACHE="${FUT_CACHE:-run/futhark-cuda.cache}"
+
+# PERSISTENT=1 trains every remaining shard inside ONE process and ONE device
+# context.  The loop below starts a fresh process per shard, and each pays CUDA
+# context creation (5.15 s measured on a 5090), a kernel cache load, RTS and
+# binary startup, and a checkpoint round trip; §3.1 of the run document
+# attributes ~24% of the wiki run's wall clock to exactly that.  At 304 shards
+# the context creation alone is ~26 minutes of paid GPU time.
+#
+# The trainer resumes from the checkpoint's own completed step, so this is
+# interchangeable with the loop -- you can interrupt one and continue with the
+# other.  It still writes the .done markers deploy/pull-stages.sh counts.
+if [ "${PERSISTENT:-0}" = 1 ]; then
+  echo "train-cloud: persistent mode, one process for the whole plan"
+  MAX_SHARDS="$MAX_SHARDS" "$trainer" train-plan "$PLAN" "$RUN_DIR" "$CHECKPOINT" "$SIZE"
+  echo "train-cloud: finished. Checkpoint: $CHECKPOINT"
+  exit 0
+fi
 
 trained=0
 # Segment line: segment <k> <offset> <docs> <corpus_id> <tw> <vw> <steps> <seg_start> <seg_end>

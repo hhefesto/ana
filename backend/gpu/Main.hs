@@ -28,6 +28,7 @@ import FutharkKernels
 import GHC.Clock (getMonotonicTimeNSec)
 import System.Directory (copyFile, doesFileExist)
 import System.Environment (getArgs, lookupEnv, setEnv)
+import System.Mem (performGC)
 import System.Exit (die)
 import System.IO (BufferMode (LineBuffering), hFlush, hPutStrLn, hSetBuffering, stderr, stdout)
 import System.IO.Unsafe (unsafePerformIO)
@@ -82,6 +83,9 @@ main = do
       cfg <- chooseConfig size
       train corpus checkpoint
         (Segment total start end offset globalIdentity expectedCorpusIdentity) cfg
+    ["train-plan", plan, runDir, checkpoint, size] -> do
+      cfg <- chooseConfig size
+      trainPlan plan runDir checkpoint size cfg
     ["generate", checkpoint, text] -> generate checkpoint text 128
     ["generate", checkpoint, text, budgetText] -> parseNonnegative "MAXTOKENS" budgetText >>= generate checkpoint text
     ["check-checkpoint", checkpoint] -> checkCheckpoint checkpoint
@@ -96,7 +100,7 @@ main = do
     ["grad-compare", gradFile, tokensFile, size] -> chooseConfig size >>= gradCompare gradFile tokensFile
     ["head-path-probe"] -> headPathProbe bpe10mPreset
     ["head-path-probe", size] -> chooseConfig size >>= headPathProbe
-    _ -> die "usage: formal-transformer-gpu inspect [tiny|small|bpe10m|bpe100m|gla-small|gla] | warm-context [tiny|small|bpe10m|bpe100m|gla-small|gla] | train CORPUS CHECKPOINT (STEPS|epoch) [tiny|small|bpe10m|bpe100m|gla-small|gla] | train-segment CORPUS CHECKPOINT GLOBAL_TOTAL START END DOCUMENT_OFFSET GLOBAL_ID EXPECTED_CORPUS_ID SIZE | generate CHECKPOINT TEXT [MAXTOKENS] | check-checkpoint CHECKPOINT | evaluate CHECKPOINT CORPUS | bench CORPUS [tiny|small|bpe10m|bpe100m|gla-small|gla]"
+    _ -> die "usage: formal-transformer-gpu inspect [tiny|small|bpe10m|bpe100m|gla-small|gla] | warm-context [tiny|small|bpe10m|bpe100m|gla-small|gla] | train CORPUS CHECKPOINT (STEPS|epoch) [tiny|small|bpe10m|bpe100m|gla-small|gla] | train-segment CORPUS CHECKPOINT GLOBAL_TOTAL START END DOCUMENT_OFFSET GLOBAL_ID EXPECTED_CORPUS_ID SIZE | train-plan PLAN RUN_DIR CHECKPOINT SIZE | generate CHECKPOINT TEXT [MAXTOKENS] | check-checkpoint CHECKPOINT | evaluate CHECKPOINT CORPUS | bench CORPUS [tiny|small|bpe10m|bpe100m|gla-small|gla]"
 
 chooseConfig :: String -> IO Config
 chooseConfig "tiny" = pure tinyPreset
@@ -493,7 +497,19 @@ parseTarget "epoch" = pure EpochSteps
 parseTarget value = ExplicitSteps <$> parsePositive "STEPS" value
 
 train :: FilePath -> FilePath -> TrainingMode -> Config -> IO ()
-train corpusPath checkpointPath mode cfg = do
+train corpusPath checkpointPath mode cfg =
+  withContext (\ctx -> trainInContext ctx corpusPath checkpointPath mode cfg)
+
+-- The body of `train`, taking the device context rather than opening one, so
+-- that train-plan can hoist a single context above a whole shard loop.
+--
+-- Hoisting is a correctness requirement, not just an optimization: CudaBlasOps
+-- caches one process-global cuBLAS handle with no destroy path, bound to
+-- whichever CUDA context was live when the first GEMM ran.  A loop that opened
+-- and closed a context per shard would leave the second shard's first GEMM
+-- using a handle bound to a freed context.
+trainInContext :: Context -> FilePath -> FilePath -> TrainingMode -> Config -> IO ()
+trainInContext ctx corpusPath checkpointPath mode cfg = do
   batchSize <- positiveEnv "TRAIN_BATCH" 1
   microSize <- positiveEnv "MICRO_BATCH" batchSize
   when (microSize > batchSize) (die "MICRO_BATCH must not exceed TRAIN_BATCH")
@@ -601,7 +617,7 @@ train corpusPath checkpointPath mode cfg = do
     Nothing -> pure ()
     Just g -> logTraining ("bigram gate: sample=" ++ show (gateSampleCrossEntropy g)
       ++ " nats full=" ++ show (gateFullCrossEntropy g) ++ " nats")
-  withContext $ \ctx -> do
+  do
     params <- uploadF32Vector ctx params0
     m <- uploadF32Vector ctx (firstMoment state0)
     v <- uploadF32Vector ctx (secondMoment state0)
@@ -709,6 +725,107 @@ train corpusPath checkpointPath mode cfg = do
       saveSnapshot target rngFinal (progressBestValidationLoss progressFinal) paramsFinal mFinal vFinal
       logTraining ("saved checkpoint at completed step " ++ show target ++ ": " ++ checkpointPath)
       mapM_ (freeF32 ctx) [paramsFinal, mFinal, vFinal]
+
+-- One segment line of a run plan, as deploy/plan-corpus writes it:
+--   segment <k> <document_offset> <docs> <corpus_id> <tw> <vw> <steps> <seg_start> <seg_end>
+data PlanSegment = PlanSegment
+  { planSegmentIndex :: !Int
+  , planSegmentOffset :: !Word64
+  , planSegmentCorpusIdentity :: !String
+  , planSegmentStart :: !Int
+  , planSegmentEnd :: !Int
+  }
+
+-- Header: plan <version> <global_total_steps> <global_id> <...>
+parsePlan :: String -> Either String (Int, String, [PlanSegment])
+parsePlan contents = case map words (lines contents) of
+  [] -> Left "plan is empty"
+  (header : rest) -> do
+    (total, globalIdentity) <- case header of
+      ("plan" : _version : totalText : globalIdentity : _) ->
+        case readMaybe totalText of
+          Just total | total > 0 -> Right (total, globalIdentity)
+          _ -> Left "plan header has a non-positive global step total"
+      _ -> Left "plan header must begin with `plan`"
+    segments <- mapM parseSegment [fields | fields <- rest, take 1 fields == ["segment"]]
+    when (null segments) (Left "plan contains no segment lines")
+    pure (total, globalIdentity, segments)
+  where
+    parseSegment fields = case fields of
+      ["segment", indexText, offsetText, _docs, corpusIdentity,
+        _tw, _vw, _steps, startText, endText] ->
+        case (readMaybe indexText, readMaybe offsetText,
+              readMaybe startText, readMaybe endText) of
+          (Just index, Just offset, Just start, Just end) ->
+            Right (PlanSegment index offset corpusIdentity start end)
+          _ -> Left ("plan segment has unparseable numbers: " ++ unwords fields)
+      _ -> Left ("plan segment has the wrong field count: " ++ unwords fields)
+
+-- Trains every remaining shard of a run plan inside ONE process and ONE device
+-- context, replacing deploy/train-cloud.sh's loop of train-segment processes.
+--
+-- Each of those processes paid CUDA context creation (5.15 s measured on a
+-- 5090), a Futhark kernel compile or cache load, its own RTS and binary
+-- startup, and a checkpoint round trip.  The run document attributes ~24% of
+-- the wiki run's wall clock to exactly this; at 304 shards the context
+-- creation alone is ~26 minutes of paid GPU time.
+--
+-- Deliberately calls trainInContext per shard with no state carried across the
+-- boundary beyond the checkpoint file itself.  That makes the whole loop
+-- exactly N sequential train-segment invocations with the context lifted out,
+-- which is what backend/test's equivalence gate can prove byte for byte.
+-- Keeping params/m/v device-resident across shards would save the per-shard
+-- checkpoint load and the three uploads on top of this; it is a separate
+-- change, because it is the point where the trajectory could stop being
+-- reproducible by the fallback path.
+--
+-- Resume comes from the checkpoint's own completed step, not from the .done
+-- markers: the markers are shell state that can disagree with the checkpoint
+-- if a process died between the save and the touch.  They are still written,
+-- because deploy/pull-stages.sh counts them for progress.
+trainPlan :: FilePath -> FilePath -> FilePath -> String -> Config -> IO ()
+trainPlan planPath runDir checkpointPath size cfg = do
+  contents <- readFile planPath
+  (globalTotal, globalIdentity, segments) <- either die pure (parsePlan contents)
+  maxShards <- maybe (0 :: Int) (\raw -> maybe 0 id (readMaybe raw)) <$> lookupEnv "MAX_SHARDS"
+  completed <- do
+    existing <- doesFileExist checkpointPath
+    if existing
+      then adamStep . checkpointOptimizer <$> (loadCheckpoint checkpointPath >>= either die pure)
+      else pure 0
+  let remaining = [segment | segment <- segments, planSegmentEnd segment > completed]
+      selected = if maxShards > 0 then take maxShards remaining else remaining
+  logTraining ("train-plan: " ++ show (length segments) ++ " segments, completed step "
+    ++ show completed ++ "/" ++ show globalTotal ++ ", " ++ show (length selected)
+    ++ " to train this run")
+  -- ONE context for every shard below.  See trainInContext's note on why this
+  -- is required rather than merely faster.
+  withContext $ \ctx ->
+    let go [] = pure ()
+        go (segment : rest) = do
+          let index = planSegmentIndex segment
+              corpusPath = runDir ++ "/shard-" ++ show index ++ "-" ++ size ++ ".corpus"
+              marker = runDir ++ "/shard-" ++ show index ++ "-" ++ size ++ ".done"
+          present <- doesFileExist corpusPath
+          if not present
+            then logTraining ("train-plan: corpus for shard " ++ show index
+              ++ " is not present, stopping cleanly here: " ++ corpusPath)
+            else do
+              logTraining ("train-plan: shard " ++ show index ++ "  global "
+                ++ show (planSegmentStart segment) ++ ".." ++ show (planSegmentEnd segment)
+                ++ " / " ++ show globalTotal)
+              trainInContext ctx corpusPath checkpointPath
+                (Segment globalTotal (planSegmentStart segment) (planSegmentEnd segment)
+                  (planSegmentOffset segment) globalIdentity
+                  (planSegmentCorpusIdentity segment)) cfg
+              writeFile marker ""
+              -- The shard's ~3.2 GB of boxed [[Int64]] windows and its corpus
+              -- die with the call above; this is what makes the RTS hand the
+              -- pages back before the next shard allocates its own.
+              performGC
+              go rest
+    in go selected
+  logTraining ("train-plan: finished. checkpoint: " ++ checkpointPath)
 
 -- Synchronized step-time benchmark per the measurement contract: every
 -- measured interval starts with both device queues drained (the previous
