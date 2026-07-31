@@ -148,6 +148,10 @@ entry piece_write_slice (n: i64) (m: i64) (offset: i64)
     (destination: [n]f32) (source: [m]f32): [n]f32 =
   piece_slice_write offset destination source
 
+entry piece_concat (n: i64) (m: i64)
+    (a: [n]f32) (b: [m]f32): [n+m]f32 =
+  piece_concat_pair a b
+
 entry piece_gather_chunk (groups: i64) (chunk_count: i64) (elements: i64)
     (chunk_index: i64) (values: [groups*chunk_count*elements]f32)
     : [groups*elements]f32 =

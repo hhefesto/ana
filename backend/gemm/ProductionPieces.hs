@@ -132,6 +132,7 @@ productionPieceOpsWith extend ctx = extend PieceOps
       pure result
   , opsReadSlice = readSlice ctx
   , opsWriteSlice = writeSlice ctx
+  , opsConcat = concatPair ctx
   , opsGatherChunk = gatherChunkDevice ctx
   , opsPutChunk = putChunkDevice ctx
   }
@@ -449,6 +450,11 @@ writeSlice ctx offset (DevF32 destination n) (DevF32 source m) =
     entryPieceWriteSlice (rawContext ctx) out (f n) (f m) (f offset)
       destination source
 
+concatPair :: Context -> DevF32 -> DevF32 -> IO DevF32
+concatPair ctx (DevF32 a n) (DevF32 b m) =
+  output1 ctx "piece_concat" (n + m) $ \[out] ->
+    entryPieceConcat (rawContext ctx) out (f n) (f m) a b
+
 gatherChunkDevice :: Context -> Int -> Int -> Int -> Int -> DevF32 -> IO DevF32
 gatherChunkDevice ctx groups chunkCount elements chunkIndex (DevF32 values _) =
   output1 ctx "piece_gather_chunk" (groups * elements) $ \[out] ->
@@ -750,5 +756,6 @@ foreign import ccall safe "futhark_entry_clip_global_norm" entryClipGlobalNorm :
 foreign import ccall safe "futhark_entry_adamw_step" entryAdamwStep :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Int64 -> Float -> Float -> Float -> Float -> Float -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CBool_1d -> IO CInt
 foreign import ccall safe "futhark_entry_piece_read_slice" entryPieceReadSlice :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> IO CInt
 foreign import ccall safe "futhark_entry_piece_write_slice" entryPieceWriteSlice :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_piece_concat" entryPieceConcat :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
 foreign import ccall safe "futhark_entry_piece_gather_chunk" entryPieceGatherChunk :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> IO CInt
 foreign import ccall safe "futhark_entry_piece_put_chunk" entryPiecePutChunk :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt

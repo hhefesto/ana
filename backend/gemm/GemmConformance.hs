@@ -363,6 +363,7 @@ conformancePieceOps ctx = PieceOps
   , opsReadSlice = \offset count values -> pure (readSliceList offset count values)
   , opsWriteSlice = \offset destination source ->
       pure (writeSliceList offset destination source)
+  , opsConcat = \a b -> pure (a ++ b)
   , opsGatherChunk = \groups chunkCount elements chunkIndex values ->
       pure (gatherChunk groups chunkCount elements chunkIndex values)
   , opsPutChunk = \groups chunkCount elements chunkIndex destination source ->
@@ -399,6 +400,27 @@ dataMovementSmoke ctx = do
         compareVector ("piece write_slice offset=" ++ show offset) 0 0
           (asDouble (writeSliceList offset source13 patch)) (asDouble actual)
     | offset <- [0, 4, 8]
+    ]
+  -- piece_concat is what gradient assembly is now built from, so it carries the
+  -- same zero tolerance.  The empty operands matter: the balanced tree bottoms
+  -- out on odd-length rounds, and a zero-length parameter slice is legal.
+  sequence_
+    [ do
+        actual <- withF32 ctx left $ \leftArr ->
+          withF32 ctx right $
+            pieceConcat ctx (length left + length right)
+              (fromIntegral (length left)) (fromIntegral (length right)) leftArr
+        compareVector
+          ("piece concat " ++ show (length left) ++ "+" ++ show (length right))
+          0 0 (asDouble (left ++ right)) (asDouble actual)
+    | (left, right) <-
+        [ (take 5 source13, patch)
+        , (patch, take 5 source13)
+        , (source13, patch)
+        , ([], patch)
+        , (patch, [])
+        , ([], [])
+        ]
     ]
   sequence_
     [ do

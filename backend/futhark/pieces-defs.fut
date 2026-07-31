@@ -381,6 +381,17 @@ def piece_slice_write [n] [m] (offset: i64)
     then source[index - offset]
     else checked[index])
 
+-- Pairwise concatenation, the primitive gradient assembly is built from.
+--
+-- namedLayout's slices are contiguous and cover the parameter vector exactly
+-- (backend/test/Main.hs asserts both), and the decomposed traversal emits the
+-- named cotangents in that same order, so the flat gradient IS the ordered
+-- concatenation of them.  Folding piece_slice_write over the 119 slices instead
+-- rewrote the whole 115M-element vector once per slice: ~55 GB of traffic per
+-- step to place 461 MB.  A balanced tree of these brings it to O(m log k).
+def piece_concat_pair [n] [m] (a: [n]f32) (b: [m]f32): [n+m]f32 =
+  concat a b :> [n+m]f32
+
 def piece_chunk_gather [groups] [chunk_count] [elements] (chunk_index: i64)
     (values: [groups*chunk_count*elements]f32): [groups*elements]f32 =
   let checked = assert (chunk_index >= 0 && chunk_index < chunk_count) values

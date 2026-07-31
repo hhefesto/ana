@@ -101,6 +101,7 @@ data PieceOps buf tok = PieceOps
   , opsScope :: forall a. IO (a, [buf]) -> IO a
   , opsReadSlice :: Int -> Int -> buf -> IO buf
   , opsWriteSlice :: Int -> buf -> buf -> IO buf
+  , opsConcat :: buf -> buf -> IO buf
   , opsGatherChunk :: Int -> Int -> Int -> Int -> buf -> IO buf
   , opsPutChunk :: Int -> Int -> Int -> Int -> buf -> buf -> IO buf
   }
@@ -693,16 +694,68 @@ modelLossGradDecomposed ops cfg chunk batch effectiveBatch params tokens = do
     (zip3 (reverse [0 .. layerCount cfg - 1]) (reverse layers) inputsReversed)
   embeddingInputBar <- opsEmbeddingBackward ops vocab d tokens initialBar
   embeddingBar <- opsAddForward ops embeddingOutputBar embeddingInputBar
-  emptyGradient <- opsZeros ops (paramCount cfg)
-  gradient <- foldM (writeNamedSlice ops layout) emptyGradient
+  gradient <- assembleGradient ops layout (paramCount cfg)
     (("embedding", embeddingBar) : concat namedBars ++ [("final_rms", finalRmsBar)])
   unless (opsLength ops gradient == paramCount cfg) $
     ioError (userError "decomposed model gradient length mismatch")
   pure (loss, gradient)
 
+-- Builds the flat gradient from the named cotangents.
+--
+-- namedLayout's slices are contiguous and cover the parameter vector exactly
+-- (backend/test/Main.hs asserts both), and the decomposed traversal emits its
+-- cotangents in that same order -- reverseLayer prepends while walking layers
+-- backwards, and glaNamedGradient/softmaxNamedGradient list a block's slices in
+-- layout order.  So the gradient is simply the ordered concatenation, and a
+-- balanced tree of pairwise concatenations builds it in O(m log k).
+--
+-- The fold this replaces called piece_slice_write once per slice, and that
+-- kernel is a functional whole-array update: it rewrote all 115M elements to
+-- place one slice.  119 slices x 461 MB is ~55 GB of traffic per step to write
+-- 461 MB, 7.0% of kernel time at bpe100m.  The tree moves ~3.2 GB instead.
+--
+-- The precondition is checked rather than assumed: if the layout ever stops
+-- being a contiguous cover in emission order, this falls back to the fold.
+assembleGradient
+  :: PieceOps buf tok -> [Slice] -> Int -> [(String, buf)] -> IO buf
+assembleGradient ops layout total named
+  | concatenable = treeConcat ops (map snd named)
+  | otherwise = do
+      emptyGradient <- opsZeros ops total
+      foldM (writeNamedSlice ops layout) emptyGradient named
+  where
+    expected = [(sliceName slice, sliceOffset slice, sliceLength slice) | slice <- layout]
+    actual = [(name, opsLength ops values) | (name, values) <- named]
+    -- Same names in the same order, each cotangent the length its slice
+    -- declares, offsets exactly the running sum, and the whole vector covered.
+    concatenable =
+      map (\(name, _, _) -> name) expected == map fst actual
+        && map (\(_, _, len) -> len) expected == map snd actual
+        && map (\(_, offset, _) -> offset) expected
+             == scanl (+) 0 (init (map (\(_, _, len) -> len) expected))
+        && sum (map (\(_, _, len) -> len) expected) == total
+        && not (null expected)
+
+-- Pairwise merge, halving the list each round.  Operands are freed as soon as
+-- they are consumed, exactly as the fold did, so peak memory stays at one
+-- round's working set rather than the whole traversal's.
+treeConcat :: PieceOps buf tok -> [buf] -> IO buf
+treeConcat ops buffers = case buffers of
+  [] -> ioError (userError "gradient assembly needs at least one cotangent")
+  [single] -> pure single
+  _ -> mergePairs buffers >>= treeConcat ops
+  where
+    mergePairs (a : b : rest) = do
+      joined <- opsConcat ops a b
+      opsFree ops a
+      opsFree ops b
+      (joined :) <$> mergePairs rest
+    mergePairs remaining = pure remaining
+
 -- Writes one named parameter cotangent into the flat gradient vector at its
--- layout offset, so gradient assembly never concatenates on the host.  The
--- superseded gradient vector and the consumed cotangent are freed eagerly:
+-- layout offset.  Retained as the fallback for a layout that is not a
+-- contiguous cover in emission order; assembleGradient prefers the tree.
+-- The superseded gradient vector and the consumed cotangent are freed eagerly:
 -- without this the fold retains every intermediate full-parameter copy until
 -- the arena closes (~62 x 42 MB at bpe10m).
 writeNamedSlice
