@@ -35,8 +35,27 @@ import System.IO.Unsafe (unsafePerformIO)
 import Text.Printf (printf)
 import Text.Read (readMaybe)
 
+-- The model identity a checkpoint is stamped with and resumed against.
+--
+-- `Config` carries only the six Ints, so the GLA fix arms -- gateTemperature
+-- and glaOutputNorm (FormalTransformer.Config) -- were invisible here.  They
+-- are architecture: the gate is alpha = sigmoid(z)^(1/tau), so moving tau
+-- changes what every GLA layer's decay MEANS.  Without them in the identity a
+-- checkpoint trained at one setting loads without complaint under another and
+-- is silently evaluated as a different model -- no error, just quietly wrong
+-- output from a set of weights that cost days of GPU time.
+--
+-- The suffix is empty at the historical values, so identities minted before
+-- this existed are reproduced byte for byte and every stored checkpoint keeps
+-- loading.  Move either arm and validateResume rejects those checkpoints
+-- loudly, which is the entire point.
 modelId :: Config -> String
-modelId cfg = "formal-transformer-futhark-hybrid-gla-v2:" ++ show cfg
+modelId cfg = "formal-transformer-futhark-hybrid-gla-v2:" ++ show cfg ++ gateSuffix
+  where
+    gateSuffix
+      | gateTemperature == 1 && not glaOutputNorm = ""
+      | otherwise = ":tau=" ++ show gateTemperature
+                 ++ ":outnorm=" ++ show glaOutputNorm
 
 -- Schedule experiment overrides; the defaults are the historical constants.
 -- TRAIN_LR / TRAIN_WD / TRAIN_WARMUP change training semantics — use them
