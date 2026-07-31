@@ -57,7 +57,20 @@ fi
 # codegen.  That is cheap on a workstation and pure waste with an instance
 # already billing, so run `nix build .#formal-transformer-cuda
 # .#formal-transformer-gemm-cuda` once the tree is committed and only then rent.
-echo "push-prebuilt: resolving local build (rebuilds if the tree changed since the last one)..."
+# Warn before silently burning rented time.  A rebuild here is ~15 minutes,
+# mostly Futhark's CUDA codegen, and it happens on any commit -- the flake's
+# source is the git tree, so its hash changes even when file contents do not.
+needed=$(nix build --dry-run .#formal-transformer-cuda .#formal-transformer-gemm-cuda 2>&1 \
+  | grep -c "will be built" || true)
+if [ "${needed:-0}" != 0 ]; then
+  echo "push-prebuilt: WARNING — the local build is stale and will be rebuilt (~15 min)." >&2
+  echo "  The instance is billing while this runs. Build BEFORE renting:" >&2
+  echo "    nix build .#formal-transformer-cuda .#formal-transformer-gemm-cuda" >&2
+  echo "  Continuing in 10 s; Ctrl-C to abort and rebuild first." >&2
+  sleep 10
+fi
+
+echo "push-prebuilt: resolving local build..."
 cuda=$(nix build --no-link --print-out-paths .#formal-transformer-cuda | tail -1)
 gemm=$(nix build --no-link --print-out-paths .#formal-transformer-gemm-cuda | tail -1)
 test -n "$cuda" && test -n "$gemm" || { echo "push-prebuilt: build produced no output paths" >&2; exit 1; }

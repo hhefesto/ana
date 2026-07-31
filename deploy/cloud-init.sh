@@ -113,7 +113,17 @@ source_nix_profile || true
 if ! command -v nix >/dev/null; then
   if [ "$env_kind" = container ]; then
     echo "cloud-init: installing single-user Nix (root container)..."
-    rm -rf /nix   # clear any partial/failed install (the installer refuses if /nix exists)
+    # Only clear a /nix we can be sure is a failed install. push-prebuilt.sh
+    # copies the runtime closure straight into /nix/store with no Nix present,
+    # so a populated store here is shipped payload, not debris -- deleting it
+    # destroys the transfer it took minutes to make (observed, once).
+    if [ "$(ls -A /nix/store 2>/dev/null | head -1)" != "" ]; then
+      echo "cloud-init: /nix/store is populated but Nix is not installed." >&2
+      echo "  That is what push-prebuilt.sh produces. Refusing to wipe it." >&2
+      echo "  If this really is a broken install, remove /nix by hand and re-run." >&2
+      exit 1
+    fi
+    rm -rf /nix   # clear a partial/failed install (the installer refuses if /nix exists)
     curl -L https://nixos.org/nix/install | sh -s -- --no-daemon
   else
     echo "cloud-init: installing multi-user Nix (--daemon)..."
