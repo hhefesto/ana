@@ -90,17 +90,41 @@ echo "push-prebuilt: copying the closure into $host:/nix/store ..."
 # Store paths are immutable and content-addressed by their hash, so anything
 # already present is byte-identical -- skip it rather than re-send or try to
 # overwrite a read-only tree.
-rsync -a --ignore-existing --info=progress2 -e "$ssh_cmd" \
+#
+# -r is NOT redundant with -a here.  --files-from switches off the recursion
+# that -a would otherwise imply, so without it rsync creates each store path as
+# an empty directory and copies none of its contents -- silently, and with an
+# exit status of 0.  That shipped forty empty directories to a billing box and
+# read as success.
+rsync -a -r --ignore-existing --info=progress2 -e "$ssh_cmd" \
   --files-from="$closure" / "$host:/"
+
+# Acceptance test: compare the file count and byte total of each output path
+# against the local original.  Checking that the *binary runs* is not usable
+# here -- it legitimately fails until cloud-init resolves libcuda.so.1 -- and an
+# earlier version that fell back to a reassuring message on failure is exactly
+# how the empty-directory transfer went unnoticed.
+echo "push-prebuilt: verifying the transfer"
+for path in "$cuda" "$gemm"; do
+  want=$(find "$path" | wc -l)
+  want_bytes=$(du -sb "$path" | cut -f1)
+  read -r got got_bytes < <($ssh_cmd "$host" \
+    "find '$path' 2>/dev/null | wc -l; du -sb '$path' 2>/dev/null | cut -f1" \
+    | tr -d '\r' | paste -sd' ')
+  if [ "${got:-0}" != "$want" ] || [ "${got_bytes:-0}" != "$want_bytes" ]; then
+    echo "push-prebuilt: FAILED — $path is ${got:-0} entries / ${got_bytes:-0} bytes" >&2
+    echo "  on the box, expected $want entries / $want_bytes bytes." >&2
+    exit 1
+  fi
+  printf 'push-prebuilt: ok %s (%s entries, %s bytes)\n' "$(basename "$path")" "$want" "$want_bytes"
+done
 
 echo "push-prebuilt: linking result/ and result-gemm/ on the box"
 $ssh_cmd "$host" "mkdir -p '$remote_dir' \
   && ln -sfn '$cuda' '$remote_dir/result' \
   && ln -sfn '$gemm' '$remote_dir/result-gemm' \
-  && ls -l '$remote_dir/result' '$remote_dir/result-gemm' \
-  && '$remote_dir/result-gemm/bin/formal-transformer-gemm-cuda' inspect bpe100m >/dev/null 2>&1 \
-     && echo 'push-prebuilt: binary runs on the box' \
-     || echo 'push-prebuilt: binary present but did not run yet (cloud-init resolves libcuda.so.1)'"
+  && test -x '$remote_dir/result-gemm/bin/formal-transformer-gemm-cuda' \
+  && ls -l '$remote_dir/result' '$remote_dir/result-gemm'"
 
 cat <<EOF
 
