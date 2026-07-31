@@ -1116,16 +1116,16 @@ assertExact label expected actual = do
 assertGlaBlock :: (Int, BlockParameters) -> IO ()
 assertGlaBlock (i, block) = do
   assertCommonBlock i block
-  case blockWalpha block of
-    Nothing -> die ("GLA block " ++ show i ++ " is missing walpha")
-    Just walpha -> assertShape ("block " ++ show i ++ " walpha") (modelDim config) (modelDim config) walpha
+  case blockMixer block of
+    SoftmaxBlock -> die ("GLA block " ++ show i ++ " is missing walpha")
+    GlaBlock walpha -> assertShape ("block " ++ show i ++ " walpha") (modelDim config) (modelDim config) walpha
 
 assertSoftmaxBlock :: Int -> BlockParameters -> IO ()
 assertSoftmaxBlock i block = do
   assertCommonBlock i block
-  case blockWalpha block of
-    Nothing -> putStrLn ("block " ++ show i ++ " softmax has no walpha: exact")
-    Just _ -> die ("softmax block " ++ show i ++ " unexpectedly has walpha")
+  case blockMixer block of
+    SoftmaxBlock -> putStrLn ("block " ++ show i ++ " softmax has no walpha: exact")
+    GlaBlock _ -> die ("softmax block " ++ show i ++ " unexpectedly has walpha")
 
 assertCommonBlock :: Int -> BlockParameters -> IO ()
 assertCommonBlock i block = do
