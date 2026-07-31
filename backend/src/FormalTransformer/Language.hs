@@ -6,7 +6,8 @@ module FormalTransformer.Language
   , splits
   , single
   , scale
-  , foldScoring
+  , algebraScoring
+  , algebraLanguage
   , foldDetermination
   , LanguageState
   , initialState
@@ -27,6 +28,7 @@ module FormalTransformer.Language
   ) where
 
 import FormalTransformer.Config
+import FormalTransformer.Language.Autoregressive
 import FormalTransformer.Model
 import FormalTransformer.Semiring
 
@@ -81,18 +83,32 @@ single word = WeightedLanguage (\candidate -> if candidate == word then one else
 scale :: Semiring weight => weight -> WeightedLanguage token weight -> WeightedLanguage token weight
 scale weight language = WeightedLanguage ((weight <.>) . runWeightedLanguage language)
 
-foldScoring
+-- The monoidal score of a run: the accumulated step weights followed by the
+-- terminal observation.  Accumulation is LEFT-associated, deliberately, so
+-- that a Double weight sums in generation order.
+algebraScoring
   :: Monoid weight
-  => (state -> token -> (weight, state))
-  -> (state -> weight)
+  => StateAlgebra token weight state
   -> state
   -> WeightedLanguage token weight
-foldScoring step terminal initial = WeightedLanguage (go mempty initial)
+algebraScoring algebra initial = WeightedLanguage (go mempty initial)
   where
-    go score state [] = score <> terminal state
+    go score state [] = score <> algebraOut algebra state
     go score state (token : remaining) =
-      let (increment, state') = step state token
+      let (increment, state') = algebraStep algebra state token
       in go (score <> increment) state' remaining
+
+-- Autoregressive.agda's `unnormalized`: the language a state algebra denotes,
+-- pathWeight times the terminal observation of the reached state.  Where
+-- algebraScoring is monoidal (used for log weights), this is multiplicative
+-- in the semiring, and the `factorization` law is what makes them agree.
+algebraLanguage
+  :: Semiring weight
+  => StateAlgebra token weight state
+  -> state
+  -> WeightedLanguage token weight
+algebraLanguage algebra initial = WeightedLanguage $ \word ->
+  pathWeight algebra initial word <.> algebraOut algebra (runAlgebra algebra initial word)
 
 foldDetermination :: (state -> token -> state) -> state -> [token] -> state
 foldDetermination = foldl

@@ -41,7 +41,7 @@ namedLayout c = do
       , ("blocks." ++ show i ++ ".wo", d * d, True)
       ]
       ++ [ ("blocks." ++ show i ++ ".walpha", d * d, True)
-         | not (isSoftmaxLayer c i) ]
+         | layerKind c i == GlaKind ]
       ++
       [ ("blocks." ++ show i ++ ".rms_ff", d, False)
       , ("blocks." ++ show i ++ ".wgate", f * d, True)

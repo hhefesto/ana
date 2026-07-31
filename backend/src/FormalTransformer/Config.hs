@@ -5,6 +5,8 @@ module FormalTransformer.Config
   , validateConfig
   , headDim
   , paramCount
+  , LayerKind (..)
+  , layerKind
   , isSoftmaxLayer
   , glaLayerCount
   , tinyPreset
@@ -93,8 +95,22 @@ glaOutputNorm = False
 -- Softmax layers use no positional encoding; position lives in the GLA
 -- gates (data-dependent transitions subsume rotations).  See
 -- docs/RUN-2026-07-25-WIKI-FULL.md.
+-- Transformer/Specification.agda's LayerKind and kindOf.  A Bool named
+-- `isSoftmaxLayer` says which of two things a layer is only by convention;
+-- the sum type says it in the type, and every consumer must now handle both
+-- alternatives by name.
+data LayerKind = GlaKind | SoftmaxKind
+  deriving (Eq, Show)
+
+layerKind :: Config -> Int -> LayerKind
+layerKind _ i = if i `mod` 4 == 3 then SoftmaxKind else GlaKind
+
+-- Retained as a one-line shim.  backend/gemm, backend/gpu and
+-- backend/conformance are compiled by raw ghc in Nix derivations, several of
+-- which need CUDA or OpenCL to build at all; keeping this means none of them
+-- has to change to land the sum type.
 isSoftmaxLayer :: Config -> Int -> Bool
-isSoftmaxLayer _ i = i `mod` 4 == 3
+isSoftmaxLayer c i = layerKind c i == SoftmaxKind
 
 glaLayerCount :: Config -> Int
 glaLayerCount c = layerCount c - layerCount c `div` 4

@@ -17,10 +17,12 @@ library
   exposed-modules:
       FormalTransformer.AD
       FormalTransformer.Artifact
+      FormalTransformer.Attention.Gla
       FormalTransformer.Bigram
       FormalTransformer.Config
       FormalTransformer.Data
       FormalTransformer.Language
+      FormalTransformer.Language.Autoregressive
       FormalTransformer.Layout
       FormalTransformer.Model
       FormalTransformer.Optimizer

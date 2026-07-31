@@ -4,6 +4,7 @@ import Control.Exception (Exception, SomeException, displayException, finally, t
 import Control.Monad (forM_, unless)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
+import Data.List (transpose)
 import Data.Monoid (Sum (..))
 import qualified Data.Vector.Unboxed as VU
 import FormalTransformer.AD
@@ -11,7 +12,9 @@ import FormalTransformer.Artifact
 import FormalTransformer.Bigram
 import FormalTransformer.Config
 import FormalTransformer.Data
+import FormalTransformer.Attention.Gla
 import FormalTransformer.Language
+import FormalTransformer.Language.Autoregressive
 import FormalTransformer.Layout
 import FormalTransformer.Model
 import FormalTransformer.Optimizer
@@ -38,6 +41,11 @@ tests =
   , ("weighted-language convolution is a semiring", testConvolutionSemiring)
   , ("Brzozowski product rule", testProductRule)
   , ("single is a monoid morphism from words", testSingleMorphism)
+  , ("state-algebra runs and path weights factorize", testAlgebraFactorization)
+  , ("GLA attention is bit-identical to the frozen reference", testGlaFrozenReference)
+  , ("GLA chunk concatenation is exact", testGlaChunkLaw)
+  , ("GLA recurrent and parallel forms agree", testGlaRecurrentParallel)
+  , ("instrumented stats agree with the reference forward", testStatsAgreeWithForward)
   , ("language prefix scores factorize", testPrefixFactorization)
   , ("conditional path metrics compose", testPathComposition)
   , ("Bradley finite-tree magnitude", testBradleyMagnitude)
@@ -194,8 +202,12 @@ testGlaPresets = do
   -- Exact 3:1 tiling: 8 layers = 6 GLA + 2 softmax; 4 layers = 3 GLA + 1.
   assert (glaLayerCount glaPreset == 6 && glaLayerCount glaSmallPreset == 3)
     "hybrid 3:1 tiling differs"
+  assert (map (layerKind glaPreset) [0 .. 7]
+    == [GlaKind, GlaKind, GlaKind, SoftmaxKind, GlaKind, GlaKind, GlaKind, SoftmaxKind])
+    "softmax layer rule differs"
   assert (map (isSoftmaxLayer glaPreset) [0 .. 7]
-    == [False, False, False, True, False, False, False, True]) "softmax layer rule differs"
+    == [False, False, False, True, False, False, False, True])
+    "the isSoftmaxLayer shim disagrees with layerKind"
   assert (paramCount glaPreset == 13153600) "GLA preset parameter count differs"
   assert (paramCount glaSmallPreset == 242368) "GLA small parameter count differs"
   assert (sum (map sliceLength layout) == paramCount glaPreset)
@@ -233,7 +245,8 @@ testResidualLaws = do
       prefix = [2, 3]
       suffix = [4, 5]
       delta = singletonDelta 2 language
-      scoring = foldScoring (\state token -> (Sum token, state + token)) Sum 0 :: WeightedLanguage Int (Sum Int)
+      scoring = algebraScoring (StateAlgebra Sum (\state token -> (Sum token, state + token))) 0
+        :: WeightedLanguage Int (Sum Int)
   assert (nu (residual prefix language) == runWeightedLanguage language prefix) "nu of a residual differs from prefix evaluation"
   assert (runWeightedLanguage (residual suffix (residual prefix language)) []
     == runWeightedLanguage language (prefix ++ suffix)) "iterated residual does not append prefixes"
@@ -345,6 +358,160 @@ testSingleMorphism = do
       (sameLanguage (single (u ++ v) :: WeightedLanguage Int Bool) (single u <.> single v))
       "single is not a monoid morphism from word concatenation to convolution"
   where shortWords = [w | w <- testWords, length w <= 1]
+
+-- Autoregressive.agda proves `run-append` and `factorization`; both are
+-- exact at Semiring Int, so they are checked here with (==) over the same
+-- exhaustive word enumeration.  The third assertion is the payoff: the
+-- residual of an algebra's language IS the language of the algebra restarted
+-- at the state the prefix reaches.  That is why prefixLogScore may be
+-- computed incrementally at all.
+testAlgebraFactorization :: IO ()
+testAlgebraFactorization = do
+  forM_ [(xs, ys) | xs <- testWords, ys <- testWords] $ \(xs, ys) -> do
+    let reached = runAlgebra sampleAlgebra sampleStart xs
+    assert (runAlgebra sampleAlgebra sampleStart (xs ++ ys) == runAlgebra sampleAlgebra reached ys)
+      "runAlgebra does not respect concatenation"
+    assert (pathWeight sampleAlgebra sampleStart (xs ++ ys)
+      == pathWeight sampleAlgebra sampleStart xs <.> pathWeight sampleAlgebra reached ys)
+      "path weights do not factorize"
+    assert (runWeightedLanguage (residual xs (algebraLanguage sampleAlgebra sampleStart)) ys
+      == pathWeight sampleAlgebra sampleStart xs
+           <.> runWeightedLanguage (algebraLanguage sampleAlgebra reached) ys)
+      "the residual of an algebra's language is not the restarted algebra"
+  where
+    sampleStart = 3 :: Int
+    sampleAlgebra :: StateAlgebra Int Int Int
+    sampleAlgebra = StateAlgebra
+      { algebraOut = \state -> state + 1
+      , algebraStep = \state token -> (state + token + 1, state * 2 + token)
+      }
+
+-- A GLA-shaped config: two heads of four, so the per-head slicing and the
+-- interleaving in `map concat (transpose perHead)` are both exercised.  Only
+-- headDim and headCount are read by glaAttention.
+glaTestConfig :: Config
+glaTestConfig = Config 8 8 8 16 4 2
+
+-- Deterministic synthetic activations: no RNG, so the frozen-reference
+-- comparison below is reproducible bit for bit across machines.
+glaSample :: Int -> Double -> Int -> [[Double]]
+glaSample width seed count =
+  [ [ sin (seed + fromIntegral (t * 13 + i * 7)) | i <- [0 .. width - 1] ] | t <- [0 .. count - 1] ]
+
+glaTokensForTest :: Int -> Int -> [GlaToken Double]
+glaTokensForTest hd count =
+  [ GlaToken q k v alpha
+  | (q, k, v, alpha) <- zip4' (vecs 0.1) (vecs 0.7) (vecs 1.3) (map gate (vecs 2.1))
+  ]
+  where
+    vecs seed = glaSample hd seed count
+    gate = map (\x -> 0.5 + 0.4 * x)
+
+-- The regression barrier for Commit B and for every future edit to the GLA
+-- path.  This is the recursion Model.glaAttention carried before the state
+-- algebra was named, copied verbatim except that the local `zeroState` is
+-- renamed `zeros` to avoid shadowing the exported one; every float expression
+-- is character for character what it was.  The comparison is exact (==) — the
+-- conformance oracle's 3e-4 tolerance is loose enough to hide a reassociation,
+-- this is not.
+frozenGlaAttention :: Floating a => Config -> [[a]] -> [[a]] -> [[a]] -> [[a]] -> [[a]]
+frozenGlaAttention c qs ks vs alphas = map concat (transpose perHead)
+  where
+    hd = headDim c
+    perHead = [ headOutputs h | h <- [0 .. headCount c - 1] ]
+    headSlice vector h = take hd (drop (h * hd) vector)
+    headOutputs h = go zeros (zip4' qh kh vh ah)
+      where
+        qh = map (l2Normalize . (`headSlice` h)) qs
+        kh = map (l2Normalize . (`headSlice` h)) ks
+        vh = map (`headSlice` h) vs
+        ah = map (`headSlice` h) alphas
+        zeros = replicate hd (replicate hd 0)
+        go _ [] = []
+        go state ((q, k, v, alpha) : rest) =
+          let state' = zipWith3
+                (\ac kc row -> zipWith (\s vj -> ac * s + kc * vj) row v)
+                alpha k state
+              out = [ sum (zipWith (*) q col) | col <- transpose state' ]
+          in out : go state' rest
+
+testGlaFrozenReference :: IO ()
+testGlaFrozenReference = do
+  let width = modelDim glaTestConfig
+      steps = 6
+      qs = glaSample width 0.1 steps
+      ks = glaSample width 0.7 steps
+      vs = glaSample width 1.3 steps
+      alphas = map (map (\x -> 0.5 + 0.4 * x)) (glaSample width 2.1 steps)
+  assert (glaAttention glaTestConfig qs ks vs alphas == frozenGlaAttention glaTestConfig qs ks vs alphas)
+    "the GLA state-algebra refactor changed the numbers"
+  -- Truncation to the shortest input is part of the denotation (zip4').
+  assert (length (glaAttention glaTestConfig qs (take 4 ks) vs alphas) == 4)
+    "GLA attention no longer truncates to the shortest input"
+
+-- Linear.agda's runGLA-++, proved refl per step.  It is refl here too: the
+-- same multiplications happen in the same order, so this is exact even at
+-- Double, and a future chunked implementation that reassociates would fail it.
+testGlaChunkLaw :: IO ()
+testGlaChunkLaw = do
+  let hd = headDim glaTestConfig
+      tokens = glaTokensForTest hd 6
+  forM_ [0 .. length tokens] $ \cut -> do
+    let (before, after) = splitAt cut tokens
+    assert (stateRows (runGla (zeroState hd) (before ++ after))
+      == stateRows (runGla (runGla (zeroState hd) before) after))
+      "runGla does not respect chunk concatenation"
+
+-- Linear.agda's recurrent≡parallel.  Exact over a semiring, only approximate
+-- over floats: the closed form reassociates the gate products, which is
+-- exactly the licence the Futhark backend uses.  The initial state is
+-- deliberately nonzero, or the gateProd * S term would be untested.
+testGlaRecurrentParallel :: IO ()
+testGlaRecurrentParallel = do
+  let hd = headDim glaTestConfig
+      tokens = glaTokensForTest hd 6
+      initial = StateMatrix
+        [ [ 0.05 * fromIntegral (i * hd + j) | j <- [0 .. hd - 1] ] | i <- [0 .. hd - 1] ]
+  forM_ [0 .. length tokens] $ \count -> do
+    let prefix = take count tokens
+    assertVectorsNear 1e-10
+      (concat (stateRows (runGla initial prefix)))
+      (concat (stateRows (closedGla hd initial prefix)))
+      "recurrent and closed GLA forms disagree"
+
+-- runBlockStats used to be a hand-copied twin of runBlock with a comment
+-- asking future editors to keep them line-for-line equivalent, and nothing
+-- checking it.  They now share runBlockTrace, and this pins the agreement.
+-- glaSmallPreset is used because it has four layers, so both mixer
+-- alternatives are exercised (layer 3 is the softmax one).
+testStatsAgreeWithForward :: IO ()
+testStatsAgreeWithForward = do
+  let c = glaSmallPreset
+      ps = presetParams c
+      tokens = [0, 5, 9, 200, 3, 7]
+  stats <- expectRight (fullSequenceStats c ps tokens)
+  logits <- expectRight (fullSequenceLogits c ps tokens)
+  let scored = zip logits (drop 1 tokens)
+      losses = [logSumExp z - z !! t | (z, t) <- scored]
+      referenceLoss = sum losses / fromIntegral (length losses)
+  assertNear 1e-12 referenceLoss (actLoss stats)
+    "the instrumented forward disagrees with the reference forward"
+  assertNear 1e-12 (maximum (0 : map (maximum . map abs) logits)) (actLogitMax stats)
+    "the instrumented forward reports different logits"
+  assert (map blockStatsKind (actBlocks stats) == ["gla", "gla", "gla", "softmax"])
+    "block kinds no longer follow the 3:1 hybrid rule"
+  assert (map (fmap (const ()) . blockStatsAlpha) (actBlocks stats)
+    == [Just (), Just (), Just (), Nothing])
+    "gate statistics are reported for a softmax block, or missing from a GLA block"
+
+presetParams :: Config -> [Double]
+presetParams c = case namedLayout c of
+  Left message -> error message
+  Right layout -> concatMap values layout
+  where
+    values slice
+      | sliceDecay slice = [0.04 * sin (fromIntegral (sliceOffset slice + i + 1)) | i <- [0 .. sliceLength slice - 1]]
+      | otherwise = replicate (sliceLength slice) 1
 
 testPrefixFactorization :: IO ()
 testPrefixFactorization = do
