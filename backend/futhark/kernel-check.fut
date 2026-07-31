@@ -36,6 +36,33 @@ entry check_embed_bwd (v: i64) (d: i64) (count: i64)
   let output_bar = gen (count*d) 4 1.0f32
   in summary (piece_embed_scatter tokens output_bar : [v*d]f32)
 
+-- The superseded output-owned form of the embedding pullback, duplicated here
+-- (kernel-check imports pieces-defs, not pieces-conformance) so the grouped
+-- implementation can be differenced against it on both backends.
+def embed_scatter_reference [count] (v: i64) (d: i64)
+    (tokens: [count]i64) (output_bar_flat: [count*d]f32): [v*d]f32 =
+  let output_bar = unflatten output_bar_flat :> [count][d]f32
+  in tabulate (v*d) (\idx ->
+       let word = idx / d
+       let c = idx % d
+       in f32.sum (map (\i -> if tokens[i] == word then output_bar[i,c]
+                              else 0.0f32) (iota count)))
+
+-- Max absolute and max relative difference against the reference, over EVERY
+-- element.  Deliberately a maximum of the difference rather than a summary of
+-- the values: the piece_ce_dlogits miscompile produced a garbage gradient whose
+-- magnitude statistics looked ordinary, and only an element-wise comparison
+-- against an exact reference caught it.  Both must be ~1e-6 on both backends.
+entry check_embed_bwd_vs_reference (v: i64) (d: i64) (count: i64)
+    : (f32, f32) =
+  let tokens = gentok count v
+  let output_bar = gen (count*d) 4 1.0f32
+  let actual = piece_embed_scatter tokens output_bar : [v*d]f32
+  let expected = embed_scatter_reference v d tokens output_bar
+  in ( f32.maximum (map2 (\a b -> f32.abs (a - b)) actual expected)
+     , f32.maximum (map2 (\a b -> f32.abs (a - b) / (1.0f32 + f32.abs b))
+                         actual expected) )
+
 entry check_gate_cum_bwd (groups: i64) (chunk: i64) (hd: i64)
     : (f32, f32, f32) =
   let gate_logits = gen (groups*chunk*hd) 5 1.0f32

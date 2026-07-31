@@ -231,15 +231,63 @@ def piece_embed_gather [v] [d] [count]
   let checked = assert (v > 0 && valid_tokens v tokens) tokens
   in flatten (map (\token -> embedding[token]) checked)
 
+-- Segmented inclusive scan.  There is no futhark.pkg in this repo, so
+-- github.com/diku-dk/segmented is unavailable and the operator is spelled out.
+-- It is associative: the flag disjunction is, and the value branch takes the
+-- right operand whenever the right segment has already started.
+def segmented_scan_add [n] (flags: [n]bool) (values: [n]f32): [n]f32 =
+  let combine (f1, x1) (f2, x2) = (f1 || f2, if f2 then x2 else x1 + x2)
+  in map (.1) (scan combine (false, 0.0f32) (zip flags values))
+
+-- The pullback of the embedding gather: a scatter-add, since duplicate token
+-- IDs must accumulate rather than overwrite.
+--
+-- The obvious output-owned form -- tabulate (v*d) with an inner sum over every
+-- token -- is Theta(v*d*count), which at bpe100m is 4.1e11 element visits for
+-- 1.26e7 useful adds, one launch of ~129 ms, 12.5% of kernel time.  It is
+-- written that way because it is race-free: each output belongs to one thread.
+--
+-- This form keeps that property and drops the vocabulary factor.  Positions are
+-- grouped by token with a stable counting sort, then each word's contributions
+-- are summed by one segmented scan and placed by a scatter at distinct indices.
+--
+-- Deliberately NOT reduce_by_index over f32: its CUDA lowering accumulates with
+-- atomics, which makes the sum order vary run to run.  A 4.7-day training run
+-- has to be reproducible, so the only reduce_by_index here is over i64, where
+-- addition is exactly associative and commutative and the order cannot matter.
+--
+-- The sum order within a word differs from the superseded form (a flat reduce
+-- over all `count` slots, most of them zero), so this is not bit-identical to
+-- it; conf_piece_embed_scatter_reference in pieces-conformance.fut pins the
+-- agreement element-wise.
 def piece_embed_scatter [v] [d] [count]
     (tokens: [count]i64) (output_bar_flat: [count*d]f32): [v*d]f32 =
   let output_bar = unflatten output_bar_flat :> [count][d]f32
   let checked = assert (v > 0 && valid_tokens v tokens) tokens
+  -- How many positions carry each word, and where that word's run begins.
+  let counts = reduce_by_index (replicate v 0i64) (+) 0i64 checked
+                 (replicate count 1i64)
+  let inclusive = scan (+) 0i64 counts
+  let starts = map2 (-) inclusive counts
+  -- Rank of position i among the earlier positions carrying the same token.
+  -- Theta(count^2) and fully regular: no atomics, no irregular nesting, and
+  -- ~1500x below the cost this replaces.  A radix sort would make it
+  -- Theta(count log count) if `count` ever grows past a batch of windows.
+  let ranks = tabulate count (\i ->
+    i64.sum (map (\j -> if j < i && checked[j] == checked[i] then 1i64 else 0i64)
+                 (iota count)))
+  let destination = map2 (\token rank -> starts[token] + rank) checked ranks
+  -- Every destination is distinct, so this scatter is deterministic.
+  let order = scatter (replicate count 0i64) destination (iota count)
+  let sorted_tokens = map (\position -> checked[position]) order
+  let flags = tabulate count (\r -> r == 0 || sorted_tokens[r] != sorted_tokens[r-1])
+  let summed = tabulate d (\c ->
+    segmented_scan_add flags (map (\position -> output_bar[position, c]) order))
   in tabulate (v*d) (\idx ->
        let word = idx / d
        let c = idx % d
-       in f32.sum (map (\i -> if checked[i] == word then output_bar[i,c]
-                              else 0.0f32) (iota count)))
+       let n = counts[word]
+       in if n == 0 then 0.0f32 else summed[c, starts[word] + n - 1])
 
 -- [batch][n][h*hd] <-> [batch][h][n][hd], exact inverse permutations.
 def piece_split_heads [batch] [n] [h] [hd]

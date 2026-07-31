@@ -476,6 +476,11 @@
                 futhark check backend/futhark/bench.fut
                 futhark check backend/futhark/pieces.fut
                 futhark check backend/futhark/pieces-conformance.fut
+                # The cross-backend probes are run by hand on a rented box, but
+                # type-checking them here keeps them from bit-rotting against
+                # the definitions they are meant to police.
+                futhark check backend/futhark/kernel-check.fut
+                futhark check backend/futhark/intra-check.fut
                 futhark test --backend=c backend/futhark/tests.fut
                 futhark test --backend=c backend/futhark/pieces-conformance.fut
                 touch $out

@@ -58,7 +58,7 @@ import qualified Data.Vector.Unboxed as VU
 import Data.Word (Word64, Word8)
 import Decomposed (PieceOps (..))
 import Foreign
-import Foreign.C.String (CString, peekCString)
+import Foreign.C.String (CString, peekCString, withCString)
 import Foreign.C.Types (CInt (..))
 import GHC.Float (double2Float, float2Double)
 import System.Environment (lookupEnv)
@@ -154,6 +154,16 @@ withProductionContext action = bracket newConfig cConfigFree $ \cfg -> do
       whenNull cfg "Futhark context config allocation failed"
       profile <- lookupEnv "FUT_PROFILE"
       when (profile == Just "1") (cConfigSetProfiling cfg 1)
+      -- The CUDA backend compiles its embedded kernel source with NVRTC at
+      -- context creation.  FutharkKernels honours FUT_CACHE for the fused
+      -- trainer and deploy/train-cloud.sh exports it unconditionally, but this
+      -- module never read it -- so every process start of the production GEMM
+      -- trainer recompiled the whole pieces module from scratch, silently, with
+      -- the environment variable set and doing nothing.
+      cachePath <- lookupEnv "FUT_CACHE"
+      case cachePath of
+        Nothing -> pure ()
+        Just path -> withCString path (cConfigSetCacheFile cfg)
       pure cfg
     freeContext rawCtx = when (rawCtx /= nullPtr) $ do
       -- FUT_PROFILE=1: dump the runtime's per-kernel totals before the
@@ -692,6 +702,7 @@ traceOp message = when traceEnabled $ do
 foreign import ccall unsafe "futhark_context_config_new" cConfigNew :: IO (Ptr CContextConfig)
 foreign import ccall unsafe "futhark_context_config_free" cConfigFree :: Ptr CContextConfig -> IO ()
 foreign import ccall unsafe "futhark_context_config_set_profiling" cConfigSetProfiling :: Ptr CContextConfig -> CInt -> IO ()
+foreign import ccall unsafe "futhark_context_config_set_cache_file" cConfigSetCacheFile :: Ptr CContextConfig -> CString -> IO ()
 foreign import ccall safe "futhark_context_report" cContextReport :: Ptr CContext -> IO CString
 foreign import ccall safe "futhark_context_new" cContextNew :: Ptr CContextConfig -> IO (Ptr CContext)
 foreign import ccall safe "futhark_context_free" cContextFree :: Ptr CContext -> IO ()
