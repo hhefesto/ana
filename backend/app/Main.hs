@@ -18,6 +18,7 @@ import FormalTransformer.Model
 import FormalTransformer.Optimizer
 import FormalTransformer.Tokenizer
 import System.Environment (getArgs)
+import System.Exit (exitFailure)
 import System.IO (hPutStrLn, stderr, stdin)
 import Text.Read (readMaybe)
 
@@ -40,6 +41,7 @@ main = do
     ["inspect-corpus", path] -> inspectCorpus path
     ["inspect-checkpoint", path] -> inspectCheckpoint path
     ["compact-checkpoint", input, output] -> compactCheckpoint input output
+    ["compare-checkpoint", left, right] -> compareCheckpoint left right
     ["plan-segment", path, offsetText, batchText, size] ->
       planSegment path offsetText batchText size
     ["build-eval", output, planPath, runDir, perShardText, strideText] ->
@@ -51,7 +53,7 @@ main = do
     ["bigram-gate", path, "small"] -> bigramGateCommand path smallPreset
     ["bigram-gate", path, "bpe10m"] -> bigramGateCommand path bpe10mPreset
     ["bigram-gate", path, "bpe100m"] -> bigramGateCommand path bpe100mPreset
-    _ -> putStrLn "usage: formal-transformer (inspect | logits TOKENS | gradcheck | train-smoke | prepare-bytes OUTPUT INPUT... | prepare-stdin OUTPUT | prepare-bpe TOKENIZER OUTPUT INPUT... | prepare-bpe-stdin TOKENIZER OUTPUT | inspect-corpus PATH | inspect-checkpoint PATH | compact-checkpoint INPUT OUTPUT | plan-segment CORPUS DOCUMENT_OFFSET TRAIN_BATCH SIZE | build-eval OUTPUT PLAN RUN_DIR DOCS_PER_SHARD STRIDE | learn-bpe OUTPUT VOCABULARY [MIN_FREQUENCY] | bigram-gate CORPUS [tiny|small|bpe10m|bpe100m])"
+    _ -> putStrLn "usage: formal-transformer (inspect | logits TOKENS | gradcheck | train-smoke | prepare-bytes OUTPUT INPUT... | prepare-stdin OUTPUT | prepare-bpe TOKENIZER OUTPUT INPUT... | prepare-bpe-stdin TOKENIZER OUTPUT | inspect-corpus PATH | inspect-checkpoint PATH | compact-checkpoint INPUT OUTPUT | compare-checkpoint LEFT RIGHT | plan-segment CORPUS DOCUMENT_OFFSET TRAIN_BATCH SIZE | build-eval OUTPUT PLAN RUN_DIR DOCS_PER_SHARD STRIDE | learn-bpe OUTPUT VOCABULARY [MIN_FREQUENCY] | bigram-gate CORPUS [tiny|small|bpe10m|bpe100m])"
 
 tinyConfig :: Config
 tinyConfig = Config 5 6 4 6 2 2
@@ -311,6 +313,114 @@ inspectCheckpoint path = do
       putStrLn ("tokenizer: " ++ tokenizerIdentity identity)
       putStrLn ("dataset: " ++ datasetIdentity identity)
       putStrLn ("best validation loss: " ++ show (checkpointBestValidationLoss checkpoint))
+
+-- Element-wise comparison of two checkpoints.  The conformance oracle relates
+-- backends on a five-token toy model; this relates them on the real one, which
+-- is what the CPU-vs-GPU step-1 check needs and what `check-checkpoint` (an
+-- identity check on a single file) has never done.
+--
+-- The report is data, not a verdict: two backends summing f32 in different
+-- orders are expected to differ in the last bits, and only the caller knows
+-- what tolerance the comparison deserves.  Exit status is nonzero only when the
+-- two files cannot be compared at all — unreadable, or different shapes.
+--
+-- The cosine of the two first-moment vectors is the number to read first.  At
+-- step 1 from a fresh initialization m = (1-beta1)*g, so that cosine IS the
+-- gradient cosine — the statistic that caught the piece_ce_bwd miscompile, and
+-- the one an element-wise max-abs cannot report.
+compareCheckpoint :: FilePath -> FilePath -> IO ()
+compareCheckpoint leftPath rightPath = do
+  leftResult <- loadCheckpoint leftPath
+  rightResult <- loadCheckpoint rightPath
+  case (leftResult, rightResult) of
+    (Left message, _) -> failWith (leftPath ++ ": " ++ message)
+    (_, Left message) -> failWith (rightPath ++ ": " ++ message)
+    (Right left, Right right) -> do
+      let leftManifest = checkpointManifest left
+          rightManifest = checkpointManifest right
+      putStrLn ("left:  " ++ leftPath)
+      putStrLn ("right: " ++ rightPath)
+      putStrLn ("completed step: " ++ show (adamStep (checkpointOptimizer left))
+        ++ " vs " ++ show (adamStep (checkpointOptimizer right)))
+      putStrLn ("numerics: " ++ show (manifestNumerics leftManifest)
+        ++ " vs " ++ show (manifestNumerics rightManifest))
+      when (manifestConfig leftManifest /= manifestConfig rightManifest)
+        (failWith "checkpoint configs differ; the vectors are not comparable")
+      putStrLn ("config: " ++ show (manifestConfig leftManifest))
+      mapM_ (uncurry3 reportVector)
+        [ ("parameters", checkpointParameters left, checkpointParameters right)
+        , ("adam first moment", firstMoment (checkpointOptimizer left)
+          , firstMoment (checkpointOptimizer right))
+        , ("adam second moment", secondMoment (checkpointOptimizer left)
+          , secondMoment (checkpointOptimizer right))
+        ]
+  where
+    uncurry3 f (a, b, c) = f a b c
+    failWith message = hPutStrLn stderr ("compare-checkpoint: " ++ message) >> exitFailure
+
+-- Every statistic in ONE strict pass, with no intermediate vector.  At bpe100m
+-- each vector is 115,428,096 doubles = 923 MB, and the two checkpoints are
+-- already 5.5 GB live, so materializing even one difference vector exhausts a
+-- 12 GB heap.  All fields are strict, so the accumulator stays a flat unboxed
+-- record rather than a chain of thunks 115M deep.
+data VectorDiff = VectorDiff
+  { diffMaxAbs :: !Double
+  , diffMaxAbsIndex :: !Int
+  , diffMaxRel :: !Double
+  , diffMaxRelIndex :: !Int
+  , diffFirstIndex :: !Int      -- ^ -1 when the vectors are equal
+  , diffDot :: !Double
+  , diffLeftSquares :: !Double
+  , diffRightSquares :: !Double
+  }
+
+reportVector :: String -> VU.Vector Double -> VU.Vector Double -> IO ()
+reportVector label left right
+  | VU.length left /= VU.length right =
+      hPutStrLn stderr ("compare-checkpoint: " ++ label ++ " lengths differ: "
+        ++ show (VU.length left) ++ " vs " ++ show (VU.length right)) >> exitFailure
+  | VU.null left = putStrLn (label ++ ": empty")
+  | otherwise = do
+      putStrLn (label ++ ": elements=" ++ show (VU.length left)
+        ++ " identical=" ++ show (diffFirstIndex accumulated < 0))
+      putStrLn ("  max_abs=" ++ show (diffMaxAbs accumulated)
+        ++ " at index " ++ show (diffMaxAbsIndex accumulated)
+        ++ " (" ++ show (left VU.! diffMaxAbsIndex accumulated)
+        ++ " vs " ++ show (right VU.! diffMaxAbsIndex accumulated) ++ ")")
+      putStrLn ("  max_rel=" ++ show (diffMaxRel accumulated)
+        ++ " at index " ++ show (diffMaxRelIndex accumulated))
+      putStrLn ("  cosine=" ++ show cosine
+        ++ " norms=" ++ show leftNorm ++ " / " ++ show rightNorm)
+      if diffFirstIndex accumulated < 0
+        then putStrLn "  first differing index: none"
+        else putStrLn ("  first differing index: " ++ show (diffFirstIndex accumulated)
+          ++ " (" ++ show (left VU.! diffFirstIndex accumulated)
+          ++ " vs " ++ show (right VU.! diffFirstIndex accumulated) ++ ")")
+  where
+    accumulated = VU.ifoldl' step (VectorDiff (-1) 0 (-1) 0 (-1) 0 0 0) left
+    step acc index a =
+      let b = right VU.! index
+          absolute = abs (a - b)
+          -- Relative to the left operand, guarded so an exact zero cannot turn
+          -- an already-tiny absolute difference into an infinite ratio.
+          rel = absolute / max 1e-30 (abs a)
+          (bestAbs, bestAbsIndex)
+            | absolute > diffMaxAbs acc = (absolute, index)
+            | otherwise = (diffMaxAbs acc, diffMaxAbsIndex acc)
+          (bestRel, bestRelIndex)
+            | rel > diffMaxRel acc = (rel, index)
+            | otherwise = (diffMaxRel acc, diffMaxRelIndex acc)
+          firstIndex
+            | diffFirstIndex acc >= 0 = diffFirstIndex acc
+            | a /= b = index
+            | otherwise = -1
+      in VectorDiff bestAbs bestAbsIndex bestRel bestRelIndex firstIndex
+           (diffDot acc + a * b) (diffLeftSquares acc + a * a) (diffRightSquares acc + b * b)
+    leftNorm = sqrt (diffLeftSquares accumulated)
+    rightNorm = sqrt (diffRightSquares accumulated)
+    cosine
+      | leftNorm == 0 || rightNorm == 0 = 0
+      | otherwise = diffDot accumulated / (leftNorm * rightNorm)
 
 compactCheckpoint :: FilePath -> FilePath -> IO ()
 compactCheckpoint input output = do
