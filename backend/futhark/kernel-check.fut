@@ -79,6 +79,57 @@ entry check_l2_bwd (rows: i64) (d: i64) (h: i64)
   let (_, x_bar) = vjp2 (piece_l2norm_heads h) x output_bar
   in summary x_bar
 
+-- The superseded per-element form of l2_normalize_heads, which recomputed each
+-- head's norm for every output component.  Hoisting the norm is pure
+-- let-floating, so the forward must be EXACTLY equal -- this returns the max
+-- absolute difference, and anything but 0 means the hoist reassociated.
+def l2_normalize_heads_per_element [d] (h: i64) (x: [d]f32): [d]f32 =
+  let hd = d / h
+  in tabulate d (\j ->
+       let head_base = (j / hd) * hd
+       let norm = f32.sqrt (1.0e-6f32 +
+         f32.sum (map (\c -> x[head_base+c] * x[head_base+c]) (iota hd)))
+       in x[j] / norm)
+
+-- The three candidate pullbacks, isolated for timing.  check_l2_bwd above is
+-- vjp2 of the hoisted forward; these two are the superseded per-element vjp and
+-- the handwritten closed form, so a single run gives the whole comparison.
+entry check_l2_bwd_per_element (rows: i64) (d: i64) (h: i64)
+    : (f32, f32, f32) =
+  let x = gen (rows*d) 8 1.0f32
+  let output_bar = gen (rows*d) 9 1.0f32
+  let (_, x_bar) = vjp2 (\z ->
+    flatten (map (l2_normalize_heads_per_element h)
+                 (unflatten z :> [rows][d]f32))) x output_bar
+  in summary x_bar
+
+entry check_l2_bwd_closed (rows: i64) (d: i64) (h: i64)
+    : (f32, f32, f32) =
+  let x = gen (rows*d) 8 1.0f32
+  let output_bar = gen (rows*d) 9 1.0f32
+  in summary (piece_l2norm_heads_bars h x output_bar)
+
+entry check_l2_fwd_vs_per_element (rows: i64) (d: i64) (h: i64): f32 =
+  let x = gen (rows*d) 8 1.0f32
+  let hoisted = piece_l2norm_heads h x
+  let reference = flatten (map (l2_normalize_heads_per_element h)
+                               (unflatten x :> [rows][d]f32))
+  in f32.maximum (map2 (\a b -> f32.abs (a - b)) hoisted reference)
+
+-- The handwritten closed form against the AD-generated pullback, element-wise.
+-- These are different float expressions, so the bound is relative, not exact.
+-- `scale` deliberately shrinks x so some heads sit near the 1e-6 floor, where
+-- the epsilon dominates the norm and the two forms disagree most.
+entry check_l2_bwd_closed_vs_vjp (rows: i64) (d: i64) (h: i64) (scale: f32)
+    : (f32, f32) =
+  let x = gen (rows*d) 8 scale
+  let output_bar = gen (rows*d) 9 1.0f32
+  let (_, from_vjp) = vjp2 (piece_l2norm_heads h) x output_bar
+  let closed = piece_l2norm_heads_bars h x output_bar
+  in ( f32.maximum (map2 (\a b -> f32.abs (a - b)) closed from_vjp)
+     , f32.maximum (map2 (\a b -> f32.abs (a - b) / (1.0f32 + f32.abs b))
+                         closed from_vjp) )
+
 entry check_intra_bwd (groups: i64) (chunk: i64) (hd: i64)
     : (f32, f32, f32) =
   let q = gen (groups*chunk*hd) 1 1.0f32

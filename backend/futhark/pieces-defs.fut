@@ -16,6 +16,53 @@ def piece_l2norm_heads [rows] [d]
   in flatten (map (l2_normalize_heads h)
               (unflatten checked :> [rows][d]f32))
 
+-- Handwritten pullback of piece_l2norm_heads, in the piece_gla_intra_bars
+-- style: the quantities that depend only on (row, head) are computed once and
+-- shared by that head's hd components, and every output element is owned by one
+-- thread.
+--
+-- Per head, with s = 1e-6 + sum_c x_c^2, norm = sqrt s, and u = x / norm:
+--   y_j    = x_j / norm
+--   dy_j/dx_i = [i=j]/norm - x_j x_i / norm^3
+--   xbar_i = (obar_i - u_i * (u . obar)) / norm
+-- The epsilon is additive in s and so does not change the formula: it shifts
+-- norm, and norm is what the expression is written in terms of.
+--
+-- NOT wired into piece_l2norm_heads_bwd, which still takes vjp2 of the forward,
+-- and on present evidence it should stay that way.  Measured on the C backend
+-- at the bpe100m shape (rows=256, d=768, h=12, 20 reps): the superseded
+-- per-element vjp is 23,652 us, vjp of the hoisted forward is 4,953 us, and
+-- this closed form is 5,109 us.  Hoisting the norm (see l2_normalize_heads in
+-- model.fut) recovers the entire 4.8x on its own while leaving the pullback
+-- correct by construction; the handwritten form is 3% slower and carries the
+-- divergence risk for nothing.
+--
+-- It is kept because the CPU ranking need not survive to CUDA, where the cost
+-- being removed is lock-guarded atomic accumulation rather than arithmetic.
+-- check_l2_bwd_closed_vs_vjp and check_l2_bwd_closed in kernel-check.fut make
+-- the comparison reproducible on a real GPU; switching is one line in
+-- pieces.fut if the measurement there disagrees.
+def piece_l2norm_heads_bars [rows] [d]
+    (h: i64) (x_flat: [rows*d]f32) (output_bar_flat: [rows*d]f32): [rows*d]f32 =
+  let checked = assert (h > 0 && d > 0 && d % h == 0) x_flat
+  let hd = d / h
+  let x = unflatten checked :> [rows][d]f32
+  let output_bar = unflatten output_bar_flat :> [rows][d]f32
+  let norms = tabulate_2d rows h (\r head ->
+    let base = head * hd
+    in f32.sqrt (1.0e-6f32 +
+         f32.sum (map (\c -> x[r, base+c] * x[r, base+c]) (iota hd))))
+  -- u . obar, the only other quantity shared across a head's components.
+  let projections = tabulate_2d rows h (\r head ->
+    let base = head * hd
+    let norm = norms[r, head]
+    in f32.sum (map (\c -> (x[r, base+c] / norm) * output_bar[r, base+c])
+                    (iota hd)))
+  in flatten (tabulate_2d rows d (\r j ->
+       let head = j / hd
+       let norm = norms[r, head]
+       in (output_bar[r, j] - (x[r, j] / norm) * projections[r, head]) / norm))
+
 -- Input and relcum are [groups][chunk][hd], where groups is B*nc*h.
 -- dec is the total log-decay of each group/channel.
 def piece_gate_cum [groups] [chunk] [hd]

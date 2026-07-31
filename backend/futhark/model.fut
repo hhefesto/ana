@@ -96,16 +96,25 @@ def causal_attention [n] [d]
   in tabulate n (\i ->
        flatten (map (\head -> per_head[head, i]) (iota h)) :> [d]f32)
 
--- Per-head L2 normalization written per element (like RoPE used to be):
--- each output element recomputes its head's norm, so the definition stays a
--- flat tabulate and allocates nothing inside nested parallel constructs.
+-- Per-head L2 normalization.  The norm depends only on the head, never on the
+-- output component, so it is computed once per head here and shared by that
+-- head's hd components -- the same treatment causal_attention above already
+-- gets, and for the same reason.
+--
+-- Every output element is still the same expression as the per-component
+-- formulation this replaced (pure let-floating; no f32 reassociation, so the
+-- forward is bit-identical), but the forward work and -- critically -- the
+-- reverse-AD adjoint accumulations into the shared x slice shrink by a factor
+-- of hd.  Written per element, vjp made each of a head's hd outputs accumulate
+-- into all hd of its inputs, which is what compiles to lock-guarded updates on
+-- GPUs; piece_l2norm_heads_bwd was 16.5% of kernel time at bpe100m.
 def l2_normalize_heads [d] (h: i64) (x: [d]f32): [d]f32 =
   let hd = d / h
-  in tabulate d (\j ->
-       let head_base = (j / hd) * hd
-       let norm = f32.sqrt (1.0e-6f32 +
-         f32.sum (map (\c -> x[head_base+c] * x[head_base+c]) (iota hd)))
-       in x[j] / norm)
+  let norms = tabulate h (\head ->
+    let head_base = head * hd
+    in f32.sqrt (1.0e-6f32 +
+         f32.sum (map (\c -> x[head_base+c] * x[head_base+c]) (iota hd))))
+  in tabulate d (\j -> x[j] / norms[j / hd])
 
 -- Numerically stable log(sigmoid(z)) = -softplus(-z); the gate itself is
 -- never materialized, so a saturated sigmoid cannot produce log 0.

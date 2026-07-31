@@ -214,6 +214,49 @@ entry test_piece_ce_effective_batch: bool =
      grad[2] == -0.25f32 && grad[3] == 0.25f32 &&
      grad[4] == 0.0f32 && grad[5] == 0.0f32
 
+-- Hoisting the per-head norm out of l2_normalize_heads is pure let-floating, so
+-- the forward is required to be EXACTLY unchanged.  This pins that against a
+-- frozen copy of the per-element form at a shape with several heads.
+def l2_normalize_heads_per_element [d] (h: i64) (x: [d]f32): [d]f32 =
+  let hd = d / h
+  in tabulate d (\j ->
+       let head_base = (j / hd) * hd
+       let norm = f32.sqrt (1.0e-6f32 +
+         f32.sum (map (\c -> x[head_base+c] * x[head_base+c]) (iota hd)))
+       in x[j] / norm)
+
+-- ==
+-- entry: test_piece_l2norm_heads_hoist_is_exact
+-- input { }
+-- output { true }
+entry test_piece_l2norm_heads_hoist_is_exact: bool =
+  let rows = 5i64
+  let d = 24i64
+  let h = 4i64
+  let x = tabulate (rows*d) (\i -> f32.sin (f32.i64 (i * 11 + 1)))
+  let hoisted = piece_l2norm_heads_fwd rows d h x
+  let reference = flatten (map (l2_normalize_heads_per_element h)
+                               (unflatten x :> [rows][d]f32))
+  in all (\i -> hoisted[i] == reference[i]) (iota (rows*d))
+
+-- The handwritten closed-form pullback against the AD-generated one.  Different
+-- float expressions, so the bound is relative rather than exact.
+-- ==
+-- entry: test_piece_l2norm_heads_closed_matches_vjp
+-- input { }
+-- output { true }
+entry test_piece_l2norm_heads_closed_matches_vjp: bool =
+  let rows = 5i64
+  let d = 24i64
+  let h = 4i64
+  let x = tabulate (rows*d) (\i -> f32.sin (f32.i64 (i * 11 + 1)))
+  let output_bar = tabulate (rows*d) (\i -> f32.cos (f32.i64 (i * 7 + 3)))
+  let from_vjp = piece_l2norm_heads_bwd rows d h x output_bar
+  let closed = piece_l2norm_heads_bars h x output_bar
+  in all (\i -> f32.abs (closed[i] - from_vjp[i])
+                  <= 1.0e-5f32 * (1.0f32 + f32.abs from_vjp[i]))
+         (iota (rows*d))
+
 -- The superseded output-owned form of the embedding pullback, frozen here as
 -- the reference the grouped implementation must reproduce.  Theta(v*d*count),
 -- which is exactly why it is no longer what piece_embed_scatter does.
