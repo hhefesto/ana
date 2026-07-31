@@ -3,6 +3,9 @@ module FormalTransformer.Language
   , nu
   , residual
   , singletonDelta
+  , splits
+  , single
+  , scale
   , foldScoring
   , foldDetermination
   , LanguageState
@@ -25,6 +28,7 @@ module FormalTransformer.Language
 
 import FormalTransformer.Config
 import FormalTransformer.Model
+import FormalTransformer.Semiring
 
 newtype WeightedLanguage token weight = WeightedLanguage
   { runWeightedLanguage :: [token] -> weight
@@ -40,6 +44,42 @@ residual prefix language = WeightedLanguage (runWeightedLanguage language . (pre
 -- Elliott's one-token derivative is residualization by a singleton prefix.
 singletonDelta :: token -> WeightedLanguage token weight -> WeightedLanguage token weight
 singletonDelta token = residual [token]
+
+-- The weight is the functorial argument: reweighting a language is
+-- postcomposition, so `nu` and `residual` are natural in it.
+instance Functor (WeightedLanguage token) where
+  fmap f (WeightedLanguage run) = WeightedLanguage (f . run)
+
+-- Elliott's generalized convolution (arXiv:1903.10677).  The denotation is
+-- the free semimodule over [token]: addition is pointwise, and multiplication
+-- sums the products of every way a word splits in two.  Each definition is
+-- the pointwise structure transported through `runWeightedLanguage`, which is
+-- exactly what makes that projection a semiring homomorphism.
+instance Additive weight => Additive (WeightedLanguage token weight) where
+  zero = WeightedLanguage (const zero)
+  f <+> g = WeightedLanguage (\word -> runWeightedLanguage f word <+> runWeightedLanguage g word)
+
+instance Semiring weight => Semiring (WeightedLanguage token weight) where
+  one = WeightedLanguage (\word -> case word of { [] -> one; _ -> zero })
+  f <.> g = WeightedLanguage (\word ->
+    sumWith [runWeightedLanguage f prefix <.> runWeightedLanguage g suffix | (prefix, suffix) <- splits word])
+
+-- Every way to cut a word in two, shortest prefix first.  The head is always
+-- ([], word), which is what makes the Brzozowski product rule hold on the nose
+-- rather than only up to reassociation.
+splits :: [token] -> [([token], [token])]
+splits [] = [([], [])]
+splits (token : remaining) =
+  ([], token : remaining) : [(token : prefix, suffix) | (prefix, suffix) <- splits remaining]
+
+-- The language accepting exactly one word.  `single` is the monoid morphism
+-- from words to languages: single [] = one and single (u ++ v) = single u <.> single v.
+single :: (Eq token, Semiring weight) => [token] -> WeightedLanguage token weight
+single word = WeightedLanguage (\candidate -> if candidate == word then one else zero)
+
+-- Left scaling by a weight; the semimodule action underlying convolution.
+scale :: Semiring weight => weight -> WeightedLanguage token weight -> WeightedLanguage token weight
+scale weight language = WeightedLanguage ((weight <.>) . runWeightedLanguage language)
 
 foldScoring
   :: Monoid weight
@@ -80,6 +120,9 @@ prefixLogScore :: Config -> [Double] -> [Int] -> Either String Double
 prefixLogScore _ _ [] = Left "a scored prefix must contain an initial token"
 prefixLogScore c params (first : rest) = continuationLogScore c params (initialState first) rest
 
+-- Do NOT rewrite this with the PathMetric Monoid below.  The accumulation is
+-- left-associated, `mconcat` on lists is foldr, and the float association
+-- order is the denotation the conformance oracle pins.
 continuationLogScore :: Config -> [Double] -> LanguageState -> [Int] -> Either String Double
 continuationLogScore c params = go 0
   where
@@ -114,6 +157,22 @@ directedSurprisal = negate . pathLogProbability
 -- Composition is valid for consecutive conditional path probabilities.
 composeConditionalPath :: PathMetric -> PathMetric -> PathMetric
 composeConditionalPath (PathMetric first) (PathMetric second) = PathMetric (first + second)
+
+-- PathMetric is the composition monoid of Bradley's [0,1]-enriched category
+-- read in logs: the hom-object is a nonpositive finite log probability, the
+-- identity is 0 (probability one), and composition is addition.  The carrier
+-- is closed under it (a sum of nonpositive finite doubles is nonpositive) and
+-- pathIdentity is in the admitted subset, so this is a genuine Monoid.
+--
+-- Both identity laws hold exactly in IEEE: x + 0.0 == x for every finite x,
+-- and -0.0 is unreachable because pathMetric applies `min 0`, and
+-- min 0 (-0.0) = 0.0.  Associativity holds only up to rounding, the same
+-- caveat Bigram.hs's `Sum Double` already carries.
+instance Semigroup PathMetric where
+  (<>) = composeConditionalPath
+
+instance Monoid PathMetric where
+  mempty = pathIdentity
 
 bradleyMagnitude :: Double -> [[Double]] -> Int -> Either String Double
 bradleyMagnitude t distributions terminalCount

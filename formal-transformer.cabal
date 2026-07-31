@@ -24,6 +24,7 @@ library
       FormalTransformer.Layout
       FormalTransformer.Model
       FormalTransformer.Optimizer
+      FormalTransformer.Semiring
       FormalTransformer.Tokenizer
   build-depends:
       ad >=4.5 && <5,

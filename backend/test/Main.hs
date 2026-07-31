@@ -15,6 +15,7 @@ import FormalTransformer.Language
 import FormalTransformer.Layout
 import FormalTransformer.Model
 import FormalTransformer.Optimizer
+import FormalTransformer.Semiring
 import FormalTransformer.Tokenizer
 import System.Directory (doesFileExist, getTemporaryDirectory, removeFile)
 import System.Exit (exitFailure)
@@ -33,6 +34,10 @@ tests =
   , ("invalid configurations are rejected", testConfigRejection)
   , ("causal prefix logits are invariant", testCausalPrefix)
   , ("weighted-language residual laws", testResidualLaws)
+  , ("nu is a semiring homomorphism", testNuHomomorphism)
+  , ("weighted-language convolution is a semiring", testConvolutionSemiring)
+  , ("Brzozowski product rule", testProductRule)
+  , ("single is a monoid morphism from words", testSingleMorphism)
   , ("language prefix scores factorize", testPrefixFactorization)
   , ("conditional path metrics compose", testPathComposition)
   , ("Bradley finite-tree magnitude", testBradleyMagnitude)
@@ -238,6 +243,109 @@ testResidualLaws = do
   assert (getSum (runWeightedLanguage scoring [2, 3]) == 10) "fold scoring omitted step or terminal weights"
   assert (foldDetermination (+) (0 :: Int) [2, 3, 4] == 9) "fold determination differs from repeated transitions"
 
+-- The law tests for FormalTransformer.Semiring.  Every assertion below is an
+-- exact (==) at Bool or Int over an exhaustive enumeration of the words of
+-- length at most three over a two-letter alphabet.  Convolution only ever
+-- inspects subwords of its argument, so exhaustiveness up to length three is
+-- genuine coverage of every product these carriers can form there.
+testAlphabet :: [Int]
+testAlphabet = [0, 1]
+
+testWords :: [[Int]]
+testWords = concat [wordsOfLength n | n <- [0 .. 3 :: Int]]
+  where
+    wordsOfLength 0 = [[]]
+    wordsOfLength n = [token : word | token <- testAlphabet, word <- wordsOfLength (n - 1)]
+
+-- Extensional equality, restricted to the enumeration.  Languages are
+-- functions, so this is the only equality available.
+sameLanguage :: Eq weight => WeightedLanguage Int weight -> WeightedLanguage Int weight -> Bool
+sameLanguage f g = all agrees testWords
+  where agrees word = runWeightedLanguage f word == runWeightedLanguage g word
+
+boolLanguages :: [WeightedLanguage Int Bool]
+boolLanguages =
+  [ zero
+  , one
+  , single [0]
+  , single [1]
+  , single [0, 1]
+  , WeightedLanguage (even . length)
+  , WeightedLanguage (\word -> sum word == (1 :: Int))
+  ]
+
+intLanguages :: [WeightedLanguage Int Int]
+intLanguages =
+  [ zero
+  , one
+  , single [0]
+  , single [1, 0]
+  , WeightedLanguage length
+  , WeightedLanguage (\word -> sum word + 1)
+  ]
+
+testNuHomomorphism :: IO ()
+testNuHomomorphism = do
+  -- nu is evaluation at the empty word, and splits [] = [([], [])], so it is a
+  -- semiring homomorphism on the nose rather than only up to isomorphism.
+  assert (nu (zero :: WeightedLanguage Int Int) == zero) "nu of zero is not zero"
+  assert (nu (one :: WeightedLanguage Int Int) == one) "nu of one is not one"
+  assert (splits ([] :: [Int]) == [([], [])]) "splits of the empty word is not the trivial split"
+  forM_ [(f, g) | f <- intLanguages, g <- intLanguages] $ \(f, g) -> do
+    assert (nu (f <+> g) == nu f <+> nu g) "nu does not preserve addition"
+    assert (nu (f <.> g) == nu f <.> nu g) "nu does not preserve convolution"
+  forM_ [(f, g) | f <- boolLanguages, g <- boolLanguages] $ \(f, g) -> do
+    assert (nu (f <+> g) == nu f <+> nu g) "nu does not preserve disjunction"
+    assert (nu (f <.> g) == nu f <.> nu g) "nu does not preserve conjunction"
+
+testConvolutionSemiring :: IO ()
+testConvolutionSemiring = do
+  checkSemiring "Bool" boolLanguages
+  checkSemiring "Int" intLanguages
+  where
+    checkSemiring :: (Eq weight, Semiring weight) => String -> [WeightedLanguage Int weight] -> IO ()
+    checkSemiring carrier languages = do
+      forM_ languages $ \f -> do
+        assert (sameLanguage (zero <+> f) f) (carrier ++ ": zero is not a left additive identity")
+        assert (sameLanguage (f <+> zero) f) (carrier ++ ": zero is not a right additive identity")
+        assert (sameLanguage (one <.> f) f) (carrier ++ ": one is not a left multiplicative identity")
+        assert (sameLanguage (f <.> one) f) (carrier ++ ": one is not a right multiplicative identity")
+        assert (sameLanguage (zero <.> f) zero) (carrier ++ ": zero does not annihilate on the left")
+        assert (sameLanguage (f <.> zero) zero) (carrier ++ ": zero does not annihilate on the right")
+      forM_ [(f, g) | f <- languages, g <- languages] $ \(f, g) ->
+        assert (sameLanguage (f <+> g) (g <+> f)) (carrier ++ ": addition is not commutative")
+      forM_ [(f, g, h) | f <- languages, g <- languages, h <- languages] $ \(f, g, h) -> do
+        assert (sameLanguage ((f <+> g) <+> h) (f <+> (g <+> h))) (carrier ++ ": addition is not associative")
+        assert (sameLanguage ((f <.> g) <.> h) (f <.> (g <.> h))) (carrier ++ ": convolution is not associative")
+        assert (sameLanguage (f <.> (g <+> h)) ((f <.> g) <+> (f <.> h))) (carrier ++ ": convolution does not distribute on the left")
+        assert (sameLanguage ((f <+> g) <.> h) ((f <.> h) <+> (g <.> h))) (carrier ++ ": convolution does not distribute on the right")
+
+-- The reason `residual` exists, and until now unstated anywhere in Haskell:
+-- the one-token derivative of a convolution obeys Leibniz, with nu f as the
+-- scalar correction for the empty left factor.
+testProductRule :: IO ()
+testProductRule = do
+  checkRule "Bool" boolLanguages
+  checkRule "Int" intLanguages
+  where
+    checkRule :: (Eq weight, Semiring weight) => String -> [WeightedLanguage Int weight] -> IO ()
+    checkRule carrier languages =
+      forM_ [(t, f, g) | t <- testAlphabet, f <- languages, g <- languages] $ \(t, f, g) ->
+        assert
+          (sameLanguage
+            (singletonDelta t (f <.> g))
+            (scale (nu f) (singletonDelta t g) <+> (singletonDelta t f <.> g)))
+          (carrier ++ ": the Brzozowski product rule fails")
+
+testSingleMorphism :: IO ()
+testSingleMorphism = do
+  assert (sameLanguage (single [] :: WeightedLanguage Int Bool) one) "single of the empty word is not one"
+  forM_ [(u, v) | u <- shortWords, v <- shortWords] $ \(u, v) ->
+    assert
+      (sameLanguage (single (u ++ v) :: WeightedLanguage Int Bool) (single u <.> single v))
+      "single is not a monoid morphism from word concatenation to convolution"
+  where shortWords = [w | w <- testWords, length w <= 1]
+
 testPrefixFactorization :: IO ()
 testPrefixFactorization = do
   whole <- expectRight (prefixLogScore config params [0, 2, 3, 1])
@@ -257,6 +365,17 @@ testPathComposition = do
   assertNear 1e-12 (directedSurprisal whole)
     (directedSurprisal first + directedSurprisal second) "directed surprisal is not additive"
   assertNear 1e-12 1 (pathProbability pathIdentity) "path identity probability differs from one"
+  -- The Monoid instance is composeConditionalPath, and both identity laws hold
+  -- exactly in IEEE (x + 0.0 == x, and -0.0 is unreachable through pathMetric).
+  assert (mempty == pathIdentity) "path metric mempty is not the identity path"
+  assert (first <> second == composed) "the Monoid instance differs from composeConditionalPath"
+  forM_ [first, second, whole, pathIdentity] $ \p -> do
+    assert (mempty <> p == p) "path metric left identity is inexact"
+    assert (p <> mempty == p) "path metric right identity is inexact"
+    -- directedSurprisal is an exact monoid morphism into Sum Double: negation
+    -- of a sum is the sum of negations with no rounding.
+    assert (directedSurprisal (p <> p) == getSum (foldMap (Sum . directedSurprisal) [p, p]))
+      "directed surprisal is not an exact monoid morphism"
 
 testBradleyMagnitude :: IO ()
 testBradleyMagnitude = do
