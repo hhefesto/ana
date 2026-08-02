@@ -58,6 +58,18 @@ if [ -f run/cloud-env.sh ]; then
   . run/cloud-env.sh
 fi
 
+# Run-defining settings come from a file, not from shell history.  GEMM_NUMERICS
+# in particular enters the checkpoint manifest and validateResume rejects a
+# mismatch, so it is chosen once for the whole run and cannot be corrected
+# later; unset, it silently defaults to the slower Fp32IEEE.  Same variable and
+# same default as deploy/start-cloud-training.sh, so both entry points read one
+# file -- and sourcing it twice is harmless, because the file assigns with :=.
+# See deploy/bpe100m.env for the production run.
+if [ -f "${TRAIN_ENV_FILE:-run/train-cloud.env}" ]; then
+  # shellcheck disable=SC1090
+  . "${TRAIN_ENV_FILE:-run/train-cloud.env}"
+fi
+
 SIZE="${SIZE:-bpe10m}"
 BATCH="${TRAIN_BATCH:-8}"
 RUN_DIR="${RUN_DIR:-run/wiki-$SIZE}"
@@ -85,6 +97,11 @@ read -r tag _ver global_total global_id _rest < "$PLAN"
 echo "train-cloud: global_total=$global_total"
 echo "train-cloud: global_id=$global_id"
 echo "train-cloud: checkpoint=$CHECKPOINT batch=$BATCH micro=${MICRO_BATCH:-1} max_shards=$MAX_SHARDS"
+# Echo the run-defining settings, because the env file yields to anything
+# already exported: a stray SIZE or GEMM_NUMERICS in the shell silently wins,
+# and numerics cannot be corrected once the first checkpoint is written.
+echo "train-cloud: size=$SIZE run_dir=$RUN_DIR persistent=${PERSISTENT:-0}"
+echo "train-cloud: numerics=${GEMM_NUMERICS:-fp32 (default)} ordering=${GEMM_ORDERING:-default} trainer=$trainer"
 
 export TRAIN_BATCH="$BATCH"
 export MICRO_BATCH="${MICRO_BATCH:-1}"

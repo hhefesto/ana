@@ -375,7 +375,20 @@ pre-built plan, bypassing the 18 GB source JSONL.
 ./deploy/push-prebuilt.sh root@HOST PORT     # binaries + runtime closure
 ./deploy/push-bench.sh    root@HOST PORT     # source + a corpus shard
 ssh -p PORT root@HOST 'cd formalTransformer && BUILD_GEMM_CUDA=1 ./deploy/cloud-init.sh'
+
+# plan + tokenizer + the 15 GB corpus, in plan order — start training as soon
+# as shard 0 lands and let the rest stream in behind it (see below)
+TRAIN_ENV_FILE=deploy/bpe100m.env ./deploy/push-corpus.sh root@HOST PORT
 ```
+
+**Do not wait for the corpus before starting.** Both launch modes stop *cleanly*
+at the first absent shard (`backend/gpu/Main.hs:822`, `deploy/train-cloud.sh:121`)
+and resume from the checkpoint's own Adam step, and
+`deploy/watch-cloud-training.sh` re-invokes the idempotent launcher every 60 s.
+Segment 0 is 4,940 steps ≈ **92 minutes** at the measured 1.117 s/step, so
+shipping shard 0 first leaves 92 minutes to move the remaining 14.8 GB — about
+22 Mbit/s to stay ahead of the trainer. Run `push-corpus.sh` and
+`watch-cloud-training.sh` side by side.
 
 `cloud-init.sh` detects the prebuilt binaries and skips both the Nix install and
 the build, going straight to the `libcuda.so.1` resolution it still has to do.
@@ -612,7 +625,20 @@ depends on that host existing.
    51 tokens/parameter at 115M, 4.06 × 10¹⁸ FLOPs.
 
    **Train from `run/mixed-bpe100m-s32000`** (304 shards, 358,276 steps):
-   `SIZE=bpe100m TRAIN_BATCH=64 RUN_DIR=run/mixed-bpe100m-s32000 deploy/train-cloud.sh`.
+
+   ```bash
+   TRAIN_ENV_FILE=deploy/bpe100m.env deploy/train-cloud.sh
+   ```
+
+   Every run-defining setting lives in that one tracked file — `SHARD_ARTICLES`
+   (without it `PLAN` resolves to a `-s4000` name that does not exist),
+   `GEMM_NUMERICS=tf32` (unset, `GemmKernels.hs:131` silently defaults to the
+   slower `Fp32IEEE`, and numerics is in the checkpoint manifest so resume will
+   not let you change it later), `GEMM_ORDERING=stream`, `MICRO_BATCH=64`,
+   `PERSISTENT=1`, and the `result-gemm` trainer path. Values given on the
+   command line still win, e.g. `MAX_SHARDS=4 TRAIN_ENV_FILE=… deploy/train-cloud.sh`.
+   It sits in `deploy/` and not `run/` because `.gitignore` excludes `/run/`
+   wholesale, so a file there is never tracked and never reaches the box.
    The original `run/mixed-bpe100m` sharded at 4,000 documents is the same data
    — identical dataset hash, identical window totals — but 2,426 shards over
    359,314 steps is **148 steps per shard**, and per §3.1 every shard boundary
