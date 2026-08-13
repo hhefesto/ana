@@ -18,7 +18,7 @@ documents that preceded it.
 | Preset | `bpe10m` — `Config {vocabSize = 8192, contextSize = 256, modelDim = 320, ffDim = 864, layerCount = 6, headCount = 5}` |
 | Parameters | 10,571,840 |
 | Attention | hybrid 3:1 — every 4th layer is softmax, the other five are gated linear attention (GLA) |
-| Position | none in the softmax layers (NoPE); position is carried by the GLA gates |
+| Position | none in the softmax layers (NoPE); position was *meant* to be carried by the GLA gates — retracted below |
 | FFN | gated (SwiGLU-shaped): `wgate`, `wup`, `wdown` |
 | Embeddings | tied (one `embedding` slice, no separate output head) |
 | Head dim | 64 |
@@ -37,6 +37,19 @@ of a meaning rather than a postulate.
 
 The practical payoff is decoding: GLA layers step with O(1) state per token, and
 only the 1-in-4 softmax layers recompute over a bounded window.
+
+**Correction (2026-07-31): the gates never open, so "position is carried by the
+GLA gates" did not happen.** Measured at the shipped `gateTemperature = 1`, the
+fraction of gates above 0.9 is exactly 0.0000 in every GLA layer after 600
+steps, and memory half-life is ~0.8 tokens — the GLA layers are very nearly
+memoryless. Two fix arms were measured (gate temperature `tau=16`, which does
+open the gates, and a GLA output norm): **neither wins on loss at this
+horizon, so both stay off.** The knobs are folded into the model identity with
+a backward-compatible empty suffix (`gateSuffix` in `backend/gpu/Main.hs`), so
+existing checkpoints still validate. Long-range structure therefore rides on
+the NoPE softmax layers alone. Evidence:
+`backend/src/FormalTransformer/Config.hs` (the three-arm table and diagnosis)
+and `run/gate-arms-2026-07-31/`.
 
 **Parameter order.** Per block: `rms_att`, `wq`, `wk`, `wv`, `wo`, then `walpha`
 for GLA blocks only, then `rms_ff`, `wgate`, `wup`, `wdown`. Matrices are
@@ -102,14 +115,17 @@ folded into that one number, and only the third is about model size:
 2. **The figure is `6ND / wall`, but the backward recomputes each layer's
    forward**, so the GPU issues roughly 8ND. Hardware utilization was therefore
    strictly higher than the quoted 3%, and `bench` separately showed 5.6%.
-3. **What is left is kernel efficiency, and it is still unmeasured.** No profile
-   was ever taken and `nvidia-smi` utilization was never recorded — which is the
-   one number that separates "the card is busy doing inefficient work" from "the
-   card is idle waiting on the host". The first is an open-ended kernel problem;
-   the second is cheap. A later 5090 measurement at `MICRO_BATCH=1` showed
-   **9.6% GPU utilization**, pointing at the second, but one point at the
-   smallest batch size is not a conclusion. `deploy/sweep-cuda.sh` records both
-   columns; run it before believing any story about where the time goes.
+3. **What is left is kernel efficiency, and it has since been measured**
+   (`deploy/sweep-cuda.sh`, results in `run/sweep-5090/*.tsv`). On a 5090,
+   `nvidia-smi` utilization climbs monotonically with micro-batch — 9.8% at
+   micro 1 through 55.1% at micro 64 — with the production configuration
+   (micro 64, stream ordering) at **14,576 tok/s, 13.5% MFU, 54.3%
+   utilization**. So the answer to "busy doing inefficient work, or idle
+   waiting on the host?" is *batch-bound*: at small micro-batches the card
+   starves, and at micro 64 roughly half the remaining gap is kernel
+   efficiency (three Futhark kernels, not cuBLAS GEMMs, dominate the
+   profile). That kernel half is the only genuinely open utilization
+   problem left.
 
 The runtime itself had already been taken through a 61× optimization ladder,
 every rung gated on bit-identical loss — so the remaining cost is not naive
@@ -325,11 +341,11 @@ GitHub rejects files over 100 MB:
 
 ```bash
 ./weights/assemble.sh        # reassembles run/wiki-bpe10m-global.checkpoint, verifies SHA-256
-nix run .#wiki-generate      # asks for a prompt
-nix run .#wiki-generate -- --prompt "The theory of" --tokens 256
+nix run .#ana      # asks for a prompt
+nix run .#ana -- --prompt "The theory of" --tokens 256
 ```
 
-`wiki-generate` is offline by default: with no arguments it uses the last pulled
+`ana` is offline by default: with no arguments it uses the last pulled
 checkpoint (`run/last-checkpoint`), falling back to the newest compatible
 checkpoint under `run/`. Decoding samples the next-token distribution —
 `TEMPERATURE` (default 0.8), `TOP_K` (default 40), `SAMPLE_SEED` for
@@ -345,7 +361,7 @@ forward to ~6e-9 — the proved `cache-run` law, numerically.
 To pull weights from a training box, everything needed is an argument:
 
 ```bash
-nix run .#wiki-generate -- --pull --host user@10.0.0.5 --port 56861 --key ~/.ssh/id
+nix run .#ana -- --pull --host user@10.0.0.5 --port 56861 --key ~/.ssh/id
 ```
 
 A pull lands in `run/pulled-HOST-PORT-checkpoints/`, never on top of an existing
@@ -399,6 +415,7 @@ every instance measured — on one that advertised 72 cores but allocated 8.64.
 
 | | |
 |---|---|
+| GPU | **24 GB VRAM is the floor for bpe100m at the pinned `MICRO_BATCH=64`** — measured peak is 22,410 MiB, which fits a 24 GB card with ~1 GiB of margin (a 3090 runs it at 99% utilization); drop to micro 32 (13,576 MiB) if you want headroom. Expect ~4.7 days on a 5090 (~$55) or ~8.1 days on a $0.172/hr 3090 (~$33.50) for the full 358,276-step plan. |
 | Disk | **50 GB is enough when nothing is built there** — the runtime closure of both CUDA hosts measures **1.22 GB over 40 store paths**, against 15 GB of corpus and 5.6 GB of checkpoint plus snapshots: ~22 GB total. Building on the box is what needed 100 GB, since GHC and the CUDA toolkit dwarf what the loader actually needs. Both boxes measured gave 50 GB of container overlay regardless of the listing. |
 | Network | Verify it. One box advertised 2369 Mbps inbound and delivered ~50 KB/s, which would make the 15 GB corpus push take days. |
 | Host RAM | Shards of 32,000 documents are read into memory, not streamed; tokenizing the heaviest peaked at 7.3 GB. Cap corpus jobs with `GHCRTS=-M20g`. |
@@ -585,11 +602,14 @@ depends on that host existing.
 2. **Scale parameters, not epochs** — preset landed as `bpe100m`,
    `Config 32768 256 768 2048 12 12`, 115,428,096 parameters. The vocabulary
    moved from 8192 to 32,768 (25.2M of the budget, embeddings being tied),
-   which is what takes it to GPT-2-small scale and stops markup shattering. On the same 3.75B
-   tokens that is ~39 tokens/param, still a good regime, and ~2.17 × 10¹⁸ FLOPs
-   — hours on an A100/H100, gated on a measured `bench` MFU. Batch should rise to
-   ~64 (semantic: needs a new plan), warmup from 100 to ~2,000 steps, and the
-   gradient clip revisited given the 53.9% clip rate.
+   which is what takes it to GPT-2-small scale and stops markup shattering.
+   Batch did rise to 64 (`plan-bpe100m-b64-s32000.tsv` — semantic, so it took a
+   new plan). The "hours on an A100/H100" framing is superseded by measured
+   consumer-GPU plans: 4.66 days on a 5090, ~8.1 days on a 3090 (see the
+   addendum). **The warmup change (100 → ~2,000 steps) and the gradient-clip
+   revisit were NOT done** — `deploy/bpe100m.env` sets no `TRAIN_WARMUP`, so
+   the 115M run launched with the historical constants. Both remain open
+   hyperparameter questions, carried forward examined but unchanged.
 
    **Two memory blockers found at this scale, both invisible at 10.6M because
    the cost is linear in size and neither had a wrong-answer symptom.** Both
@@ -610,8 +630,11 @@ depends on that host existing.
      therefore every intermediate from all twelve layers, forward and backward,
      at once: ~20 GB at `MICRO_BATCH=8` and ~142 GB at 64, which is why the
      batch was capped by memory rather than chosen for GEMM efficiency. The
-     arena is now a stack of windows and each layer opens one, which should put
-     micro 8 near 4.7 GB and bring micro 32 inside a 24 GB card.
+     arena is now a stack of windows and each layer opens one. Measured on the
+     5090 sweep: micro 8 peaks at 7,048 MiB (the 4.7 GB prediction was ~47%
+     low), and the second half of the prediction holds with room to spare —
+     micro 32 peaks at 13,576 MiB and even micro 64 at 22,410 MiB, both inside
+     a 24 GB card.
 
      Survivor handling is the subtle part — promote one allocated inside the
      closing window or it leaks; leave one from further out alone or it is freed
@@ -635,7 +658,9 @@ depends on that host existing.
    `GEMM_NUMERICS=tf32` (unset, `GemmKernels.hs:131` silently defaults to the
    slower `Fp32IEEE`, and numerics is in the checkpoint manifest so resume will
    not let you change it later), `GEMM_ORDERING=stream`, `MICRO_BATCH=64`,
-   `PERSISTENT=1`, and the `result-gemm` trainer path. Values given on the
+   `PERSISTENT=1`, `TOKENIZER_FILE=run/enwiki-fineweb-32k.bpe`,
+   `CHECKPOINT=run/wiki-bpe100m-global.checkpoint`, and the `result-gemm`
+   trainer path. Values given on the
    command line still win, e.g. `MAX_SHARDS=4 TRAIN_ENV_FILE=… deploy/train-cloud.sh`.
    It sits in `deploy/` and not `run/` because `.gitignore` excludes `/run/`
    wholesale, so a file there is never tracked and never reaches the box.
@@ -671,3 +696,27 @@ depends on that host existing.
    baking the choice into an expensive run. If NoPE holds at 1024 that is a
    result worth publishing; if not, adding RoPE to the softmax layers is a
    contained change plus a `modelId` bump.
+
+## Addendum — 2026-08-12: the bpe100m run is live
+
+The 115M run this document planned launched on 2026-08-12 ~16:44 UTC on a
+rented vast.ai RTX 3090 ($0.172/hr), driven by the persistent trainer
+(`PERSISTENT=1` → `train-plan`: one process and one CUDA context across all
+304 shards, fdatasync'd checkpoints, gated byte-for-byte against the per-shard
+loop by `deploy/train-plan-gate.sh`) with every setting pinned in
+`deploy/bpe100m.env`.
+
+Measured on the box: **~0.51 steps/s ≈ 8,400 tok/s** at 99% GPU utilization
+and 22,587 MiB of the 24 GB — `MICRO_BATCH=64` fits a 3090 with ~1 GiB of
+margin, as the sweep predicted. Full-run projection ~8.1 days, ~$33.50, about
+58% of the 5090's throughput at 21% of its rental price. Loss EMA: 10.4 at
+step 0, 6.08 at step 2,000, 4.24 at step 16,000 (4.5%). Checkpoints land every
+2,000 steps (~65 min); the step-2,000 and step-16,000 checkpoints were pulled
+mid-run and sampled on a GPU-less CPU-only machine via the sequential backend,
+verifying end-to-end portability while the run continues.
+
+Corrections that postdate the original text are folded in above where the
+claims sit: the gate measurement in §1 (the GLA gates never open at the
+shipped temperature), the measured utilization curve in §3 (batch-bound, not
+model-size-bound), the GPU row in §8's rental table, and the measured arena
+peaks in §11.

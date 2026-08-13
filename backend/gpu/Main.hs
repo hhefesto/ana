@@ -8,7 +8,7 @@ import Data.Bits (rotateL, shiftL, shiftR, xor)
 import Data.IORef (modifyIORef', newIORef, readIORef)
 import Data.Int (Int64)
 import qualified Data.IntMap.Strict as IntMap
-import Data.List (foldl', isSuffixOf, sortOn)
+import Data.List (foldl', intercalate, isSuffixOf, sort, sortOn)
 import Data.Time (defaultTimeLocale, formatTime, getZonedTime)
 import Data.Word (Word64)
 import qualified Data.Text as Text
@@ -26,7 +26,7 @@ import FormalTransformer.Optimizer
 import FormalTransformer.Tokenizer
 import FutharkKernels
 import GHC.Clock (getMonotonicTimeNSec)
-import System.Directory (copyFile, doesFileExist)
+import System.Directory (copyFile, doesDirectoryExist, doesFileExist, getModificationTime, listDirectory)
 import System.Environment (getArgs, lookupEnv, setEnv)
 import System.Mem (performGC)
 import System.Exit (die)
@@ -108,6 +108,7 @@ main = do
     ["generate", checkpoint, text] -> generate checkpoint text 128
     ["generate", checkpoint, text, budgetText] -> parseNonnegative "MAXTOKENS" budgetText >>= generate checkpoint text
     ["check-checkpoint", checkpoint] -> checkCheckpoint checkpoint
+    ["checkpoint-info", checkpoint] -> checkpointInfo checkpoint
     ["evaluate", checkpoint, corpus] -> evaluate checkpoint corpus
     ["bench", corpus] -> bench corpus tinyPreset
     ["bench", corpus, size] -> chooseConfig size >>= bench corpus
@@ -119,17 +120,24 @@ main = do
     ["grad-compare", gradFile, tokensFile, size] -> chooseConfig size >>= gradCompare gradFile tokensFile
     ["head-path-probe"] -> headPathProbe bpe10mPreset
     ["head-path-probe", size] -> chooseConfig size >>= headPathProbe
-    _ -> die "usage: formal-transformer-gpu inspect [tiny|small|bpe10m|bpe100m|gla-small|gla] | warm-context [tiny|small|bpe10m|bpe100m|gla-small|gla] | train CORPUS CHECKPOINT (STEPS|epoch) [tiny|small|bpe10m|bpe100m|gla-small|gla] | train-segment CORPUS CHECKPOINT GLOBAL_TOTAL START END DOCUMENT_OFFSET GLOBAL_ID EXPECTED_CORPUS_ID SIZE | train-plan PLAN RUN_DIR CHECKPOINT SIZE | generate CHECKPOINT TEXT [MAXTOKENS] | check-checkpoint CHECKPOINT | evaluate CHECKPOINT CORPUS | bench CORPUS [tiny|small|bpe10m|bpe100m|gla-small|gla]"
+    _ -> die "usage: formal-transformer-gpu inspect [tiny|small|bpe10m|bpe100m|gla-small|gla] | warm-context [tiny|small|bpe10m|bpe100m|gla-small|gla] | train CORPUS CHECKPOINT (STEPS|epoch) [tiny|small|bpe10m|bpe100m|gla-small|gla] | train-segment CORPUS CHECKPOINT GLOBAL_TOTAL START END DOCUMENT_OFFSET GLOBAL_ID EXPECTED_CORPUS_ID SIZE | train-plan PLAN RUN_DIR CHECKPOINT SIZE | generate CHECKPOINT TEXT [MAXTOKENS] | check-checkpoint CHECKPOINT | checkpoint-info CHECKPOINT | evaluate CHECKPOINT CORPUS | bench CORPUS [tiny|small|bpe10m|bpe100m|gla-small|gla]"
+
+sizePresets :: [(String, Config)]
+sizePresets =
+  [ ("tiny", tinyPreset)
+  , ("small", smallPreset)
+  , ("small4", small4Preset)
+  , ("bpe10m", bpe10mPreset)
+  , ("bpe100m", bpe100mPreset)
+  , ("gla-small", glaSmallPreset)
+  , ("gla", glaPreset)
+  ]
 
 chooseConfig :: String -> IO Config
-chooseConfig "tiny" = pure tinyPreset
-chooseConfig "small" = pure smallPreset
-chooseConfig "small4" = pure small4Preset
-chooseConfig "bpe10m" = pure bpe10mPreset
-chooseConfig "bpe100m" = pure bpe100mPreset
-chooseConfig "gla-small" = pure glaSmallPreset
-chooseConfig "gla" = pure glaPreset
-chooseConfig value = die ("unknown model size: " ++ value ++ " (expected tiny, small, small4, bpe10m, bpe100m, gla-small, or gla)")
+chooseConfig value = case lookup value sizePresets of
+  Just cfg -> pure cfg
+  Nothing -> die ("unknown model size: " ++ value ++ " (expected "
+    ++ intercalate ", " (map fst sizePresets) ++ ")")
 
 inspect :: Config -> IO ()
 inspect cfg = either die (mapM_ print) (namedLayout cfg) >> do
@@ -1230,8 +1238,32 @@ validateResume cfg identity optCfg clipNorm numerics checkpoint = do
 -- Silent compatibility probe for checkpoint discovery: exit 0 iff this
 -- host's architecture (model identity + canonical layout) can interpret
 -- the checkpoint.  Loads and validates the artifact only; no Futhark
--- context is created.  wiki-generate uses this to skip checkpoints written
+-- context is created.  ana uses this to skip checkpoints written
 -- by a different architecture instead of dying on the newest file.
+-- Which weights are these: model, training position, and write time, printed
+-- from the manifest alone (loadCheckpointSummary) so ana can show a banner
+-- before its interactive prompt without parsing gigabytes of parameters.
+-- The mtime is the trainer's write time, not the download's: pulls preserve
+-- it (rsync -t), so it dates the weights themselves.
+checkpointInfo :: FilePath -> IO ()
+checkpointInfo path = do
+  (manifest, step) <- loadCheckpointSummary path >>= either die pure
+  mtime <- getModificationTime path
+  let cfg = manifestConfig manifest
+      scheduled = totalSteps (manifestOptimizerConfig manifest)
+      described = thousands (paramCount cfg) ++ " parameters (" ++ show cfg ++ ")"
+      model = case [label | (label, preset) <- sizePresets, preset == cfg] of
+        label : _ -> label ++ " — " ++ described
+        [] -> described
+      written = formatTime defaultTimeLocale "%Y-%m-%d %H:%M UTC" mtime
+  putStrLn ("checkpoint: " ++ path)
+  putStrLn ("model: " ++ model)
+  printf "trained: %d/%d updates (%.3f%%), weights written %s\n" step scheduled
+    (100 * fromIntegral step / fromIntegral scheduled :: Double) written
+
+thousands :: Int -> String
+thousands = reverse . intercalate "," . chunksOf 3 . reverse . show
+
 checkCheckpoint :: FilePath -> IO ()
 checkCheckpoint path = do
   checkpoint <- loadCheckpoint path >>= either die pure
@@ -1368,13 +1400,48 @@ tokenizerForIdentity :: String -> IO Tokenizer
 tokenizerForIdentity identity
   | identity == byteTokenizerIdentity = pure ByteTokenizer
   | otherwise = do
-      path <- lookupEnv "TOKENIZER_FILE" >>= maybe
-        (die "checkpoint uses BPE; set TOKENIZER_FILE to its .bpe artifact") pure
-      bpe <- loadFastBpe path >>= either die pure
-      let tokenizer = FastBpeTokenizer bpe
-      when (tokenizerIdentityOf tokenizer /= identity)
-        (die "TOKENIZER_FILE identity does not match the checkpoint")
-      pure tokenizer
+      pinned <- lookupEnv "TOKENIZER_FILE"
+      case pinned of
+        Just path -> do
+          bpe <- loadFastBpe path >>= either die pure
+          let tokenizer = FastBpeTokenizer bpe
+          when (tokenizerIdentityOf tokenizer /= identity)
+            (die ("TOKENIZER_FILE identity does not match the checkpoint\n  checkpoint: "
+              ++ identity ++ "\n  " ++ path ++ ": " ++ tokenizerIdentityOf tokenizer))
+          pure tokenizer
+        Nothing -> discoverTokenizer identity
+
+-- The checkpoint records its tokenizer's identity (a hash over the canonical
+-- merge list), so with no TOKENIZER_FILE the artifact is discovered rather
+-- than defaulted: the vendored and pulled .bpe files are scanned for the one
+-- whose identity matches.  A wrong guess cannot pass silently -- either an
+-- artifact matches the recorded identity or generation refuses to start.
+discoverTokenizer :: String -> IO Tokenizer
+discoverTokenizer identity = do
+  candidates <- concat <$> mapM bpeFilesIn ["run", "weights"]
+  loaded <- mapM loadFastBpe candidates
+  case [ (path, bpe) | (path, Right bpe) <- zip candidates loaded
+                     , tokenizerIdentityOf (FastBpeTokenizer bpe) == identity ] of
+    (path, bpe) : _ -> do
+      hPutStrLn stderr ("tokenizer: " ++ path ++ " (matched checkpoint identity)")
+      pure (FastBpeTokenizer bpe)
+    [] -> die (unlines
+      ( "checkpoint uses BPE and no candidate tokenizer matches its identity"
+      : ("  checkpoint: " ++ identity)
+      : "  candidates tried:"
+      : if null candidates
+          then ["    (none: no .bpe files in run/ or weights/)"]
+          else [ "    " ++ path ++ case result of
+                   Right bpe -> ": " ++ tokenizerIdentityOf (FastBpeTokenizer bpe)
+                   Left err -> ": unreadable (" ++ err ++ ")"
+               | (path, result) <- zip candidates loaded ]
+      ) ++ "set TOKENIZER_FILE to the matching .bpe artifact")
+  where
+    bpeFilesIn dir = do
+      exists <- doesDirectoryExist dir
+      if not exists then pure [] else do
+        entries <- listDirectory dir
+        pure [dir ++ "/" ++ entry | entry <- sort entries, ".bpe" `isSuffixOf` entry]
 
 -- Incremental decoding: the proved cache-run law executed.  Each prompt or
 -- sampled token is fed through decode_step exactly once; GLA layers carry a

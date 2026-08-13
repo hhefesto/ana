@@ -708,7 +708,7 @@
           # via --pull, and every connection detail is an argument, so an
           # arbitrary trainer can be named without editing anything.
           wikiGenerate = pkgs.writeShellApplication {
-            name = "wiki-generate";
+            name = "ana";
             runtimeInputs = [
               pkgs.coreutils
               pkgs.openssh
@@ -717,14 +717,16 @@
             text = ''
               usage() {
                 cat >&2 <<'USAGE'
-wiki-generate [OPTIONS] [PROMPT]
+ana [OPTIONS] [PROMPT]
 
 Generate text from a trained checkpoint.  With no options it uses the last
 pulled checkpoint and never contacts the network.
 
 Local:
   --checkpoint PATH        generate from this checkpoint (skips discovery)
-  --tokenizer PATH         tokenizer artifact (default weights/enwiki-8k.bpe)
+  --tokenizer PATH         tokenizer artifact (default: discovered by matching
+                           the checkpoint's identity against run/*.bpe and
+                           weights/*.bpe)
   --tokens N               generation budget (default 128)
   --prompt TEXT            prompt; also accepted as trailing arguments
   --list                   list local checkpoints with compatibility, then exit
@@ -767,7 +769,7 @@ USAGE
 
               need_value() {
                 if [ "$1" -lt 2 ]; then
-                  echo "wiki-generate: $2 needs a value" >&2
+                  echo "ana: $2 needs a value" >&2
                   exit 1
                 fi
               }
@@ -792,7 +794,7 @@ USAGE
                         shift
                       done
                       break ;;
-                  -*) echo "wiki-generate: unknown option $1" >&2; usage; exit 1 ;;
+                  -*) echo "ana: unknown option $1" >&2; usage; exit 1 ;;
                   *)  if [ "$prompt_set" = 1 ]; then prompt="$prompt $1"; else prompt="$1"; prompt_set=1; fi ;;
                 esac
                 shift
@@ -807,7 +809,7 @@ USAGE
               if [ -z "$tokenizer" ]; then tokenizer="''${WIKI_TOKENIZER:-}"; fi
               case "$tokens" in
                 ""|*[!0-9]*)
-                  echo "wiki-generate: --tokens must be a non-negative integer (got '$tokens')" >&2
+                  echo "ana: --tokens must be a non-negative integer (got '$tokens')" >&2
                   exit 1 ;;
               esac
 
@@ -823,7 +825,7 @@ USAGE
                   if [ -z "$remote_checkpoint" ]; then remote_checkpoint="''${WIKI_REMOTE_CHECKPOINT:-}"; fi
                 fi
                 if [ -z "$host" ]; then
-                  echo "wiki-generate: --pull needs a trainer to pull from" >&2
+                  echo "ana: --pull needs a trainer to pull from" >&2
                   echo "  pass --host user@host (with --port/--key as needed)," >&2
                   echo "  or set WIKI_REMOTE, or write run/remote-box.env" >&2
                   exit 1
@@ -835,7 +837,7 @@ USAGE
                 fi
                 case "$port" in
                   ""|*[!0-9]*)
-                    echo "wiki-generate: --port must be an integer (got '$port')" >&2
+                    echo "ana: --port must be an integer (got '$port')" >&2
                     exit 1 ;;
                 esac
                 case "$host" in
@@ -843,7 +845,7 @@ USAGE
                   *) host="''${user:-root}@$host" ;;
                 esac
                 if [ -n "$key" ] && [ ! -f "$key" ]; then
-                  echo "wiki-generate: ssh key not found: $key" >&2
+                  echo "ana: ssh key not found: $key" >&2
                   exit 1
                 fi
 
@@ -858,16 +860,16 @@ USAGE
                   printf -v key_quoted '%q' "$key"
                   ssh_command="$ssh_command -i $key_quoted"
                 fi
-                echo "wiki-generate: pulling $host:$remote_checkpoint -> $dest_dir/" >&2
+                echo "ana: pulling $host:$remote_checkpoint -> $dest_dir/" >&2
                 # rsync writes a temp file and renames, so a torn transfer never
                 # replaces good local weights.
                 if rsync -zt -e "$ssh_command" "$host:$remote_checkpoint" "$dest_dir/"; then
                   pulled="$dest_dir/$(basename "$remote_checkpoint")"
-                  echo "wiki-generate: pull complete: $pulled" >&2
+                  echo "ana: pull complete: $pulled" >&2
                   mkdir -p run
                   printf '%s\n' "$pulled" > run/last-checkpoint
                 else
-                  echo "wiki-generate: pull failed (box offline?); using local checkpoints" >&2
+                  echo "ana: pull failed (box offline?); using local checkpoints" >&2
                 fi
               fi
 
@@ -900,7 +902,7 @@ USAGE
                     "$mark" "$status" "$(stat -L --format=%s -- "$candidate")" "$candidate"
                 done
                 if [ "$found" = 0 ]; then
-                  echo "wiki-generate: no checkpoints under run/" >&2
+                  echo "ana: no checkpoints under run/" >&2
                 fi
                 echo "(* marks run/last-checkpoint, the no-argument default)" >&2
                 exit 0
@@ -912,7 +914,7 @@ USAGE
                 if [ -f "$pointer" ] && ${sequential} check-checkpoint "$pointer" >/dev/null 2>&1; then
                   checkpoint="$pointer"
                 else
-                  echo "wiki-generate: run/last-checkpoint names an unusable checkpoint ($pointer)" >&2
+                  echo "ana: run/last-checkpoint names an unusable checkpoint ($pointer)" >&2
                   echo "  falling back to newest-compatible discovery" >&2
                 fi
               fi
@@ -922,47 +924,50 @@ USAGE
                     checkpoint="$candidate"
                     break
                   else
-                    echo "wiki-generate: skipping incompatible checkpoint $candidate" >&2
+                    echo "ana: skipping incompatible checkpoint $candidate" >&2
                   fi
                 done
               fi
               if [ -z "$checkpoint" ]; then
-                echo "wiki-generate: no compatible checkpoint found under run/" >&2
+                echo "ana: no compatible checkpoint found under run/" >&2
                 echo "  vendored weights: ./weights/assemble.sh" >&2
-                echo "  pull from a trainer: wiki-generate --pull --host user@host --port N" >&2
+                echo "  pull from a trainer: ana --pull --host user@host --port N" >&2
                 echo "  or train first: nix run .#wiki-train" >&2
                 exit 1
               fi
               if [ ! -f "$checkpoint" ]; then
-                echo "wiki-generate: checkpoint not found: $checkpoint" >&2
+                echo "ana: checkpoint not found: $checkpoint" >&2
                 exit 1
               fi
+
+              # Which weights and model, before the prompt: reads only the
+              # checkpoint header, so it costs nothing next to generation.
+              ${sequential} checkpoint-info "$checkpoint" >&2
 
               if [ -z "$prompt_set" ] || [ "$prompt_set" = 0 ]; then
                 if [ -t 0 ]; then
                   printf 'prompt> ' >&2
                   IFS= read -r prompt || {
-                    echo "wiki-generate: no prompt entered" >&2
+                    echo "ana: no prompt entered" >&2
                     exit 1
                   }
                 else
-                  echo "wiki-generate: no prompt given and stdin is not a terminal" >&2
+                  echo "ana: no prompt given and stdin is not a terminal" >&2
                   echo "  pass --prompt TEXT (or set WIKI_PROMPT), or run interactively" >&2
                   exit 1
                 fi
               fi
 
-              if [ -z "$tokenizer" ] && [ -f weights/enwiki-8k.bpe ]; then
-                tokenizer="weights/enwiki-8k.bpe"
+              if [ -n "$tokenizer" ]; then
+                export TOKENIZER_FILE="$tokenizer"
               fi
-              export TOKENIZER_FILE="''${tokenizer:-$HOME/datasets/wikipedia-en/enwiki-8k.bpe}"
-              echo "wiki-generate: checkpoint=$checkpoint tokens=$tokens" >&2
-              echo "wiki-generate: loading model; generated text streams after initialization" >&2
+              echo "ana: tokens=$tokens" >&2
+              echo "ana: loading model; generated text streams after initialization" >&2
               exec ${sequential} generate "$checkpoint" "$prompt" "$tokens"
             '';
           };
           # Offline scoring on a fixed corpus. Same default-checkpoint rule as
-          # wiki-generate (run/last-checkpoint, then discovery), so "the model"
+          # ana (run/last-checkpoint, then discovery), so "the model"
           # means the same thing to both apps.
           #
           # Runs on the multicore host, not the sequential one: scoring every
@@ -984,7 +989,8 @@ a standard error.  Never samples: every full window in the corpus is scored.
   --checkpoint PATH   checkpoint to score (default: run/last-checkpoint, then
                       the newest compatible checkpoint under run/)
   --corpus PATH       evaluation corpus (default run/eval/wiki-heldout.corpus)
-  --tokenizer PATH    tokenizer artifact (default weights/enwiki-8k.bpe)
+  --tokenizer PATH    tokenizer artifact (default: discovered by matching the
+                      checkpoint's identity against run/*.bpe and weights/*.bpe)
   --micro N           windows per forward chunk (default 8)
   -h, --help          this message
 
@@ -1048,10 +1054,9 @@ USAGE
                 exit 1
               fi
 
-              if [ -z "$tokenizer" ] && [ -f weights/enwiki-8k.bpe ]; then
-                tokenizer="weights/enwiki-8k.bpe"
+              if [ -n "$tokenizer" ]; then
+                export TOKENIZER_FILE="$tokenizer"
               fi
-              export TOKENIZER_FILE="''${tokenizer:-$HOME/datasets/wikipedia-en/enwiki-8k.bpe}"
               export MICRO_BATCH="$micro"
               exec ${multicore} evaluate "$checkpoint" "$corpus"
             '';
@@ -1120,9 +1125,9 @@ USAGE
           program = "${wikiTrain}/bin/wiki-train";
           meta.description = "Start or resume Wikipedia training with default corpus, checkpoint, and schedule";
         };
-        wiki-generate = {
+        ana = {
           type = "app";
-          program = "${wikiGenerate}/bin/wiki-generate";
+          program = "${wikiGenerate}/bin/ana";
           meta.description = "Generate text from the latest Wikipedia checkpoint";
         };
         wiki-eval = {

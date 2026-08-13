@@ -2,7 +2,7 @@
 # One-shot, read-only pull of the newest atomically published checkpoint from a
 # training box.  This only copies a file off the box; it never writes remote
 # state or touches the training process.  The polling variant is
-# deploy/pull-checkpoint.sh; `wiki-generate --pull` does the same thing inline.
+# deploy/pull-checkpoint.sh; `ana --pull` does the same thing inline.
 #
 # Usage:
 #   deploy/pull-latest-weights.sh --host user@host [--port N] [--key PATH]

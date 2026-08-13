@@ -10,6 +10,7 @@ module FormalTransformer.Artifact
   , validateCheckpoint
   , saveCheckpointAtomic
   , loadCheckpoint
+  , loadCheckpointSummary
   , CorpusArtifact (..)
   , corpusArtifactVersion
   , datasetFingerprint
@@ -25,7 +26,7 @@ import Control.Exception (IOException, bracket, bracketOnError, try)
 import Control.Monad (replicateM, unless)
 import Data.Bits (shiftL, xor, (.|.))
 import Data.Binary (Binary, decodeOrFail, encode, get, put)
-import Data.Binary.Get (getByteString, getWord8, getWord16be, getWord32be, getWord64be, runGetOrFail)
+import Data.Binary.Get (Get, getByteString, getWord8, getWord16be, getWord32be, getWord64be, runGetOrFail)
 import Data.Binary.Put (putFloatbe, putWord8, putWord16be, putWord32be, putWord64be, runPut)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
@@ -50,7 +51,7 @@ import GHC.Generics (Generic)
 import Numeric (showHex)
 import System.Directory (doesFileExist, removeFile, renameFile)
 import System.FilePath (takeDirectory, takeFileName)
-import System.IO (Handle, hClose, hFlush, openBinaryTempFile)
+import System.IO (Handle, IOMode (ReadMode), SeekMode (AbsoluteSeek), hClose, hFileSize, hFlush, hSeek, openBinaryTempFile, withBinaryFile)
 import System.Posix.IO (OpenMode (ReadOnly), closeFd, defaultFileFlags, handleToFd, openFd)
 import System.Posix.Unistd (fileSynchronise, fileSynchroniseDataOnly)
 
@@ -253,6 +254,49 @@ loadCheckpoint path = readArtifactFile "checkpoint" hint path decode
 
 checkpointCompactMagic :: Word32
 checkpointCompactMagic = 0x46544332
+
+-- Manifest and optimizer step without parsing the parameter payload: in the
+-- compact layout both sit at offsets computable from the manifest's own
+-- encoded length, so a small header read plus one seek answers "which weights
+-- are these, how far along" in O(1) I/O on a multi-gigabyte checkpoint.
+-- Legacy-format files fall back to the full parse; they are the small old
+-- models, where the cost does not matter.
+loadCheckpointSummary :: FilePath -> IO (Either String (Manifest, Int))
+loadCheckpointSummary path = do
+  present <- doesFileExist path
+  if not present
+    then pure (Left ("checkpoint not found: " ++ path))
+    else do
+      summary <- withBinaryFile path ReadMode $ \handle -> do
+        prefix <- BS.hGet handle summaryPrefixBytes
+        case runGetOrFail getHeader (LBS.fromStrict prefix) of
+          Left _ -> pure Nothing
+          Right (_, consumed, (manifest, paramLength)) -> do
+            size <- hFileSize handle
+            let stepOffset = fromIntegral consumed + 4 * fromIntegral paramLength :: Integer
+            if stepOffset + 8 > size
+              then pure (Just (Left "checkpoint is shorter than its parameter count claims"))
+              else do
+                hSeek handle AbsoluteSeek stepOffset
+                stepBytes <- BS.hGet handle 8
+                case runGetOrFail (get :: Get Int) (LBS.fromStrict stepBytes) of
+                  Left (_, _, message) ->
+                    pure (Just (Left ("checkpoint optimizer step unreadable: " ++ message)))
+                  Right (_, _, step) -> pure (Just (Right (manifest, step)))
+      case summary of
+        Just result -> pure result
+        Nothing -> fmap (\checkpoint ->
+            ( checkpointManifest checkpoint
+            , adamStep (checkpointOptimizer checkpoint)
+            )) <$> loadCheckpoint path
+  where
+    summaryPrefixBytes = 65536
+    getHeader = do
+      magic <- getWord32be
+      unless (magic == checkpointCompactMagic) (fail "not a compact checkpoint")
+      manifest <- get
+      paramLength <- getWord64be
+      pure (manifest, paramLength)
 
 encodeCheckpointCompact :: Checkpoint -> LBS.ByteString
 encodeCheckpointCompact checkpoint = runPut $ do
