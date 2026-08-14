@@ -749,8 +749,8 @@ a later no-argument run uses.
 Environment fallbacks (arguments win): WIKI_PROMPT, WIKI_TOKENS,
 WIKI_CHECKPOINT, WIKI_TOKENIZER, and for --pull: WIKI_REMOTE,
 WIKI_REMOTE_PORT, WIKI_REMOTE_KEY, WIKI_REMOTE_CHECKPOINT, or the same
-assignments in run/remote-box.env.  TEMPERATURE, TOP_K and SAMPLE_SEED shape
-decoding.
+assignments in run/remote-box.env.  TEMPERATURE, TOP_P, TOP_K and SAMPLE_SEED
+shape decoding (defaults: temperature 0.8, nucleus top-p 0.95, top-k off).
 USAGE
               }
 
