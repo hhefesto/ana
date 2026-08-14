@@ -428,6 +428,63 @@ Two things worth *knowing* rather than adopting:
 
 ---
 
+## 9. Addendum — GLM-5.3
+
+Reviewed 2026-08-14 (release day). Raised on the report that the new model is strong and
+"the small version very powerful"; answered the same way as §8 — by checking what the
+artifact actually is.
+
+### 9.1 What shipped
+
+GLM-5.3 (Z.ai, released 2026-08-14) is **post-training only**: the company states it
+keeps the **same base model as GLM-5.2** and derives every capability gain from
+scaled-up post-training — SAO (an RL method for long-horizon tasks), environment
+scaling with agent-generated verified task environments, and slime (open-source
+asynchronous RL infrastructure). Weights are staged, ~2 weeks out at review time.
+
+**No small variant exists in any coverage checked** (launch coverage, the release
+tracker, Hugging Face). The GLM small-model lineage is GLM-4.5-Air (106B total / 12B
+active); nothing smaller than the 744B flagship is part of the 5.3 release as of today.
+The "powerful small version" could not be substantiated.
+
+### 9.2 The architecture lineage, and why none of it transfers here
+
+The base (from GLM-5/5.2, verified against the GLM-5 technical report coverage and
+Raschka's architecture note): 744B-total / ~40B-active MoE (256 routed experts, 8
+active + 1 shared), 78 layers, hidden 6,144, MLA, DeepSeek Sparse Attention (a
+lightweight indexer scores all prior tokens and keeps the top 2,048), **IndexShare**
+(a `full, shared, shared, shared` layer cycle reusing the indexer's token selections,
+justified by the measured 70–100% overlap of adjacent-layer selections; 2.9× per-token
+FLOP reduction at 1M context), an MTP layer for speculative decoding, 1M-token context.
+
+Every one of these targets **serving a ~million-token context at ~trillion scale**. At
+115M dense parameters and `contextSize = 256`, sparse attention selects from a window
+smaller than its own top-k, MoE and MLA solve memory problems this model does not have,
+and post-training presupposes a finished base model.
+
+Two things worth keeping, honestly labelled:
+
+- **A structural rhyme, not a result.** IndexShare's one-full-attention-layer-per-four
+  cycle is the same shape as this repo's `kindOf` rule (softmax every fourth layer, GLA
+  otherwise) — and Z.ai's justification method (measure cross-layer redundancy first,
+  then formalize the sharing) is this repo's own measure-first discipline applied at
+  744B. Nothing to adopt; mildly confirming of the hybrid layout's shape.
+- **The one theorem-shaped import: speculative-decoding unbiasedness.** MTP-style
+  drafting is only sound because the accept/reject step provably preserves the target
+  distribution exactly. That is a distribution-transformer theorem and would sit
+  naturally beside the truncation operators in
+  `FormalTransformer/Language/Decoding.agda` — but it buys decode *speed*, and this
+  repo's measured generation problem was decode *distortion*. Deferred until decode
+  speed matters.
+
+### 9.3 Recommendation
+
+**Adopt nothing**, same verdict as §7(a) and §8.6, for a third distinct reason: this
+release's gains come from post-training infrastructure downstream of a base model, and
+the base's architectural choices answer scale problems this project does not pose.
+
+---
+
 ## Sources
 
 - [arXiv:2604.07242](https://arxiv.org/abs/2604.07242) — the paper under review ([full text v3](https://arxiv.org/html/2604.07242v3))
@@ -446,3 +503,11 @@ Two things worth *knowing* rather than adopting:
 - [github.com/cordiverse/paper](https://github.com/cordiverse/paper) — Shi, Zhang, Cui, "A Programming Paradigm for Spatiotemporal Composability", 88 pp., draft of 2026-08-13 (PDF only; no arXiv or venue)
 - [github.com/cordiverse/cordis](https://github.com/cordiverse/cordis) — the implementation the paper describes
 - Uustalu & Vene, "Comonadic Notions of Computation", ENTCS 203(5):263–284, 2008, [doi:10.1016/j.entcs.2008.05.029](https://doi.org/10.1016/j.entcs.2008.05.029) — the stream-comonad citation §8.4 turns on
+
+§9 addendum:
+
+- [z.ai/blog/glm-5.3](https://z.ai/blog/glm-5.3) — the announcement (JS-rendered; unreadable to a plain fetch at review time, so details below were cross-checked instead)
+- [Unite.AI launch coverage](https://www.unite.ai/z-ai-launches-glm-5-3-with-frontier-coding-and-a-cyber-capability-that-outgrew-its-training/) — "same base model as GLM-5.2", post-training methods, staged weights
+- [Raschka, "GLM-5.2 IndexShare Architecture Note"](https://sebastianraschka.com/blog/2026/glm-5-2-indexshare.html) — DSA indexer, IndexShare cycle, the 70–100% overlap measurement, MTP
+- [arXiv:2602.15763](https://arxiv.org/html/2602.15763v1) — "GLM-5: from Vibe Coding to Agentic Engineering", the base's technical report
+- [aireleasetracker.com/model/zai/glm-5.3](https://aireleasetracker.com/model/zai/glm-5.3) — single-variant listing (no small model)
