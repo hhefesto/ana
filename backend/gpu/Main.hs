@@ -8,7 +8,8 @@ import Data.Bits (rotateL, shiftL, shiftR, xor)
 import Data.IORef (modifyIORef', newIORef, readIORef)
 import Data.Int (Int64)
 import qualified Data.IntMap.Strict as IntMap
-import Data.List (foldl', intercalate, isSuffixOf, nub, sort, sortOn)
+import Data.Char (isSpace)
+import Data.List (dropWhileEnd, foldl', intercalate, isSuffixOf, nub, sort, sortOn)
 import Data.Time (defaultTimeLocale, formatTime, getZonedTime)
 import Data.Word (Word64)
 import qualified Data.Text as Text
@@ -1370,7 +1371,8 @@ generate checkpointPath text budget = do
     (die "checkpoint tokenizer vocabulary does not match its model configuration")
   gpuCfg <- gpuConfigIO cfg >>= either die pure
   temperature <- nonnegativeDoubleEnv "TEMPERATURE" 0.8
-  topK <- positiveEnv "TOP_K" 40
+  topK <- positiveEnv "TOP_K" (vocabSize cfg)
+  topP <- nonnegativeDoubleEnv "TOP_P" 0.95
   observing <- (== Just "1") <$> lookupEnv "SAMPLE_STATS"
   seedText <- lookupEnv "SAMPLE_SEED"
   rng <- case seedText of
@@ -1378,8 +1380,19 @@ generate checkpointPath text budget = do
     Just value -> seededPRNG <$> parseWord64 "SAMPLE_SEED" value
   hPutStrLn stderr ("generate: temperature=" ++ show temperature
     ++ " top_k=" ++ show topK
+    ++ " top_p=" ++ show topP
     ++ " seed=" ++ maybe "checkpoint-prng" id seedText)
-  let promptBytes = Text.encodeUtf8 (Text.pack text)
+  -- Trailing whitespace cannot survive encoding: this tokenizer attaches a
+  -- space to the word that FOLLOWS it, so a dangling space becomes a
+  -- standalone token that never occurs in encoded training text.
+  -- Conditioning there is off-manifold and degenerates harder as the model
+  -- sharpens (measured: step 56,789 recovers, 92,000 emits byte soup).  The
+  -- continuation's first token carries its own leading space, so stripping
+  -- preserves the prompt's meaning.
+  let stripped = dropWhileEnd isSpace text
+  when (stripped /= text)
+    (hPutStrLn stderr "generate: trailing whitespace stripped from prompt before encoding")
+  let promptBytes = Text.encodeUtf8 (Text.pack stripped)
       prompt = bosToken : encodeWith tokenizer promptBytes
       n = paramCount cfg
       completed = adamStep (checkpointOptimizer checkpoint)
@@ -1397,7 +1410,7 @@ generate checkpointPath text budget = do
   BS.putStr promptBytes
   hFlush stdout
   _ <- withContext $ \ctx -> withF32Vector ctx (checkpointParameters checkpoint) $ \params ->
-    generateLoop ctx gpuCfg cfg params (pickToken temperature topK) emit observe
+    generateLoop ctx gpuCfg cfg params (pickToken temperature topK topP) emit observe
       budget rng prompt []
   putStrLn ""
 
@@ -1550,17 +1563,30 @@ sampleStatsLine position logits emitted topK chosen =
 -- the degenerate greedy observation (the exact argmax path); otherwise the
 -- top-K logits are softmaxed at the given temperature and sampled by
 -- inverse CDF.  The denotation being observed is unchanged either way.
-pickToken :: Float -> Int -> [Float] -> PRNGState -> (Int, PRNGState)
-pickToken temperature topK logits rng
+pickToken :: Float -> Int -> Float -> [Float] -> PRNGState -> (Int, PRNGState)
+pickToken temperature topK topP logits rng
   | temperature <= 0 = (argmax logits, rng)
-  | otherwise = (select (unitInterval word * total) weights, rng')
+  | otherwise = (select (unitInterval word * total) nucleus, rng')
   where
     top = take topK (sortOn (negate . snd) (zip [0 ..] logits))
     peak = maximum (map snd top)
     weights =
       [ (index, exp (realToFrac ((logit - peak) / temperature) :: Double))
       | (index, logit) <- top ]
-    total = sum (map snd weights)
+    weightTotal = sum (map snd weights)
+    -- Nucleus (top-p) truncation: the minimal prefix of the descending-weight
+    -- list whose mass reaches topP of the whole, so at least a topP share of
+    -- the distribution survives BY CONSTRUCTION -- the guarantee a fixed
+    -- top-k cannot give against a moving distribution (specified and proved
+    -- in FormalTransformer.Language.Decoding).  topP >= 1 is the identity.
+    nucleus
+      | topP >= 1 = weights
+      | otherwise = prefix (realToFrac topP * weightTotal) weights
+    prefix _ [] = []
+    prefix needed ((index, weight) : rest)
+      | needed <= weight = [(index, weight)]
+      | otherwise = (index, weight) : prefix (needed - weight) rest
+    total = sum (map snd nucleus)
     (word, rng') = nextWord rng
     select _ [] = argmax logits
     select remaining ((index, weight) : rest)
