@@ -8,7 +8,7 @@ import Data.Bits (rotateL, shiftL, shiftR, xor)
 import Data.IORef (modifyIORef', newIORef, readIORef)
 import Data.Int (Int64)
 import qualified Data.IntMap.Strict as IntMap
-import Data.List (foldl', intercalate, isSuffixOf, sort, sortOn)
+import Data.List (foldl', intercalate, isSuffixOf, nub, sort, sortOn)
 import Data.Time (defaultTimeLocale, formatTime, getZonedTime)
 import Data.Word (Word64)
 import qualified Data.Text as Text
@@ -1371,6 +1371,7 @@ generate checkpointPath text budget = do
   gpuCfg <- gpuConfigIO cfg >>= either die pure
   temperature <- nonnegativeDoubleEnv "TEMPERATURE" 0.8
   topK <- positiveEnv "TOP_K" 40
+  observing <- (== Just "1") <$> lookupEnv "SAMPLE_STATS"
   seedText <- lookupEnv "SAMPLE_SEED"
   rng <- case seedText of
     Nothing -> pure (checkpointPRNG checkpoint)
@@ -1388,12 +1389,16 @@ generate checkpointPath text budget = do
         bytes <- either die pure (decodeWith tokenizer [token])
         BS.putStr bytes
         hFlush stdout
+      observe position logits emitted chosen = when observing
+        (hPutStrLn stderr (sampleStatsLine position logits emitted topK chosen))
+  when observing (hPutStrLn stderr ("sample prompt_tokens=" ++ show prompt))
   printf "=== Wikipedia corpus training: %.3f%% complete (%d/%d updates) ===\n"
     progress completed scheduled
   BS.putStr promptBytes
   hFlush stdout
   _ <- withContext $ \ctx -> withF32Vector ctx (checkpointParameters checkpoint) $ \params ->
-    generateLoop ctx gpuCfg cfg params (pickToken temperature topK) emit budget rng prompt []
+    generateLoop ctx gpuCfg cfg params (pickToken temperature topK) emit observe
+      budget rng prompt []
   putStrLn ""
 
 tokenizerForIdentity :: String -> IO Tokenizer
@@ -1453,8 +1458,9 @@ discoverTokenizer identity = do
 generateLoop
   :: Context -> GpuConfig -> Config -> F32Array
   -> ([Float] -> PRNGState -> (Int, PRNGState))
-  -> (Int -> IO ()) -> Int -> PRNGState -> [Int] -> [Int] -> IO [Int]
-generateLoop ctx gpuCfg cfg params pick emit budget rng prompt _ = do
+  -> (Int -> IO ()) -> (Int -> [Float] -> [Int] -> Int -> IO ())
+  -> Int -> PRNGState -> [Int] -> [Int] -> IO [Int]
+generateLoop ctx gpuCfg cfg params pick emit observe budget rng prompt _ = do
   let d = modelDim cfg
       hd = headDim cfg
       glaStateLength = glaLayerCount cfg * d * hd
@@ -1477,6 +1483,7 @@ generateLoop ctx gpuCfg cfg params pick emit budget rng prompt _ = do
         | remaining <= (0 :: Int) = pure output
         | otherwise = do
             let (token, rng'') = pick logits rng'
+            observe position logits (prompt ++ output) token
             if token == eosToken then pure output
             else do
               unless (token == bosToken) (emit token)
@@ -1484,6 +1491,60 @@ generateLoop ctx gpuCfg cfg params pick emit budget rng prompt _ = do
               go (remaining - 1) rng'' (position + 1) states' logits'
                  (if token == bosToken then output else output ++ [token])
   go budget rng (length prompt) primed promptLogits []
+
+-- SAMPLE_STATS=1: the same distribution pickToken samples from, described
+-- rather than drawn from.  generateLoop already downloads the whole logit
+-- vector every step in order to sample at all, so none of this costs any
+-- extra forward work.
+--
+-- Every probability here is the model's OWN, at temperature 1 and with no
+-- truncation: these columns describe the denotation, not the sampler's view
+-- of it.  Two questions motivate them.
+--
+-- Is a FIXED temperature drifting colder?  As training sharpens the
+-- next-token law, TEMPERATURE=0.8 with TOP_K=40 draws from an ever more
+-- peaked distribution, so free-running repetition can rise BECAUSE the model
+-- improved, with no defect anywhere.  `support` = exp(entropy) reads as how
+-- many tokens are genuinely in play; `topk_mass` is the share the sampler's
+-- truncation keeps.  If these fall monotonically across checkpoints while
+-- validation loss also falls, that is the whole story.
+--
+-- Or is the head re-selecting what it just said?  Embeddings are tied, so
+-- the logit map is a per-row-rescaled symmetric Gram matrix (headProbe above
+-- derives this) and the skew part of the transition statistics is
+-- unrepresentable.  Repetition is precisely the symmetric part -- P(a->a),
+-- and P(a->b) = P(b->a) -- so `p_self` (mass on the most recent context
+-- token) and `p_seen` (mass on every context token so far, prompt included)
+-- measure that structural bias at its source, before sampling can mask or
+-- amplify it.
+--
+-- `rank` and `prob` locate the token actually chosen in the untruncated
+-- distribution, which separates "the model was unsure" from "the sampler
+-- reached into the tail".
+sampleStatsLine :: Int -> [Float] -> [Int] -> Int -> Int -> String
+sampleStatsLine position logits emitted topK chosen =
+  "sample pos=" ++ show position
+    ++ " token=" ++ show chosen
+    ++ printf " entropy=%.4f" entropy
+    ++ printf " support=%.1f" (exp entropy)
+    ++ printf " topk_mass=%.6f" topkMass
+    ++ " rank=" ++ show chosenRank
+    ++ printf " prob=%.6f" (probOf chosen)
+    ++ printf " p_self=%.6f" pSelf
+    ++ printf " p_seen=%.6f" pSeen
+  where
+    values = U.fromList (map realToFrac logits) :: U.Vector Double
+    peak = U.maximum values
+    weights = U.map (\l -> exp (l - peak)) values
+    total = U.sum weights
+    -- H = log Z - (1/Z) sum_i w_i (l_i - peak), the shift-stable form
+    entropy = log total
+      - U.sum (U.zipWith (\w l -> w * (l - peak)) weights values) / total
+    probOf i = (weights U.! i) / total
+    topkMass = sum (take topK (sortOn negate (U.toList weights))) / total
+    chosenRank = U.length (U.filter (> (values U.! chosen)) values)
+    pSelf = if null emitted then 0 else probOf (last emitted)
+    pSeen = sum (map probOf (nub emitted))
 
 -- Observation of the model's next-token distribution.  TEMPERATURE=0 is
 -- the degenerate greedy observation (the exact argmax path); otherwise the
