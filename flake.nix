@@ -703,10 +703,13 @@
             '';
           };
           # Generation is local and offline by default: with no arguments it
-          # uses the last pulled checkpoint (run/last-checkpoint), falling back
-          # to newest-compatible discovery.  Reaching a training box is opt-in
-          # via --pull, and every connection detail is an argument, so an
-          # arbitrary trainer can be named without editing anything.
+          # uses the newest compatible checkpoint, ordered by the write date
+          # each checkpoint's header records -- not by file mtime (transfer
+          # tools rewrite mtimes) and not by a pointer file (a pointer goes
+          # stale the moment weights arrive some other way).  Reaching a
+          # training box is opt-in via --pull, and every connection detail is
+          # an argument, so an arbitrary trainer can be named without editing
+          # anything.
           wikiGenerate = pkgs.writeShellApplication {
             name = "ana";
             runtimeInputs = [
@@ -719,8 +722,10 @@
                 cat >&2 <<'USAGE'
 ana [OPTIONS] [PROMPT]
 
-Generate text from a trained checkpoint.  With no options it uses the last
-pulled checkpoint and never contacts the network.
+Generate text from a trained checkpoint.  With no options it uses the newest
+local weights -- ordered by the write date in each checkpoint's own header,
+so however new weights arrive (pull, rsync stamp, copy) the latest always
+wins -- and never contacts the network.
 
 Local:
   --checkpoint PATH        generate from this checkpoint (skips discovery)
@@ -743,8 +748,9 @@ Pulling from a trainer (opt-in; nothing is contacted without --pull/--host):
                            /root/ana/run/wiki-bpe10m-global.checkpoint)
 
 A pull lands in run/pulled-HOST-PORT-checkpoints/, never on top of an existing
-checkpoint, and records its destination in run/last-checkpoint - which is what
-a later no-argument run uses.
+checkpoint, and records its destination in run/last-checkpoint for reference.
+A later no-argument run selects the newest local weights, so a fresh pull wins
+by being newest, not by being pointed at.
 
 Environment fallbacks (arguments win): WIKI_PROMPT, WIKI_TOKENS,
 WIKI_CHECKPOINT, WIKI_TOKENIZER, and for --pull: WIKI_REMOTE,
@@ -873,19 +879,33 @@ USAGE
                 fi
               fi
 
-              # Newest first, but only checkpoints this host's architecture can
-              # interpret: a checkpoint from another architecture (for example
-              # another branch's model/layout identity) is skipped with a note
-              # instead of aborting generation.
+              # All local checkpoints, then the newest COMPATIBLE one by the
+              # write date recorded in each checkpoint's own header (a ~20 ms
+              # header seek per file).  The header is the authority on
+              # recency: file mtimes are rewritten by transfer tools, and a
+              # pointer file goes stale the moment weights arrive another way.
+              # Ties on write date (a stamped copy of the same weights) break
+              # toward the higher step, then either file equivalently.
               candidates="$(
                 for candidate in run/*.checkpoint run/*-checkpoints/*.checkpoint; do
                   if [ ! -f "$candidate" ]; then continue; fi
-                  printf '%s %s\n' "$(stat -L --format=%Y -- "$candidate")" "$candidate"
-                done | sort -rn | cut -d' ' -f2-
+                  printf '%s\n' "$candidate"
+                done | sort -u
               )"
 
-              pointer=
-              if [ -f run/last-checkpoint ]; then pointer="$(cat run/last-checkpoint)"; fi
+              newest="$(
+                for candidate in $candidates; do
+                  if ! ${sequential} check-checkpoint "$candidate" >/dev/null 2>&1; then
+                    continue
+                  fi
+                  info="$(${sequential} checkpoint-info "$candidate" 2>/dev/null \
+                    | grep '^trained:' || true)"
+                  step="$(printf '%s' "$info" | sed -n 's|^trained: \([0-9]*\)/.*|\1|p')"
+                  written="$(printf '%s' "$info" | sed -n 's|.*weights written \(.*\)$|\1|p')"
+                  epoch="$(date -u -d "$written" +%s 2>/dev/null || echo 0)"
+                  printf '%s %s %s\n' "$epoch" "''${step:-0}" "$candidate"
+                done | sort -k1,1rn -k2,2rn | head -n 1 | cut -d' ' -f3-
+              )"
 
               if [ "$list" = 1 ]; then
                 found=0
@@ -897,36 +917,19 @@ USAGE
                     status=incompatible
                   fi
                   mark=" "
-                  if [ "$candidate" = "$pointer" ]; then mark="*"; fi
+                  if [ "$candidate" = "$newest" ]; then mark="*"; fi
                   printf '%s %-12s %12s bytes  %s\n' \
                     "$mark" "$status" "$(stat -L --format=%s -- "$candidate")" "$candidate"
                 done
                 if [ "$found" = 0 ]; then
                   echo "ana: no checkpoints under run/" >&2
                 fi
-                echo "(* marks run/last-checkpoint, the no-argument default)" >&2
+                echo "(* marks the no-argument default: newest compatible weights by header write date)" >&2
                 exit 0
               fi
 
-              # The default is the last pulled checkpoint; discovery is the
-              # fallback when no pull has happened or the pointer went stale.
-              if [ -z "$checkpoint" ] && [ -n "$pointer" ]; then
-                if [ -f "$pointer" ] && ${sequential} check-checkpoint "$pointer" >/dev/null 2>&1; then
-                  checkpoint="$pointer"
-                else
-                  echo "ana: run/last-checkpoint names an unusable checkpoint ($pointer)" >&2
-                  echo "  falling back to newest-compatible discovery" >&2
-                fi
-              fi
               if [ -z "$checkpoint" ]; then
-                for candidate in $candidates; do
-                  if ${sequential} check-checkpoint "$candidate" >/dev/null 2>&1; then
-                    checkpoint="$candidate"
-                    break
-                  else
-                    echo "ana: skipping incompatible checkpoint $candidate" >&2
-                  fi
-                done
+                checkpoint="$newest"
               fi
               if [ -z "$checkpoint" ]; then
                 echo "ana: no compatible checkpoint found under run/" >&2
