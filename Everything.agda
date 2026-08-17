@@ -18,3 +18,4 @@ import FormalTransformer.AD.Batch
 import FormalTransformer.Transformer.Config
 import FormalTransformer.Transformer.Specification
 import FormalTransformer.Transformer.TiedHead
+import FormalTransformer.Transformer.ResidualStream
