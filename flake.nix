@@ -11,6 +11,29 @@
         "aarch64-linux"
       ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
+      # What a build is allowed to see.  Handing a derivation the whole flake
+      # source makes its output hash depend on every tracked file, so a commit
+      # touching only prose invalidated every derivation and the next
+      # `nix run .#ana` paid for a fresh `futhark c` plus GHC -O2 before it
+      # could pull a checkpoint.  Nothing here compiles documentation, run
+      # artifacts, vendored weights or references, and the wrapper scripts
+      # reach run/ and weights/ through the caller's working directory rather
+      # than the store, so excluding them changes no behaviour -- only how
+      # often the compiler runs.  This is an allowlist: a new buildable
+      # directory has to be added here, which is the failure we want (a build
+      # error naming the missing file) rather than the one we had.
+      buildSrc = nixpkgs.lib.fileset.toSource {
+        root = ./.;
+        fileset = nixpkgs.lib.fileset.unions [
+          ./backend
+          ./FormalTransformer
+          ./Everything.agda
+          ./formal-transformer.agda-lib
+          ./formal-transformer.cabal
+          ./cabal.project
+          ./LICENSE
+        ];
+      };
     in
     {
       packages = forAllSystems (
@@ -20,7 +43,7 @@
             inherit system;
             config.allowUnfree = true;
           };
-          haskellPackage = pkgs.haskellPackages.callCabal2nix "formal-transformer" ./. { };
+          haskellPackage = pkgs.haskellPackages.callCabal2nix "formal-transformer" buildSrc { };
           futharkKernels = self.packages.${system}.futhark-kernels;
           futharkKernelsCuda = self.packages.${system}.futhark-kernels-cuda;
           # CUDA userspace. Futhark JIT-compiles its kernel PTX through NVRTC at
@@ -58,7 +81,7 @@
           futhark-kernels = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-futhark-kernels";
             version = "0.1.0";
-            src = ./.;
+            src = buildSrc;
             nativeBuildInputs = [ pkgs.futhark ];
             buildPhase = ''
               runHook preBuild
@@ -80,7 +103,7 @@
           futhark-kernels-cuda = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-futhark-kernels-cuda";
             version = "0.1.0";
-            src = ./.;
+            src = buildSrc;
             nativeBuildInputs = [ pkgs.futhark ];
             buildPhase = ''
               runHook preBuild
@@ -99,7 +122,7 @@
           futhark-pieces = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-futhark-pieces";
             version = "0.1.0";
-            src = ./.;
+            src = buildSrc;
             nativeBuildInputs = [ pkgs.futhark ];
             buildPhase = ''
               runHook preBuild
@@ -118,7 +141,7 @@
           futhark-pieces-cuda = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-futhark-pieces-cuda";
             version = "0.1.0";
-            src = ./.;
+            src = buildSrc;
             nativeBuildInputs = [ pkgs.futhark ];
             buildPhase = ''
               runHook preBuild
@@ -138,7 +161,7 @@
           futhark-pieces-conformance = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-futhark-pieces-conformance";
             version = "0.1.0";
-            src = ./.;
+            src = buildSrc;
             nativeBuildInputs = [ pkgs.futhark ];
             buildPhase = ''
               runHook preBuild
@@ -157,7 +180,7 @@
           gemm-blas-test = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-gemm-blas-test";
             version = "0.1.0";
-            src = ./.;
+            src = buildSrc;
             nativeBuildInputs = [ gemmGhc ];
             buildInputs = [ pkgs.openblas ];
             buildPhase = ''
@@ -177,7 +200,7 @@
           gemm-conformance = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-gemm-conformance";
             version = "0.1.0";
-            src = ./.;
+            src = buildSrc;
             nativeBuildInputs = [ conformanceGhc ];
             buildInputs = [ pkgs.openblas ];
             buildPhase = ''
@@ -204,7 +227,7 @@
           formal-transformer-gpu = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-gpu";
             version = "0.1.0";
-            src = ./.;
+            src = buildSrc;
             nativeBuildInputs = [
               gpuGhc
               pkgs.pkg-config
@@ -232,7 +255,7 @@
           formal-transformer-cuda = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-cuda";
             version = "0.1.0";
-            src = ./.;
+            src = buildSrc;
             __structuredAttrs = true;
             strictDeps = true;
             nativeBuildInputs = [
@@ -280,7 +303,7 @@
           formal-transformer-gemm-cuda = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-gemm-cuda";
             version = "0.1.0";
-            src = ./.;
+            src = buildSrc;
             __structuredAttrs = true;
             strictDeps = true;
             nativeBuildInputs = [
@@ -355,7 +378,7 @@
           formal-transformer-sequential = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-sequential";
             version = "0.1.0";
-            src = ./.;
+            src = buildSrc;
             nativeBuildInputs = [
               gpuGhc
               pkgs.futhark
@@ -384,7 +407,7 @@
           formal-transformer-multicore = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-multicore";
             version = "0.1.0";
-            src = ./.;
+            src = buildSrc;
             nativeBuildInputs = [
               gpuGhc
               pkgs.futhark
@@ -409,7 +432,7 @@
           conformance = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-conformance";
             version = "0.1.0";
-            src = ./.;
+            src = buildSrc;
             nativeBuildInputs = [
               conformanceGhc
               pkgs.futhark
@@ -451,7 +474,7 @@
             pkgs.runCommand "formal-transformer-agda-check"
               {
                 nativeBuildInputs = [ agda ];
-                src = ./.;
+                src = buildSrc;
               }
               ''
                 cp -r $src source
@@ -464,7 +487,7 @@
             pkgs.runCommand "formal-transformer-futhark-check"
               {
                 nativeBuildInputs = [ pkgs.futhark pkgs.stdenv.cc ];
-                src = ./.;
+                src = buildSrc;
               }
               ''
                 cp -r $src source
@@ -734,7 +757,9 @@ Local:
                            weights/*.bpe)
   --tokens N               generation budget (default 128)
   --prompt TEXT            prompt; also accepted as trailing arguments
-  --list                   list local checkpoints with compatibility, then exit
+  --list                   list local checkpoints (header only), then exit
+  --verify                 with --list, fully validate every checkpoint (slow:
+                           reads each file whole)
   -h, --help               this message
 
 Pulling from a trainer (opt-in; nothing is contacted without --pull/--host):
@@ -762,6 +787,7 @@ USAGE
 
               pull=0
               list=0
+              verify=0
               host=
               user=
               port=
@@ -784,6 +810,7 @@ USAGE
                 case "$1" in
                   --pull) pull=1 ;;
                   --list) list=1 ;;
+                  --verify) verify=1 ;;
                   --host) need_value $# "$1"; host="$2"; pull=1; shift ;;
                   --user) need_value $# "$1"; user="$2"; shift ;;
                   --port) need_value $# "$1"; port="$2"; shift ;;
@@ -893,38 +920,78 @@ USAGE
                 done | sort -u
               )"
 
-              newest="$(
+              # Rank by header, validate lazily.  check-checkpoint reads the
+              # whole file -- 5 s for a 1.4 GB checkpoint -- so validating
+              # every candidate cost 2.5 minutes on a run/ holding 31 stamped
+              # checkpoints (21.5 GB), on every invocation, including --pull.
+              # The header seek is 20 ms and already carries the write date and
+              # step, so it does the ordering; validation then walks the ranked
+              # list and stops at the first candidate that passes.  Same answer
+              # as validating all of them -- the winner is still fully
+              # verified -- for one full read instead of N.
+              ranked="$(
                 for candidate in $candidates; do
-                  if ! ${sequential} check-checkpoint "$candidate" >/dev/null 2>&1; then
-                    continue
-                  fi
                   info="$(${sequential} checkpoint-info "$candidate" 2>/dev/null \
                     | grep '^trained:' || true)"
+                  if [ -z "$info" ]; then continue; fi
                   step="$(printf '%s' "$info" | sed -n 's|^trained: \([0-9]*\)/.*|\1|p')"
                   written="$(printf '%s' "$info" | sed -n 's|.*weights written \(.*\)$|\1|p')"
                   epoch="$(date -u -d "$written" +%s 2>/dev/null || echo 0)"
                   printf '%s %s %s\n' "$epoch" "''${step:-0}" "$candidate"
-                done | sort -k1,1rn -k2,2rn | head -n 1 | cut -d' ' -f3-
+                done | sort -k1,1rn -k2,2rn
+              )"
+
+              newest="$(
+                printf '%s\n' "$ranked" | while IFS=' ' read -r _ _ candidate; do
+                  if [ -z "$candidate" ]; then continue; fi
+                  if ${sequential} check-checkpoint "$candidate" >/dev/null 2>&1; then
+                    printf '%s\n' "$candidate"
+                    break
+                  fi
+                done
               )"
 
               if [ "$list" = 1 ]; then
                 found=0
                 for candidate in $candidates; do
                   found=1
-                  if ${sequential} check-checkpoint "$candidate" >/dev/null 2>&1; then
-                    status=compatible
+                  # || true: the script runs under `set -euo pipefail`, and a
+                  # truncated checkpoint (an interrupted transfer left in
+                  # run/) makes checkpoint-info exit non-zero, which would
+                  # abort the whole listing part-way through with no message.
+                  model="$(${sequential} checkpoint-info "$candidate" 2>/dev/null \
+                    | sed -n 's|^model: \([^ ]*\) .*|\1|p' | head -n 1 || true)"
+                  # Listing every checkpoint used to validate every checkpoint,
+                  # which reads each file whole.  The header alone says whether
+                  # a file parses and which model it holds; --verify buys the
+                  # deep check, which is the only thing that can catch a
+                  # readable header over weights this binary cannot load.
+                  if [ "$verify" = 1 ]; then
+                    if ${sequential} check-checkpoint "$candidate" >/dev/null 2>&1; then
+                      status=compatible
+                    else
+                      status=incompatible
+                    fi
+                  elif [ -n "$model" ]; then
+                    status=readable
                   else
-                    status=incompatible
+                    status=unreadable
                   fi
                   mark=" "
                   if [ "$candidate" = "$newest" ]; then mark="*"; fi
-                  printf '%s %-12s %12s bytes  %s\n' \
-                    "$mark" "$status" "$(stat -L --format=%s -- "$candidate")" "$candidate"
+                  printf '%s %-12s %-9s %12s bytes  %s\n' \
+                    "$mark" "$status" "''${model:--}" \
+                    "$(stat -L --format=%s -- "$candidate")" "$candidate"
                 done
                 if [ "$found" = 0 ]; then
                   echo "ana: no checkpoints under run/" >&2
                 fi
-                echo "(* marks the no-argument default: newest compatible weights by header write date)" >&2
+                echo "(* marks the no-argument default: newest compatible weights by header write date," >&2
+                if [ "$verify" = 1 ]; then
+                  echo " and every file above was fully validated)" >&2
+                else
+                  echo " fully validated; other rows report only what their header says -- --verify checks all)" >&2
+                fi
                 exit 0
               fi
 
