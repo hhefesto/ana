@@ -3,7 +3,7 @@
 #
 # Works on both a bare VM (Verda: systemd present -> multi-user Nix) and a
 # Docker container (vast.ai: no systemd -> single-user Nix). Run it AFTER the
-# repo has been transferred (see deploy/cloud-fast-path.md). Safe to re-run
+# repo has been transferred (see docs/RUN-2026-07-25-WIKI-FULL.md). Safe to re-run
 # after an interruption/reboot; it never trains, so it costs only build time.
 #
 # Steps:
@@ -63,6 +63,20 @@ echo "cloud-init: GPU compute capability=${compute_cap:-unknown}"
 # ---------------------------------------------------------------------------
 # 2. Nix install + config (mode depends on VM vs container).
 # ---------------------------------------------------------------------------
+# Skipped entirely when deploy/push-prebuilt.sh has already shipped the
+# binaries and their runtime closure: nothing here needs to be compiled or
+# fetched, and the installer below would `rm -rf /nix` and delete the very
+# closure that was just copied in.  Rented GPUs measured ~50 minutes from
+# boot to first training step with this path taken; prebuilt makes it ~1.
+prebuilt=0
+if [ -x result/bin/formal-transformer-cuda ] \
+  && { [ "${BUILD_GEMM_CUDA:-0}" != 1 ] \
+    || [ -x result-gemm/bin/formal-transformer-gemm-cuda ]; }; then
+  prebuilt=1
+  echo "cloud-init: prebuilt binaries present — skipping Nix install and build."
+fi
+
+if [ "$prebuilt" = 0 ]; then
 # The Nix installer needs curl; a minimal base image (e.g. vastai/base-image)
 # may not ship it.
 if ! command -v curl >/dev/null; then
@@ -99,7 +113,17 @@ source_nix_profile || true
 if ! command -v nix >/dev/null; then
   if [ "$env_kind" = container ]; then
     echo "cloud-init: installing single-user Nix (root container)..."
-    rm -rf /nix   # clear any partial/failed install (the installer refuses if /nix exists)
+    # Only clear a /nix we can be sure is a failed install. push-prebuilt.sh
+    # copies the runtime closure straight into /nix/store with no Nix present,
+    # so a populated store here is shipped payload, not debris -- deleting it
+    # destroys the transfer it took minutes to make (observed, once).
+    if [ "$(ls -A /nix/store 2>/dev/null | head -1)" != "" ]; then
+      echo "cloud-init: /nix/store is populated but Nix is not installed." >&2
+      echo "  That is what push-prebuilt.sh produces. Refusing to wipe it." >&2
+      echo "  If this really is a broken install, remove /nix by hand and re-run." >&2
+      exit 1
+    fi
+    rm -rf /nix   # clear a partial/failed install (the installer refuses if /nix exists)
     curl -L https://nixos.org/nix/install | sh -s -- --no-daemon
   else
     echo "cloud-init: installing multi-user Nix (--daemon)..."
@@ -116,13 +140,14 @@ NIX() { nix --extra-experimental-features "$features" "$@"; }
 
 # ---------------------------------------------------------------------------
 # 3. Build the CUDA host (most deps come from cache.nixos.org; only our small
-#    derivation compiles). GPU is NOT needed to build — only to run.
+#    derivation compiles). GPU is NOT needed to build — only to run, which is
+#    what lets deploy/push-prebuilt.sh do this on a developer machine instead.
 # ---------------------------------------------------------------------------
 echo "cloud-init: building formal-transformer-cuda..."
 NIX build .#formal-transformer-cuda
 
 # Opt-in: also build the cuBLAS tensor-core trainer + its GPU smoke test
-# (docs/TENSOR-CORE-RUNTIME.md). Kept separate from result/ so train-cloud.sh
+# (docs/RUN-2026-07-25-WIKI-FULL.md). Kept separate from result/ so train-cloud.sh
 # defaults stay on the fused Futhark trainer until the gates pass.
 if [ "${BUILD_GEMM_CUDA:-0}" = 1 ]; then
   echo "cloud-init: building formal-transformer-gemm-cuda (BUILD_GEMM_CUDA=1)..."
@@ -137,6 +162,7 @@ if NIX shell nixpkgs#patchelf -c \
   echo "cloud-init: CUDA driver stubs leaked into the runtime RPATH" >&2
   exit 1
 fi
+fi  # end: not prebuilt
 
 # ---------------------------------------------------------------------------
 # 5. libcuda.so.1 resolution.  `inspect` execs the CUDA binary, forcing the

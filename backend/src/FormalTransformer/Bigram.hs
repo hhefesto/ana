@@ -27,7 +27,8 @@ import Data.Word (Word64)
 
 import FormalTransformer.Config
 import FormalTransformer.Data
-import FormalTransformer.Language (WeightedLanguage (..), foldScoring)
+import FormalTransformer.Language (WeightedLanguage (..), algebraScoring)
+import FormalTransformer.Language.Autoregressive (StateAlgebra (..))
 import FormalTransformer.Tokenizer (bosToken, eosToken)
 
 data BigramModel = BigramModel
@@ -64,14 +65,17 @@ bigramLogProbability model prev next =
     count = Map.findWithDefault 0 (prev, next) (bigramPairCounts model)
     total = Map.findWithDefault 0 prev (bigramContextTotals model)
 
--- The bigram as a weighted language conditioned on a start token: fold the
--- per-token conditional log weight through the previous-token state.  This
--- is the same foldScoring semantics the rest of the language layer uses.
+-- The bigram as a weighted language conditioned on a start token, written as
+-- the StateAlgebra it always was: the state is the previous token, the step
+-- emits the conditional log weight, and there is no terminal weight.  This is
+-- the same scoring semantics the rest of the language layer uses.
 bigramLanguage :: BigramModel -> Int -> WeightedLanguage Int (Sum Double)
 bigramLanguage model start =
-  foldScoring
-    (\prev token -> (Sum (bigramLogProbability model prev token), token))
-    (const mempty)
+  algebraScoring
+    StateAlgebra
+      { algebraOut = const mempty
+      , algebraStep = \prev token -> (Sum (bigramLogProbability model prev token), token)
+      }
     start
 
 -- The trainer's aggregation shape: mean over windows of the per-window

@@ -11,6 +11,29 @@
         "aarch64-linux"
       ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
+      # What a build is allowed to see.  Handing a derivation the whole flake
+      # source makes its output hash depend on every tracked file, so a commit
+      # touching only prose invalidated every derivation and the next
+      # `nix run .#ana` paid for a fresh `futhark c` plus GHC -O2 before it
+      # could pull a checkpoint.  Nothing here compiles documentation, run
+      # artifacts, vendored weights or references, and the wrapper scripts
+      # reach run/ and weights/ through the caller's working directory rather
+      # than the store, so excluding them changes no behaviour -- only how
+      # often the compiler runs.  This is an allowlist: a new buildable
+      # directory has to be added here, which is the failure we want (a build
+      # error naming the missing file) rather than the one we had.
+      buildSrc = nixpkgs.lib.fileset.toSource {
+        root = ./.;
+        fileset = nixpkgs.lib.fileset.unions [
+          ./backend
+          ./FormalTransformer
+          ./Everything.agda
+          ./formal-transformer.agda-lib
+          ./formal-transformer.cabal
+          ./cabal.project
+          ./LICENSE
+        ];
+      };
     in
     {
       packages = forAllSystems (
@@ -20,7 +43,7 @@
             inherit system;
             config.allowUnfree = true;
           };
-          haskellPackage = pkgs.haskellPackages.callCabal2nix "formal-transformer" ./. { };
+          haskellPackage = pkgs.haskellPackages.callCabal2nix "formal-transformer" buildSrc { };
           futharkKernels = self.packages.${system}.futhark-kernels;
           futharkKernelsCuda = self.packages.${system}.futhark-kernels-cuda;
           # CUDA userspace. Futhark JIT-compiles its kernel PTX through NVRTC at
@@ -57,8 +80,8 @@
           formal-transformer = haskellPackage;
           futhark-kernels = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-futhark-kernels";
-            version = "0.1.0";
-            src = ./.;
+            version = "2.0.0";
+            src = buildSrc;
             nativeBuildInputs = [ pkgs.futhark ];
             buildPhase = ''
               runHook preBuild
@@ -79,8 +102,8 @@
           };
           futhark-kernels-cuda = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-futhark-kernels-cuda";
-            version = "0.1.0";
-            src = ./.;
+            version = "2.0.0";
+            src = buildSrc;
             nativeBuildInputs = [ pkgs.futhark ];
             buildPhase = ''
               runHook preBuild
@@ -98,8 +121,8 @@
           };
           futhark-pieces = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-futhark-pieces";
-            version = "0.1.0";
-            src = ./.;
+            version = "2.0.0";
+            src = buildSrc;
             nativeBuildInputs = [ pkgs.futhark ];
             buildPhase = ''
               runHook preBuild
@@ -117,8 +140,8 @@
           };
           futhark-pieces-cuda = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-futhark-pieces-cuda";
-            version = "0.1.0";
-            src = ./.;
+            version = "2.0.0";
+            src = buildSrc;
             nativeBuildInputs = [ pkgs.futhark ];
             buildPhase = ''
               runHook preBuild
@@ -137,8 +160,8 @@
           };
           futhark-pieces-conformance = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-futhark-pieces-conformance";
-            version = "0.1.0";
-            src = ./.;
+            version = "2.0.0";
+            src = buildSrc;
             nativeBuildInputs = [ pkgs.futhark ];
             buildPhase = ''
               runHook preBuild
@@ -156,8 +179,8 @@
           };
           gemm-blas-test = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-gemm-blas-test";
-            version = "0.1.0";
-            src = ./.;
+            version = "2.0.0";
+            src = buildSrc;
             nativeBuildInputs = [ gemmGhc ];
             buildInputs = [ pkgs.openblas ];
             buildPhase = ''
@@ -176,8 +199,8 @@
           };
           gemm-conformance = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-gemm-conformance";
-            version = "0.1.0";
-            src = ./.;
+            version = "2.0.0";
+            src = buildSrc;
             nativeBuildInputs = [ conformanceGhc ];
             buildInputs = [ pkgs.openblas ];
             buildPhase = ''
@@ -203,8 +226,8 @@
           };
           formal-transformer-gpu = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-gpu";
-            version = "0.1.0";
-            src = ./.;
+            version = "2.0.0";
+            src = buildSrc;
             nativeBuildInputs = [
               gpuGhc
               pkgs.pkg-config
@@ -231,8 +254,8 @@
           };
           formal-transformer-cuda = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-cuda";
-            version = "0.1.0";
-            src = ./.;
+            version = "2.0.0";
+            src = buildSrc;
             __structuredAttrs = true;
             strictDeps = true;
             nativeBuildInputs = [
@@ -279,8 +302,8 @@
           };
           formal-transformer-gemm-cuda = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-gemm-cuda";
-            version = "0.1.0";
-            src = ./.;
+            version = "2.0.0";
+            src = buildSrc;
             __structuredAttrs = true;
             strictDeps = true;
             nativeBuildInputs = [
@@ -354,8 +377,8 @@
           };
           formal-transformer-sequential = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-sequential";
-            version = "0.1.0";
-            src = ./.;
+            version = "2.0.0";
+            src = buildSrc;
             nativeBuildInputs = [
               gpuGhc
               pkgs.futhark
@@ -383,8 +406,8 @@
           # interchangeable with the other backends.
           formal-transformer-multicore = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-multicore";
-            version = "0.1.0";
-            src = ./.;
+            version = "2.0.0";
+            src = buildSrc;
             nativeBuildInputs = [
               gpuGhc
               pkgs.futhark
@@ -408,8 +431,8 @@
           };
           conformance = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-conformance";
-            version = "0.1.0";
-            src = ./.;
+            version = "2.0.0";
+            src = buildSrc;
             nativeBuildInputs = [
               conformanceGhc
               pkgs.futhark
@@ -451,7 +474,7 @@
             pkgs.runCommand "formal-transformer-agda-check"
               {
                 nativeBuildInputs = [ agda ];
-                src = ./.;
+                src = buildSrc;
               }
               ''
                 cp -r $src source
@@ -464,7 +487,7 @@
             pkgs.runCommand "formal-transformer-futhark-check"
               {
                 nativeBuildInputs = [ pkgs.futhark pkgs.stdenv.cc ];
-                src = ./.;
+                src = buildSrc;
               }
               ''
                 cp -r $src source
@@ -476,6 +499,11 @@
                 futhark check backend/futhark/bench.fut
                 futhark check backend/futhark/pieces.fut
                 futhark check backend/futhark/pieces-conformance.fut
+                # The cross-backend probes are run by hand on a rented box, but
+                # type-checking them here keeps them from bit-rotting against
+                # the definitions they are meant to police.
+                futhark check backend/futhark/kernel-check.fut
+                futhark check backend/futhark/intra-check.fut
                 futhark test --backend=c backend/futhark/tests.fut
                 futhark test --backend=c backend/futhark/pieces-conformance.fut
                 touch $out
@@ -577,12 +605,12 @@
               rundir="''${WIKI_RUN_DIR:-run/wiki}"
               per="''${WIKI_SHARD_ARTICLES:-4000}"
               tokenizer="''${WIKI_TOKENIZER:-$HOME/datasets/wikipedia-en/enwiki-8k.bpe}"
-              if [ "$size" = bpe10m ] && [ ! -f "$tokenizer" ]; then
+              if { [ "$size" = bpe10m ] || [ "$size" = bpe100m ]; } && [ ! -f "$tokenizer" ]; then
                 echo "wiki-train: BPE tokenizer not found: $tokenizer" >&2
                 echo "  set WIKI_TOKENIZER to the versioned 8192-token .bpe artifact" >&2
                 exit 1
               fi
-              if [ "$size" = bpe10m ]; then
+              if { [ "$size" = bpe10m ] || [ "$size" = bpe100m ]; }; then
                 export TOKENIZER_FILE="$tokenizer"
               fi
               mkdir -p "$rundir"
@@ -595,7 +623,7 @@
               shards=$(( (total + per - 1) / per ))
               echo "wiki-train: $total articles, $per per shard -> $shards shards, size=$size backend=$backend"
               data_hash="$(sha256sum "$data" | cut -d ' ' -f 1)"
-              if [ "$size" = bpe10m ]; then
+              if { [ "$size" = bpe10m ] || [ "$size" = bpe100m ]; }; then
                 tokenizer_hash="$(sha256sum "$tokenizer" | cut -d ' ' -f 1)"
               else
                 tokenizer_hash=lossless-byte-v1
@@ -621,7 +649,7 @@
                   if [ ! -f "$corpus" ]; then
                     awk -v a="$first" -v b="$last" 'NR>b{exit} NR>=a' "$data" \
                       | jq -j '.id, "\u0000", .text, "\u0000"' \
-                      | if [ "$size" = bpe10m ]; then
+                      | if { [ "$size" = bpe10m ] || [ "$size" = bpe100m ]; }; then
                           ${cli} prepare-bpe-stdin "$tokenizer" "$corpus"
                         else
                           ${cli} prepare-stdin "$corpus"
@@ -682,7 +710,7 @@
                   echo "wiki-train: preparing shard $k (articles $first..$last)"
                   awk -v a="$first" -v b="$last" 'NR>b{exit} NR>=a' "$data" \
                     | jq -j '.id, "\u0000", .text, "\u0000"' \
-                    | if [ "$size" = bpe10m ]; then
+                    | if { [ "$size" = bpe10m ] || [ "$size" = bpe100m ]; }; then
                         ${cli} prepare-bpe-stdin "$tokenizer" "$corpus"
                       else
                         ${cli} prepare-stdin "$corpus"
@@ -698,12 +726,15 @@
             '';
           };
           # Generation is local and offline by default: with no arguments it
-          # uses the last pulled checkpoint (run/last-checkpoint), falling back
-          # to newest-compatible discovery.  Reaching a training box is opt-in
-          # via --pull, and every connection detail is an argument, so an
-          # arbitrary trainer can be named without editing anything.
+          # uses the newest compatible checkpoint, ordered by the write date
+          # each checkpoint's header records -- not by file mtime (transfer
+          # tools rewrite mtimes) and not by a pointer file (a pointer goes
+          # stale the moment weights arrive some other way).  Reaching a
+          # training box is opt-in via --pull, and every connection detail is
+          # an argument, so an arbitrary trainer can be named without editing
+          # anything.
           wikiGenerate = pkgs.writeShellApplication {
-            name = "wiki-generate";
+            name = "ana";
             runtimeInputs = [
               pkgs.coreutils
               pkgs.openssh
@@ -712,17 +743,23 @@
             text = ''
               usage() {
                 cat >&2 <<'USAGE'
-wiki-generate [OPTIONS] [PROMPT]
+ana [OPTIONS] [PROMPT]
 
-Generate text from a trained checkpoint.  With no options it uses the last
-pulled checkpoint and never contacts the network.
+Generate text from a trained checkpoint.  With no options it uses the newest
+local weights -- ordered by the write date in each checkpoint's own header,
+so however new weights arrive (pull, rsync stamp, copy) the latest always
+wins -- and never contacts the network.
 
 Local:
   --checkpoint PATH        generate from this checkpoint (skips discovery)
-  --tokenizer PATH         tokenizer artifact (default weights/enwiki-8k.bpe)
+  --tokenizer PATH         tokenizer artifact (default: discovered by matching
+                           the checkpoint's identity against run/*.bpe and
+                           weights/*.bpe)
   --tokens N               generation budget (default 128)
   --prompt TEXT            prompt; also accepted as trailing arguments
-  --list                   list local checkpoints with compatibility, then exit
+  --list                   list local checkpoints (header only), then exit
+  --verify                 with --list, fully validate every checkpoint (slow:
+                           reads each file whole)
   -h, --help               this message
 
 Pulling from a trainer (opt-in; nothing is contacted without --pull/--host):
@@ -733,22 +770,24 @@ Pulling from a trainer (opt-in; nothing is contacted without --pull/--host):
   --port N                 ssh port (default 22)
   --key PATH               ssh identity file
   --remote-checkpoint PATH remote checkpoint path (default
-                           /root/ana/run/wiki-bpe10m-global.checkpoint)
+                           /root/formalTransformer/run/wiki-bpe100m-global.checkpoint)
 
 A pull lands in run/pulled-HOST-PORT-checkpoints/, never on top of an existing
-checkpoint, and records its destination in run/last-checkpoint - which is what
-a later no-argument run uses.
+checkpoint, and records its destination in run/last-checkpoint for reference.
+A later no-argument run selects the newest local weights, so a fresh pull wins
+by being newest, not by being pointed at.
 
 Environment fallbacks (arguments win): WIKI_PROMPT, WIKI_TOKENS,
 WIKI_CHECKPOINT, WIKI_TOKENIZER, and for --pull: WIKI_REMOTE,
 WIKI_REMOTE_PORT, WIKI_REMOTE_KEY, WIKI_REMOTE_CHECKPOINT, or the same
-assignments in run/remote-box.env.  TEMPERATURE, TOP_K and SAMPLE_SEED shape
-decoding.
+assignments in run/remote-box.env.  TEMPERATURE, TOP_P, TOP_K and SAMPLE_SEED
+shape decoding (defaults: temperature 0.8, nucleus top-p 0.95, top-k off).
 USAGE
               }
 
               pull=0
               list=0
+              verify=0
               host=
               user=
               port=
@@ -762,7 +801,7 @@ USAGE
 
               need_value() {
                 if [ "$1" -lt 2 ]; then
-                  echo "wiki-generate: $2 needs a value" >&2
+                  echo "ana: $2 needs a value" >&2
                   exit 1
                 fi
               }
@@ -771,6 +810,7 @@ USAGE
                 case "$1" in
                   --pull) pull=1 ;;
                   --list) list=1 ;;
+                  --verify) verify=1 ;;
                   --host) need_value $# "$1"; host="$2"; pull=1; shift ;;
                   --user) need_value $# "$1"; user="$2"; shift ;;
                   --port) need_value $# "$1"; port="$2"; shift ;;
@@ -787,7 +827,7 @@ USAGE
                         shift
                       done
                       break ;;
-                  -*) echo "wiki-generate: unknown option $1" >&2; usage; exit 1 ;;
+                  -*) echo "ana: unknown option $1" >&2; usage; exit 1 ;;
                   *)  if [ "$prompt_set" = 1 ]; then prompt="$prompt $1"; else prompt="$1"; prompt_set=1; fi ;;
                 esac
                 shift
@@ -802,7 +842,7 @@ USAGE
               if [ -z "$tokenizer" ]; then tokenizer="''${WIKI_TOKENIZER:-}"; fi
               case "$tokens" in
                 ""|*[!0-9]*)
-                  echo "wiki-generate: --tokens must be a non-negative integer (got '$tokens')" >&2
+                  echo "ana: --tokens must be a non-negative integer (got '$tokens')" >&2
                   exit 1 ;;
               esac
 
@@ -818,7 +858,7 @@ USAGE
                   if [ -z "$remote_checkpoint" ]; then remote_checkpoint="''${WIKI_REMOTE_CHECKPOINT:-}"; fi
                 fi
                 if [ -z "$host" ]; then
-                  echo "wiki-generate: --pull needs a trainer to pull from" >&2
+                  echo "ana: --pull needs a trainer to pull from" >&2
                   echo "  pass --host user@host (with --port/--key as needed)," >&2
                   echo "  or set WIKI_REMOTE, or write run/remote-box.env" >&2
                   exit 1
@@ -826,11 +866,11 @@ USAGE
                 if [ -z "$port" ]; then port="''${WIKI_REMOTE_PORT:-22}"; fi
                 if [ -z "$key" ]; then key="''${WIKI_REMOTE_KEY:-}"; fi
                 if [ -z "$remote_checkpoint" ]; then
-                  remote_checkpoint="''${WIKI_REMOTE_CHECKPOINT:-/root/ana/run/wiki-bpe10m-global.checkpoint}"
+                  remote_checkpoint="''${WIKI_REMOTE_CHECKPOINT:-/root/formalTransformer/run/wiki-bpe100m-global.checkpoint}"
                 fi
                 case "$port" in
                   ""|*[!0-9]*)
-                    echo "wiki-generate: --port must be an integer (got '$port')" >&2
+                    echo "ana: --port must be an integer (got '$port')" >&2
                     exit 1 ;;
                 esac
                 case "$host" in
@@ -838,7 +878,7 @@ USAGE
                   *) host="''${user:-root}@$host" ;;
                 esac
                 if [ -n "$key" ] && [ ! -f "$key" ]; then
-                  echo "wiki-generate: ssh key not found: $key" >&2
+                  echo "ana: ssh key not found: $key" >&2
                   exit 1
                 fi
 
@@ -853,107 +893,242 @@ USAGE
                   printf -v key_quoted '%q' "$key"
                   ssh_command="$ssh_command -i $key_quoted"
                 fi
-                echo "wiki-generate: pulling $host:$remote_checkpoint -> $dest_dir/" >&2
+                echo "ana: pulling $host:$remote_checkpoint -> $dest_dir/" >&2
                 # rsync writes a temp file and renames, so a torn transfer never
                 # replaces good local weights.
                 if rsync -zt -e "$ssh_command" "$host:$remote_checkpoint" "$dest_dir/"; then
                   pulled="$dest_dir/$(basename "$remote_checkpoint")"
-                  echo "wiki-generate: pull complete: $pulled" >&2
+                  echo "ana: pull complete: $pulled" >&2
                   mkdir -p run
                   printf '%s\n' "$pulled" > run/last-checkpoint
                 else
-                  echo "wiki-generate: pull failed (box offline?); using local checkpoints" >&2
+                  echo "ana: pull failed (box offline?); using local checkpoints" >&2
                 fi
               fi
 
-              # Newest first, but only checkpoints this host's architecture can
-              # interpret: a checkpoint from another architecture (for example
-              # another branch's model/layout identity) is skipped with a note
-              # instead of aborting generation.
+              # All local checkpoints, then the newest COMPATIBLE one by the
+              # write date recorded in each checkpoint's own header (a ~20 ms
+              # header seek per file).  The header is the authority on
+              # recency: file mtimes are rewritten by transfer tools, and a
+              # pointer file goes stale the moment weights arrive another way.
+              # Ties on write date (a stamped copy of the same weights) break
+              # toward the higher step, then either file equivalently.
               candidates="$(
                 for candidate in run/*.checkpoint run/*-checkpoints/*.checkpoint; do
                   if [ ! -f "$candidate" ]; then continue; fi
-                  printf '%s %s\n' "$(stat -L --format=%Y -- "$candidate")" "$candidate"
-                done | sort -rn | cut -d' ' -f2-
+                  printf '%s\n' "$candidate"
+                done | sort -u
               )"
 
-              pointer=
-              if [ -f run/last-checkpoint ]; then pointer="$(cat run/last-checkpoint)"; fi
+              # Rank by header, validate lazily.  check-checkpoint reads the
+              # whole file -- 5 s for a 1.4 GB checkpoint -- so validating
+              # every candidate cost 2.5 minutes on a run/ holding 31 stamped
+              # checkpoints (21.5 GB), on every invocation, including --pull.
+              # The header seek is 20 ms and already carries the write date and
+              # step, so it does the ordering; validation then walks the ranked
+              # list and stops at the first candidate that passes.  Same answer
+              # as validating all of them -- the winner is still fully
+              # verified -- for one full read instead of N.
+              ranked="$(
+                for candidate in $candidates; do
+                  info="$(${sequential} checkpoint-info "$candidate" 2>/dev/null \
+                    | grep '^trained:' || true)"
+                  if [ -z "$info" ]; then continue; fi
+                  step="$(printf '%s' "$info" | sed -n 's|^trained: \([0-9]*\)/.*|\1|p')"
+                  written="$(printf '%s' "$info" | sed -n 's|.*weights written \(.*\)$|\1|p')"
+                  epoch="$(date -u -d "$written" +%s 2>/dev/null || echo 0)"
+                  printf '%s %s %s\n' "$epoch" "''${step:-0}" "$candidate"
+                done | sort -k1,1rn -k2,2rn
+              )"
+
+              newest="$(
+                printf '%s\n' "$ranked" | while IFS=' ' read -r _ _ candidate; do
+                  if [ -z "$candidate" ]; then continue; fi
+                  if ${sequential} check-checkpoint "$candidate" >/dev/null 2>&1; then
+                    printf '%s\n' "$candidate"
+                    break
+                  fi
+                done
+              )"
 
               if [ "$list" = 1 ]; then
                 found=0
                 for candidate in $candidates; do
                   found=1
-                  if ${sequential} check-checkpoint "$candidate" >/dev/null 2>&1; then
-                    status=compatible
+                  # || true: the script runs under `set -euo pipefail`, and a
+                  # truncated checkpoint (an interrupted transfer left in
+                  # run/) makes checkpoint-info exit non-zero, which would
+                  # abort the whole listing part-way through with no message.
+                  model="$(${sequential} checkpoint-info "$candidate" 2>/dev/null \
+                    | sed -n 's|^model: \([^ ]*\) .*|\1|p' | head -n 1 || true)"
+                  # Listing every checkpoint used to validate every checkpoint,
+                  # which reads each file whole.  The header alone says whether
+                  # a file parses and which model it holds; --verify buys the
+                  # deep check, which is the only thing that can catch a
+                  # readable header over weights this binary cannot load.
+                  if [ "$verify" = 1 ]; then
+                    if ${sequential} check-checkpoint "$candidate" >/dev/null 2>&1; then
+                      status=compatible
+                    else
+                      status=incompatible
+                    fi
+                  elif [ -n "$model" ]; then
+                    status=readable
                   else
-                    status=incompatible
+                    status=unreadable
                   fi
                   mark=" "
-                  if [ "$candidate" = "$pointer" ]; then mark="*"; fi
-                  printf '%s %-12s %12s bytes  %s\n' \
-                    "$mark" "$status" "$(stat -L --format=%s -- "$candidate")" "$candidate"
+                  if [ "$candidate" = "$newest" ]; then mark="*"; fi
+                  printf '%s %-12s %-9s %12s bytes  %s\n' \
+                    "$mark" "$status" "''${model:--}" \
+                    "$(stat -L --format=%s -- "$candidate")" "$candidate"
                 done
                 if [ "$found" = 0 ]; then
-                  echo "wiki-generate: no checkpoints under run/" >&2
+                  echo "ana: no checkpoints under run/" >&2
                 fi
-                echo "(* marks run/last-checkpoint, the no-argument default)" >&2
+                echo "(* marks the no-argument default: newest compatible weights by header write date," >&2
+                if [ "$verify" = 1 ]; then
+                  echo " and every file above was fully validated)" >&2
+                else
+                  echo " fully validated; other rows report only what their header says -- --verify checks all)" >&2
+                fi
                 exit 0
               fi
 
-              # The default is the last pulled checkpoint; discovery is the
-              # fallback when no pull has happened or the pointer went stale.
-              if [ -z "$checkpoint" ] && [ -n "$pointer" ]; then
-                if [ -f "$pointer" ] && ${sequential} check-checkpoint "$pointer" >/dev/null 2>&1; then
-                  checkpoint="$pointer"
-                else
-                  echo "wiki-generate: run/last-checkpoint names an unusable checkpoint ($pointer)" >&2
-                  echo "  falling back to newest-compatible discovery" >&2
-                fi
+              if [ -z "$checkpoint" ]; then
+                checkpoint="$newest"
               fi
               if [ -z "$checkpoint" ]; then
-                for candidate in $candidates; do
-                  if ${sequential} check-checkpoint "$candidate" >/dev/null 2>&1; then
-                    checkpoint="$candidate"
-                    break
-                  else
-                    echo "wiki-generate: skipping incompatible checkpoint $candidate" >&2
-                  fi
-                done
-              fi
-              if [ -z "$checkpoint" ]; then
-                echo "wiki-generate: no compatible checkpoint found under run/" >&2
+                echo "ana: no compatible checkpoint found under run/" >&2
                 echo "  vendored weights: ./weights/assemble.sh" >&2
-                echo "  pull from a trainer: wiki-generate --pull --host user@host --port N" >&2
+                echo "  pull from a trainer: ana --pull --host user@host --port N" >&2
                 echo "  or train first: nix run .#wiki-train" >&2
                 exit 1
               fi
               if [ ! -f "$checkpoint" ]; then
-                echo "wiki-generate: checkpoint not found: $checkpoint" >&2
+                echo "ana: checkpoint not found: $checkpoint" >&2
                 exit 1
               fi
+
+              # Which weights and model, before the prompt: reads only the
+              # checkpoint header, so it costs nothing next to generation.
+              ${sequential} checkpoint-info "$checkpoint" >&2
 
               if [ -z "$prompt_set" ] || [ "$prompt_set" = 0 ]; then
                 if [ -t 0 ]; then
                   printf 'prompt> ' >&2
                   IFS= read -r prompt || {
-                    echo "wiki-generate: no prompt entered" >&2
+                    echo "ana: no prompt entered" >&2
                     exit 1
                   }
                 else
-                  echo "wiki-generate: no prompt given and stdin is not a terminal" >&2
+                  echo "ana: no prompt given and stdin is not a terminal" >&2
                   echo "  pass --prompt TEXT (or set WIKI_PROMPT), or run interactively" >&2
                   exit 1
                 fi
               fi
 
-              if [ -z "$tokenizer" ] && [ -f weights/enwiki-8k.bpe ]; then
-                tokenizer="weights/enwiki-8k.bpe"
+              if [ -n "$tokenizer" ]; then
+                export TOKENIZER_FILE="$tokenizer"
               fi
-              export TOKENIZER_FILE="''${tokenizer:-$HOME/datasets/wikipedia-en/enwiki-8k.bpe}"
-              echo "wiki-generate: checkpoint=$checkpoint tokens=$tokens" >&2
-              echo "wiki-generate: loading model; generated text streams after initialization" >&2
+              echo "ana: tokens=$tokens" >&2
+              echo "ana: loading model; generated text streams after initialization" >&2
               exec ${sequential} generate "$checkpoint" "$prompt" "$tokens"
+            '';
+          };
+          # Offline scoring on a fixed corpus. Same default-checkpoint rule as
+          # ana (run/last-checkpoint, then discovery), so "the model"
+          # means the same thing to both apps.
+          #
+          # Runs on the multicore host, not the sequential one: scoring every
+          # window of a real evaluation set is thousands of forward passes, and
+          # multicore produces step-for-step identical losses (docs/RUN-2026-07-25-WIKI-FULL.md)
+          # while using every core. It is still CPU-only, so it stays safe on a
+          # display GPU.
+          wikiEval = pkgs.writeShellApplication {
+            name = "wiki-eval";
+            runtimeInputs = [ pkgs.coreutils ];
+            text = ''
+              usage() {
+                cat >&2 <<'USAGE'
+wiki-eval [OPTIONS]
+
+Score a checkpoint on a fixed evaluation corpus and report bits per byte with
+a standard error.  Never samples: every full window in the corpus is scored.
+
+  --checkpoint PATH   checkpoint to score (default: run/last-checkpoint, then
+                      the newest compatible checkpoint under run/)
+  --corpus PATH       evaluation corpus (default run/eval/wiki-heldout.corpus)
+  --tokenizer PATH    tokenizer artifact (default: discovered by matching the
+                      checkpoint's identity against run/*.bpe and weights/*.bpe)
+  --micro N           windows per forward chunk (default 8)
+  -h, --help          this message
+
+Build a held-out corpus first with:
+  formal-transformer build-eval run/eval/wiki-heldout.corpus \
+    run/wiki-bpe10m/plan-bpe10m-b8-s4000.tsv run/wiki-bpe10m 40 20
+USAGE
+              }
+
+              checkpoint=
+              corpus=
+              tokenizer=
+              micro=
+
+              while [ $# -gt 0 ]; do
+                case "$1" in
+                  --checkpoint) checkpoint="''${2:-}"; shift ;;
+                  --corpus) corpus="''${2:-}"; shift ;;
+                  --tokenizer) tokenizer="''${2:-}"; shift ;;
+                  --micro) micro="''${2:-}"; shift ;;
+                  -h|--help) usage; exit 0 ;;
+                  *) echo "wiki-eval: unknown argument $1" >&2; usage; exit 1 ;;
+                esac
+                shift
+              done
+
+              if [ -z "$corpus" ]; then corpus="run/eval/wiki-heldout.corpus"; fi
+              if [ -z "$micro" ]; then micro="''${MICRO_BATCH:-8}"; fi
+              case "$micro" in
+                ""|*[!0-9]*) echo "wiki-eval: --micro must be a positive integer" >&2; exit 1 ;;
+              esac
+
+              if [ -z "$checkpoint" ] && [ -f run/last-checkpoint ]; then
+                pointer="$(cat run/last-checkpoint)"
+                if [ -n "$pointer" ] && [ -f "$pointer" ] \
+                   && ${multicore} check-checkpoint "$pointer" >/dev/null 2>&1; then
+                  checkpoint="$pointer"
+                fi
+              fi
+              if [ -z "$checkpoint" ]; then
+                candidates="$(
+                  for candidate in run/*.checkpoint run/*-checkpoints/*.checkpoint; do
+                    if [ ! -f "$candidate" ]; then continue; fi
+                    printf '%s %s\n' "$(stat -L --format=%Y -- "$candidate")" "$candidate"
+                  done | sort -rn | cut -d' ' -f2-
+                )"
+                for candidate in $candidates; do
+                  if ${multicore} check-checkpoint "$candidate" >/dev/null 2>&1; then
+                    checkpoint="$candidate"
+                    break
+                  fi
+                done
+              fi
+              if [ -z "$checkpoint" ]; then
+                echo "wiki-eval: no compatible checkpoint found under run/" >&2
+                exit 1
+              fi
+              if [ ! -f "$corpus" ]; then
+                echo "wiki-eval: evaluation corpus not found: $corpus" >&2
+                echo "  build one with: formal-transformer build-eval ..." >&2
+                exit 1
+              fi
+
+              if [ -n "$tokenizer" ]; then
+                export TOKENIZER_FILE="$tokenizer"
+              fi
+              export MICRO_BATCH="$micro"
+              exec ${multicore} evaluate "$checkpoint" "$corpus"
             '';
           };
           watchTraining = pkgs.writeShellApplication {
@@ -963,9 +1138,26 @@ USAGE
               pkgs.openssh
             ];
             text = ''
-              host="''${TRAIN_SSH_HOST:-root@154.9.228.248}"
-              port="''${TRAIN_SSH_PORT:-21300}"
-              remote_log="''${TRAIN_REMOTE_LOG:-/root/formalTransformer-5070ti/run/train-cloud-rtx5070ti.log}"
+              # The trainer's address is not a constant: vast reassigns an
+              # instance's public IP without restarting it, so a hardcoded host
+              # here goes stale silently and watch-training just hangs on a
+              # box that no longer answers.  run/remote-box.env is the one
+              # place the current address is written (ana --pull reads it too),
+              # so read it first and let TRAIN_SSH_* override.
+              host="''${TRAIN_SSH_HOST:-}"
+              port="''${TRAIN_SSH_PORT:-}"
+              if [ -f run/remote-box.env ]; then
+                # shellcheck disable=SC1091
+                . run/remote-box.env
+                if [ -z "$host" ]; then host="''${WIKI_REMOTE:-}"; fi
+                if [ -z "$port" ]; then port="''${WIKI_REMOTE_PORT:-}"; fi
+              fi
+              if [ -z "$host" ]; then
+                echo "watch-training: no host; set TRAIN_SSH_HOST or write run/remote-box.env" >&2
+                exit 1
+              fi
+              port="''${port:-22}"
+              remote_log="''${TRAIN_REMOTE_LOG:-/root/formalTransformer/run/train-cloud.log}"
               lines="''${TRAIN_LOG_LINES:-20}"
               reconnect_delay="''${TRAIN_RECONNECT_DELAY:-2}"
 
@@ -1020,10 +1212,15 @@ USAGE
           program = "${wikiTrain}/bin/wiki-train";
           meta.description = "Start or resume Wikipedia training with default corpus, checkpoint, and schedule";
         };
-        wiki-generate = {
+        ana = {
           type = "app";
-          program = "${wikiGenerate}/bin/wiki-generate";
+          program = "${wikiGenerate}/bin/ana";
           meta.description = "Generate text from the latest Wikipedia checkpoint";
+        };
+        wiki-eval = {
+          type = "app";
+          program = "${wikiEval}/bin/wiki-eval";
+          meta.description = "Score a checkpoint on a fixed held-out corpus (bits per byte with a standard error)";
         };
         watch-training = {
           type = "app";

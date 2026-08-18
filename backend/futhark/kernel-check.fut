@@ -36,6 +36,33 @@ entry check_embed_bwd (v: i64) (d: i64) (count: i64)
   let output_bar = gen (count*d) 4 1.0f32
   in summary (piece_embed_scatter tokens output_bar : [v*d]f32)
 
+-- The superseded output-owned form of the embedding pullback, duplicated here
+-- (kernel-check imports pieces-defs, not pieces-conformance) so the grouped
+-- implementation can be differenced against it on both backends.
+def embed_scatter_reference [count] (v: i64) (d: i64)
+    (tokens: [count]i64) (output_bar_flat: [count*d]f32): [v*d]f32 =
+  let output_bar = unflatten output_bar_flat :> [count][d]f32
+  in tabulate (v*d) (\idx ->
+       let word = idx / d
+       let c = idx % d
+       in f32.sum (map (\i -> if tokens[i] == word then output_bar[i,c]
+                              else 0.0f32) (iota count)))
+
+-- Max absolute and max relative difference against the reference, over EVERY
+-- element.  Deliberately a maximum of the difference rather than a summary of
+-- the values: the piece_ce_dlogits miscompile produced a garbage gradient whose
+-- magnitude statistics looked ordinary, and only an element-wise comparison
+-- against an exact reference caught it.  Both must be ~1e-6 on both backends.
+entry check_embed_bwd_vs_reference (v: i64) (d: i64) (count: i64)
+    : (f32, f32) =
+  let tokens = gentok count v
+  let output_bar = gen (count*d) 4 1.0f32
+  let actual = piece_embed_scatter tokens output_bar : [v*d]f32
+  let expected = embed_scatter_reference v d tokens output_bar
+  in ( f32.maximum (map2 (\a b -> f32.abs (a - b)) actual expected)
+     , f32.maximum (map2 (\a b -> f32.abs (a - b) / (1.0f32 + f32.abs b))
+                         actual expected) )
+
 entry check_gate_cum_bwd (groups: i64) (chunk: i64) (hd: i64)
     : (f32, f32, f32) =
   let gate_logits = gen (groups*chunk*hd) 5 1.0f32
@@ -51,6 +78,57 @@ entry check_l2_bwd (rows: i64) (d: i64) (h: i64)
   let output_bar = gen (rows*d) 9 1.0f32
   let (_, x_bar) = vjp2 (piece_l2norm_heads h) x output_bar
   in summary x_bar
+
+-- The superseded per-element form of l2_normalize_heads, which recomputed each
+-- head's norm for every output component.  Hoisting the norm is pure
+-- let-floating, so the forward must be EXACTLY equal -- this returns the max
+-- absolute difference, and anything but 0 means the hoist reassociated.
+def l2_normalize_heads_per_element [d] (h: i64) (x: [d]f32): [d]f32 =
+  let hd = d / h
+  in tabulate d (\j ->
+       let head_base = (j / hd) * hd
+       let norm = f32.sqrt (1.0e-6f32 +
+         f32.sum (map (\c -> x[head_base+c] * x[head_base+c]) (iota hd)))
+       in x[j] / norm)
+
+-- The three candidate pullbacks, isolated for timing.  check_l2_bwd above is
+-- vjp2 of the hoisted forward; these two are the superseded per-element vjp and
+-- the handwritten closed form, so a single run gives the whole comparison.
+entry check_l2_bwd_per_element (rows: i64) (d: i64) (h: i64)
+    : (f32, f32, f32) =
+  let x = gen (rows*d) 8 1.0f32
+  let output_bar = gen (rows*d) 9 1.0f32
+  let (_, x_bar) = vjp2 (\z ->
+    flatten (map (l2_normalize_heads_per_element h)
+                 (unflatten z :> [rows][d]f32))) x output_bar
+  in summary x_bar
+
+entry check_l2_bwd_closed (rows: i64) (d: i64) (h: i64)
+    : (f32, f32, f32) =
+  let x = gen (rows*d) 8 1.0f32
+  let output_bar = gen (rows*d) 9 1.0f32
+  in summary (piece_l2norm_heads_bars h x output_bar)
+
+entry check_l2_fwd_vs_per_element (rows: i64) (d: i64) (h: i64): f32 =
+  let x = gen (rows*d) 8 1.0f32
+  let hoisted = piece_l2norm_heads h x
+  let reference = flatten (map (l2_normalize_heads_per_element h)
+                               (unflatten x :> [rows][d]f32))
+  in f32.maximum (map2 (\a b -> f32.abs (a - b)) hoisted reference)
+
+-- The handwritten closed form against the AD-generated pullback, element-wise.
+-- These are different float expressions, so the bound is relative, not exact.
+-- `scale` deliberately shrinks x so some heads sit near the 1e-6 floor, where
+-- the epsilon dominates the norm and the two forms disagree most.
+entry check_l2_bwd_closed_vs_vjp (rows: i64) (d: i64) (h: i64) (scale: f32)
+    : (f32, f32) =
+  let x = gen (rows*d) 8 scale
+  let output_bar = gen (rows*d) 9 1.0f32
+  let (_, from_vjp) = vjp2 (piece_l2norm_heads h) x output_bar
+  let closed = piece_l2norm_heads_bars h x output_bar
+  in ( f32.maximum (map2 (\a b -> f32.abs (a - b)) closed from_vjp)
+     , f32.maximum (map2 (\a b -> f32.abs (a - b) / (1.0f32 + f32.abs b))
+                         closed from_vjp) )
 
 entry check_intra_bwd (groups: i64) (chunk: i64) (hd: i64)
     : (f32, f32, f32) =

@@ -1,6 +1,6 @@
 -- Performance ladder for the differentiated training step.
 --
--- Why this exists (finding 2026-07-15, see HANDOFF.md): the vjp-generated
+-- Why this exists (finding 2026-07-15): the vjp-generated
 -- gradient kernel is pathologically slow at bpe10m scale on every GPU tested,
 -- while the small preset hides the problem. Each `bench_grad` dataset moves
 -- ONE configuration axis from the small preset (258/64/192/h4/L2/n64) toward

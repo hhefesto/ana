@@ -4,16 +4,21 @@ import Control.Exception (Exception, SomeException, displayException, finally, t
 import Control.Monad (forM_, unless)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
+import Data.List (transpose)
 import Data.Monoid (Sum (..))
+import qualified Data.Vector.Unboxed as VU
 import FormalTransformer.AD
 import FormalTransformer.Artifact
 import FormalTransformer.Bigram
 import FormalTransformer.Config
 import FormalTransformer.Data
+import FormalTransformer.Attention.Gla
 import FormalTransformer.Language
+import FormalTransformer.Language.Autoregressive
 import FormalTransformer.Layout
 import FormalTransformer.Model
 import FormalTransformer.Optimizer
+import FormalTransformer.Semiring
 import FormalTransformer.Tokenizer
 import System.Directory (doesFileExist, getTemporaryDirectory, removeFile)
 import System.Exit (exitFailure)
@@ -32,6 +37,15 @@ tests =
   , ("invalid configurations are rejected", testConfigRejection)
   , ("causal prefix logits are invariant", testCausalPrefix)
   , ("weighted-language residual laws", testResidualLaws)
+  , ("nu is a semiring homomorphism", testNuHomomorphism)
+  , ("weighted-language convolution is a semiring", testConvolutionSemiring)
+  , ("Brzozowski product rule", testProductRule)
+  , ("single is a monoid morphism from words", testSingleMorphism)
+  , ("state-algebra runs and path weights factorize", testAlgebraFactorization)
+  , ("GLA attention is bit-identical to the frozen reference", testGlaFrozenReference)
+  , ("GLA chunk concatenation is exact", testGlaChunkLaw)
+  , ("GLA recurrent and parallel forms agree", testGlaRecurrentParallel)
+  , ("instrumented stats agree with the reference forward", testStatsAgreeWithForward)
   , ("language prefix scores factorize", testPrefixFactorization)
   , ("conditional path metrics compose", testPathComposition)
   , ("Bradley finite-tree magnitude", testBradleyMagnitude)
@@ -50,7 +64,73 @@ tests =
   , ("bigram gate matches weighted-language semantics", testBigramLanguage)
   , ("bigram with no evidence is uniform", testBigramUniform)
   , ("trainer window split is shared and deterministic", testTrainerWindowSplit)
+  , ("learned BPE is parseable, deterministic and lossless", testLearnBpe)
+  , ("100M preset is GPT-2-small scale and tiles 3:1", testBpe100mPreset)
   ]
+
+-- The scale-up rung. Pinning the exact count here is the point: vocabulary is
+-- 22% of the budget at 32k pieces with tied embeddings, so a silent change to
+-- either the vocabulary or the FFN ratio would move the model off GPT-2-small
+-- scale without anything else noticing.
+testBpe100mPreset :: IO ()
+testBpe100mPreset = do
+  _ <- expectRight (validateConfig bpe100mPreset)
+  layout <- expectRight (namedLayout bpe100mPreset)
+  assert (bpe100mPreset == Config 32768 256 768 2048 12 12) "100M preset dimensions differ"
+  assert (headDim bpe100mPreset == 64) "100M preset head dimension differs"
+  assert (glaLayerCount bpe100mPreset == 9) "100M preset should have 9 GLA layers of 12"
+  assert (paramCount bpe100mPreset == 115428096) "100M preset parameter count differs"
+  assert (sum (map sliceLength layout) == 115428096) "100M layout does not cover parameters"
+  -- Tied embeddings: the vocabulary is one d-wide row per piece and nothing else.
+  assert (vocabSize bpe100mPreset * modelDim bpe100mPreset == 25165824)
+    "100M embedding cost differs"
+
+-- A learned tokenizer has to satisfy three things, and all three are checkable
+-- without a reference implementation: the artifact must be readable by the very
+-- parser that validates contiguity and merge ordering, learning must be
+-- deterministic given a word table, and encoding must remain lossless.  The
+-- last is the one that matters most in practice -- a trainer whose merges the
+-- encoder cannot reproduce would corrupt a corpus silently.
+testLearnBpe :: IO ()
+testLearnBpe = do
+  let text = BSC.pack (concat (replicate 40
+        ("the theory of language is a theory of structure; "
+          ++ "the structure of a language is the language of structures\n")))
+      frequencies = countWords mempty text
+      vocabulary = 320
+  merges <- either (throwIO . TestException) pure (learnBpeMerges vocabulary frequencies)
+  assert (not (null merges)) "learned no merges at all"
+  assert (map snd merges == take (length merges) [byteVocabSize ..])
+    "merge ids are not contiguous from the first non-byte token"
+
+  again <- either (throwIO . TestException) pure (learnBpeMerges vocabulary frequencies)
+  assert (again == merges) "learning is not deterministic for a fixed word table"
+
+  -- Round-trip through the artifact the parser accepts, then through the
+  -- encoder, so the trainer is checked against the real reader and writer.
+  directory <- getTemporaryDirectory
+  let path = directory </> "formal-transformer-learned.bpe"
+      cleanup = do
+        present <- doesFileExist path
+        if present then removeFile path else pure ()
+  (do
+    BS.writeFile path (renderBpeArtifact merges)
+    loaded <- loadFastBpe path >>= either (throwIO . TestException) pure
+    let tokenizer = FastBpeTokenizer loaded
+    assert (tokenizerVocabSize tokenizer == byteVocabSize + length merges)
+      "loaded vocabulary disagrees with the number of learned merges"
+    let tokens = encodeWith tokenizer text
+    assert (not (null tokens)) "encoding produced no tokens"
+    either (throwIO . TestException) (\back -> assert (back == text)
+      "decode . encode is not the identity under the learned tokenizer")
+      (decodeWith tokenizer tokens)
+    -- Merges must actually be used, or the learner produced a table the
+    -- encoder silently ignores.
+    assert (any (>= byteVocabSize) tokens)
+      "no learned merge was applied when encoding the training text"
+    assert (length tokens < BS.length text)
+      "encoding was no shorter than the raw bytes, so no compression happened")
+    `finally` cleanup
 
 runTest :: (String, IO ()) -> IO Bool
 runTest (name, action) = do
@@ -94,7 +174,7 @@ testLayout = do
   mask <- expectRight (decayMask config)
   assert (sum (map sliceLength layout) == paramCount config) "slice lengths do not cover parameter vector"
   assert (map sliceOffset layout == scanl (+) 0 (map sliceLength (init layout))) "slice offsets are not contiguous"
-  assert (length mask == paramCount config) "decay mask length differs from parameter count"
+  assert (VU.length mask == paramCount config) "decay mask length differs from parameter count"
   assert (paramCount config == vocabSize config * modelDim config
     + layerCount config * (4 * modelDim config ^ (2 :: Int) + 3 * ffDim config * modelDim config + 2 * modelDim config)
     + glaLayerCount config * modelDim config ^ (2 :: Int)
@@ -122,8 +202,12 @@ testGlaPresets = do
   -- Exact 3:1 tiling: 8 layers = 6 GLA + 2 softmax; 4 layers = 3 GLA + 1.
   assert (glaLayerCount glaPreset == 6 && glaLayerCount glaSmallPreset == 3)
     "hybrid 3:1 tiling differs"
+  assert (map (layerKind glaPreset) [0 .. 7]
+    == [GlaKind, GlaKind, GlaKind, SoftmaxKind, GlaKind, GlaKind, GlaKind, SoftmaxKind])
+    "softmax layer rule differs"
   assert (map (isSoftmaxLayer glaPreset) [0 .. 7]
-    == [False, False, False, True, False, False, False, True]) "softmax layer rule differs"
+    == [False, False, False, True, False, False, False, True])
+    "the isSoftmaxLayer shim disagrees with layerKind"
   assert (paramCount glaPreset == 13153600) "GLA preset parameter count differs"
   assert (paramCount glaSmallPreset == 242368) "GLA small parameter count differs"
   assert (sum (map sliceLength layout) == paramCount glaPreset)
@@ -161,7 +245,8 @@ testResidualLaws = do
       prefix = [2, 3]
       suffix = [4, 5]
       delta = singletonDelta 2 language
-      scoring = foldScoring (\state token -> (Sum token, state + token)) Sum 0 :: WeightedLanguage Int (Sum Int)
+      scoring = algebraScoring (StateAlgebra Sum (\state token -> (Sum token, state + token))) 0
+        :: WeightedLanguage Int (Sum Int)
   assert (nu (residual prefix language) == runWeightedLanguage language prefix) "nu of a residual differs from prefix evaluation"
   assert (runWeightedLanguage (residual suffix (residual prefix language)) []
     == runWeightedLanguage language (prefix ++ suffix)) "iterated residual does not append prefixes"
@@ -170,6 +255,263 @@ testResidualLaws = do
     "singleton derivative does not prepend its token"
   assert (getSum (runWeightedLanguage scoring [2, 3]) == 10) "fold scoring omitted step or terminal weights"
   assert (foldDetermination (+) (0 :: Int) [2, 3, 4] == 9) "fold determination differs from repeated transitions"
+
+-- The law tests for FormalTransformer.Semiring.  Every assertion below is an
+-- exact (==) at Bool or Int over an exhaustive enumeration of the words of
+-- length at most three over a two-letter alphabet.  Convolution only ever
+-- inspects subwords of its argument, so exhaustiveness up to length three is
+-- genuine coverage of every product these carriers can form there.
+testAlphabet :: [Int]
+testAlphabet = [0, 1]
+
+testWords :: [[Int]]
+testWords = concat [wordsOfLength n | n <- [0 .. 3 :: Int]]
+  where
+    wordsOfLength 0 = [[]]
+    wordsOfLength n = [token : word | token <- testAlphabet, word <- wordsOfLength (n - 1)]
+
+-- Extensional equality, restricted to the enumeration.  Languages are
+-- functions, so this is the only equality available.
+sameLanguage :: Eq weight => WeightedLanguage Int weight -> WeightedLanguage Int weight -> Bool
+sameLanguage f g = all agrees testWords
+  where agrees word = runWeightedLanguage f word == runWeightedLanguage g word
+
+boolLanguages :: [WeightedLanguage Int Bool]
+boolLanguages =
+  [ zero
+  , one
+  , single [0]
+  , single [1]
+  , single [0, 1]
+  , WeightedLanguage (even . length)
+  , WeightedLanguage (\word -> sum word == (1 :: Int))
+  ]
+
+intLanguages :: [WeightedLanguage Int Int]
+intLanguages =
+  [ zero
+  , one
+  , single [0]
+  , single [1, 0]
+  , WeightedLanguage length
+  , WeightedLanguage (\word -> sum word + 1)
+  ]
+
+testNuHomomorphism :: IO ()
+testNuHomomorphism = do
+  -- nu is evaluation at the empty word, and splits [] = [([], [])], so it is a
+  -- semiring homomorphism on the nose rather than only up to isomorphism.
+  assert (nu (zero :: WeightedLanguage Int Int) == zero) "nu of zero is not zero"
+  assert (nu (one :: WeightedLanguage Int Int) == one) "nu of one is not one"
+  assert (splits ([] :: [Int]) == [([], [])]) "splits of the empty word is not the trivial split"
+  forM_ [(f, g) | f <- intLanguages, g <- intLanguages] $ \(f, g) -> do
+    assert (nu (f <+> g) == nu f <+> nu g) "nu does not preserve addition"
+    assert (nu (f <.> g) == nu f <.> nu g) "nu does not preserve convolution"
+  forM_ [(f, g) | f <- boolLanguages, g <- boolLanguages] $ \(f, g) -> do
+    assert (nu (f <+> g) == nu f <+> nu g) "nu does not preserve disjunction"
+    assert (nu (f <.> g) == nu f <.> nu g) "nu does not preserve conjunction"
+
+testConvolutionSemiring :: IO ()
+testConvolutionSemiring = do
+  checkSemiring "Bool" boolLanguages
+  checkSemiring "Int" intLanguages
+  where
+    checkSemiring :: (Eq weight, Semiring weight) => String -> [WeightedLanguage Int weight] -> IO ()
+    checkSemiring carrier languages = do
+      forM_ languages $ \f -> do
+        assert (sameLanguage (zero <+> f) f) (carrier ++ ": zero is not a left additive identity")
+        assert (sameLanguage (f <+> zero) f) (carrier ++ ": zero is not a right additive identity")
+        assert (sameLanguage (one <.> f) f) (carrier ++ ": one is not a left multiplicative identity")
+        assert (sameLanguage (f <.> one) f) (carrier ++ ": one is not a right multiplicative identity")
+        assert (sameLanguage (zero <.> f) zero) (carrier ++ ": zero does not annihilate on the left")
+        assert (sameLanguage (f <.> zero) zero) (carrier ++ ": zero does not annihilate on the right")
+      forM_ [(f, g) | f <- languages, g <- languages] $ \(f, g) ->
+        assert (sameLanguage (f <+> g) (g <+> f)) (carrier ++ ": addition is not commutative")
+      forM_ [(f, g, h) | f <- languages, g <- languages, h <- languages] $ \(f, g, h) -> do
+        assert (sameLanguage ((f <+> g) <+> h) (f <+> (g <+> h))) (carrier ++ ": addition is not associative")
+        assert (sameLanguage ((f <.> g) <.> h) (f <.> (g <.> h))) (carrier ++ ": convolution is not associative")
+        assert (sameLanguage (f <.> (g <+> h)) ((f <.> g) <+> (f <.> h))) (carrier ++ ": convolution does not distribute on the left")
+        assert (sameLanguage ((f <+> g) <.> h) ((f <.> h) <+> (g <.> h))) (carrier ++ ": convolution does not distribute on the right")
+
+-- The reason `residual` exists, and until now unstated anywhere in Haskell:
+-- the one-token derivative of a convolution obeys Leibniz, with nu f as the
+-- scalar correction for the empty left factor.
+testProductRule :: IO ()
+testProductRule = do
+  checkRule "Bool" boolLanguages
+  checkRule "Int" intLanguages
+  where
+    checkRule :: (Eq weight, Semiring weight) => String -> [WeightedLanguage Int weight] -> IO ()
+    checkRule carrier languages =
+      forM_ [(t, f, g) | t <- testAlphabet, f <- languages, g <- languages] $ \(t, f, g) ->
+        assert
+          (sameLanguage
+            (singletonDelta t (f <.> g))
+            (scale (nu f) (singletonDelta t g) <+> (singletonDelta t f <.> g)))
+          (carrier ++ ": the Brzozowski product rule fails")
+
+testSingleMorphism :: IO ()
+testSingleMorphism = do
+  assert (sameLanguage (single [] :: WeightedLanguage Int Bool) one) "single of the empty word is not one"
+  forM_ [(u, v) | u <- shortWords, v <- shortWords] $ \(u, v) ->
+    assert
+      (sameLanguage (single (u ++ v) :: WeightedLanguage Int Bool) (single u <.> single v))
+      "single is not a monoid morphism from word concatenation to convolution"
+  where shortWords = [w | w <- testWords, length w <= 1]
+
+-- Autoregressive.agda proves `run-append` and `factorization`; both are
+-- exact at Semiring Int, so they are checked here with (==) over the same
+-- exhaustive word enumeration.  The third assertion is the payoff: the
+-- residual of an algebra's language IS the language of the algebra restarted
+-- at the state the prefix reaches.  That is why prefixLogScore may be
+-- computed incrementally at all.
+testAlgebraFactorization :: IO ()
+testAlgebraFactorization = do
+  forM_ [(xs, ys) | xs <- testWords, ys <- testWords] $ \(xs, ys) -> do
+    let reached = runAlgebra sampleAlgebra sampleStart xs
+    assert (runAlgebra sampleAlgebra sampleStart (xs ++ ys) == runAlgebra sampleAlgebra reached ys)
+      "runAlgebra does not respect concatenation"
+    assert (pathWeight sampleAlgebra sampleStart (xs ++ ys)
+      == pathWeight sampleAlgebra sampleStart xs <.> pathWeight sampleAlgebra reached ys)
+      "path weights do not factorize"
+    assert (runWeightedLanguage (residual xs (algebraLanguage sampleAlgebra sampleStart)) ys
+      == pathWeight sampleAlgebra sampleStart xs
+           <.> runWeightedLanguage (algebraLanguage sampleAlgebra reached) ys)
+      "the residual of an algebra's language is not the restarted algebra"
+  where
+    sampleStart = 3 :: Int
+    sampleAlgebra :: StateAlgebra Int Int Int
+    sampleAlgebra = StateAlgebra
+      { algebraOut = \state -> state + 1
+      , algebraStep = \state token -> (state + token + 1, state * 2 + token)
+      }
+
+-- A GLA-shaped config: two heads of four, so the per-head slicing and the
+-- interleaving in `map concat (transpose perHead)` are both exercised.  Only
+-- headDim and headCount are read by glaAttention.
+glaTestConfig :: Config
+glaTestConfig = Config 8 8 8 16 4 2
+
+-- Deterministic synthetic activations: no RNG, so the frozen-reference
+-- comparison below is reproducible bit for bit across machines.
+glaSample :: Int -> Double -> Int -> [[Double]]
+glaSample width seed count =
+  [ [ sin (seed + fromIntegral (t * 13 + i * 7)) | i <- [0 .. width - 1] ] | t <- [0 .. count - 1] ]
+
+glaTokensForTest :: Int -> Int -> [GlaToken Double]
+glaTokensForTest hd count =
+  [ GlaToken q k v alpha
+  | (q, k, v, alpha) <- zip4' (vecs 0.1) (vecs 0.7) (vecs 1.3) (map gate (vecs 2.1))
+  ]
+  where
+    vecs seed = glaSample hd seed count
+    gate = map (\x -> 0.5 + 0.4 * x)
+
+-- The regression barrier for Commit B and for every future edit to the GLA
+-- path.  This is the recursion Model.glaAttention carried before the state
+-- algebra was named, copied verbatim except that the local `zeroState` is
+-- renamed `zeros` to avoid shadowing the exported one; every float expression
+-- is character for character what it was.  The comparison is exact (==) — the
+-- conformance oracle's 3e-4 tolerance is loose enough to hide a reassociation,
+-- this is not.
+frozenGlaAttention :: Floating a => Config -> [[a]] -> [[a]] -> [[a]] -> [[a]] -> [[a]]
+frozenGlaAttention c qs ks vs alphas = map concat (transpose perHead)
+  where
+    hd = headDim c
+    perHead = [ headOutputs h | h <- [0 .. headCount c - 1] ]
+    headSlice vector h = take hd (drop (h * hd) vector)
+    headOutputs h = go zeros (zip4' qh kh vh ah)
+      where
+        qh = map (l2Normalize . (`headSlice` h)) qs
+        kh = map (l2Normalize . (`headSlice` h)) ks
+        vh = map (`headSlice` h) vs
+        ah = map (`headSlice` h) alphas
+        zeros = replicate hd (replicate hd 0)
+        go _ [] = []
+        go state ((q, k, v, alpha) : rest) =
+          let state' = zipWith3
+                (\ac kc row -> zipWith (\s vj -> ac * s + kc * vj) row v)
+                alpha k state
+              out = [ sum (zipWith (*) q col) | col <- transpose state' ]
+          in out : go state' rest
+
+testGlaFrozenReference :: IO ()
+testGlaFrozenReference = do
+  let width = modelDim glaTestConfig
+      steps = 6
+      qs = glaSample width 0.1 steps
+      ks = glaSample width 0.7 steps
+      vs = glaSample width 1.3 steps
+      alphas = map (map (\x -> 0.5 + 0.4 * x)) (glaSample width 2.1 steps)
+  assert (glaAttention glaTestConfig qs ks vs alphas == frozenGlaAttention glaTestConfig qs ks vs alphas)
+    "the GLA state-algebra refactor changed the numbers"
+  -- Truncation to the shortest input is part of the denotation (zip4').
+  assert (length (glaAttention glaTestConfig qs (take 4 ks) vs alphas) == 4)
+    "GLA attention no longer truncates to the shortest input"
+
+-- Linear.agda's runGLA-++, proved refl per step.  It is refl here too: the
+-- same multiplications happen in the same order, so this is exact even at
+-- Double, and a future chunked implementation that reassociates would fail it.
+testGlaChunkLaw :: IO ()
+testGlaChunkLaw = do
+  let hd = headDim glaTestConfig
+      tokens = glaTokensForTest hd 6
+  forM_ [0 .. length tokens] $ \cut -> do
+    let (before, after) = splitAt cut tokens
+    assert (stateRows (runGla (zeroState hd) (before ++ after))
+      == stateRows (runGla (runGla (zeroState hd) before) after))
+      "runGla does not respect chunk concatenation"
+
+-- Linear.agda's recurrent≡parallel.  Exact over a semiring, only approximate
+-- over floats: the closed form reassociates the gate products, which is
+-- exactly the licence the Futhark backend uses.  The initial state is
+-- deliberately nonzero, or the gateProd * S term would be untested.
+testGlaRecurrentParallel :: IO ()
+testGlaRecurrentParallel = do
+  let hd = headDim glaTestConfig
+      tokens = glaTokensForTest hd 6
+      initial = StateMatrix
+        [ [ 0.05 * fromIntegral (i * hd + j) | j <- [0 .. hd - 1] ] | i <- [0 .. hd - 1] ]
+  forM_ [0 .. length tokens] $ \count -> do
+    let prefix = take count tokens
+    assertVectorsNear 1e-10
+      (concat (stateRows (runGla initial prefix)))
+      (concat (stateRows (closedGla hd initial prefix)))
+      "recurrent and closed GLA forms disagree"
+
+-- runBlockStats used to be a hand-copied twin of runBlock with a comment
+-- asking future editors to keep them line-for-line equivalent, and nothing
+-- checking it.  They now share runBlockTrace, and this pins the agreement.
+-- glaSmallPreset is used because it has four layers, so both mixer
+-- alternatives are exercised (layer 3 is the softmax one).
+testStatsAgreeWithForward :: IO ()
+testStatsAgreeWithForward = do
+  let c = glaSmallPreset
+      ps = presetParams c
+      tokens = [0, 5, 9, 200, 3, 7]
+  stats <- expectRight (fullSequenceStats c ps tokens)
+  logits <- expectRight (fullSequenceLogits c ps tokens)
+  let scored = zip logits (drop 1 tokens)
+      losses = [logSumExp z - z !! t | (z, t) <- scored]
+      referenceLoss = sum losses / fromIntegral (length losses)
+  assertNear 1e-12 referenceLoss (actLoss stats)
+    "the instrumented forward disagrees with the reference forward"
+  assertNear 1e-12 (maximum (0 : map (maximum . map abs) logits)) (actLogitMax stats)
+    "the instrumented forward reports different logits"
+  assert (map blockStatsKind (actBlocks stats) == ["gla", "gla", "gla", "softmax"])
+    "block kinds no longer follow the 3:1 hybrid rule"
+  assert (map (fmap (const ()) . blockStatsAlpha) (actBlocks stats)
+    == [Just (), Just (), Just (), Nothing])
+    "gate statistics are reported for a softmax block, or missing from a GLA block"
+
+presetParams :: Config -> [Double]
+presetParams c = case namedLayout c of
+  Left message -> error message
+  Right layout -> concatMap values layout
+  where
+    values slice
+      | sliceDecay slice = [0.04 * sin (fromIntegral (sliceOffset slice + i + 1)) | i <- [0 .. sliceLength slice - 1]]
+      | otherwise = replicate (sliceLength slice) 1
 
 testPrefixFactorization :: IO ()
 testPrefixFactorization = do
@@ -190,6 +532,17 @@ testPathComposition = do
   assertNear 1e-12 (directedSurprisal whole)
     (directedSurprisal first + directedSurprisal second) "directed surprisal is not additive"
   assertNear 1e-12 1 (pathProbability pathIdentity) "path identity probability differs from one"
+  -- The Monoid instance is composeConditionalPath, and both identity laws hold
+  -- exactly in IEEE (x + 0.0 == x, and -0.0 is unreachable through pathMetric).
+  assert (mempty == pathIdentity) "path metric mempty is not the identity path"
+  assert (first <> second == composed) "the Monoid instance differs from composeConditionalPath"
+  forM_ [first, second, whole, pathIdentity] $ \p -> do
+    assert (mempty <> p == p) "path metric left identity is inexact"
+    assert (p <> mempty == p) "path metric right identity is inexact"
+    -- directedSurprisal is an exact monoid morphism into Sum Double: negation
+    -- of a sum is the sum of negations with no rounding.
+    assert (directedSurprisal (p <> p) == getSum (foldMap (Sum . directedSurprisal) [p, p]))
+      "directed surprisal is not an exact monoid morphism"
 
 testBradleyMagnitude :: IO ()
 testBradleyMagnitude = do
@@ -216,14 +569,15 @@ testAdamW :: IO ()
 testAdamW = do
   let cfg = AdamWConfig 0.01 0.9 0.99 1e-8 0.1 0 10
       state = initAdamW 2
-  (updated, nextState) <- expectRight (adamWStep cfg [True, False] state [2, -3] [0.5, -0.25])
+  (updated, nextState) <- expectRight
+    (adamWStep cfg (VU.fromList [True, False]) state (VU.fromList [2, -3]) (VU.fromList [0.5, -0.25]))
   let rate = learningRate cfg 1
       expected0 = 2 - rate * (0.5 / (sqrt (0.25) + 1e-8) + 0.1 * 2)
       expected1 = -3 - rate * ((-0.25) / (sqrt (0.0625) + 1e-8))
-  assertVectorsNear 1e-12 [expected0, expected1] updated "AdamW first update differs"
+  assertVectorsNear 1e-12 [expected0, expected1] (VU.toList updated) "AdamW first update differs"
   assert (adamStep nextState == 1) "AdamW step was not incremented"
-  assertVectorsNear 1e-12 [0.05, -0.025] (firstMoment nextState) "AdamW first moment differs"
-  assertVectorsNear 1e-12 [0.0025, 0.000625] (secondMoment nextState) "AdamW second moment differs"
+  assertVectorsNear 1e-12 [0.05, -0.025] (VU.toList (firstMoment nextState)) "AdamW first moment differs"
+  assertVectorsNear 1e-12 [0.0025, 0.000625] (VU.toList (secondMoment nextState)) "AdamW second moment differs"
 
 testSplit :: IO ()
 testSplit = do
@@ -329,14 +683,14 @@ testCheckpoint = do
       optimizerConfig = AdamWConfig 0.0025 0.8 0.95 1e-7 0.025 3 37
       manifest = Manifest artifactVersion config (paramCount config) canonicalLayoutIdentity
         canonicalLayoutVersion optimizerConfig identity 0.75 Tf32TensorCores
-      checkpoint = Checkpoint manifest params (initAdamW (paramCount config)) (Just 1.2345) (PRNGState 1 2 3 4)
+      checkpoint = Checkpoint manifest (VU.fromList params) (initAdamW (paramCount config)) (Just 1.2345) (PRNGState 1 2 3 4)
       cleanup = do exists <- doesFileExist path; if exists then removeFile path else pure ()
   cleanup
   (do
       saved <- saveCheckpointAtomic path checkpoint
       _ <- expectRight saved
       loaded <- loadCheckpoint path >>= expectRight
-      let quantize = map (realToFrac . (realToFrac :: Double -> Float))
+      let quantize = VU.fromList . map (realToFrac . (realToFrac :: Double -> Float))
       assert (checkpointManifest loaded == manifest) "checkpoint manifest did not roundtrip exactly"
       assert (checkpointParameters loaded == quantize params) "checkpoint parameters did not roundtrip as f32"
       assert (checkpointOptimizer loaded == initAdamW (paramCount config)) "checkpoint optimizer did not roundtrip"
@@ -352,7 +706,7 @@ testCheckpointMetadata = do
       optimizerConfig = AdamWConfig 1e-3 0.9 0.999 1e-8 0.01 2 10
       manifest = Manifest artifactVersion config (paramCount config) canonicalLayoutIdentity
         canonicalLayoutVersion optimizerConfig identity 1 Fp32IEEE
-      checkpoint = Checkpoint manifest params (initAdamW (paramCount config)) Nothing (PRNGState 1 2 3 4)
+      checkpoint = Checkpoint manifest (VU.fromList params) (initAdamW (paramCount config)) Nothing (PRNGState 1 2 3 4)
       withManifest update = checkpoint { checkpointManifest = update manifest }
   assert (isLeft (validateCheckpoint (withManifest (\m -> m { manifestOptimizerConfig = optimizerConfig { warmupSteps = 11 } }))))
     "checkpoint accepted warmup beyond total steps"

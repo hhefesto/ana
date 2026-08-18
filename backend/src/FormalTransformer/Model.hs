@@ -12,7 +12,7 @@ module FormalTransformer.Model
   ) where
 
 import Control.Monad (foldM)
-import Data.List (transpose)
+import FormalTransformer.Attention.Gla (glaAttention, l2Normalize)
 import FormalTransformer.Config
 import FormalTransformer.Layout
 
@@ -103,52 +103,28 @@ fullSequenceStats c params tokens = do
     , actLoss = meanOf losses
     }
 
--- Statistics-carrying copy of runBlock; the math must stay line-for-line
--- equivalent to runBlock (any edit there belongs here too).
+-- The diagnostic view of a block.  It used to be a hand-copied twin of
+-- runBlock carrying the comment "the math must stay line-for-line equivalent
+-- to runBlock (any edit there belongs here too)" -- with nothing checking
+-- that.  Both now call runBlockTrace, so the claim is true by construction
+-- rather than by discipline.
 runBlockStats :: Config -> [Double] -> [Slice] -> [[Double]] -> [[Double]] -> Int -> Either String ([[Double]], BlockStats)
 runBlockStats c params layout embedded xs blockIndex = do
-  attGain <- get "rms_att"
-  wq <- get "wq"
-  wk <- get "wk"
-  wv <- get "wv"
-  wo <- get "wo"
-  ffGain <- get "rms_ff"
-  wgate <- get "wgate"
-  wup <- get "wup"
-  wdown <- get "wdown"
-  let normalized = map (rmsNorm attGain) xs
-      qs = map (matVec d d wq) normalized
-      ks = map (matVec d d wk) normalized
-      vs = map (matVec d d wv) normalized
-  (attended, alphaStats) <-
-    if isSoftmaxLayer c blockIndex
-      then pure (causalAttention c qs ks vs, Nothing)
-      else do
-        walpha <- get "walpha"
-        let alphas = map (map gateAlpha . matVec d d walpha) normalized
-            flat = concat alphas
-        pure ( glaAttendedOut c (glaAttention c qs ks vs alphas)
-             , Just ( meanOf flat
-                    , exp (meanOf (map log flat))
-                    , fromIntegral (length (filter (> 0.9) flat))
-                        / fromIntegral (max 1 (length flat))))
-  let afterAttention = zipWith addVec xs (map (matVec d d wo) attended)
-      ff x =
-        let n = rmsNorm ffGain x
-            gated = zipWith (*) (map silu (matVec f d wgate n)) (matVec f d wup n)
-        in matVec d f wdown gated
-      out = zipWith addVec afterAttention (map ff afterAttention)
-      kind = if isSoftmaxLayer c blockIndex then "softmax" else "gla"
+  weights <- blockWeights c params layout blockIndex
+  let trace = runBlockTrace c weights xs
+      out = traceOut trace
+      attended = traceAttended trace
+      alphaStats = fmap gateStats (traceAlphas trace)
+      gateStats alphas =
+        let flat = concat alphas
+        in ( meanOf flat
+           , exp (meanOf (map log flat))
+           , fromIntegral (length (filter (> 0.9) flat))
+               / fromIntegral (max 1 (length flat)))
+      kind = case blockMixer weights of { SoftmaxMixer -> "softmax"; GlaMixer _ -> "gla" }
   pure ( out
        , BlockStats blockIndex kind (bucketRms out) (rmsOfRows attended)
            (meanCos out embedded) alphaStats)
-  where
-    d = modelDim c
-    f = ffDim c
-    prefix = "blocks." ++ show blockIndex ++ "."
-    get suffix = case filter ((== prefix ++ suffix) . sliceName) layout of
-      [s] -> sliceValues s params
-      _ -> Left ("missing layout slice: " ++ prefix ++ suffix)
 
 getSlice :: String -> [Slice] -> [Double] -> Either String [Double]
 getSlice name layout params = case filter ((== name) . sliceName) layout of
@@ -199,44 +175,90 @@ embeddingRow c table token
   | otherwise = Right (take d (drop (token * d) table))
   where d = modelDim c
 
--- Hybrid token mixer (docs/ATTENTION-SEMANTICS.md): GLA layers step a
--- per-head dk x dv state; every fourth layer is softmax full attention with
--- no positional encoding — position lives in the GLA gates.
-runBlock :: (Floating a, Ord a) => Config -> [a] -> [Slice] -> [[a]] -> Int -> Either String [[a]]
-runBlock c params layout xs blockIndex = do
+-- A block's parameters.  Everything but the token mixer is uniform across
+-- layer kinds, so that is where the sum type belongs: a GlaMixer cannot lack
+-- its gate projection and a SoftmaxMixer cannot carry one, which is the
+-- invariant Layout.namedLayout enforces by hand when it emits `walpha` for
+-- GLA blocks only.  The Bool that used to decide this at three separate call
+-- sites is now decided once, where the weights are fetched.
+data Mixer a = SoftmaxMixer | GlaMixer [a]
+
+data BlockWeights a = BlockWeights
+  { blockAttGain :: [a]
+  , blockWq :: [a]
+  , blockWk :: [a]
+  , blockWv :: [a]
+  , blockWo :: [a]
+  , blockMixer :: Mixer a
+  , blockFfGain :: [a]
+  , blockWgate :: [a]
+  , blockWup :: [a]
+  , blockWdown :: [a]
+  }
+
+blockWeights :: Config -> [a] -> [Slice] -> Int -> Either String (BlockWeights a)
+blockWeights c params layout blockIndex = do
   attGain <- get "rms_att"
   wq <- get "wq"
   wk <- get "wk"
   wv <- get "wv"
   wo <- get "wo"
+  mixer <- case layerKind c blockIndex of
+    SoftmaxKind -> pure SoftmaxMixer
+    GlaKind -> fmap GlaMixer (get "walpha")
   ffGain <- get "rms_ff"
   wgate <- get "wgate"
   wup <- get "wup"
   wdown <- get "wdown"
-  let normalized = map (rmsNorm attGain) xs
-      qs = map (matVec d d wq) normalized
-      ks = map (matVec d d wk) normalized
-      vs = map (matVec d d wv) normalized
-  attended <-
-    if isSoftmaxLayer c blockIndex
-      then pure (causalAttention c qs ks vs)
-      else do
-        walpha <- get "walpha"
-        let alphas = map (map gateAlpha . matVec d d walpha) normalized
-        pure (glaAttendedOut c (glaAttention c qs ks vs alphas))
-  let afterAttention = zipWith addVec xs (map (matVec d d wo) attended)
-      ff x =
-        let n = rmsNorm ffGain x
-            gated = zipWith (*) (map silu (matVec f d wgate n)) (matVec f d wup n)
-        in matVec d f wdown gated
-  pure (zipWith addVec afterAttention (map ff afterAttention))
+  pure (BlockWeights attGain wq wk wv wo mixer ffGain wgate wup wdown)
   where
-    d = modelDim c
-    f = ffDim c
     prefix = "blocks." ++ show blockIndex ++ "."
     get suffix = case filter ((== prefix ++ suffix) . sliceName) layout of
       [s] -> sliceValues s params
       _ -> Left ("missing layout slice: " ++ prefix ++ suffix)
+
+-- The intermediates a diagnostic needs, so that runBlock and runBlockStats
+-- can share one definition of the math instead of two copies of it.
+data BlockTrace a = BlockTrace
+  { traceOut :: [[a]]
+  , traceAttended :: [[a]]
+  , traceAlphas :: Maybe [[a]]
+  }
+
+-- Hybrid token mixer (docs/RUN-2026-07-25-WIKI-FULL.md): GLA layers step a
+-- per-head dk x dv state; every fourth layer is softmax full attention with
+-- no positional encoding — position lives in the GLA gates.
+--
+-- Every float expression here is character-for-character what runBlock and
+-- runBlockStats computed separately; only the fetching of the weights and the
+-- kind test moved out, into blockWeights.  The fields of BlockTrace are lazy,
+-- so runBlock still evaluates exactly what it did before.
+runBlockTrace :: (Floating a, Ord a) => Config -> BlockWeights a -> [[a]] -> BlockTrace a
+runBlockTrace c weights xs = BlockTrace out attended alphas
+  where
+    d = modelDim c
+    f = ffDim c
+    normalized = map (rmsNorm (blockAttGain weights)) xs
+    qs = map (matVec d d (blockWq weights)) normalized
+    ks = map (matVec d d (blockWk weights)) normalized
+    vs = map (matVec d d (blockWv weights)) normalized
+    alphas = case blockMixer weights of
+      SoftmaxMixer -> Nothing
+      GlaMixer walpha -> Just (map (map gateAlpha . matVec d d walpha) normalized)
+    attended = case alphas of
+      Nothing -> causalAttention c qs ks vs
+      Just as -> glaAttendedOut c (glaAttention c qs ks vs as)
+    afterAttention = zipWith addVec xs (map (matVec d d (blockWo weights)) attended)
+    ff x =
+      let n = rmsNorm (blockFfGain weights) x
+          gated = zipWith (*) (map silu (matVec f d (blockWgate weights) n)) (matVec f d (blockWup weights) n)
+      in matVec d f (blockWdown weights) gated
+    out = zipWith addVec afterAttention (map ff afterAttention)
+
+runBlock :: (Floating a, Ord a) => Config -> [a] -> [Slice] -> [[a]] -> Int -> Either String [[a]]
+runBlock c params layout xs blockIndex = do
+  weights <- blockWeights c params layout blockIndex
+  pure (traceOut (runBlockTrace c weights xs))
 
 rmsNorm :: Floating a => [a] -> [a] -> [a]
 rmsNorm gain x = zipWith (\g xi -> g * xi / scale) gain x
@@ -290,42 +312,6 @@ glaAttendedOut :: Floating a => Config -> [[a]] -> [[a]]
 glaAttendedOut c attended
   | glaOutputNorm = map (l2NormalizeHeads c) attended
   | otherwise = attended
-
-l2Normalize :: Floating a => [a] -> [a]
-l2Normalize x = map (/ norm) x
-  where norm = sqrt (sum (map (\v -> v * v) x) + 1e-6)
-
--- Gated linear attention in the RECURRENT form — the definitional reading of
--- the semantics (FormalTransformer/Attention/Linear.agda stepGLA/runGLA):
--- per head, S_t = diag(alpha_t) * S_{t-1} + k_t v_t^T and o_t = q_t^T S_t.
--- The Futhark implementation computes the PARALLEL closed form; their
--- agreement in the conformance oracle is the f32 shadow of the proved
--- recurrent≡parallel theorem.  Queries and keys are L2-normalized per head
--- to bound the state readout.
-glaAttention :: Floating a => Config -> [[a]] -> [[a]] -> [[a]] -> [[a]] -> [[a]]
-glaAttention c qs ks vs alphas = map concat (transpose perHead)
-  where
-    hd = headDim c
-    perHead = [ headOutputs h | h <- [0 .. headCount c - 1] ]
-    headSlice vector h = take hd (drop (h * hd) vector)
-    headOutputs h = go zeroState (zip4' qh kh vh ah)
-      where
-        qh = map (l2Normalize . (`headSlice` h)) qs
-        kh = map (l2Normalize . (`headSlice` h)) ks
-        vh = map (`headSlice` h) vs
-        ah = map (`headSlice` h) alphas
-        zeroState = replicate hd (replicate hd 0)
-        go _ [] = []
-        go state ((q, k, v, alpha) : rest) =
-          let state' = zipWith3
-                (\ac kc row -> zipWith (\s vj -> ac * s + kc * vj) row v)
-                alpha k state
-              out = [ sum (zipWith (*) q col) | col <- transpose state' ]
-          in out : go state' rest
-
-zip4' :: [a] -> [b] -> [c] -> [d] -> [(a, b, c, d)]
-zip4' (a : as) (b : bs) (c : cs) (d : ds) = (a, b, c, d) : zip4' as bs cs ds
-zip4' _ _ _ _ = []
 
 -- Softmax full attention, no positional encoding.
 causalAttention :: (Floating a, Ord a) => Config -> [[a]] -> [[a]] -> [[a]] -> [[a]]

@@ -3,7 +3,7 @@
 #
 # Pulls the training checkpoint at each 1/N of the corpus (N=4 by default:
 # snapshots at ~25%, 50%, 75%, 100% of shards), each saved under a distinct
-# name. This gives milestone weights you can compare with wiki-generate to watch
+# name. This gives milestone weights you can compare with ana to watch
 # the model sharpen across training, and it doubles as eviction insurance —
 # without the noise of a continuous pull.
 #
@@ -13,9 +13,9 @@
 # early stages with whatever weights exist at that moment).
 #
 # Snapshots land as run/wiki-<size>-global.stage-<k>of<N>.checkpoint. They match
-# wiki-generate's run/*.checkpoint discovery, so the newest stage is picked
+# ana's run/*.checkpoint discovery, so the newest stage is picked
 # automatically; generate from an earlier stage with
-#   WIKI_CHECKPOINT=run/wiki-bpe10m-global.stage-1of4.checkpoint nix run .#wiki-generate
+#   WIKI_CHECKPOINT=run/wiki-bpe10m-global.stage-1of4.checkpoint nix run .#ana
 #
 # Usage:  deploy/pull-stages.sh USER@HOST
 #         vast.ai: SSH_PORT=<port> deploy/pull-stages.sh root@<host>

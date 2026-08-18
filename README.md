@@ -1,388 +1,227 @@
 # ana
 
-`ana` — as in anamorphism: the coinductive unfold that builds the observation
-trie this project proves its decoder against — is a specification-first
-decoder language model (formerly `formalTransformer`). It keeps three
-questions separate:
+A denotationally specified autoregressive transformer — written from a
+mathematical specification in Agda, refined through a Haskell reference and
+Futhark kernels, and now training its second, 115M-parameter model on a
+single rented consumer GPU.
 
-1. What language does an autoregressive model denote?
-2. What tensor function does the transformer compute?
-3. Does each executable backend implement that function and its derivative?
+| | |
+|---|---|
+| Model | 115,428,096 parameters — GLA/softmax 3:1 hybrid (9 GLA + 3 softmax layers), vocab 32,768 with tied embeddings, context 256 |
+| Data | English Wikipedia interleaved with FineWeb-Edu — 9,700,651 documents, ~5.86B tokens, exactly one pass (51 tokens/parameter) |
+| Plan | `run/mixed-bpe100m-s32000` — 304 shards, 358,276 updates at batch 64, one AdamW trajectory and one cosine schedule fixed before step one |
+| Status | **the master run, training now** on one rented RTX 3090 ($0.172/hr) — past step 245,000 of 358,276 (~68%) as of 2026-08-18 |
 
-The design follows Conal Elliott's denotational and compositional approach.
-Elliott's prefix derivative describes how a language changes after consuming a
-token; reverse automatic differentiation describes how the loss changes after
-perturbing parameters. They are deliberately not identified with one another.
+This is *the master run*: `master` is its branch of record, and version 3
+development happens on a separate branch (see Versions below). The run is in
+progress; no final quality numbers exist yet and none are claimed. Two
+samples bracket the trajectory so far. Step 16,000 (4.5% of the schedule) —
+on-topic, correctly registered, and factually invented, which is the
+expected order of acquisition:
 
-Tai-Danae Bradley's enrichment is derived from conditional continuation
-probabilities. It supplies prefix hom-values, directed surprisal, magnitude, and
-entropy metrics. It does not define attention or backpropagation.
+> The theory of **evolution that has emerged in recent years by the term
+> "Plasticizationism" was coined in the 1980s to describe the concept of
+> evolution in a number of ways.**
 
-## Canonical Model
+Step 230,000 (64.2%, loss EMA 3.373 and falling monotonically) — coherent,
+chronologically framed, and still wrong in the ordinary way:
 
-The single parameter layout shared by Agda, Haskell, and Futhark is:
+> The theory of **prehistory is based on the idea that the earliest humans
+> migrated through a region of Eurasia that was larger than present-day
+> Europe. The pre-Han people were the first people to arrive in the area
+> around the eighth century BCE. They established a trading network that
+> included China, India and Australia.**
 
-```text
-token embedding [v,d]
-for each block:
-  attention RMS gain [d]
-  Wq, Wk, Wv, Wo [d,d]
-  feed-forward RMS gain [d]
-  Wgate, Wup [f,d]
-  Wdown [d,f]
-final RMS gain [d]
-```
+One architectural claim from earlier drafts deserves an explicit retraction.
+The design story said position is carried by the GLA gates; measurement says
+the gates never open at the shipped temperature — the fraction of gates above
+0.9 is exactly 0.0000 in every GLA layer, and memory half-life is ~0.8 tokens,
+so the GLA layers are very nearly memoryless. Two fix arms (gate temperature,
+output norm) were measured on 2026-07-31 and both lost on loss, so both stay
+off; the knobs are folded into the model identity with a backward-compatible
+empty suffix (`backend/gpu/Main.hs`, `gateSuffix`). Long-range structure rides
+on the three NoPE softmax layers. The evidence is in
+`backend/src/FormalTransformer/Config.hs` and `run/gate-arms-2026-07-31/`.
 
-The decoder uses pre-RMSNorm, RoPE, causal multi-head attention, SwiGLU,
-residual connections, and tied embedding/unembedding weights. It has no biases,
-dropout, or learned positional table. The exact count is
+## The previous run: all of English Wikipedia, once
 
-```text
-v*d + layers*(4*d*d + 3*f*d + 2*d) + d
-```
+The first trained model — 10,571,840 parameters, vocab 8,192 — consumed all
+5,857,550 articles of English Wikipedia in one pass: 92 h on a rented RTX
+5060 Ti, roughly $10–25. It reached **1.21 bits per byte** on held-out
+Wikipedia prose and **1.99 bpb** on enwik8 against GPT-2-small's 1.16, so it
+does not reach GPT-2-small quality; the gap is mostly the 8,192-piece
+tokenizer shattering enwik8's raw MediaWiki markup into byte fallbacks — the
+finding that motivated the current 32k tokenizer. Two flattering misreadings
+of that run (the shard-ordered 1.107 final decile, and comparing in-domain
+numbers to GPT-2's zero-shot benchmark) are dissected in the full record:
+**[`docs/RUN-2026-07-25-WIKI-FULL.md`](docs/RUN-2026-07-25-WIKI-FULL.md)**.
 
-## Components
-
-- `FormalTransformer/`: safe Agda definitions and structural proofs.
-- `backend/src/`: list-backed `Double` reference implementation and artifacts.
-- `backend/futhark/`: flat-array `f32` model, VJP, and AdamW kernels.
-- `backend/gpu/`: device-resident OpenCL trainer and generator.
-- `backend/conformance/`: Haskell/Futhark sequential-C numeric oracle.
-- `docs/PROOF-STATUS.md`: exact statement of what is proved or tested.
-- `docs/TYPE-HISTORY.md`: the type-level path from languages to GPU training.
-- `docs/LOCAL-COMPARISON.md`: type-history comparison with the other local
-  language-model projects.
-- `docs/PARALLEL-SCALING.md`: where linearity licenses parallelism, and the
-  plan for scaling beyond this machine.
-- `docs/CLOUD-TRAINING.md`: budgeted CUDA deployment and rental procedure.
-- `docs/RUN-2026-07-10.md`: first live training report and GPU reset diagnosis.
-
-## Verification
-
-```bash
-nix flake check
-```
-
-This typechecks all safe Agda modules, builds and tests the Haskell reference,
-typechecks Futhark, compile-links the OpenCL host without running it, and runs a
-CPU-only Haskell/Futhark conformance oracle.
-
-Useful individual commands:
+Its weights are vendored in this repository, and `run/` is gitignored — from
+a fresh clone, the vendored checkpoint is the one path that works immediately:
 
 ```bash
-nix build .#conformance
-nix build .#formal-transformer-gpu
-nix develop -c agda -i . Everything.agda
-nix develop -c cabal test
-nix develop -c futhark check backend/futhark/kernels.fut
+./weights/assemble.sh                    # reassemble the vendored checkpoint, verify SHA-256
+nix run .#ana -- --prompt "The theory of" --tokens 256
 ```
 
-## Data And CPU Reference
+## Generate
 
-The initial tokenizer is deliberately small and total: BOS `0`, EOS `1`, and
-bytes `2..257`. Each input file becomes one document, so document splitting
-happens before windows are produced.
+`ana` is offline by default — it makes no network call unless asked.
+With no arguments it uses the last pulled checkpoint (`run/last-checkpoint`),
+falling back to the newest architecture-compatible checkpoint under `run/`;
+`--list` shows what is available locally. Decoding samples the next-token
+distribution: `TEMPERATURE` (default 0.8), nucleus sampling via `TOP_P`
+(default 0.95), `TOP_K` (off by default — top-p retains ≥ p of the mass by
+construction, while a fixed k has no such floor; both proved in
+`FormalTransformer/Language/Decoding.agda`), `SAMPLE_SEED` for
+reproducibility, `TEMPERATURE=0` for exact greedy argmax. Trailing
+whitespace is stripped from prompts before encoding (a space attaches to the
+*following* word under this BPE, so a trailing space puts the prompt
+off-manifold). Each response begins with the generating checkpoint's exact
+training percentage and update count.
+
+The tokenizer is discovered from the checkpoint: every checkpoint records its
+tokenizer's identity (a hash over the merge list), and `ana` scans `run/*.bpe`
+and `weights/*.bpe` for the artifact that matches. `--tokenizer` remains as an
+override and still fails closed on an identity mismatch.
 
 ```bash
-nix run . -- prepare-bytes corpus.bin article-1.txt article-2.txt article-3.txt
-nix run . -- inspect-corpus corpus.bin
-nix run . -- inspect
-nix run . -- gradcheck
-nix run . -- train-smoke
-nix run . -- bigram-gate corpus.bin small
+# pull the live run's newest checkpoint and sample it (CPU is fine)
+nix run .#ana -- --pull --host root@HOST --port N \
+  --remote-checkpoint /root/formalTransformer/run/wiki-bpe100m-global.checkpoint
+
+# sample an already-pulled bpe100m checkpoint offline
+nix run .#ana -- --prompt "The theory of"
 ```
 
-`bigram-gate` reports the exact-counts bigram baseline on the trainer's own
-validation windows; a trained model should beat this number (see
-`docs/TRAINING.md`).
+`--pull` fetches into a per-host directory that can never overwrite existing
+weights (`--user`, `--key`, `--checkpoint` are also available; see `--help`).
 
-## One-Command Wikipedia Training And Generation
+Generation runs the incremental decoder: GLA layers advance a fixed-size state
+per token, and the softmax layers append to a ring-buffer KV cache (cache
+order does not matter without positional encodings, so the ring needs no
+reindexing). Feeding a sequence token-by-token reproduces every row of the
+batch forward to ~6e-9 — the proved `cache-run` law, numerically.
 
-Two flake apps run the whole Wikipedia loop with no arguments:
+## Measure
+
+Training-log validation lines are a progress signal, not a measurement: they
+sample a few windows, and each shard validates against a *different* held-out
+split. For a number worth quoting, score a fixed corpus offline:
 
 ```bash
-nix run .#wiki-train      # start or resume training
-nix run .#wiki-generate   # generate text from the latest weights
+formal-transformer build-eval run/eval/wiki-heldout.corpus \
+  run/wiki-bpe10m/plan-bpe10m-b8-s4000.tsv run/wiki-bpe10m 40 20
+nix run .#wiki-eval
 ```
 
-`wiki-train` with no arguments consumes the **entire local Wikipedia
-dataset** (`~/datasets/wikipedia-en/enwiki-natural-language.jsonl`, one
-article per line; override with `WIKI_DATA`). Before step one it makes an
-atomic plan over bounded article shards. The plan fixes the complete dataset
-identity, exact update count, batch size, offset-invariant document split,
-and cumulative shard endpoints. Training then uses one checkpoint, one AdamW
-state, and one cosine schedule across every shard. Physical sharding is a
-bounded-memory implementation detail, not 1,465 fresh optimizer runs.
+`build-eval` does not invent a split — it replays each shard's
+`splitDocumentsFrom offset trainerSplitSeed trainerValidationFraction`, the same
+call the trainer makes, and collects the validation side, so the corpus is made
+of documents the run genuinely never trained on. `wiki-eval` then scores **every**
+full window and reports bits per byte with a standard error.
+
+## Train
 
 ```bash
-nix run .#wiki-train                       # consume all of Wikipedia
-WIKI_SHARD_ARTICLES=16000 nix run .#wiki-train
-TRAIN_BATCH=8 nix run .#wiki-train
-WIKI_BACKEND=opencl nix run .#wiki-train   # GPU (see below)
+nix run .#wiki-train                       # consume the entire local dataset
 WIKI_BACKEND=cuda nix run .#wiki-train     # NVIDIA CUDA
-WIKI_SIZE=bpe10m WIKI_PLAN_ONLY=1 WIKI_KEEP_CORPORA=1 nix run .#wiki-train
 WIKI_CORPUS=my.corpus nix run .#wiki-train # single-corpus mode
 ```
 
-With `WIKI_CORPUS` set, the old single-corpus behavior applies:
-one run into `WIKI_CHECKPOINT` (default `run/wiki-small.checkpoint`)
-toward `WIKI_STEPS` (default `epoch`).
+`wiki-train` defaults to `WIKI_BACKEND=multicore` (Futhark's multicore C backend,
+step-for-step identical to the sequential oracle). Backends share one checkpoint
+format, so a run started on one continues on another.
 
-Contract notes: a run's schedule is anchored at creation. Whole-dataset mode
-includes `TRAIN_BATCH` in its global plan identity; single-corpus epoch mode
-anchors the same value through its total step count. `MICRO_BATCH` and
-checkpoint cadence may change on resume.
+Whole-dataset mode makes an atomic plan before step one, fixing the dataset
+identity, exact update count, batch size, document split, and shard endpoints —
+one checkpoint, one AdamW trajectory, and one cosine schedule across every
+shard (304 in the current plan). Physical sharding is a bounded-memory detail,
+not 304 separate runs.
 
-`wiki-train` defaults to `WIKI_BACKEND=multicore`: Futhark's multicore C
-backend runs every kernel data-parallel across all CPU cores, produces
-step-for-step identical losses to the sequential backend, and shares the
-same checkpoint format as every other backend. `WIKI_BACKEND=sequential`
-keeps the single-core oracle backend. The Haskell host driver also runs on
-all RTS capabilities and indexes the epoch window order in O(1) per step,
-so cores are spent in kernels rather than in the driver between launches.
+A run's schedule is anchored at creation, and `TRAIN_BATCH` is *semantic*: it
+enters the plan identity, so changing it needs a new plan. `MICRO_BATCH` and the
+checkpoint/validation cadences are execution-only and never affect the
+trajectory. Ingestion is generic — any dataset expressible as JSONL `{id, text}`
+pipes through `prepare-bpe-stdin` with no code change. The mixed corpus itself
+is built by `deploy/build-mixed-corpus.sh` (Wikipedia interleaved with
+FineWeb-Edu via duckdb — interleaved, never concatenated, to avoid a
+curriculum effect) and sharded by `deploy/plan-corpus.sh`, a linear-time
+planner that replaced a quadratic rescan.
 
-`WIKI_BACKEND=cuda` uses the Nix-built Futhark CUDA host. It links the CUDA
-runtime and NVRTC from pinned Nixpkgs while resolving `libcuda.so.1` from the
-machine's NVIDIA driver. See `docs/CLOUD-TRAINING.md` before renting hardware.
+**On rented hardware the production path is the persistent trainer**: with
+`PERSISTENT=1` (pinned in `deploy/bpe100m.env`), `deploy/train-cloud.sh` runs
+`train-plan` — one process and one CUDA context across the whole plan, with
+fdatasync'd checkpoints — instead of one process per shard.
+`deploy/train-plan-gate.sh` proves the two modes agree byte for byte. A run's
+full settings live in a tracked env file (`deploy/bpe100m.env`: size, run dir,
+tokenizer, checkpoint path, batch sizes, `GEMM_NUMERICS=tf32`,
+`GEMM_ORDERING=stream`), so a box is launched with
+`TRAIN_ENV_FILE=deploy/bpe100m.env deploy/start-cloud-training.sh` and nothing
+is decided ad hoc. `deploy/push-corpus.sh` streams shards in plan order
+(`--partial-dir`, so a truncated transfer is never admitted),
+`deploy/check-link.sh` gates on sustained transfer speed, and
+`nix run .#watch-training` follows the remote log with SSH reconnect.
 
-`WIKI_BACKEND=opencl` opts into the GPU: measured on the display-attached
-RX 580, the OpenCL program builds on the host CPU (about a minute cold;
-seconds afterward via the `FUT_CACHE` program cache the app sets up
-automatically), the `tiny` preset then trains on the GPU, but the `small`
-preset's gradient kernel is soft-reset after ~10 s by the amdgpu
-*compute-ring* watchdog. Note a single-value `amdgpu.lockup_timeout`
-kernel parameter raises only the non-compute rings; the four-value form
-(`amdgpu.lockup_timeout=60000,60000,60000,60000`) covers the compute ring
-rusticl submits to — after a rebuild and reboot with that setting, OpenCL
-becomes viable for `small` on this machine (see
-`docs/PARALLEL-SCALING.md`).
+**Build locally, never on the rented box.** The CUDA hosts need a GPU to run but
+not to build, so `deploy/push-prebuilt.sh user@HOST PORT` compiles here and
+rsyncs the runtime closure into the box's `/nix/store`; `cloud-init.sh` then
+detects the binaries and skips its install and build. Compiling on the instance
+instead cost ~50 minutes of paid GPU time every time. Before a long run,
+`deploy/sweep-cuda.sh` records throughput, peak memory, GPU utilization, and
+projected cost per completed run — on a 5090 the production configuration
+measured 14,576 tok/s at 13.5% MFU and 54% utilization, and the sweep is why
+`MICRO_BATCH=64` is pinned. See §8 of the run document for what to ask for
+when renting.
 
-`wiki-generate` is local and offline by default. With no arguments it uses the
-last pulled checkpoint — the path recorded in `run/last-checkpoint` — and makes
-no network call at all, so a destroyed training box costs nothing. If that
-pointer is missing or stale it falls back to the newest `run/*.checkpoint` (or
-`run/*-checkpoints/*.checkpoint`) this host's architecture can interpret,
-skipping other architectures with a note rather than aborting. It asks for the
-prompt at the terminal; `--prompt` (or a trailing argument, or `WIKI_PROMPT`)
-skips the question and is required when stdin is not a terminal.
-
-```bash
-nix run .#wiki-generate                                   # asks for a prompt
-nix run .#wiki-generate -- --prompt "The theory of" --tokens 256
-nix run .#wiki-generate -- --list                         # what is available locally
-nix run .#wiki-generate -- --help
-```
-
-Reaching a training box is opt-in, and every connection detail is an argument,
-so an arbitrary trainer can be named without editing anything:
+## Build and verify
 
 ```bash
-nix run .#wiki-generate -- --pull --host user@10.0.0.5 --port 56861 \
-  --key ~/.ssh/trainer --remote-checkpoint /root/ana/run/wiki-bpe10m-global.checkpoint
+nix build .#formal-transformer            # CPU reference + CLI
+nix build .#formal-transformer-multicore  # multicore C backend
+nix build .#formal-transformer-cuda       # Futhark CUDA
+nix build .#formal-transformer-gemm-cuda  # decomposed cuBLAS tensor-core trainer
+nix build .#conformance                   # cross-backend numeric oracle
+nix build .#gemm-conformance              # decomposed vs fused oracle vs Numeric.AD
 ```
 
-A pull lands in `run/pulled-HOST-PORT-checkpoints/` — never on top of an
-existing checkpoint, so weights from one box can never overwrite another's, or a
-finished run's — and records its destination in `run/last-checkpoint`, which is
-what the next no-argument run uses. An unreachable box degrades to the local
-checkpoints with a note. `--host` without a user defaults to `root` (override
-with `--user`). `WIKI_REMOTE`, `WIKI_REMOTE_PORT`, `WIKI_REMOTE_KEY`, and
-`WIKI_REMOTE_CHECKPOINT` — or the same assignments in the git-ignored
-`run/remote-box.env` — still work as fallbacks under `--pull`, but no longer
-trigger a pull on their own.
+Agda proofs build with `Everything.agda` under `--safe --without-K`. Beyond
+the language and reverse-AD laws, the specification now covers decoding
+(`Language/Decoding.agda`: top-p mass retention by construction, top-k's
+lack of any distribution-independent floor), the tied output head
+(`Transformer/TiedHead.agda`: the tied logit kernel is a symmetric Gram
+matrix, so skew bigram preferences are unrepresentable by the head alone),
+and residual-stream mixing (`Transformer/ResidualStream.agda`: mass
+conservation under column-stochastic mixes, and n = 1 rigidity). The
+conformance oracle relates the Haskell `Double` reference, the Futhark backends,
+and `Numeric.AD` under component-specific tolerances — a tested refinement
+relation, not an equality theorem over the reals. `formal-transformer
+compare-checkpoint` diffs two checkpoints element-wise. What is proved, and the
+trusted base that is *not*, are enumerated in the run document.
 
-`WIKI_CHECKPOINT`, `WIKI_TOKENS`, and `WIKI_TOKENIZER` remain as environment
-fallbacks for `--checkpoint`, `--tokens`, and `--tokenizer`.
+## Versions
 
-Decoding samples the model's next-token distribution: `TEMPERATURE`
-(default 0.8) and `TOP_K` (default 40) shape the observation, `SAMPLE_SEED`
-makes it reproducible, and `TEMPERATURE=0` recovers exact greedy argmax.
+A version number here is a **model generation**, because that is the
+boundary that actually matters in this project: every architecture change is
+a new model identity (checkpoint-incompatible), so changes batch at run
+boundaries. MAJOR = a model generation; MINOR = a landed milestone inside it
+(a completed run's results, a measurement campaign, a batch of spec
+modules); PATCH = tooling and documentation fixes. Each tag is annotated,
+and the annotation records the facts that tie the git state to the weights:
+model config, parameter count, corpus plan, tokenizer identity, checkpoint
+SHA-256, headline numbers.
 
-It generates on the sequential-C backend, which is safe on a display GPU;
-checkpoints are interchangeable between backends. Both apps resolve their
-paths relative to the current directory, so run them from the repository
-root.
-
-## GPU Training And Generation
-
-The `inspect` command does not initialize OpenCL. `train` and `generate` do.
-
-```bash
-nix run .#formal-transformer-gpu -- inspect tiny
-nix run .#formal-transformer-gpu -- train corpus.bin model.checkpoint 100 tiny
-nix run .#formal-transformer-gpu -- generate model.checkpoint "A formal language" 128
-nix run .#formal-transformer-cuda -- inspect bpe10m
-```
-
-`STEPS` is the target completed step, not an additional step count. Optimizer
-and schedule configuration are checkpointed and must match exactly on resume.
-The trainer defaults to `TRAIN_BATCH=1` and writes an atomic snapshot every ten
-steps; both values can be changed through `TRAIN_BATCH` and `CHECKPOINT_EVERY`.
-`MICRO_BATCH` (default: `TRAIN_BATCH`) splits each effective batch into
-watchdog-sized accumulation chunks without changing what a step means (see
-`docs/TRAINING.md`).
-`GRAD_CLIP` defaults to global norm 1.0. Checkpoints and corpus documents use
-packed `f32` and `u16` wire arrays while legacy artifacts remain readable.
-
-### Continuing Training
-
-Training resumes from a checkpoint file automatically: if `CHECKPOINT` exists,
-the trainer validates it exactly (model configuration, parameter count, layout
-identity, optimizer schedule, model/tokenizer/dataset identities, PRNG, best
-validation loss) and continues from its completed step. Because `STEPS` is a
-*target*, re-running the same command is idempotent, and raising the target
-continues the run:
-
-```bash
-# First 100 steps (creates model.checkpoint):
-nix run .#formal-transformer-sequential -- train corpus.bin model.checkpoint 100 small
-
-# Continue the same run to step 300 — same corpus, same size, higher target:
-nix run .#formal-transformer-sequential -- train corpus.bin model.checkpoint 300 small
-```
-
-Rules the trainer enforces on resume:
-
-- The corpus, model size, and checkpoint must be the ones the run started
-  with; any identity mismatch is rejected rather than silently retrained.
-- The optimizer schedule is anchored to the *original* total target inside
-  the checkpoint. Continuing past that target requires starting a new run
-  (new checkpoint file), because changing the target would silently change
-  the meaning of the earlier warmup/decay schedule.
-- `TRAIN_BATCH`, `MICRO_BATCH`, and `CHECKPOINT_EVERY` are launch mechanics,
-  not identity; they may differ between sessions of the same run.
-- A snapshot is written atomically every `CHECKPOINT_EVERY` steps and at the
-  target, so an interrupted run loses at most `CHECKPOINT_EVERY - 1` steps.
-
-### Watching Cloud Training
-
-The current on-demand training log can be followed with automatic reconnection
-when the provider closes a long-lived SSH session:
-
-```bash
-nix run .#watch-training
-```
-
-The app defaults to the active RTX 5070 Ti endpoint. `TRAIN_SSH_HOST`,
-`TRAIN_SSH_PORT`, `TRAIN_REMOTE_LOG`, `TRAIN_LOG_LINES`,
-`TRAIN_RECONNECT_DELAY`, and optional `TRAIN_SSH_KEY` override its connection
-settings without changing the flake.
-
-Pullers publish each box's checkpoint under its own
-`run/pulled-HOST-PORT-checkpoints/` directory. Transfers are staged and renamed
-atomically, so such a path always names a complete checkpoint even if SSH
-disconnects mid-pull, and one box can never overwrite another's weights.
-
-`wiki-generate` searches both `run/*.checkpoint` and nested
-`run/*-checkpoints/*.checkpoint`, so it finds these pulled
-weights. The 10M-parameter model runs through the local sequential backend;
-model initialization and the first token can take several seconds, and 128
-tokens can take several minutes. Generated bytes are flushed token by token
-after initialization rather than being withheld until the entire response is
-finished. Each response begins with the generating checkpoint's exact Wikipedia
-corpus training percentage and global update count.
-
-The sequential and OpenCL hosts write identical checkpoint formats, so a run
-started on one backend continues on the other.
-
-### Generating From A Fresh Clone (vendored weights)
-
-The repository vendors the completed run's trained weights under `weights/`: the
-FastBPE tokenizer (`enwiki-8k.bpe`) and the final
-`wiki-bpe10m-global.checkpoint` from the 2026-07-25 full-Wikipedia run (sha256
-`ae775082…5018`, one pass over all 5,857,550 articles — see
-`docs/RUN-2026-07-25-WIKI-FULL.md`), split into sub-50 MB parts because GitHub
-rejects files over 100 MB. To generate with no other artifacts:
-
-```bash
-./weights/assemble.sh      # reassembles run/wiki-bpe10m-global.checkpoint, verifies SHA-256
-nix run .#wiki-generate
-```
-
-`assemble.sh` is never destructive: it joins and verifies the parts in a
-temporary file first, reports and exits if the destination already holds these
-exact bytes, and refuses to replace a destination holding anything else unless
-`FORCE=1`. The only copy of a multi-day run can be sitting at that path.
-
-To refresh the vendored weights from a live trainer without touching the
-training process, `deploy/pull-latest-weights.sh` performs one read-only `scp`
-of the atomically published remote checkpoint. There is no default host, and it
-will not overwrite an existing destination without `FORCE=1`:
-
-```bash
-deploy/pull-latest-weights.sh --host user@10.0.0.5 --port 56861 [--key PATH]
-#   -> run/pulled-user-10.0.0.5-56861-checkpoints/wiki-bpe10m-global.checkpoint
-split -b 45M -d run/wiki-bpe10m-global.checkpoint weights/wiki-bpe10m-global.checkpoint.part-
-(cd weights && sha256sum ../run/wiki-bpe10m-global.checkpoint \
-  wiki-bpe10m-global.checkpoint.part-* enwiki-8k.bpe \
-  | sed 's|\.\./run/||' > SHA256SUMS)
-```
-
-### Running With The Latest Weights
-
-Generation always reads a checkpoint file; the latest weights are simply the
-checkpoint most recently written by training (the same path you trained
-into):
-
-```bash
-nix run .#formal-transformer-sequential -- generate model.checkpoint "A formal language" 128
-# or, when OpenCL is stable on your device:
-nix run .#formal-transformer-gpu -- generate model.checkpoint "A formal language" 128
-```
-
-The generator validates the checkpoint's model and tokenizer identities
-before creating a context, decodes greedily, and stops at EOS or the token
-budget. To generate from an earlier point of the run, keep dated copies of
-the checkpoint file; the artifact is self-describing, so any copy remains
-loadable as long as identities match.
-
-The current GPU host recomputes the bounded prefix during generation. A true KV
-cache, padding masks, large-corpus streaming, mixed precision, and distributed
-training remain future refinement layers (see `docs/PARALLEL-SCALING.md` for
-the scaling plan).
-
-The same host can be linked to Futhark's sequential-C backend when OpenCL shares
-a display GPU or is unstable:
-
-```bash
-nix run .#formal-transformer-sequential -- train corpus.bin model.checkpoint 100 tiny
-```
-
-Sequential and OpenCL checkpoints share the same model identity and flat layout.
-
-## Common Errors
-
-Every command needs its input artifacts to exist already; the tools tell you
-which command produces a missing artifact. The dependency order is:
-
-```text
-text files --prepare-bytes--> CORPUS --train--> CHECKPOINT --generate--> text
-```
-
-- `corpus file not found: corpus.bin` — `train`, `inspect-corpus`, and
-  `bigram-gate` consume a *prepared corpus*, not raw text. Create one first:
-  `nix run . -- prepare-bytes corpus.bin article-1.txt article-2.txt`. The
-  literal `corpus.bin` in the usage examples is a placeholder for whatever
-  path you chose there.
-- `checkpoint file not found: model.checkpoint` — `generate` needs a trained
-  checkpoint; run `train` first with the same path. (`train` itself treats a
-  missing checkpoint as a fresh run, so this error never appears there.)
-- `corpus/checkpoint decode failed` — the path exists but is not an artifact
-  written by `prepare-bytes`/`train`; most often a raw text file was passed
-  where a prepared corpus belongs.
-- `checkpoint ... identity mismatch` / `does not match requested model size`
-  — resume validation refuses to continue a run under a different corpus,
-  model size, or optimizer schedule than it started with. Use the original
-  arguments, or start a new checkpoint file (see "Continuing Training").
-- `checkpoint has already passed target STEPS` — `STEPS` is a target
-  completed step, not an increment; give a larger target or keep the
-  finished checkpoint.
-- `MICRO_BATCH must not exceed TRAIN_BATCH` — the micro-batch is an
-  accumulation chunk of the effective batch (`docs/TRAINING.md`).
+| tag | generation |
+|---|---|
+| `v1.0.0` | before-the-wikipedia-run: the 10.5M-parameter first model — all of English Wikipedia in one pass, 1.21 bpb held-out (`docs/RUN-2026-07-25-WIKI-FULL.md`) |
+| `v2.0.0` | the-wikipedia-run: the 115M hybrid and everything around it — the 32k tokenizer, the mixed corpus, the cloud training path, the decoding/tied-head/residual-stream specs. The master run is this generation; its final results will land as `v2.1.0`. |
+| *(v3, in progress)* | ana-next, developed on the `ana-next` branch (cabal version 3.0.0 there; `master` stays 2.0.0 to match the running model). Planning basis: [`docs/ANA-NEXT-DESIGN-NOTES.md`](docs/ANA-NEXT-DESIGN-NOTES.md). |
 
 ## Scope
 
-The repository proves structural language and reverse-AD laws and tests numeric
-backend agreement. It does not prove that IEEE floating point is real arithmetic,
-that Futhark's compiler is correct, that optimization converges, or that a
-trained model is accurate, truthful, or safe.
+This repository proves structural language and reverse-AD laws, and tests
+numeric backend agreement. It does not prove that IEEE floating point is real
+arithmetic, that Futhark's compiler is correct, that optimization converges, or
+that a trained model is accurate, truthful, or safe. The trained models have had
+no post-training of any kind: they cannot follow an instruction, because they
+have never seen one.

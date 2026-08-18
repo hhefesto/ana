@@ -167,6 +167,10 @@ entry conf_piece_write_slice (n: i64) (m: i64) (offset: i64)
     (destination: [n]f32) (source: [m]f32): [n]f32 =
   piece_write_slice n m offset destination source
 
+entry conf_piece_concat (n: i64) (m: i64)
+    (a: [n]f32) (b: [m]f32): [n+m]f32 =
+  piece_concat n m a b
+
 entry conf_piece_gather_chunk (groups: i64) (chunk_count: i64) (elements: i64)
     (chunk_index: i64) (values: [groups*chunk_count*elements]f32)
     : [groups*elements]f32 =
@@ -213,6 +217,85 @@ entry test_piece_ce_effective_batch: bool =
      grad[0] == 0.25f32 && grad[1] == -0.25f32 &&
      grad[2] == -0.25f32 && grad[3] == 0.25f32 &&
      grad[4] == 0.0f32 && grad[5] == 0.0f32
+
+-- Hoisting the per-head norm out of l2_normalize_heads is pure let-floating, so
+-- the forward is required to be EXACTLY unchanged.  This pins that against a
+-- frozen copy of the per-element form at a shape with several heads.
+def l2_normalize_heads_per_element [d] (h: i64) (x: [d]f32): [d]f32 =
+  let hd = d / h
+  in tabulate d (\j ->
+       let head_base = (j / hd) * hd
+       let norm = f32.sqrt (1.0e-6f32 +
+         f32.sum (map (\c -> x[head_base+c] * x[head_base+c]) (iota hd)))
+       in x[j] / norm)
+
+-- ==
+-- entry: test_piece_l2norm_heads_hoist_is_exact
+-- input { }
+-- output { true }
+entry test_piece_l2norm_heads_hoist_is_exact: bool =
+  let rows = 5i64
+  let d = 24i64
+  let h = 4i64
+  let x = tabulate (rows*d) (\i -> f32.sin (f32.i64 (i * 11 + 1)))
+  let hoisted = piece_l2norm_heads_fwd rows d h x
+  let reference = flatten (map (l2_normalize_heads_per_element h)
+                               (unflatten x :> [rows][d]f32))
+  in all (\i -> hoisted[i] == reference[i]) (iota (rows*d))
+
+-- The handwritten closed-form pullback against the AD-generated one.  Different
+-- float expressions, so the bound is relative rather than exact.
+-- ==
+-- entry: test_piece_l2norm_heads_closed_matches_vjp
+-- input { }
+-- output { true }
+entry test_piece_l2norm_heads_closed_matches_vjp: bool =
+  let rows = 5i64
+  let d = 24i64
+  let h = 4i64
+  let x = tabulate (rows*d) (\i -> f32.sin (f32.i64 (i * 11 + 1)))
+  let output_bar = tabulate (rows*d) (\i -> f32.cos (f32.i64 (i * 7 + 3)))
+  let from_vjp = piece_l2norm_heads_bwd rows d h x output_bar
+  let closed = piece_l2norm_heads_bars h x output_bar
+  in all (\i -> f32.abs (closed[i] - from_vjp[i])
+                  <= 1.0e-5f32 * (1.0f32 + f32.abs from_vjp[i]))
+         (iota (rows*d))
+
+-- The superseded output-owned form of the embedding pullback, frozen here as
+-- the reference the grouped implementation must reproduce.  Theta(v*d*count),
+-- which is exactly why it is no longer what piece_embed_scatter does.
+def piece_embed_scatter_reference [count] (v: i64) (d: i64)
+    (tokens: [count]i64) (output_bar_flat: [count*d]f32): [v*d]f32 =
+  let output_bar = unflatten output_bar_flat :> [count][d]f32
+  in tabulate (v*d) (\idx ->
+       let word = idx / d
+       let c = idx % d
+       in f32.sum (map (\i -> if tokens[i] == word then output_bar[i,c]
+                              else 0.0f32) (iota count)))
+
+-- The grouped scatter-add must agree with the frozen reference element-wise, at
+-- dimensions where the vocabulary is not trivially covered and tokens repeat
+-- heavily: v=64, d=8, count=256, so every word carries four positions on
+-- average and words 32..63 carry none at all.  The two sum in different orders,
+-- so the bound is a relative one rather than exact equality; the small-integer
+-- exactness case is the test below.
+-- ==
+-- entry: test_piece_embedding_scatter_matches_reference
+-- input { }
+-- output { true }
+entry test_piece_embedding_scatter_matches_reference: bool =
+  let v = 64i64
+  let d = 8i64
+  let count = 256i64
+  -- Deterministic, duplicate-heavy, and deliberately non-uniform: token 0
+  -- appears far more often than any other, so one segment is long.
+  let tokens = tabulate count (\i -> if i % 5 == 0 then 0i64 else (i * 7 + 3) % 32)
+  let bar = tabulate (count*d) (\i -> f32.sin (f32.i64 (i * 13 + 1)))
+  let actual = piece_embed_gather_bwd v d count tokens bar
+  let expected = piece_embed_scatter_reference v d tokens bar
+  in all (\i -> f32.abs (actual[i] - expected[i])
+                  <= 1.0e-5f32 * (1.0f32 + f32.abs expected[i]))
+         (iota (v*d))
 
 -- Duplicate token IDs must scatter-add, not overwrite.
 -- ==

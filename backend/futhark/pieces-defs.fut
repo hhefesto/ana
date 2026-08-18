@@ -16,6 +16,53 @@ def piece_l2norm_heads [rows] [d]
   in flatten (map (l2_normalize_heads h)
               (unflatten checked :> [rows][d]f32))
 
+-- Handwritten pullback of piece_l2norm_heads, in the piece_gla_intra_bars
+-- style: the quantities that depend only on (row, head) are computed once and
+-- shared by that head's hd components, and every output element is owned by one
+-- thread.
+--
+-- Per head, with s = 1e-6 + sum_c x_c^2, norm = sqrt s, and u = x / norm:
+--   y_j    = x_j / norm
+--   dy_j/dx_i = [i=j]/norm - x_j x_i / norm^3
+--   xbar_i = (obar_i - u_i * (u . obar)) / norm
+-- The epsilon is additive in s and so does not change the formula: it shifts
+-- norm, and norm is what the expression is written in terms of.
+--
+-- NOT wired into piece_l2norm_heads_bwd, which still takes vjp2 of the forward,
+-- and on present evidence it should stay that way.  Measured on the C backend
+-- at the bpe100m shape (rows=256, d=768, h=12, 20 reps): the superseded
+-- per-element vjp is 23,652 us, vjp of the hoisted forward is 4,953 us, and
+-- this closed form is 5,109 us.  Hoisting the norm (see l2_normalize_heads in
+-- model.fut) recovers the entire 4.8x on its own while leaving the pullback
+-- correct by construction; the handwritten form is 3% slower and carries the
+-- divergence risk for nothing.
+--
+-- It is kept because the CPU ranking need not survive to CUDA, where the cost
+-- being removed is lock-guarded atomic accumulation rather than arithmetic.
+-- check_l2_bwd_closed_vs_vjp and check_l2_bwd_closed in kernel-check.fut make
+-- the comparison reproducible on a real GPU; switching is one line in
+-- pieces.fut if the measurement there disagrees.
+def piece_l2norm_heads_bars [rows] [d]
+    (h: i64) (x_flat: [rows*d]f32) (output_bar_flat: [rows*d]f32): [rows*d]f32 =
+  let checked = assert (h > 0 && d > 0 && d % h == 0) x_flat
+  let hd = d / h
+  let x = unflatten checked :> [rows][d]f32
+  let output_bar = unflatten output_bar_flat :> [rows][d]f32
+  let norms = tabulate_2d rows h (\r head ->
+    let base = head * hd
+    in f32.sqrt (1.0e-6f32 +
+         f32.sum (map (\c -> x[r, base+c] * x[r, base+c]) (iota hd))))
+  -- u . obar, the only other quantity shared across a head's components.
+  let projections = tabulate_2d rows h (\r head ->
+    let base = head * hd
+    let norm = norms[r, head]
+    in f32.sum (map (\c -> (x[r, base+c] / norm) * output_bar[r, base+c])
+                    (iota hd)))
+  in flatten (tabulate_2d rows d (\r j ->
+       let head = j / hd
+       let norm = norms[r, head]
+       in (output_bar[r, j] - (x[r, j] / norm) * projections[r, head]) / norm))
+
 -- Input and relcum are [groups][chunk][hd], where groups is B*nc*h.
 -- dec is the total log-decay of each group/channel.
 def piece_gate_cum [groups] [chunk] [hd]
@@ -231,15 +278,63 @@ def piece_embed_gather [v] [d] [count]
   let checked = assert (v > 0 && valid_tokens v tokens) tokens
   in flatten (map (\token -> embedding[token]) checked)
 
+-- Segmented inclusive scan.  There is no futhark.pkg in this repo, so
+-- github.com/diku-dk/segmented is unavailable and the operator is spelled out.
+-- It is associative: the flag disjunction is, and the value branch takes the
+-- right operand whenever the right segment has already started.
+def segmented_scan_add [n] (flags: [n]bool) (values: [n]f32): [n]f32 =
+  let combine (f1, x1) (f2, x2) = (f1 || f2, if f2 then x2 else x1 + x2)
+  in map (.1) (scan combine (false, 0.0f32) (zip flags values))
+
+-- The pullback of the embedding gather: a scatter-add, since duplicate token
+-- IDs must accumulate rather than overwrite.
+--
+-- The obvious output-owned form -- tabulate (v*d) with an inner sum over every
+-- token -- is Theta(v*d*count), which at bpe100m is 4.1e11 element visits for
+-- 1.26e7 useful adds, one launch of ~129 ms, 12.5% of kernel time.  It is
+-- written that way because it is race-free: each output belongs to one thread.
+--
+-- This form keeps that property and drops the vocabulary factor.  Positions are
+-- grouped by token with a stable counting sort, then each word's contributions
+-- are summed by one segmented scan and placed by a scatter at distinct indices.
+--
+-- Deliberately NOT reduce_by_index over f32: its CUDA lowering accumulates with
+-- atomics, which makes the sum order vary run to run.  A 4.7-day training run
+-- has to be reproducible, so the only reduce_by_index here is over i64, where
+-- addition is exactly associative and commutative and the order cannot matter.
+--
+-- The sum order within a word differs from the superseded form (a flat reduce
+-- over all `count` slots, most of them zero), so this is not bit-identical to
+-- it; conf_piece_embed_scatter_reference in pieces-conformance.fut pins the
+-- agreement element-wise.
 def piece_embed_scatter [v] [d] [count]
     (tokens: [count]i64) (output_bar_flat: [count*d]f32): [v*d]f32 =
   let output_bar = unflatten output_bar_flat :> [count][d]f32
   let checked = assert (v > 0 && valid_tokens v tokens) tokens
+  -- How many positions carry each word, and where that word's run begins.
+  let counts = reduce_by_index (replicate v 0i64) (+) 0i64 checked
+                 (replicate count 1i64)
+  let inclusive = scan (+) 0i64 counts
+  let starts = map2 (-) inclusive counts
+  -- Rank of position i among the earlier positions carrying the same token.
+  -- Theta(count^2) and fully regular: no atomics, no irregular nesting, and
+  -- ~1500x below the cost this replaces.  A radix sort would make it
+  -- Theta(count log count) if `count` ever grows past a batch of windows.
+  let ranks = tabulate count (\i ->
+    i64.sum (map (\j -> if j < i && checked[j] == checked[i] then 1i64 else 0i64)
+                 (iota count)))
+  let destination = map2 (\token rank -> starts[token] + rank) checked ranks
+  -- Every destination is distinct, so this scatter is deterministic.
+  let order = scatter (replicate count 0i64) destination (iota count)
+  let sorted_tokens = map (\position -> checked[position]) order
+  let flags = tabulate count (\r -> r == 0 || sorted_tokens[r] != sorted_tokens[r-1])
+  let summed = tabulate d (\c ->
+    segmented_scan_add flags (map (\position -> output_bar[position, c]) order))
   in tabulate (v*d) (\idx ->
        let word = idx / d
        let c = idx % d
-       in f32.sum (map (\i -> if checked[i] == word then output_bar[i,c]
-                              else 0.0f32) (iota count)))
+       let n = counts[word]
+       in if n == 0 then 0.0f32 else summed[c, starts[word] + n - 1])
 
 -- [batch][n][h*hd] <-> [batch][h][n][hd], exact inverse permutations.
 def piece_split_heads [batch] [n] [h] [hd]
@@ -285,6 +380,17 @@ def piece_slice_write [n] [m] (offset: i64)
     if index >= offset && index < offset + m
     then source[index - offset]
     else checked[index])
+
+-- Pairwise concatenation, the primitive gradient assembly is built from.
+--
+-- namedLayout's slices are contiguous and cover the parameter vector exactly
+-- (backend/test/Main.hs asserts both), and the decomposed traversal emits the
+-- named cotangents in that same order, so the flat gradient IS the ordered
+-- concatenation of them.  Folding piece_slice_write over the 119 slices instead
+-- rewrote the whole 115M-element vector once per slice: ~55 GB of traffic per
+-- step to place 461 MB.  A balanced tree of these brings it to O(m log k).
+def piece_concat_pair [n] [m] (a: [n]f32) (b: [m]f32): [n+m]f32 =
+  concat a b :> [n+m]f32
 
 def piece_chunk_gather [groups] [chunk_count] [elements] (chunk_index: i64)
     (values: [groups*chunk_count*elements]f32): [groups*elements]f32 =

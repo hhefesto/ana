@@ -1,6 +1,7 @@
 module Parameters
   ( Parameters (..)
   , BlockParameters (..)
+  , BlockMixer (..)
   , parameterViews
   ) where
 
@@ -15,13 +16,20 @@ data Parameters = Parameters
   , paramsFinalRms :: !MatrixView
   }
 
+-- The token mixer is the only place a block's parameters depend on the layer
+-- kind, so it carries the sum type.  `Maybe MatrixView` said the same thing
+-- with a Nothing that had to be read as "softmax"; this says which layer kind
+-- it is, and a GlaBlock cannot lack its gate projection.  Decomposed.hs
+-- already draws the distinction this way in LayerWeights.
+data BlockMixer = SoftmaxBlock | GlaBlock !MatrixView
+
 data BlockParameters = BlockParameters
   { blockRmsAtt :: !MatrixView
   , blockWq :: !MatrixView
   , blockWk :: !MatrixView
   , blockWv :: !MatrixView
   , blockWo :: !MatrixView
-  , blockWalpha :: !(Maybe MatrixView)
+  , blockMixer :: !BlockMixer
   , blockRmsFf :: !MatrixView
   , blockWgate :: !MatrixView
   , blockWup :: !MatrixView
@@ -45,14 +53,14 @@ parameterViews cfg buffer = do
       wk <- matrix (prefix "wk") d d layout
       wv <- matrix (prefix "wv") d d layout
       wo <- matrix (prefix "wo") d d layout
-      walpha <- if isSoftmaxLayer cfg i
-        then pure Nothing
-        else Just <$> matrix (prefix "walpha") d d layout
+      mixer <- case layerKind cfg i of
+        SoftmaxKind -> pure SoftmaxBlock
+        GlaKind -> GlaBlock <$> matrix (prefix "walpha") d d layout
       rmsFf <- vector (prefix "rms_ff") d layout
       wgate <- matrix (prefix "wgate") f d layout
       wup <- matrix (prefix "wup") f d layout
       wdown <- matrix (prefix "wdown") d f layout
-      pure (BlockParameters rmsAtt wq wk wv wo walpha rmsFf wgate wup wdown)
+      pure (BlockParameters rmsAtt wq wk wv wo mixer rmsFf wgate wup wdown)
       where
         prefix suffix = "blocks." ++ show i ++ "." ++ suffix
         prefixRmsAtt = prefix "rms_att"

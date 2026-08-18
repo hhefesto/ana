@@ -72,7 +72,7 @@ entry benchmark_tokens (batch: i64) (sequence: i64): [batch][sequence]i64 =
 -- per step on an RTX 3090 at bpe10m scale).  A per-sample vjp distributes
 -- into a few hundred kernels parallel over sequence/dim/vocab, and the
 -- samples pay a sequential loop that costs nothing when each sweep already
--- fills the GPU.  See HANDOFF.md.
+-- fills the GPU.
 entry micro_batch_loss_grad [batch] [sequence]
     (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64) (chunk: i64)
     (effective_batch: i64)

@@ -39,6 +39,7 @@ module PiecesConformance
   , pieceStateAdvanceBackward
   , pieceReadSlice
   , pieceWriteSlice
+  , pieceConcat
   , pieceGatherChunk
   , piecePutChunk
   ) where
@@ -130,6 +131,13 @@ pieceWriteSlice :: Context -> Int -> Int64 -> Int64 -> Int64 -> F32Array -> F32A
 pieceWriteSlice (Context ctx) count n m offset (F32Array destination) (F32Array source) = alloca $ \out -> do
   entry_conf_piece_write_slice ctx out n m offset destination source >>= check ctx "conf_piece_write_slice"
   c_context_sync ctx >>= check ctx "piece_write_slice sync"
+  arr <- F32Array <$> peek out
+  bracket (pure arr) (freeF32 (Context ctx)) (downloadF32 (Context ctx) count)
+
+pieceConcat :: Context -> Int -> Int64 -> Int64 -> F32Array -> F32Array -> IO [Float]
+pieceConcat (Context ctx) count n m (F32Array a) (F32Array b) = alloca $ \out -> do
+  entry_conf_piece_concat ctx out n m a b >>= check ctx "conf_piece_concat"
+  c_context_sync ctx >>= check ctx "piece_concat sync"
   arr <- F32Array <$> peek out
   bracket (pure arr) (freeF32 (Context ctx)) (downloadF32 (Context ctx) count)
 
@@ -474,5 +482,6 @@ foreign import ccall safe "futhark_entry_conf_piece_state_advance_fwd" entry_con
 foreign import ccall safe "futhark_entry_conf_piece_state_advance_bwd" entry_conf_piece_state_advance_bwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
 foreign import ccall safe "futhark_entry_conf_piece_read_slice" entry_conf_piece_read_slice :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> IO CInt
 foreign import ccall safe "futhark_entry_conf_piece_write_slice" entry_conf_piece_write_slice :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_conf_piece_concat" entry_conf_piece_concat :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
 foreign import ccall safe "futhark_entry_conf_piece_gather_chunk" entry_conf_piece_gather_chunk :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> IO CInt
 foreign import ccall safe "futhark_entry_conf_piece_put_chunk" entry_conf_piece_put_chunk :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt

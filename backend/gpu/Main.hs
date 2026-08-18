@@ -8,7 +8,8 @@ import Data.Bits (rotateL, shiftL, shiftR, xor)
 import Data.IORef (modifyIORef', newIORef, readIORef)
 import Data.Int (Int64)
 import qualified Data.IntMap.Strict as IntMap
-import Data.List (foldl', isSuffixOf, sortOn)
+import Data.Char (isSpace)
+import Data.List (dropWhileEnd, foldl', intercalate, isSuffixOf, nub, sort, sortOn)
 import Data.Time (defaultTimeLocale, formatTime, getZonedTime)
 import Data.Word (Word64)
 import qualified Data.Text as Text
@@ -26,16 +27,36 @@ import FormalTransformer.Optimizer
 import FormalTransformer.Tokenizer
 import FutharkKernels
 import GHC.Clock (getMonotonicTimeNSec)
-import System.Directory (copyFile, doesFileExist)
+import System.Directory (copyFile, doesDirectoryExist, doesFileExist, getModificationTime, listDirectory)
 import System.Environment (getArgs, lookupEnv, setEnv)
+import System.Mem (performGC)
 import System.Exit (die)
 import System.IO (BufferMode (LineBuffering), hFlush, hPutStrLn, hSetBuffering, stderr, stdout)
 import System.IO.Unsafe (unsafePerformIO)
 import Text.Printf (printf)
 import Text.Read (readMaybe)
 
+-- The model identity a checkpoint is stamped with and resumed against.
+--
+-- `Config` carries only the six Ints, so the GLA fix arms -- gateTemperature
+-- and glaOutputNorm (FormalTransformer.Config) -- were invisible here.  They
+-- are architecture: the gate is alpha = sigmoid(z)^(1/tau), so moving tau
+-- changes what every GLA layer's decay MEANS.  Without them in the identity a
+-- checkpoint trained at one setting loads without complaint under another and
+-- is silently evaluated as a different model -- no error, just quietly wrong
+-- output from a set of weights that cost days of GPU time.
+--
+-- The suffix is empty at the historical values, so identities minted before
+-- this existed are reproduced byte for byte and every stored checkpoint keeps
+-- loading.  Move either arm and validateResume rejects those checkpoints
+-- loudly, which is the entire point.
 modelId :: Config -> String
-modelId cfg = "formal-transformer-futhark-hybrid-gla-v2:" ++ show cfg
+modelId cfg = "formal-transformer-futhark-hybrid-gla-v2:" ++ show cfg ++ gateSuffix
+  where
+    gateSuffix
+      | gateTemperature == 1 && not glaOutputNorm = ""
+      | otherwise = ":tau=" ++ show gateTemperature
+                 ++ ":outnorm=" ++ show glaOutputNorm
 
 -- Schedule experiment overrides; the defaults are the historical constants.
 -- TRAIN_LR / TRAIN_WD / TRAIN_WARMUP change training semantics — use them
@@ -82,9 +103,14 @@ main = do
       cfg <- chooseConfig size
       train corpus checkpoint
         (Segment total start end offset globalIdentity expectedCorpusIdentity) cfg
+    ["train-plan", plan, runDir, checkpoint, size] -> do
+      cfg <- chooseConfig size
+      trainPlan plan runDir checkpoint size cfg
     ["generate", checkpoint, text] -> generate checkpoint text 128
     ["generate", checkpoint, text, budgetText] -> parseNonnegative "MAXTOKENS" budgetText >>= generate checkpoint text
     ["check-checkpoint", checkpoint] -> checkCheckpoint checkpoint
+    ["checkpoint-info", checkpoint] -> checkpointInfo checkpoint
+    ["evaluate", checkpoint, corpus] -> evaluate checkpoint corpus
     ["bench", corpus] -> bench corpus tinyPreset
     ["bench", corpus, size] -> chooseConfig size >>= bench corpus
     ["act-stats", corpus, checkpoint] -> actStats corpus checkpoint bpe10mPreset
@@ -95,16 +121,24 @@ main = do
     ["grad-compare", gradFile, tokensFile, size] -> chooseConfig size >>= gradCompare gradFile tokensFile
     ["head-path-probe"] -> headPathProbe bpe10mPreset
     ["head-path-probe", size] -> chooseConfig size >>= headPathProbe
-    _ -> die "usage: formal-transformer-gpu inspect [tiny|small|bpe10m|gla-small|gla] | warm-context [tiny|small|bpe10m|gla-small|gla] | train CORPUS CHECKPOINT (STEPS|epoch) [tiny|small|bpe10m|gla-small|gla] | train-segment CORPUS CHECKPOINT GLOBAL_TOTAL START END DOCUMENT_OFFSET GLOBAL_ID EXPECTED_CORPUS_ID SIZE | generate CHECKPOINT TEXT [MAXTOKENS] | check-checkpoint CHECKPOINT | bench CORPUS [tiny|small|bpe10m|gla-small|gla]"
+    _ -> die "usage: formal-transformer-gpu inspect [tiny|small|bpe10m|bpe100m|gla-small|gla] | warm-context [tiny|small|bpe10m|bpe100m|gla-small|gla] | train CORPUS CHECKPOINT (STEPS|epoch) [tiny|small|bpe10m|bpe100m|gla-small|gla] | train-segment CORPUS CHECKPOINT GLOBAL_TOTAL START END DOCUMENT_OFFSET GLOBAL_ID EXPECTED_CORPUS_ID SIZE | train-plan PLAN RUN_DIR CHECKPOINT SIZE | generate CHECKPOINT TEXT [MAXTOKENS] | check-checkpoint CHECKPOINT | checkpoint-info CHECKPOINT | evaluate CHECKPOINT CORPUS | bench CORPUS [tiny|small|bpe10m|bpe100m|gla-small|gla]"
+
+sizePresets :: [(String, Config)]
+sizePresets =
+  [ ("tiny", tinyPreset)
+  , ("small", smallPreset)
+  , ("small4", small4Preset)
+  , ("bpe10m", bpe10mPreset)
+  , ("bpe100m", bpe100mPreset)
+  , ("gla-small", glaSmallPreset)
+  , ("gla", glaPreset)
+  ]
 
 chooseConfig :: String -> IO Config
-chooseConfig "tiny" = pure tinyPreset
-chooseConfig "small" = pure smallPreset
-chooseConfig "small4" = pure small4Preset
-chooseConfig "bpe10m" = pure bpe10mPreset
-chooseConfig "gla-small" = pure glaSmallPreset
-chooseConfig "gla" = pure glaPreset
-chooseConfig value = die ("unknown model size: " ++ value ++ " (expected tiny, small, bpe10m, gla-small, or gla)")
+chooseConfig value = case lookup value sizePresets of
+  Just cfg -> pure cfg
+  Nothing -> die ("unknown model size: " ++ value ++ " (expected "
+    ++ intercalate ", " (map fst sizePresets) ++ ")")
 
 inspect :: Config -> IO ()
 inspect cfg = either die (mapM_ print) (namedLayout cfg) >> do
@@ -141,7 +175,7 @@ actStats corpusPath checkpointPath cfg = do
   when (manifestConfig manifest /= cfg) (die
     ("checkpoint config " ++ show (manifestConfig manifest)
       ++ " does not match requested size " ++ show cfg))
-  let params = checkpointParameters checkpoint
+  let params = U.toList (checkpointParameters checkpoint)
       step = adamStep (checkpointOptimizer checkpoint)
   results <- mapM (either die pure . fullSequenceStats cfg params) windows
   let mean xs = sum xs / fromIntegral (length xs) :: Double
@@ -491,7 +525,19 @@ parseTarget "epoch" = pure EpochSteps
 parseTarget value = ExplicitSteps <$> parsePositive "STEPS" value
 
 train :: FilePath -> FilePath -> TrainingMode -> Config -> IO ()
-train corpusPath checkpointPath mode cfg = do
+train corpusPath checkpointPath mode cfg =
+  withContext (\ctx -> trainInContext ctx corpusPath checkpointPath mode cfg)
+
+-- The body of `train`, taking the device context rather than opening one, so
+-- that train-plan can hoist a single context above a whole shard loop.
+--
+-- Hoisting is a correctness requirement, not just an optimization: CudaBlasOps
+-- caches one process-global cuBLAS handle with no destroy path, bound to
+-- whichever CUDA context was live when the first GEMM ran.  A loop that opened
+-- and closed a context per shard would leave the second shard's first GEMM
+-- using a handle bound to a freed context.
+trainInContext :: Context -> FilePath -> FilePath -> TrainingMode -> Config -> IO ()
+trainInContext ctx corpusPath checkpointPath mode cfg = do
   batchSize <- positiveEnv "TRAIN_BATCH" 1
   microSize <- positiveEnv "MICRO_BATCH" batchSize
   when (microSize > batchSize) (die "MICRO_BATCH must not exceed TRAIN_BATCH")
@@ -581,7 +627,7 @@ train corpusPath checkpointPath mode cfg = do
     (die "checkpoint has already passed this segment's target step")
   gpuCfg <- gpuConfigIO cfg >>= either die pure
   mask <- either die pure (decayMask cfg)
-  let params0 = map realToFrac (checkpointParameters checkpoint)
+  let params0 = checkpointParameters checkpoint
       state0 = checkpointOptimizer checkpoint
       n = paramCount cfg
   logTraining ("training config=" ++ show cfg
@@ -599,18 +645,18 @@ train corpusPath checkpointPath mode cfg = do
     Nothing -> pure ()
     Just g -> logTraining ("bigram gate: sample=" ++ show (gateSampleCrossEntropy g)
       ++ " nats full=" ++ show (gateFullCrossEntropy g) ++ " nats")
-  withContext $ \ctx -> do
-    params <- uploadF32 ctx params0
-    m <- uploadF32 ctx (map realToFrac (firstMoment state0))
-    v <- uploadF32 ctx (map realToFrac (secondMoment state0))
-    withBool ctx mask $ \deviceMask -> do
+  do
+    params <- uploadF32Vector ctx params0
+    m <- uploadF32Vector ctx (firstMoment state0)
+    v <- uploadF32Vector ctx (secondMoment state0)
+    withBoolVector ctx mask $ \deviceMask -> do
       -- DUMP_CHECKPOINTS=1: keep a step-suffixed copy of every snapshot so
       -- the act-stats diagnostic can walk the trajectory afterwards.
       dumpCheckpoints <- (== Just "1") <$> lookupEnv "DUMP_CHECKPOINTS"
       let saveSnapshot step rng best deviceParams deviceM deviceV = do
-            hostParams <- map realToFrac <$> downloadF32 ctx n deviceParams
-            hostM <- map realToFrac <$> downloadF32 ctx n deviceM
-            hostV <- map realToFrac <$> downloadF32 ctx n deviceV
+            hostParams <- downloadF32Vector ctx n deviceParams
+            hostM <- downloadF32Vector ctx n deviceM
+            hostV <- downloadF32Vector ctx n deviceV
             let snapshot = checkpoint
                   { checkpointParameters = hostParams
                   , checkpointOptimizer = AdamWState step hostM hostV
@@ -631,12 +677,11 @@ train corpusPath checkpointPath mode cfg = do
       let layoutSlices = either (const []) id (namedLayout cfg)
           dumpSlices step gradientDevice paramsDevice =
             when (dumpEvery > 0 && step `mod` dumpEvery == 0) $ do
-              gradientHost <- downloadF32 ctx n gradientDevice
-              paramsHost <- downloadF32 ctx n paramsDevice
-              let sliceNorm values slice = sqrt (sum
-                    [ realToFrac x * realToFrac x
-                    | x <- take (sliceLength slice) (drop (sliceOffset slice) values)
-                    ]) :: Double
+              gradientHost <- downloadF32Vector ctx n gradientDevice
+              paramsHost <- downloadF32Vector ctx n paramsDevice
+              let sliceNorm values slice = sqrt
+                    (U.sum (U.map (\x -> x * x)
+                      (U.slice (sliceOffset slice) (sliceLength slice) values))) :: Double
               mapM_ (\slice -> hPutStrLn stderr ("slice step=" ++ show step
                 ++ " name=" ++ sliceName slice
                 ++ printf " grad=%.6g" (sliceNorm gradientHost slice)
@@ -648,11 +693,8 @@ train corpusPath checkpointPath mode cfg = do
                 [s] | modelDim cfg > 0 && sliceLength s `mod` modelDim cfg == 0 -> do
                   let d0 = modelDim cfg
                       rows0 = sliceLength s `div` d0
-                      values = map realToFrac (take (sliceLength s)
-                        (drop (sliceOffset s) gradientHost)) :: [Double]
-                      rowChunks [] = []
-                      rowChunks xs = take d0 xs : rowChunks (drop d0 xs)
-                      rowsL = rowChunks values
+                      values = U.slice (sliceOffset s) (sliceLength s) gradientHost
+                      rowsL = [ U.toList (U.slice (r * d0) d0 values) | r <- [0 .. rows0 - 1] ]
                       meanRow = map (/ fromIntegral rows0)
                         (foldl' (zipWith (+)) (replicate d0 0) rowsL)
                       rowNorm r = sqrt (sum (map (\x -> x * x) r))
@@ -679,20 +721,21 @@ train corpusPath checkpointPath mode cfg = do
       let maskGradient g
             | trunkScale == 1 = pure g
             | otherwise = do
-                hostG <- downloadF32 ctx n g
+                hostG <- downloadF32Vector ctx n g
                 freeF32 ctx g
-                let (embedPart, trunkPart) = splitAt embeddingLength hostG
-                uploadF32 ctx (embedPart ++ map (* realToFrac trunkScale) trunkPart)
+                uploadF32Vector ctx (U.imap
+                  (\i x -> if i < embeddingLength then x else x * realToFrac trunkScale)
+                  hostG)
       -- DUMP_GRAD_VECTOR=path: at step 1 write the RAW model gradient
       -- (pre-mask, pre-clip) and the exact batch tokens, so an offline f64
       -- oracle can recompute the same step's gradient and compare.
       dumpVectorPath <- lookupEnv "DUMP_GRAD_VECTOR"
       let dumpVector step batch g = case dumpVectorPath of
             Just path | step == 1 -> do
-              hostG <- downloadF32 ctx n g
+              hostG <- downloadF32Vector ctx n g
               writeFile (path ++ ".tokens")
                 (unlines (map (unwords . map show) batch))
-              writeFile path (unlines (map show hostG))
+              writeFile path (unlines (map show (U.toList hostG)))
               logTraining ("dumped step-1 gradient (" ++ show n
                 ++ " floats) and batch to " ++ path)
             _ -> pure ()
@@ -710,6 +753,107 @@ train corpusPath checkpointPath mode cfg = do
       saveSnapshot target rngFinal (progressBestValidationLoss progressFinal) paramsFinal mFinal vFinal
       logTraining ("saved checkpoint at completed step " ++ show target ++ ": " ++ checkpointPath)
       mapM_ (freeF32 ctx) [paramsFinal, mFinal, vFinal]
+
+-- One segment line of a run plan, as deploy/plan-corpus writes it:
+--   segment <k> <document_offset> <docs> <corpus_id> <tw> <vw> <steps> <seg_start> <seg_end>
+data PlanSegment = PlanSegment
+  { planSegmentIndex :: !Int
+  , planSegmentOffset :: !Word64
+  , planSegmentCorpusIdentity :: !String
+  , planSegmentStart :: !Int
+  , planSegmentEnd :: !Int
+  }
+
+-- Header: plan <version> <global_total_steps> <global_id> <...>
+parsePlan :: String -> Either String (Int, String, [PlanSegment])
+parsePlan contents = case map words (lines contents) of
+  [] -> Left "plan is empty"
+  (header : rest) -> do
+    (total, globalIdentity) <- case header of
+      ("plan" : _version : totalText : globalIdentity : _) ->
+        case readMaybe totalText of
+          Just total | total > 0 -> Right (total, globalIdentity)
+          _ -> Left "plan header has a non-positive global step total"
+      _ -> Left "plan header must begin with `plan`"
+    segments <- mapM parseSegment [fields | fields <- rest, take 1 fields == ["segment"]]
+    when (null segments) (Left "plan contains no segment lines")
+    pure (total, globalIdentity, segments)
+  where
+    parseSegment fields = case fields of
+      ["segment", indexText, offsetText, _docs, corpusIdentity,
+        _tw, _vw, _steps, startText, endText] ->
+        case (readMaybe indexText, readMaybe offsetText,
+              readMaybe startText, readMaybe endText) of
+          (Just index, Just offset, Just start, Just end) ->
+            Right (PlanSegment index offset corpusIdentity start end)
+          _ -> Left ("plan segment has unparseable numbers: " ++ unwords fields)
+      _ -> Left ("plan segment has the wrong field count: " ++ unwords fields)
+
+-- Trains every remaining shard of a run plan inside ONE process and ONE device
+-- context, replacing deploy/train-cloud.sh's loop of train-segment processes.
+--
+-- Each of those processes paid CUDA context creation (5.15 s measured on a
+-- 5090), a Futhark kernel compile or cache load, its own RTS and binary
+-- startup, and a checkpoint round trip.  The run document attributes ~24% of
+-- the wiki run's wall clock to exactly this; at 304 shards the context
+-- creation alone is ~26 minutes of paid GPU time.
+--
+-- Deliberately calls trainInContext per shard with no state carried across the
+-- boundary beyond the checkpoint file itself.  That makes the whole loop
+-- exactly N sequential train-segment invocations with the context lifted out,
+-- which is what backend/test's equivalence gate can prove byte for byte.
+-- Keeping params/m/v device-resident across shards would save the per-shard
+-- checkpoint load and the three uploads on top of this; it is a separate
+-- change, because it is the point where the trajectory could stop being
+-- reproducible by the fallback path.
+--
+-- Resume comes from the checkpoint's own completed step, not from the .done
+-- markers: the markers are shell state that can disagree with the checkpoint
+-- if a process died between the save and the touch.  They are still written,
+-- because deploy/pull-stages.sh counts them for progress.
+trainPlan :: FilePath -> FilePath -> FilePath -> String -> Config -> IO ()
+trainPlan planPath runDir checkpointPath size cfg = do
+  contents <- readFile planPath
+  (globalTotal, globalIdentity, segments) <- either die pure (parsePlan contents)
+  maxShards <- maybe (0 :: Int) (\raw -> maybe 0 id (readMaybe raw)) <$> lookupEnv "MAX_SHARDS"
+  completed <- do
+    existing <- doesFileExist checkpointPath
+    if existing
+      then adamStep . checkpointOptimizer <$> (loadCheckpoint checkpointPath >>= either die pure)
+      else pure 0
+  let remaining = [segment | segment <- segments, planSegmentEnd segment > completed]
+      selected = if maxShards > 0 then take maxShards remaining else remaining
+  logTraining ("train-plan: " ++ show (length segments) ++ " segments, completed step "
+    ++ show completed ++ "/" ++ show globalTotal ++ ", " ++ show (length selected)
+    ++ " to train this run")
+  -- ONE context for every shard below.  See trainInContext's note on why this
+  -- is required rather than merely faster.
+  withContext $ \ctx ->
+    let go [] = pure ()
+        go (segment : rest) = do
+          let index = planSegmentIndex segment
+              corpusPath = runDir ++ "/shard-" ++ show index ++ "-" ++ size ++ ".corpus"
+              marker = runDir ++ "/shard-" ++ show index ++ "-" ++ size ++ ".done"
+          present <- doesFileExist corpusPath
+          if not present
+            then logTraining ("train-plan: corpus for shard " ++ show index
+              ++ " is not present, stopping cleanly here: " ++ corpusPath)
+            else do
+              logTraining ("train-plan: shard " ++ show index ++ "  global "
+                ++ show (planSegmentStart segment) ++ ".." ++ show (planSegmentEnd segment)
+                ++ " / " ++ show globalTotal)
+              trainInContext ctx corpusPath checkpointPath
+                (Segment globalTotal (planSegmentStart segment) (planSegmentEnd segment)
+                  (planSegmentOffset segment) globalIdentity
+                  (planSegmentCorpusIdentity segment)) cfg
+              writeFile marker ""
+              -- The shard's ~3.2 GB of boxed [[Int64]] windows and its corpus
+              -- die with the call above; this is what makes the RTS hand the
+              -- pages back before the next shard allocates its own.
+              performGC
+              go rest
+    in go selected
+  logTraining ("train-plan: finished. checkpoint: " ++ checkpointPath)
 
 -- Synchronized step-time benchmark per the measurement contract: every
 -- measured interval starts with both device queues drained (the previous
@@ -754,10 +898,10 @@ bench corpusPath cfg = do
     ++ " warmup=" ++ show warmupSteps
     ++ " steps=" ++ show benchSteps)
   withContext $ \ctx -> do
-    params <- uploadF32 ctx (map realToFrac (checkpointParameters fresh))
-    m <- uploadF32 ctx (map realToFrac (firstMoment state0))
-    v <- uploadF32 ctx (map realToFrac (secondMoment state0))
-    withBool ctx mask $ \deviceMask -> do
+    params <- uploadF32Vector ctx (checkpointParameters fresh)
+    m <- uploadF32Vector ctx (firstMoment state0)
+    v <- uploadF32Vector ctx (secondMoment state0)
+    withBoolVector ctx mask $ \deviceMask -> do
       let o field = realToFrac (field optCfg)
           benchStep step (rng, ps, ms, vs) = do
             let (batch, rng') = sampler step rng
@@ -1018,14 +1162,14 @@ newCheckpoint cfg identity optCfg clipNorm numerics =
     count = paramCount cfg
     manifest = Manifest artifactVersion cfg count canonicalLayoutIdentity canonicalLayoutVersion
       optCfg identity (realToFrac clipNorm) numerics
-    params = either error (concatMap initialize) (namedLayout cfg)
+    params = either error (U.concat . map initialize) (namedLayout cfg)
     initialize slice
       | initZeroOutput && (".wo" `isSuffixOf` sliceName slice
           || ".wdown" `isSuffixOf` sliceName slice) =
-          replicate (sliceLength slice) 0
+          U.replicate (sliceLength slice) 0
       | sliceDecay slice =
-          [initNoise (sliceOffset slice + i + 1) | i <- [0 .. sliceLength slice - 1]]
-      | otherwise = replicate (sliceLength slice) 1
+          U.generate (sliceLength slice) (\i -> initNoise (sliceOffset slice + i + 1))
+      | otherwise = U.replicate (sliceLength slice) 1
 
 -- Init experiment overrides (probes only; the initialization is part of a
 -- run's identity, so record any override with a published run).
@@ -1095,8 +1239,32 @@ validateResume cfg identity optCfg clipNorm numerics checkpoint = do
 -- Silent compatibility probe for checkpoint discovery: exit 0 iff this
 -- host's architecture (model identity + canonical layout) can interpret
 -- the checkpoint.  Loads and validates the artifact only; no Futhark
--- context is created.  wiki-generate uses this to skip checkpoints written
+-- context is created.  ana uses this to skip checkpoints written
 -- by a different architecture instead of dying on the newest file.
+-- Which weights are these: model, training position, and write time, printed
+-- from the manifest alone (loadCheckpointSummary) so ana can show a banner
+-- before its interactive prompt without parsing gigabytes of parameters.
+-- The mtime is the trainer's write time, not the download's: pulls preserve
+-- it (rsync -t), so it dates the weights themselves.
+checkpointInfo :: FilePath -> IO ()
+checkpointInfo path = do
+  (manifest, step) <- loadCheckpointSummary path >>= either die pure
+  mtime <- getModificationTime path
+  let cfg = manifestConfig manifest
+      scheduled = totalSteps (manifestOptimizerConfig manifest)
+      described = thousands (paramCount cfg) ++ " parameters (" ++ show cfg ++ ")"
+      model = case [label | (label, preset) <- sizePresets, preset == cfg] of
+        label : _ -> label ++ " — " ++ described
+        [] -> described
+      written = formatTime defaultTimeLocale "%Y-%m-%d %H:%M UTC" mtime
+  putStrLn ("checkpoint: " ++ path)
+  putStrLn ("model: " ++ model)
+  printf "trained: %d/%d updates (%.3f%%), weights written %s\n" step scheduled
+    (100 * fromIntegral step / fromIntegral scheduled :: Double) written
+
+thousands :: Int -> String
+thousands = reverse . intercalate "," . chunksOf 3 . reverse . show
+
 checkCheckpoint :: FilePath -> IO ()
 checkCheckpoint path = do
   checkpoint <- loadCheckpoint path >>= either die pure
@@ -1110,6 +1278,87 @@ checkCheckpoint path = do
     (die "checkpoint layout identity is not supported by this host")
   putStrLn ("compatible: " ++ path)
 
+-- Offline evaluation on a fixed corpus: the measurement the training loop's
+-- periodic validation only samples, run once over every window instead.
+--
+-- The corpus is consumed as-is -- deliberately NOT through
+-- trainingSequencesFrom, which would re-split an already-held-out set and
+-- silently score 90% of it.  The caller supplies a corpus that is held out by
+-- construction (see `formal-transformer build-eval`).
+--
+-- Reported with a standard error, because a bits-per-byte figure without one
+-- invites exactly the mistake the 2026-07-25 run's last log line encourages:
+-- reading a small sample's draw as the model's quality.  Chunk means are
+-- independent samples of equal size, so sd(chunk means)/sqrt(chunks) is the
+-- standard error of the overall mean.
+evaluate :: FilePath -> FilePath -> IO ()
+evaluate checkpointPath corpusPath = do
+  microSize <- positiveEnv "MICRO_BATCH" 8
+  checkpoint <- loadCheckpoint checkpointPath >>= either die pure
+  let manifest = checkpointManifest checkpoint
+      cfg = manifestConfig manifest
+      identity = manifestIdentity manifest
+  when (modelIdentity identity /= modelId cfg)
+    (die "checkpoint model identity is not supported by this host")
+  corpus <- loadCorpus corpusPath >>= either die pure
+  when (corpusTokenizerIdentity corpus /= tokenizerIdentity identity)
+    (die ("corpus tokenizer identity does not match the checkpoint\n  corpus:     "
+      ++ corpusTokenizerIdentity corpus
+      ++ "\n  checkpoint: " ++ tokenizerIdentity identity))
+  tokenizer <- tokenizerForIdentity (tokenizerIdentity identity)
+  when (tokenizerVocabSize tokenizer /= vocabSize cfg)
+    (die "checkpoint tokenizer vocabulary does not match its model configuration")
+  let windows = map (map fromIntegral)
+        (concatMap (fullWindows (contextSize cfg)) (corpusDocuments corpus)) :: [[Int64]]
+  when (null windows) (die "evaluation corpus yields no full context windows")
+  scale <- either die pure (bitsPerByteScale tokenizer windows)
+  gpuCfg <- gpuConfigIO cfg >>= either die pure
+  let chunks = chunksOf microSize windows
+      completed = adamStep (checkpointOptimizer checkpoint)
+      scheduled = totalSteps (manifestOptimizerConfig manifest)
+  hPutStrLn stderr ("evaluate: " ++ show (length windows) ++ " windows, "
+    ++ show (length chunks) ++ " chunks of at most " ++ show microSize)
+  results <- withContext $ \ctx ->
+    withF32Vector ctx (checkpointParameters checkpoint) $ \params ->
+      mapM (chunkMean ctx gpuCfg params) chunks
+  let totalWindows = sum (map fst results)
+      predictions = sum (map (\w -> length w - 1) windows)
+      meanLoss = sum [fromIntegral n * m | (n, m) <- results]
+        / fromIntegral totalWindows :: Double
+      full = [m | (n, m) <- results, n == microSize]
+      standardError
+        | length full < 2 = Nothing
+        | otherwise =
+            let k = length full
+                centre = sum full / fromIntegral k
+                variance = sum [(m - centre) * (m - centre) | m <- full]
+                  / fromIntegral (k - 1)
+            in Just (sqrt (variance / fromIntegral k))
+      showError formatter = maybe "n/a" formatter standardError
+  printf "=== evaluation: %s on %s ===\n" checkpointPath corpusPath
+  printf "checkpoint step: %d/%d (%.3f%% of the scheduled run)\n"
+    completed scheduled
+    (100 * fromIntegral completed / fromIntegral scheduled :: Double)
+  printf "config: %s\n" (show cfg)
+  printf "dataset fingerprint: %s\n" (corpusDatasetIdentity corpus)
+  printf "documents: %d  windows: %d  predictions: %d\n"
+    (length (corpusDocuments corpus)) totalWindows predictions
+  printf "loss: %.6f nats/token (standard error %s)\n"
+    meanLoss (showError (printf "%.6f" :: Double -> String))
+  printf "bits_per_byte: %.6f (standard error %s)\n"
+    (meanLoss * scale) (showError ((printf "%.6f" :: Double -> String) . (* scale)))
+  printf "perplexity: %.4f\n" (exp meanLoss)
+
+-- One evaluation chunk: window count and mean loss over that chunk.
+chunkMean :: Context -> GpuConfig -> F32Array -> [[Int64]] -> IO (Int, Double)
+chunkMean ctx gpuCfg params chunk = do
+  width <- case chunk of
+    [] -> die "internal error: empty evaluation chunk"
+    first : _ -> pure (length first)
+  value <- withI64_2d ctx (length chunk) width (concat chunk)
+    (batchMeanLoss ctx gpuCfg params)
+  pure (length chunk, realToFrac value)
+
 generate :: FilePath -> String -> Int -> IO ()
 generate checkpointPath text budget = do
   checkpoint <- loadCheckpoint checkpointPath >>= either die pure
@@ -1122,15 +1371,28 @@ generate checkpointPath text budget = do
     (die "checkpoint tokenizer vocabulary does not match its model configuration")
   gpuCfg <- gpuConfigIO cfg >>= either die pure
   temperature <- nonnegativeDoubleEnv "TEMPERATURE" 0.8
-  topK <- positiveEnv "TOP_K" 40
+  topK <- positiveEnv "TOP_K" (vocabSize cfg)
+  topP <- nonnegativeDoubleEnv "TOP_P" 0.95
+  observing <- (== Just "1") <$> lookupEnv "SAMPLE_STATS"
   seedText <- lookupEnv "SAMPLE_SEED"
   rng <- case seedText of
     Nothing -> pure (checkpointPRNG checkpoint)
     Just value -> seededPRNG <$> parseWord64 "SAMPLE_SEED" value
   hPutStrLn stderr ("generate: temperature=" ++ show temperature
     ++ " top_k=" ++ show topK
+    ++ " top_p=" ++ show topP
     ++ " seed=" ++ maybe "checkpoint-prng" id seedText)
-  let promptBytes = Text.encodeUtf8 (Text.pack text)
+  -- Trailing whitespace cannot survive encoding: this tokenizer attaches a
+  -- space to the word that FOLLOWS it, so a dangling space becomes a
+  -- standalone token that never occurs in encoded training text.
+  -- Conditioning there is off-manifold and degenerates harder as the model
+  -- sharpens (measured: step 56,789 recovers, 92,000 emits byte soup).  The
+  -- continuation's first token carries its own leading space, so stripping
+  -- preserves the prompt's meaning.
+  let stripped = dropWhileEnd isSpace text
+  when (stripped /= text)
+    (hPutStrLn stderr "generate: trailing whitespace stripped from prompt before encoding")
+  let promptBytes = Text.encodeUtf8 (Text.pack stripped)
       prompt = bosToken : encodeWith tokenizer promptBytes
       n = paramCount cfg
       completed = adamStep (checkpointOptimizer checkpoint)
@@ -1140,25 +1402,64 @@ generate checkpointPath text budget = do
         bytes <- either die pure (decodeWith tokenizer [token])
         BS.putStr bytes
         hFlush stdout
+      observe position logits emitted chosen = when observing
+        (hPutStrLn stderr (sampleStatsLine position logits emitted topK chosen))
+  when observing (hPutStrLn stderr ("sample prompt_tokens=" ++ show prompt))
   printf "=== Wikipedia corpus training: %.3f%% complete (%d/%d updates) ===\n"
     progress completed scheduled
   BS.putStr promptBytes
   hFlush stdout
-  _ <- withContext $ \ctx -> withF32 ctx (map realToFrac (checkpointParameters checkpoint)) $ \params ->
-    generateLoop ctx gpuCfg cfg params (pickToken temperature topK) emit budget rng prompt []
+  _ <- withContext $ \ctx -> withF32Vector ctx (checkpointParameters checkpoint) $ \params ->
+    generateLoop ctx gpuCfg cfg params (pickToken temperature topK topP) emit observe
+      budget rng prompt []
   putStrLn ""
 
 tokenizerForIdentity :: String -> IO Tokenizer
 tokenizerForIdentity identity
   | identity == byteTokenizerIdentity = pure ByteTokenizer
   | otherwise = do
-      path <- lookupEnv "TOKENIZER_FILE" >>= maybe
-        (die "checkpoint uses BPE; set TOKENIZER_FILE to its .bpe artifact") pure
-      bpe <- loadFastBpe path >>= either die pure
-      let tokenizer = FastBpeTokenizer bpe
-      when (tokenizerIdentityOf tokenizer /= identity)
-        (die "TOKENIZER_FILE identity does not match the checkpoint")
-      pure tokenizer
+      pinned <- lookupEnv "TOKENIZER_FILE"
+      case pinned of
+        Just path -> do
+          bpe <- loadFastBpe path >>= either die pure
+          let tokenizer = FastBpeTokenizer bpe
+          when (tokenizerIdentityOf tokenizer /= identity)
+            (die ("TOKENIZER_FILE identity does not match the checkpoint\n  checkpoint: "
+              ++ identity ++ "\n  " ++ path ++ ": " ++ tokenizerIdentityOf tokenizer))
+          pure tokenizer
+        Nothing -> discoverTokenizer identity
+
+-- The checkpoint records its tokenizer's identity (a hash over the canonical
+-- merge list), so with no TOKENIZER_FILE the artifact is discovered rather
+-- than defaulted: the vendored and pulled .bpe files are scanned for the one
+-- whose identity matches.  A wrong guess cannot pass silently -- either an
+-- artifact matches the recorded identity or generation refuses to start.
+discoverTokenizer :: String -> IO Tokenizer
+discoverTokenizer identity = do
+  candidates <- concat <$> mapM bpeFilesIn ["run", "weights"]
+  loaded <- mapM loadFastBpe candidates
+  case [ (path, bpe) | (path, Right bpe) <- zip candidates loaded
+                     , tokenizerIdentityOf (FastBpeTokenizer bpe) == identity ] of
+    (path, bpe) : _ -> do
+      hPutStrLn stderr ("tokenizer: " ++ path ++ " (matched checkpoint identity)")
+      pure (FastBpeTokenizer bpe)
+    [] -> die (unlines
+      ( "checkpoint uses BPE and no candidate tokenizer matches its identity"
+      : ("  checkpoint: " ++ identity)
+      : "  candidates tried:"
+      : if null candidates
+          then ["    (none: no .bpe files in run/ or weights/)"]
+          else [ "    " ++ path ++ case result of
+                   Right bpe -> ": " ++ tokenizerIdentityOf (FastBpeTokenizer bpe)
+                   Left err -> ": unreadable (" ++ err ++ ")"
+               | (path, result) <- zip candidates loaded ]
+      ) ++ "set TOKENIZER_FILE to the matching .bpe artifact")
+  where
+    bpeFilesIn dir = do
+      exists <- doesDirectoryExist dir
+      if not exists then pure [] else do
+        entries <- listDirectory dir
+        pure [dir ++ "/" ++ entry | entry <- sort entries, ".bpe" `isSuffixOf` entry]
 
 -- Incremental decoding: the proved cache-run law executed.  Each prompt or
 -- sampled token is fed through decode_step exactly once; GLA layers carry a
@@ -1170,8 +1471,9 @@ tokenizerForIdentity identity
 generateLoop
   :: Context -> GpuConfig -> Config -> F32Array
   -> ([Float] -> PRNGState -> (Int, PRNGState))
-  -> (Int -> IO ()) -> Int -> PRNGState -> [Int] -> [Int] -> IO [Int]
-generateLoop ctx gpuCfg cfg params pick emit budget rng prompt _ = do
+  -> (Int -> IO ()) -> (Int -> [Float] -> [Int] -> Int -> IO ())
+  -> Int -> PRNGState -> [Int] -> [Int] -> IO [Int]
+generateLoop ctx gpuCfg cfg params pick emit observe budget rng prompt _ = do
   let d = modelDim cfg
       hd = headDim cfg
       glaStateLength = glaLayerCount cfg * d * hd
@@ -1194,6 +1496,7 @@ generateLoop ctx gpuCfg cfg params pick emit budget rng prompt _ = do
         | remaining <= (0 :: Int) = pure output
         | otherwise = do
             let (token, rng'') = pick logits rng'
+            observe position logits (prompt ++ output) token
             if token == eosToken then pure output
             else do
               unless (token == bosToken) (emit token)
@@ -1202,21 +1505,88 @@ generateLoop ctx gpuCfg cfg params pick emit budget rng prompt _ = do
                  (if token == bosToken then output else output ++ [token])
   go budget rng (length prompt) primed promptLogits []
 
+-- SAMPLE_STATS=1: the same distribution pickToken samples from, described
+-- rather than drawn from.  generateLoop already downloads the whole logit
+-- vector every step in order to sample at all, so none of this costs any
+-- extra forward work.
+--
+-- Every probability here is the model's OWN, at temperature 1 and with no
+-- truncation: these columns describe the denotation, not the sampler's view
+-- of it.  Two questions motivate them.
+--
+-- Is a FIXED temperature drifting colder?  As training sharpens the
+-- next-token law, TEMPERATURE=0.8 with TOP_K=40 draws from an ever more
+-- peaked distribution, so free-running repetition can rise BECAUSE the model
+-- improved, with no defect anywhere.  `support` = exp(entropy) reads as how
+-- many tokens are genuinely in play; `topk_mass` is the share the sampler's
+-- truncation keeps.  If these fall monotonically across checkpoints while
+-- validation loss also falls, that is the whole story.
+--
+-- Or is the head re-selecting what it just said?  Embeddings are tied, so
+-- the logit map is a per-row-rescaled symmetric Gram matrix (headProbe above
+-- derives this) and the skew part of the transition statistics is
+-- unrepresentable.  Repetition is precisely the symmetric part -- P(a->a),
+-- and P(a->b) = P(b->a) -- so `p_self` (mass on the most recent context
+-- token) and `p_seen` (mass on every context token so far, prompt included)
+-- measure that structural bias at its source, before sampling can mask or
+-- amplify it.
+--
+-- `rank` and `prob` locate the token actually chosen in the untruncated
+-- distribution, which separates "the model was unsure" from "the sampler
+-- reached into the tail".
+sampleStatsLine :: Int -> [Float] -> [Int] -> Int -> Int -> String
+sampleStatsLine position logits emitted topK chosen =
+  "sample pos=" ++ show position
+    ++ " token=" ++ show chosen
+    ++ printf " entropy=%.4f" entropy
+    ++ printf " support=%.1f" (exp entropy)
+    ++ printf " topk_mass=%.6f" topkMass
+    ++ " rank=" ++ show chosenRank
+    ++ printf " prob=%.6f" (probOf chosen)
+    ++ printf " p_self=%.6f" pSelf
+    ++ printf " p_seen=%.6f" pSeen
+  where
+    values = U.fromList (map realToFrac logits) :: U.Vector Double
+    peak = U.maximum values
+    weights = U.map (\l -> exp (l - peak)) values
+    total = U.sum weights
+    -- H = log Z - (1/Z) sum_i w_i (l_i - peak), the shift-stable form
+    entropy = log total
+      - U.sum (U.zipWith (\w l -> w * (l - peak)) weights values) / total
+    probOf i = (weights U.! i) / total
+    topkMass = sum (take topK (sortOn negate (U.toList weights))) / total
+    chosenRank = U.length (U.filter (> (values U.! chosen)) values)
+    pSelf = if null emitted then 0 else probOf (last emitted)
+    pSeen = sum (map probOf (nub emitted))
+
 -- Observation of the model's next-token distribution.  TEMPERATURE=0 is
 -- the degenerate greedy observation (the exact argmax path); otherwise the
 -- top-K logits are softmaxed at the given temperature and sampled by
 -- inverse CDF.  The denotation being observed is unchanged either way.
-pickToken :: Float -> Int -> [Float] -> PRNGState -> (Int, PRNGState)
-pickToken temperature topK logits rng
+pickToken :: Float -> Int -> Float -> [Float] -> PRNGState -> (Int, PRNGState)
+pickToken temperature topK topP logits rng
   | temperature <= 0 = (argmax logits, rng)
-  | otherwise = (select (unitInterval word * total) weights, rng')
+  | otherwise = (select (unitInterval word * total) nucleus, rng')
   where
     top = take topK (sortOn (negate . snd) (zip [0 ..] logits))
     peak = maximum (map snd top)
     weights =
       [ (index, exp (realToFrac ((logit - peak) / temperature) :: Double))
       | (index, logit) <- top ]
-    total = sum (map snd weights)
+    weightTotal = sum (map snd weights)
+    -- Nucleus (top-p) truncation: the minimal prefix of the descending-weight
+    -- list whose mass reaches topP of the whole, so at least a topP share of
+    -- the distribution survives BY CONSTRUCTION -- the guarantee a fixed
+    -- top-k cannot give against a moving distribution (specified and proved
+    -- in FormalTransformer.Language.Decoding).  topP >= 1 is the identity.
+    nucleus
+      | topP >= 1 = weights
+      | otherwise = prefix (realToFrac topP * weightTotal) weights
+    prefix _ [] = []
+    prefix needed ((index, weight) : rest)
+      | needed <= weight = [(index, weight)]
+      | otherwise = (index, weight) : prefix (needed - weight) rest
+    total = sum (map snd nucleus)
     (word, rng') = nextWord rng
     select _ [] = argmax logits
     select remaining ((index, weight) : rest)

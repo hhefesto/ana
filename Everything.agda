@@ -8,6 +8,7 @@ import FormalTransformer.Language.Weighted
 import FormalTransformer.Language.Autoregressive
 import FormalTransformer.Language.Trie
 import FormalTransformer.Language.AutoregressiveTrie
+import FormalTransformer.Language.Decoding
 import FormalTransformer.Attention.Linear
 import FormalTransformer.Attention.LinearTrie
 import FormalTransformer.Enriched.Bradley
@@ -16,3 +17,5 @@ import FormalTransformer.AD.Trusted
 import FormalTransformer.AD.Batch
 import FormalTransformer.Transformer.Config
 import FormalTransformer.Transformer.Specification
+import FormalTransformer.Transformer.TiedHead
+import FormalTransformer.Transformer.ResidualStream

@@ -8,7 +8,7 @@
 -- Ordering follows the conservative ownership-transfer contract with
 -- dirty-flag elision: pending cuBLAS work is synchronized before any Futhark
 -- entry, host read, or free; pending Futhark work is synchronized before a
--- GEMM is enqueued (docs/GEMM-BACKEND.md, Synchronization and threading).
+-- GEMM is enqueued.
 module ProductionPieces
   ( Context
   , CContext
@@ -23,10 +23,13 @@ module ProductionPieces
   , rawContext
   , uploadF32
   , downloadF32
+  , uploadF32Vector
+  , downloadF32Vector
   , freeF32
   , uploadI64
   , freeI64
   , uploadBool
+  , uploadBoolVector
   , freeBool
   , deviceZeros
   , deviceRawPointer
@@ -43,17 +46,21 @@ module ProductionPieces
   , traceOp
   ) where
 
+import Arena (arenaForget, arenaPop, arenaPush, arenaRegister)
 import Control.Exception (bracket, onException, throwIO)
 import Control.Monad (forM_, unless, when)
 import CudaBlasOps (cublasContextSync)
 import Data.IORef
 import Data.Int (Int64)
-import Data.List (nub)
+import qualified Data.Vector.Storable as VS
+import qualified Data.Vector.Storable.Mutable as VSM
+import qualified Data.Vector.Unboxed as VU
 import Data.Word (Word64, Word8)
 import Decomposed (PieceOps (..))
 import Foreign
-import Foreign.C.String (CString, peekCString)
+import Foreign.C.String (CString, peekCString, withCString)
 import Foreign.C.Types (CInt (..))
+import GHC.Float (double2Float, float2Double)
 import System.Environment (lookupEnv)
 import System.IO (hFlush, hPutStrLn, stderr)
 import System.IO.Unsafe (unsafePerformIO)
@@ -64,9 +71,12 @@ data CF32_1d
 data CI64_1d
 data CBool_1d
 
+-- ctxArena is a stack of windows, innermost first; [] means no window is
+-- open. Nesting is what lets a layer's intermediates be reclaimed as the
+-- traversal advances instead of at the end of the whole micro-batch.
 data Context = Context
   { rawContext :: !(Ptr CContext)
-  , ctxArena :: !(IORef (Maybe [Ptr CF32_1d]))
+  , ctxArena :: !(IORef [[Ptr CF32_1d]])
   , ctxFutharkDirty :: !(IORef Bool)
   , ctxBlasDirty :: !(IORef Bool)
   }
@@ -115,8 +125,14 @@ productionPieceOpsWith extend ctx = extend PieceOps
   , opsLength = \(DevF32 _ count) -> count
   , opsTokenCount = \(DevI64 _ count) -> count
   , opsFree = freeF32 ctx
+  , opsScope = \action -> do
+      pushArena ctx
+      (result, survivors) <- action `onException` popArenaKeeping ctx []
+      popArenaKeeping ctx survivors
+      pure result
   , opsReadSlice = readSlice ctx
   , opsWriteSlice = writeSlice ctx
+  , opsConcat = concatPair ctx
   , opsGatherChunk = gatherChunkDevice ctx
   , opsPutChunk = putChunkDevice ctx
   }
@@ -129,7 +145,7 @@ withProductionContext action = bracket newConfig cConfigFree $ \cfg -> do
   bracket (cContextNew cfg) freeContext $ \rawCtx -> do
     whenNull rawCtx "Futhark context allocation failed"
     check rawCtx "Futhark context creation" =<< cContextSync rawCtx
-    arena <- newIORef Nothing
+    arena <- newIORef []
     futharkDirty <- newIORef False
     blasDirty <- newIORef False
     action (Context rawCtx arena futharkDirty blasDirty)
@@ -139,6 +155,16 @@ withProductionContext action = bracket newConfig cConfigFree $ \cfg -> do
       whenNull cfg "Futhark context config allocation failed"
       profile <- lookupEnv "FUT_PROFILE"
       when (profile == Just "1") (cConfigSetProfiling cfg 1)
+      -- The CUDA backend compiles its embedded kernel source with NVRTC at
+      -- context creation.  FutharkKernels honours FUT_CACHE for the fused
+      -- trainer and deploy/train-cloud.sh exports it unconditionally, but this
+      -- module never read it -- so every process start of the production GEMM
+      -- trainer recompiled the whole pieces module from scratch, silently, with
+      -- the environment variable set and doing nothing.
+      cachePath <- lookupEnv "FUT_CACHE"
+      case cachePath of
+        Nothing -> pure ()
+        Just path -> withCString path (cConfigSetCacheFile cfg)
       pure cfg
     freeContext rawCtx = when (rawCtx /= nullPtr) $ do
       -- FUT_PROFILE=1: dump the runtime's per-kernel totals before the
@@ -157,28 +183,26 @@ withProductionContext action = bracket newConfig cConfigFree $ \cfg -> do
 -- before anything is freed. Uploads and entry outputs outside a window are
 -- caller-owned.
 pushArena :: Context -> IO ()
-pushArena ctx = do
-  previous <- readIORef (ctxArena ctx)
-  case previous of
-    Just _ -> throwIO (userError "device arena windows do not nest")
-    Nothing -> writeIORef (ctxArena ctx) (Just [])
+pushArena ctx = modifyIORef' (ctxArena ctx) arenaPush
 
+-- The policy lives in Arena; this enacts it.  Pending work is completed
+-- before anything is released, because a GEMM may still be reading a buffer
+-- the frame is about to free.
 popArenaKeeping :: Context -> [DevF32] -> IO ()
 popArenaKeeping ctx survivors = do
-  entries <- readIORef (ctxArena ctx)
-  case entries of
+  frames <- readIORef (ctxArena ctx)
+  let kept = [pointer | DevF32 pointer _ <- survivors]
+  case arenaPop kept frames of
     Nothing -> throwIO (userError "device arena pop without a window")
-    Just pointers -> do
-      writeIORef (ctxArena ctx) Nothing
+    Just (stack, released) -> do
       syncDevice ctx
-      let kept = [pointer | DevF32 pointer _ <- survivors]
-      forM_ (nub pointers) $ \pointer ->
-        unless (pointer `elem` kept) $
-          cFreeF32 (rawContext ctx) pointer
-            >>= check (rawContext ctx) "arena free f32[1]"
+      writeIORef (ctxArena ctx) stack
+      forM_ released $ \pointer ->
+        cFreeF32 (rawContext ctx) pointer
+          >>= check (rawContext ctx) "arena free f32[1]"
 
 registerArena :: Context -> Ptr CF32_1d -> IO ()
-registerArena ctx pointer = modifyIORef' (ctxArena ctx) (fmap (pointer :))
+registerArena ctx pointer = modifyIORef' (ctxArena ctx) (arenaRegister pointer)
 
 markFutharkDirty :: Context -> IO ()
 markFutharkDirty ctx = writeIORef (ctxFutharkDirty ctx) True
@@ -426,6 +450,11 @@ writeSlice ctx offset (DevF32 destination n) (DevF32 source m) =
     entryPieceWriteSlice (rawContext ctx) out (f n) (f m) (f offset)
       destination source
 
+concatPair :: Context -> DevF32 -> DevF32 -> IO DevF32
+concatPair ctx (DevF32 a n) (DevF32 b m) =
+  output1 ctx "piece_concat" (n + m) $ \[out] ->
+    entryPieceConcat (rawContext ctx) out (f n) (f m) a b
+
 gatherChunkDevice :: Context -> Int -> Int -> Int -> Int -> DevF32 -> IO DevF32
 gatherChunkDevice ctx groups chunkCount elements chunkIndex (DevF32 values _) =
   output1 ctx "piece_gather_chunk" (groups * elements) $ \[out] ->
@@ -522,15 +551,54 @@ downloadF32 ctx (DevF32 arr count) = do
     sync ctx "download f32[1]"
     peekArray count host
 
+-- Parameter-sized transfers stage through a storable f32 vector instead of a
+-- boxed [Float]: 4 bytes an element rather than 40, which at 115M parameters
+-- is 462 MB against 4.6 GB. See the same pair in FutharkKernels.
+
+uploadF32Vector :: Context -> VU.Vector Double -> IO DevF32
+uploadF32Vector ctx values = do
+  let count = VU.length values
+      staged = VS.generate count (double2Float . VU.unsafeIndex values)
+  traceOp ("upload f32 count=" ++ show count)
+  syncBlasIfDirty ctx
+  VS.unsafeWith staged $ \host -> do
+    arr <- cNewF32 (rawContext ctx) host (f count)
+    whenNull arr "upload f32[1] returned null"
+    sync ctx "upload f32[1]" `onException` (cFreeF32 (rawContext ctx) arr >> pure ())
+    registerArenaIfActive ctx arr
+    pure (DevF32 arr count)
+
+downloadF32Vector :: Context -> DevF32 -> IO (VU.Vector Double)
+downloadF32Vector ctx (DevF32 arr count) = do
+  syncBlasIfDirty ctx
+  syncFutharkIfDirty ctx
+  staged <- VSM.new count
+  VSM.unsafeWith staged $ \host -> do
+    cValuesF32 (rawContext ctx) arr host
+      >>= check (rawContext ctx) "download f32[1]"
+    sync ctx "download f32[1]"
+  frozen <- VS.unsafeFreeze staged
+  pure (VU.generate count (float2Double . VS.unsafeIndex frozen))
+
+uploadBoolVector :: Context -> VU.Vector Bool -> IO (Ptr CBool_1d)
+uploadBoolVector ctx values = do
+  let count = VU.length values
+      staged = VS.generate count (\i -> if VU.unsafeIndex values i then 1 else 0 :: Word8)
+  syncBlasIfDirty ctx
+  VS.unsafeWith staged $ \host -> do
+    arr <- cNewBool (rawContext ctx) host (f count)
+    whenNull arr "upload bool[1] returned null"
+    sync ctx "upload bool[1]"
+      `onException` (cFreeBool (rawContext ctx) arr >> pure ())
+    pure arr
+
 freeF32 :: Context -> DevF32 -> IO ()
 freeF32 ctx (DevF32 arr _) = do
   syncBlasIfDirty ctx
   syncFutharkIfDirty ctx
-  arena <- readIORef (ctxArena ctx)
-  case arena of
-    Just pointers ->
-      writeIORef (ctxArena ctx) (Just (filter (/= arr) pointers))
-    Nothing -> pure ()
+  -- Deregister from every open window before freeing, so a later pop does
+  -- not free the same pointer a second time.
+  modifyIORef' (ctxArena ctx) (arenaForget arr)
   cFreeF32 (rawContext ctx) arr >>= check (rawContext ctx) "free f32[1]"
 
 freeI64 :: Context -> DevI64 -> IO ()
@@ -543,10 +611,8 @@ freeBool ctx arr =
 
 registerArenaIfActive :: Context -> Ptr CF32_1d -> IO ()
 registerArenaIfActive ctx pointer = do
-  arena <- readIORef (ctxArena ctx)
-  case arena of
-    Just _ -> registerArena ctx pointer
-    Nothing -> pure ()
+  frames <- readIORef (ctxArena ctx)
+  unless (null frames) (registerArena ctx pointer)
 
 freeIfNonNull :: Context -> Ptr CF32_1d -> IO ()
 freeIfNonNull ctx arr = when (arr /= nullPtr) $
@@ -642,6 +708,7 @@ traceOp message = when traceEnabled $ do
 foreign import ccall unsafe "futhark_context_config_new" cConfigNew :: IO (Ptr CContextConfig)
 foreign import ccall unsafe "futhark_context_config_free" cConfigFree :: Ptr CContextConfig -> IO ()
 foreign import ccall unsafe "futhark_context_config_set_profiling" cConfigSetProfiling :: Ptr CContextConfig -> CInt -> IO ()
+foreign import ccall unsafe "futhark_context_config_set_cache_file" cConfigSetCacheFile :: Ptr CContextConfig -> CString -> IO ()
 foreign import ccall safe "futhark_context_report" cContextReport :: Ptr CContext -> IO CString
 foreign import ccall safe "futhark_context_new" cContextNew :: Ptr CContextConfig -> IO (Ptr CContext)
 foreign import ccall safe "futhark_context_free" cContextFree :: Ptr CContext -> IO ()
@@ -689,5 +756,6 @@ foreign import ccall safe "futhark_entry_clip_global_norm" entryClipGlobalNorm :
 foreign import ccall safe "futhark_entry_adamw_step" entryAdamwStep :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Int64 -> Float -> Float -> Float -> Float -> Float -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CBool_1d -> IO CInt
 foreign import ccall safe "futhark_entry_piece_read_slice" entryPieceReadSlice :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> IO CInt
 foreign import ccall safe "futhark_entry_piece_write_slice" entryPieceWriteSlice :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_piece_concat" entryPieceConcat :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
 foreign import ccall safe "futhark_entry_piece_gather_chunk" entryPieceGatherChunk :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> IO CInt
 foreign import ccall safe "futhark_entry_piece_put_chunk" entryPiecePutChunk :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt

@@ -2,7 +2,7 @@
 # One-shot, read-only pull of the newest atomically published checkpoint from a
 # training box.  This only copies a file off the box; it never writes remote
 # state or touches the training process.  The polling variant is
-# deploy/pull-checkpoint.sh; `wiki-generate --pull` does the same thing inline.
+# deploy/pull-checkpoint.sh; `ana --pull` does the same thing inline.
 #
 # Usage:
 #   deploy/pull-latest-weights.sh --host user@host [--port N] [--key PATH]
@@ -19,7 +19,7 @@ set -euo pipefail
 HOST="${TRAIN_SSH_HOST:-}"
 PORT="${TRAIN_SSH_PORT:-22}"
 KEY="${TRAIN_SSH_KEY:-}"
-REMOTE="${TRAIN_REMOTE_CHECKPOINT:-/root/ana/run/wiki-bpe10m-global.checkpoint}"
+REMOTE="${TRAIN_REMOTE_CHECKPOINT:-/root/formalTransformer/run/wiki-bpe100m-global.checkpoint}"
 DEST=
 
 while [ $# -gt 0 ]; do

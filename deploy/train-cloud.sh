@@ -23,16 +23,29 @@
 #   TRAIN_BATCH=8    must match the plan identity (batch is semantic)
 #   MICRO_BATCH=1    raise toward TRAIN_BATCH on a headless GPU (no watchdog)
 #   MAX_SHARDS=0     0 = whole plan; N = stop after N shards this run
+#   PERSISTENT=0     1 = train every remaining shard in ONE process and ONE
+#                    device context (train-plan) instead of one process per
+#                    shard. Saves the per-shard CUDA context creation, kernel
+#                    cache load, and process startup -- ~26 min of paid GPU
+#                    time over a 304-shard plan. Resume is by the checkpoint's
+#                    completed step, so the two modes are interchangeable.
 #   CHECKPOINT_EVERY=2000  checkpoint cadence (execution control; safe to change)
 #   VALIDATE_EVERY=2000    validation cadence (observation only)
-#   VALIDATION_WINDOWS=1   windows per validation observation (CUDA forward is slow)
+#   VALIDATION_WINDOWS=256 windows per validation observation. Matches the
+#                    trainer's own default: 256 windows put the standard error
+#                    near 0.01 nats, against +-0.07 at 8. Lowering it does not
+#                    speed up training (validation is off the trajectory), it
+#                    only makes the curve unreadable -- the 2026-07-25 run
+#                    shipped at 8 and its per-observation noise swamped the
+#                    signal. For a single number on a fixed held-out set, use
+#                    `evaluate` instead of reading these lines.
 #   RUN_DIR, SIZE, SHARD_ARTICLES, PLAN, CHECKPOINT, FUT_CACHE  (have defaults)
 #   TRAINER          override the trainer binary; point it at
 #                    result-gemm/bin/formal-transformer-gemm-cuda (built with
 #                    BUILD_GEMM_CUDA=1 cloud-init.sh) for cuBLAS tensor-core
 #                    GEMMs, and set GEMM_NUMERICS=fp32|tf32|bf16 — it reaches
 #                    the trainer through the environment. See
-#                    docs/TENSOR-CORE-RUNTIME.md for the gates to run first.
+#                    docs/RUN-2026-07-25-WIKI-FULL.md for the gates to run first.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -43,6 +56,18 @@ cd "$repo_root"
 if [ -f run/cloud-env.sh ]; then
   # shellcheck disable=SC1091
   . run/cloud-env.sh
+fi
+
+# Run-defining settings come from a file, not from shell history.  GEMM_NUMERICS
+# in particular enters the checkpoint manifest and validateResume rejects a
+# mismatch, so it is chosen once for the whole run and cannot be corrected
+# later; unset, it silently defaults to the slower Fp32IEEE.  Same variable and
+# same default as deploy/start-cloud-training.sh, so both entry points read one
+# file -- and sourcing it twice is harmless, because the file assigns with :=.
+# See deploy/bpe100m.env for the production run.
+if [ -f "${TRAIN_ENV_FILE:-run/train-cloud.env}" ]; then
+  # shellcheck disable=SC1090
+  . "${TRAIN_ENV_FILE:-run/train-cloud.env}"
 fi
 
 SIZE="${SIZE:-bpe10m}"
@@ -72,14 +97,36 @@ read -r tag _ver global_total global_id _rest < "$PLAN"
 echo "train-cloud: global_total=$global_total"
 echo "train-cloud: global_id=$global_id"
 echo "train-cloud: checkpoint=$CHECKPOINT batch=$BATCH micro=${MICRO_BATCH:-1} max_shards=$MAX_SHARDS"
+# Echo the run-defining settings, because the env file yields to anything
+# already exported: a stray SIZE or GEMM_NUMERICS in the shell silently wins,
+# and numerics cannot be corrected once the first checkpoint is written.
+echo "train-cloud: size=$SIZE run_dir=$RUN_DIR persistent=${PERSISTENT:-0}"
+echo "train-cloud: numerics=${GEMM_NUMERICS:-fp32 (default)} ordering=${GEMM_ORDERING:-default} trainer=$trainer"
 
 export TRAIN_BATCH="$BATCH"
 export MICRO_BATCH="${MICRO_BATCH:-1}"
 export CHECKPOINT_EVERY="${CHECKPOINT_EVERY:-2000}"
 export VALIDATE_EVERY="${VALIDATE_EVERY:-2000}"
-export VALIDATION_WINDOWS="${VALIDATION_WINDOWS:-1}"
+export VALIDATION_WINDOWS="${VALIDATION_WINDOWS:-256}"
 export SKIP_BIGRAM_GATE="${SKIP_BIGRAM_GATE:-1}"
 export FUT_CACHE="${FUT_CACHE:-run/futhark-cuda.cache}"
+
+# PERSISTENT=1 trains every remaining shard inside ONE process and ONE device
+# context.  The loop below starts a fresh process per shard, and each pays CUDA
+# context creation (5.15 s measured on a 5090), a kernel cache load, RTS and
+# binary startup, and a checkpoint round trip; §3.1 of the run document
+# attributes ~24% of the wiki run's wall clock to exactly that.  At 304 shards
+# the context creation alone is ~26 minutes of paid GPU time.
+#
+# The trainer resumes from the checkpoint's own completed step, so this is
+# interchangeable with the loop -- you can interrupt one and continue with the
+# other.  It still writes the .done markers deploy/pull-stages.sh counts.
+if [ "${PERSISTENT:-0}" = 1 ]; then
+  echo "train-cloud: persistent mode, one process for the whole plan"
+  MAX_SHARDS="$MAX_SHARDS" "$trainer" train-plan "$PLAN" "$RUN_DIR" "$CHECKPOINT" "$SIZE"
+  echo "train-cloud: finished. Checkpoint: $CHECKPOINT"
+  exit 0
+fi
 
 trained=0
 # Segment line: segment <k> <offset> <docs> <corpus_id> <tw> <vw> <steps> <seg_start> <seg_end>

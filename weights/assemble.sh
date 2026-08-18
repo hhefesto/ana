@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Reassemble the vendored checkpoint parts into run/, where wiki-generate
+# Reassemble the vendored checkpoint parts into run/, where ana
 # discovers checkpoints, and verify the whole-file SHA-256 from SHA256SUMS.
 # GitHub rejects files over 100 MB, hence the split.
 #
@@ -42,4 +42,4 @@ fi
 mv "$tmp" "$dest"
 trap - EXIT
 echo "assembled run/wiki-bpe10m-global.checkpoint ($actual)"
-echo "generate with: nix run .#wiki-generate"
+echo "generate with: nix run .#ana"
