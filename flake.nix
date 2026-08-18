@@ -80,7 +80,7 @@
           formal-transformer = haskellPackage;
           futhark-kernels = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-futhark-kernels";
-            version = "0.1.0";
+            version = "2.0.0";
             src = buildSrc;
             nativeBuildInputs = [ pkgs.futhark ];
             buildPhase = ''
@@ -102,7 +102,7 @@
           };
           futhark-kernels-cuda = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-futhark-kernels-cuda";
-            version = "0.1.0";
+            version = "2.0.0";
             src = buildSrc;
             nativeBuildInputs = [ pkgs.futhark ];
             buildPhase = ''
@@ -121,7 +121,7 @@
           };
           futhark-pieces = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-futhark-pieces";
-            version = "0.1.0";
+            version = "2.0.0";
             src = buildSrc;
             nativeBuildInputs = [ pkgs.futhark ];
             buildPhase = ''
@@ -140,7 +140,7 @@
           };
           futhark-pieces-cuda = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-futhark-pieces-cuda";
-            version = "0.1.0";
+            version = "2.0.0";
             src = buildSrc;
             nativeBuildInputs = [ pkgs.futhark ];
             buildPhase = ''
@@ -160,7 +160,7 @@
           };
           futhark-pieces-conformance = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-futhark-pieces-conformance";
-            version = "0.1.0";
+            version = "2.0.0";
             src = buildSrc;
             nativeBuildInputs = [ pkgs.futhark ];
             buildPhase = ''
@@ -179,7 +179,7 @@
           };
           gemm-blas-test = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-gemm-blas-test";
-            version = "0.1.0";
+            version = "2.0.0";
             src = buildSrc;
             nativeBuildInputs = [ gemmGhc ];
             buildInputs = [ pkgs.openblas ];
@@ -199,7 +199,7 @@
           };
           gemm-conformance = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-gemm-conformance";
-            version = "0.1.0";
+            version = "2.0.0";
             src = buildSrc;
             nativeBuildInputs = [ conformanceGhc ];
             buildInputs = [ pkgs.openblas ];
@@ -226,7 +226,7 @@
           };
           formal-transformer-gpu = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-gpu";
-            version = "0.1.0";
+            version = "2.0.0";
             src = buildSrc;
             nativeBuildInputs = [
               gpuGhc
@@ -254,7 +254,7 @@
           };
           formal-transformer-cuda = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-cuda";
-            version = "0.1.0";
+            version = "2.0.0";
             src = buildSrc;
             __structuredAttrs = true;
             strictDeps = true;
@@ -302,7 +302,7 @@
           };
           formal-transformer-gemm-cuda = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-gemm-cuda";
-            version = "0.1.0";
+            version = "2.0.0";
             src = buildSrc;
             __structuredAttrs = true;
             strictDeps = true;
@@ -377,7 +377,7 @@
           };
           formal-transformer-sequential = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-sequential";
-            version = "0.1.0";
+            version = "2.0.0";
             src = buildSrc;
             nativeBuildInputs = [
               gpuGhc
@@ -406,7 +406,7 @@
           # interchangeable with the other backends.
           formal-transformer-multicore = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-multicore";
-            version = "0.1.0";
+            version = "2.0.0";
             src = buildSrc;
             nativeBuildInputs = [
               gpuGhc
@@ -431,7 +431,7 @@
           };
           conformance = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-conformance";
-            version = "0.1.0";
+            version = "2.0.0";
             src = buildSrc;
             nativeBuildInputs = [
               conformanceGhc
