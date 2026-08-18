@@ -19,15 +19,18 @@ import System.Exit (die)
 -- parallel closed form, so these comparisons are also the f32 shadow of the
 -- proved recurrent≡parallel theorem.
 --
--- The whole battery runs once per gate parametrization: the sigmoid config
--- guards the v2 float path, and the RG-LRU config is the element-wise
--- verification of the v3 gate (log-gate, write scaling, and the shifted
--- gate_lambda offsets) across forward, vjp, chunked-vs-quadratic, AdamW,
+-- The whole battery runs once per architecture arm: the sigmoid config
+-- guards the v2 float path, and each v3 arm (RG-LRU gate, qk-norm, sinks,
+-- and all three together) is element-wise verified — including its shifted
+-- parameter offsets — across forward, vjp, chunked-vs-quadratic, AdamW,
 -- micro-batching, and incremental decode.
 configs :: [(String, Config)]
 configs =
   [ ("sigmoid", Config 5 4 4 6 5 2 GateSigmoid False False)
   , ("rglru", Config 5 4 4 6 5 2 GateRgLru False False)
+  , ("qknorm", Config 5 4 4 6 5 2 GateSigmoid True False)
+  , ("sinks", Config 5 4 4 6 5 2 GateSigmoid False True)
+  , ("v3-all", Config 5 4 4 6 5 2 GateRgLru True True)
   ]
 
 tokens :: [Int]

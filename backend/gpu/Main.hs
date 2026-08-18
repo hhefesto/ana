@@ -125,10 +125,16 @@ sizePresets =
   , ("bpe100m", bpe100mPreset)
   , ("gla-small", glaSmallPreset)
   , ("gla", glaPreset)
-  -- v3 pilot arms (docs/V3-DECISIONS.md).  bpe10m-v3 (all arms on) joins
-  -- once qk-norm and sinks are implemented.
+  -- v3 pilot arms (docs/V3-DECISIONS.md).
   , ("tiny-rglru", tinyPreset { gateKind = GateRgLru })
+  -- tiny has ONE layer, hence no softmax block: tiny-v3 only exercises the
+  -- gate arm.  small4-v3 (4 layers, one softmax) is the smallest smoke that
+  -- actually runs qk-norm and sinks in training.
+  , ("tiny-v3", tinyPreset { gateKind = GateRgLru, qkNorm = True, headSinks = True })
+  , ("small4-v3", small4Preset { gateKind = GateRgLru, qkNorm = True, headSinks = True })
   , ("bpe10m-rglru", bpe10mPreset { gateKind = GateRgLru })
+  , ("bpe10m-qk-sink", bpe10mPreset { qkNorm = True, headSinks = True })
+  , ("bpe10m-v3", bpe10mV3Preset)
   ]
 
 chooseConfig :: String -> IO Config
@@ -1163,6 +1169,14 @@ newCheckpoint cfg identity optCfg clipNorm numerics =
     initialize slice
       | ".gate_lambda" `isSuffixOf` sliceName slice =
           U.generate (sliceLength slice) (\i -> lambdaInit (sliceOffset slice + i + 1))
+      -- Zero-centered qk-norm gains start at gain = 1 + 0, and sink logits
+      -- start at 0 (unit sink mass, e^0 = 1 — Attention/Sink.agda's
+      -- softmax-one reading): both arms begin as near-neutral variants of
+      -- the plain layer and learn away from it.
+      | ".qk_gain_q" `isSuffixOf` sliceName slice
+          || ".qk_gain_k" `isSuffixOf` sliceName slice
+          || ".sink" `isSuffixOf` sliceName slice =
+          U.replicate (sliceLength slice) 0
       | initZeroOutput && (".wo" `isSuffixOf` sliceName slice
           || ".wdown" `isSuffixOf` sliceName slice) =
           U.replicate (sliceLength slice) 0
