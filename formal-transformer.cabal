@@ -1,6 +1,6 @@
 cabal-version:      2.4
 name:               formal-transformer
-version:            2.0.0
+version:            3.0.0
 synopsis:           Compact reference runtime for a canonical decoder transformer
 description:        A CPU reference implementation, language semantics, optimizer, artifacts, and tests for a flat-parameter decoder transformer.
 license:             MIT
