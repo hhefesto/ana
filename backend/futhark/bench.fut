@@ -30,8 +30,9 @@ open import "model"
 -- Deterministic, finite, small-magnitude pseudo-parameters. Performance of
 -- the step is data-independent (dense arithmetic, no value-driven control
 -- flow), so the exact values only need to keep exp/softmax finite.
-entry mk_params (v: i64) (d: i64) (f: i64) (n_layers: i64): []f32 =
-  let p = parameter_count v d f n_layers
+entry mk_params (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64)
+    (n_layers: i64): []f32 =
+  let p = parameter_count arch v d f h n_layers
   in tabulate p (\i -> 0.02f32 * f32.sin (f32.i64 i))
 
 -- Valid token windows: every id in [0, v).
@@ -42,47 +43,47 @@ entry mk_tokens (v: i64) (batch: i64) (n: i64): [][]i64 =
 -- cloud trainer's hot path): a per-sample vjp under a sequential batch loop.
 -- Summing the gradient keeps it live in the result.
 entry bench_grad [batch] [sequence]
-    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
+    (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
     (params: []f32) (tokens: [batch][sequence]i64): f32 =
-  let p = parameter_count v d f n_layers
+  let p = parameter_count arch v d f h n_layers
   let candidate0 = params :> [p]f32
   let seed = 1.0f32 / f32.i64 batch
   let (loss_sum, accumulated) =
     loop (loss_sum, acc) = (0.0f32, replicate p 0.0f32) for b < batch do
       let (sample_loss, gradient) =
-        vjp2 (next_token_loss v d f h n_layers (default_chunk sequence) tokens[b]) candidate0 seed
+        vjp2 (next_token_loss arch v d f h n_layers (default_chunk sequence) tokens[b]) candidate0 seed
       in (loss_sum + sample_loss, map2 (+) acc gradient)
   in loss_sum / f32.i64 batch + f32.sum accumulated
 
 -- ==
 -- entry: bench_grad
--- script input { (258i64, 16i64, 48i64, 2i64, 1i64, mk_params 258i64 16i64 48i64 1i64, mk_tokens 258i64 1i64 16i64) }
--- script input { (258i64, 64i64, 192i64, 4i64, 2i64, mk_params 258i64 64i64 192i64 2i64, mk_tokens 258i64 1i64 64i64) }
--- script input { (8192i64, 64i64, 192i64, 4i64, 2i64, mk_params 8192i64 64i64 192i64 2i64, mk_tokens 8192i64 1i64 64i64) }
--- script input { (258i64, 64i64, 192i64, 4i64, 2i64, mk_params 258i64 64i64 192i64 2i64, mk_tokens 258i64 1i64 256i64) }
--- script input { (258i64, 320i64, 192i64, 5i64, 2i64, mk_params 258i64 320i64 192i64 2i64, mk_tokens 258i64 1i64 64i64) }
--- script input { (258i64, 64i64, 864i64, 4i64, 2i64, mk_params 258i64 64i64 864i64 2i64, mk_tokens 258i64 1i64 64i64) }
--- script input { (258i64, 64i64, 192i64, 4i64, 6i64, mk_params 258i64 64i64 192i64 6i64, mk_tokens 258i64 1i64 64i64) }
--- script input { (8192i64, 320i64, 864i64, 5i64, 6i64, mk_params 8192i64 320i64 864i64 6i64, mk_tokens 8192i64 1i64 256i64) }
+-- script input { (0i64, 258i64, 16i64, 48i64, 2i64, 1i64, mk_params 0i64 258i64 16i64 48i64 2i64 1i64, mk_tokens 258i64 1i64 16i64) }
+-- script input { (0i64, 258i64, 64i64, 192i64, 4i64, 2i64, mk_params 0i64 258i64 64i64 192i64 4i64 2i64, mk_tokens 258i64 1i64 64i64) }
+-- script input { (0i64, 8192i64, 64i64, 192i64, 4i64, 2i64, mk_params 0i64 8192i64 64i64 192i64 4i64 2i64, mk_tokens 8192i64 1i64 64i64) }
+-- script input { (0i64, 258i64, 64i64, 192i64, 4i64, 2i64, mk_params 0i64 258i64 64i64 192i64 4i64 2i64, mk_tokens 258i64 1i64 256i64) }
+-- script input { (0i64, 258i64, 320i64, 192i64, 5i64, 2i64, mk_params 0i64 258i64 320i64 192i64 5i64 2i64, mk_tokens 258i64 1i64 64i64) }
+-- script input { (0i64, 258i64, 64i64, 864i64, 4i64, 2i64, mk_params 0i64 258i64 64i64 864i64 4i64 2i64, mk_tokens 258i64 1i64 64i64) }
+-- script input { (0i64, 258i64, 64i64, 192i64, 4i64, 6i64, mk_params 0i64 258i64 64i64 192i64 4i64 6i64, mk_tokens 258i64 1i64 64i64) }
+-- script input { (0i64, 8192i64, 320i64, 864i64, 5i64, 6i64, mk_params 0i64 8192i64 320i64 864i64 5i64 6i64, mk_tokens 8192i64 1i64 256i64) }
 
 -- The same loss WITHOUT differentiation: the control that isolates how much
 -- of each axis's cost is the vjp transformation rather than the forward pass.
 entry bench_forward [batch] [sequence]
-    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
+    (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
     (params: []f32) (tokens: [batch][sequence]i64): f32 =
-  let p = parameter_count v d f n_layers
+  let p = parameter_count arch v d f h n_layers
   let candidate = params :> [p]f32
-  in f32.sum (map (\sample -> next_token_loss v d f h n_layers (default_chunk sequence) sample candidate)
+  in f32.sum (map (\sample -> next_token_loss arch v d f h n_layers (default_chunk sequence) sample candidate)
                   tokens)
        / f32.i64 batch
 
 -- ==
 -- entry: bench_forward
--- script input { (258i64, 16i64, 48i64, 2i64, 1i64, mk_params 258i64 16i64 48i64 1i64, mk_tokens 258i64 1i64 16i64) }
--- script input { (258i64, 64i64, 192i64, 4i64, 2i64, mk_params 258i64 64i64 192i64 2i64, mk_tokens 258i64 1i64 64i64) }
--- script input { (8192i64, 64i64, 192i64, 4i64, 2i64, mk_params 8192i64 64i64 192i64 2i64, mk_tokens 8192i64 1i64 64i64) }
--- script input { (258i64, 64i64, 192i64, 4i64, 2i64, mk_params 258i64 64i64 192i64 2i64, mk_tokens 258i64 1i64 256i64) }
--- script input { (258i64, 320i64, 192i64, 5i64, 2i64, mk_params 258i64 320i64 192i64 2i64, mk_tokens 258i64 1i64 64i64) }
--- script input { (258i64, 64i64, 864i64, 4i64, 2i64, mk_params 258i64 64i64 864i64 2i64, mk_tokens 258i64 1i64 64i64) }
--- script input { (258i64, 64i64, 192i64, 4i64, 6i64, mk_params 258i64 64i64 192i64 6i64, mk_tokens 258i64 1i64 64i64) }
--- script input { (8192i64, 320i64, 864i64, 5i64, 6i64, mk_params 8192i64 320i64 864i64 6i64, mk_tokens 8192i64 1i64 256i64) }
+-- script input { (0i64, 258i64, 16i64, 48i64, 2i64, 1i64, mk_params 0i64 258i64 16i64 48i64 2i64 1i64, mk_tokens 258i64 1i64 16i64) }
+-- script input { (0i64, 258i64, 64i64, 192i64, 4i64, 2i64, mk_params 0i64 258i64 64i64 192i64 4i64 2i64, mk_tokens 258i64 1i64 64i64) }
+-- script input { (0i64, 8192i64, 64i64, 192i64, 4i64, 2i64, mk_params 0i64 8192i64 64i64 192i64 4i64 2i64, mk_tokens 8192i64 1i64 64i64) }
+-- script input { (0i64, 258i64, 64i64, 192i64, 4i64, 2i64, mk_params 0i64 258i64 64i64 192i64 4i64 2i64, mk_tokens 258i64 1i64 256i64) }
+-- script input { (0i64, 258i64, 320i64, 192i64, 5i64, 2i64, mk_params 0i64 258i64 320i64 192i64 5i64 2i64, mk_tokens 258i64 1i64 64i64) }
+-- script input { (0i64, 258i64, 64i64, 864i64, 4i64, 2i64, mk_params 0i64 258i64 64i64 864i64 4i64 2i64, mk_tokens 258i64 1i64 64i64) }
+-- script input { (0i64, 258i64, 64i64, 192i64, 4i64, 6i64, mk_params 0i64 258i64 64i64 192i64 4i64 6i64, mk_tokens 258i64 1i64 64i64) }
+-- script input { (0i64, 8192i64, 320i64, 864i64, 5i64, 6i64, mk_params 0i64 8192i64 320i64 864i64 5i64 6i64, mk_tokens 8192i64 1i64 256i64) }

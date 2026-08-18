@@ -180,8 +180,14 @@ embeddingRow c table token
 -- its gate projection and a SoftmaxMixer cannot carry one, which is the
 -- invariant Layout.namedLayout enforces by hand when it emits `walpha` for
 -- GLA blocks only.  The Bool that used to decide this at three separate call
--- sites is now decided once, where the weights are fetched.
-data Mixer a = SoftmaxMixer | GlaMixer [a]
+-- sites is now decided once, where the weights are fetched.  The gate
+-- parametrization (Config.gateKind) follows the same rule: an RG-LRU gate
+-- cannot lack its per-channel decay base, so it carries it.
+data Mixer a = SoftmaxMixer | GlaMixer (GlaGate a)
+
+data GlaGate a
+  = SigmoidGate [a]      -- walpha
+  | RgLruGate [a] [a]    -- walpha, gate_lambda
 
 data BlockWeights a = BlockWeights
   { blockAttGain :: [a]
@@ -205,7 +211,10 @@ blockWeights c params layout blockIndex = do
   wo <- get "wo"
   mixer <- case layerKind c blockIndex of
     SoftmaxKind -> pure SoftmaxMixer
-    GlaKind -> fmap GlaMixer (get "walpha")
+    GlaKind -> case gateKind c of
+      GateSigmoid -> GlaMixer . SigmoidGate <$> get "walpha"
+      GateRgLru ->
+        (\w l -> GlaMixer (RgLruGate w l)) <$> get "walpha" <*> get "gate_lambda"
   ffGain <- get "rms_ff"
   wgate <- get "wgate"
   wup <- get "wup"
@@ -242,12 +251,13 @@ runBlockTrace c weights xs = BlockTrace out attended alphas
     qs = map (matVec d d (blockWq weights)) normalized
     ks = map (matVec d d (blockWk weights)) normalized
     vs = map (matVec d d (blockWv weights)) normalized
-    alphas = case blockMixer weights of
+    gates = case blockMixer weights of
       SoftmaxMixer -> Nothing
-      GlaMixer walpha -> Just (map (map (gateAlpha c) . matVec d d walpha) normalized)
-    attended = case alphas of
+      GlaMixer gate -> Just (glaGates c gate normalized)
+    alphas = fmap fst gates
+    attended = case gates of
       Nothing -> causalAttention c qs ks vs
-      Just as -> glaAttention c qs ks vs as
+      Just (as, scales) -> glaAttention c qs ks vs as scales
     afterAttention = zipWith addVec xs (map (matVec d d (blockWo weights)) attended)
     ff x =
       let n = rmsNorm (blockFfGain weights) x
@@ -296,12 +306,40 @@ logSigmoid z = negate (max (negate z) 0 + log (1 + exp (negate (abs z))))
 -- sigmoid case keeps the v2 bit pattern for conformance against the
 -- recorded references.  The RG-LRU case is not a scalar map — its alpha
 -- pairs the projected logit with the per-channel decay base gate_lambda —
--- so it is computed where the block has the weights (milestone M3); this
--- scalar entry point rejects it loudly rather than silently approximating.
+-- so it lives in glaGates, where the block has the weights; this scalar
+-- entry point rejects it loudly rather than silently approximating.
 gateAlpha :: (Floating a, Ord a) => Config -> a -> a
 gateAlpha c z = case gateKind c of
   GateSigmoid -> sigmoid z
-  GateRgLru -> error "gateAlpha: GateRgLru needs gate_lambda (per-channel); scalar gate path does not apply"
+  GateRgLru -> error "gateAlpha: GateRgLru needs gate_lambda (per-channel); use glaGates"
+
+-- Gate semantics per parametrization, over the normalized block input:
+-- (alphas, write scales), both position-major and d-wide.
+--
+--   SigmoidGate  alpha = sigmoid(walpha x), unit write (Nothing keeps the
+--                v2 float path textually identical).
+--   RgLruGate    Griffin's RG-LRU (arXiv 2402.19427, design notes §3.7):
+--                per channel, log alpha = c · sigmoid(z) · log sigmoid(Λ)
+--                with c = 8 — the exponent reshapes the response so
+--                moderate pre-activations already yield near-1 decay — and
+--                the state write is scaled by sqrt(1 − alpha²), computed
+--                from the log-gate as sqrt(1 − exp(2·log alpha)), so an
+--                open gate does not let fresh input swamp held state.
+--                That coupling is what the measured tau = 16 arm lacked
+--                when it opened the gates and lost on loss (Config.hs
+--                history, run/gate-arms-2026-07-31).
+glaGates :: (Floating a, Ord a) => Config -> GlaGate a -> [[a]] -> ([[a]], Maybe [[a]])
+glaGates c (SigmoidGate walpha) normalized =
+  (map (map sigmoid . matVec d d walpha) normalized, Nothing)
+  where d = modelDim c
+glaGates c (RgLruGate walpha lam) normalized =
+  ( map (map exp) logAlphas
+  , Just (map (map (\la -> sqrt (1 - exp (2 * la)))) logAlphas) )
+  where
+    d = modelDim c
+    logAlphas =
+      map (zipWith (\l z -> 8 * sigmoid z * logSigmoid l) lam . matVec d d walpha)
+        normalized
 
 -- Softmax full attention, no positional encoding.
 causalAttention :: (Floating a, Ord a) => Config -> [[a]] -> [[a]] -> [[a]] -> [[a]]

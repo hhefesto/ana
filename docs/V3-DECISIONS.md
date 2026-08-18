@@ -45,3 +45,35 @@ budget) that MobileLLM-style evidence says are better spent on depth.  A
 the gap widens toward the floor or closes; the stance flips only if the
 converged gap is a large multiple of the 500-step one.  (Result to be
 appended below when it lands.)
+
+## 2. RG-LRU gate parametrization implemented (2026-08-18)
+
+**Problem** (notes §1.1, the #1 architecture bug): v2's sigmoid gates never
+open — measured 2026-07-31, frac(α > 0.9) exactly 0.0000 in every GLA layer,
+memory half-life ~0.8 tokens — and the temperature arm that opened them lost
+on loss because open gates admit unscaled input.
+
+**Change** (notes §6.2 attack #1, Griffin arXiv 2402.19427): `GateRgLru` in
+Config — per channel, log α = c·σ(z)·log σ(Λ) with c = 8 and a learned decay
+base Λ (init so α^c is uniform on [0.9, 0.999): the gates *start open* and
+training may close them, inverting the v2 pathology), plus the state write
+scaled by √(1 − α²), folded into the normalized key so the token the
+recurrence consumes is (q̂, β·k̂, v, α) — the gate stays the transition, the
+scaled write is part of the contribution, and `Attention/Linear.agda`'s
+algebra (recurrent≡parallel, chunk-closed) applies unchanged.  Implemented
+in the Haskell reference (recurrent form), the chunked and quadratic Futhark
+kernels, and the incremental decoder; the decomposed GEMM backend refuses
+v3 arms loudly until a pilot promotes one.
+
+**Smoke measurements** (tiny-rglru, 80 steps, sequential, byte corpus):
+
+- Loss decreases 5.581 → 5.343; two identical runs give identical
+  checkpoint SHA-256 (sequential determinism holds).
+- **act-stats after training: alpha_mean 0.9727, frac(α > 0.9) = 1.0000**
+  (v2 shipped: 0.0000) — half-life ≈ 25 tokens versus ~0.8.
+- The sigmoid path is untouched: `deploy/train-plan-gate.sh` still passes
+  byte-for-byte at SIZE=tiny on the same build.
+
+80 steps at 242K parameters is a mechanism check, not a quality verdict —
+whether open gates now *pay* on loss is exactly the bpe10m pilot's question
+(§4 below, `bpe10m-rglru` arm).

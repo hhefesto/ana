@@ -4,31 +4,34 @@
 
 open import "pieces"
 
-entry oracle_n_params (v: i64) (d: i64) (f: i64) (n_layers: i64): i64 =
-  assert (v > 0 && d > 0 && f > 0 && n_layers > 0)
-  parameter_count v d f n_layers
+entry oracle_n_params (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64)
+    (n_layers: i64): i64 =
+  assert (v > 0 && d > 0 && f > 0 && h > 0 && n_layers > 0)
+  parameter_count arch v d f h n_layers
 
 entry oracle_logits [n]
-    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64) (chunk: i64)
-    (params: [parameter_count v d f n_layers]f32) (tokens: [n]i64)
+    (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
+    (chunk: i64)
+    (params: [parameter_count arch v d f h n_layers]f32) (tokens: [n]i64)
     : [n*v]f32 =
-  flatten (model_logits v d f h n_layers chunk params tokens)
+  flatten (model_logits arch v d f h n_layers chunk params tokens)
 
 entry oracle_logits_quadratic [n]
-    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
-    (params: [parameter_count v d f n_layers]f32) (tokens: [n]i64)
+    (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
+    (params: [parameter_count arch v d f h n_layers]f32) (tokens: [n]i64)
     : [n*v]f32 =
-  flatten (model_logits_quadratic v d f h n_layers params tokens)
+  flatten (model_logits_quadratic arch v d f h n_layers params tokens)
 
 entry oracle_batch_loss_grad
     (batch: i64) (sequence: i64)
-    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64) (chunk: i64)
-    (params: [parameter_count v d f n_layers]f32)
+    (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
+    (chunk: i64)
+    (params: [parameter_count arch v d f h n_layers]f32)
     (tokens_flat: [batch*sequence]i64)
-    : (f32, [parameter_count v d f n_layers]f32) =
+    : (f32, [parameter_count arch v d f h n_layers]f32) =
   let tokens = unflatten tokens_flat :> [batch][sequence]i64
   in vjp2 (\candidate ->
-    batch_mean_loss_def v d f h n_layers chunk candidate tokens) params 1.0f32
+    batch_mean_loss_def arch v d f h n_layers chunk candidate tokens) params 1.0f32
 
 entry conf_piece_ce_fwd (batch: i64) (sequence: i64) (v: i64)
     (effective_batch: i64) (logits: [batch*sequence*v]f32)

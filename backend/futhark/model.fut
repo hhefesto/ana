@@ -5,14 +5,21 @@
 -- proofs live in FormalTransformer/Attention/Linear.agda and
 -- docs/RUN-2026-07-25-WIKI-FULL.md.
 --
--- Layout:
+-- Layout (Layout.namedLayout is the Haskell mirror; keep them identical):
 --   embedding [v][d]; then, for each block:
 --   rms_att [d], Wq/Wk/Wv/Wo [d][d],
---   (GLA blocks only: Walpha [d][d]),
+--   (GLA blocks only: Walpha [d][d], then gate_lambda [d] under RG-LRU),
+--   (softmax blocks only, when enabled: qk_gain_q/qk_gain_k [d/h],
+--    sink [h]),
 --   rms_ff [d], Wgate/Wup [f][d], Wdown [d][f]; finally rms_final [d].
 --
+-- The v3 architecture (Config.gateKind/qkNorm/headSinks) arrives packed in
+-- one `arch` integer — see arch_rglru below — because it moves parameter
+-- offsets and gate semantics, and an architecture flag outside the entry
+-- interface would let one layout be silently read as another.
+--
 -- All public model entries state the exact parameter length in their
--- interface type: params must have size parameter_count v d f n_layers, so
+-- interface type: params must have size parameter_count arch v d f h n_layers, so
 -- a mis-laid-out vector is rejected at the entry boundary.  Assertions
 -- cover only the constraints size types cannot express: v,d,f,h,n_layers
 -- > 0, d % h == 0, an even head dimension d/h, token IDs in [0,v), and
@@ -28,16 +35,33 @@ def softmax_layers (n_layers: i64): i64 = n_layers / 4
 
 def gla_layers (n_layers: i64): i64 = n_layers - n_layers / 4
 
-def parameter_count (v: i64) (d: i64) (f: i64) (n_layers: i64): i64 =
-  v*d + n_layers*(4*d*d + 3*f*d + 2*d) + (n_layers - n_layers / 4)*d*d + d
+-- Packed v3 architecture flags, mirroring Config.archCode: bit 0 = RG-LRU
+-- gates, bit 1 = qk-norm on softmax layers, bit 2 = per-head sink logits.
+def arch_rglru (arch: i64): bool = arch % 2 == 1
+def arch_qknorm (arch: i64): bool = (arch / 2) % 2 == 1
+def arch_sinks (arch: i64): bool = (arch / 4) % 2 == 1
+
+-- Extra parameters each block kind carries under the v3 arms.
+def gla_extra (arch: i64) (d: i64): i64 =
+  if arch_rglru arch then d else 0
+def softmax_extra (arch: i64) (d: i64) (h: i64): i64 =
+  (if arch_qknorm arch then 2*(d/h) else 0) + (if arch_sinks arch then h else 0)
 
 def block_size (d: i64) (f: i64): i64 =
   4*d*d + 3*f*d + 2*d
 
--- Offset of block `layer`: every earlier block contributes the softmax block
--- size and the earlier GLA blocks add their gate projection.
-def block_base (v: i64) (d: i64) (f: i64) (layer: i64): i64 =
-  v*d + layer*block_size d f + (layer - layer / 4)*d*d
+-- Offset of block `layer`: every earlier block contributes the shared block
+-- size, earlier GLA blocks add their gate projection (and decay base), and
+-- earlier softmax blocks their enabled extras.
+def block_base (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64)
+               (layer: i64): i64 =
+  v*d + layer*block_size d f
+      + (layer - layer / 4)*(d*d + gla_extra arch d)
+      + (layer / 4)*softmax_extra arch d h
+
+def parameter_count (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64)
+                    (n_layers: i64): i64 =
+  block_base arch v d f h n_layers + d
 
 def vector [p] (off: i64) (n: i64) (params: [p]f32): [n]f32 =
   take n (drop off params)
@@ -158,12 +182,28 @@ def gla_attention [n] [d]
   in tabulate n (\i ->
        flatten (map (\head -> per_head[head, i]) (iota h)) :> [d]f32)
 
--- Inclusive prefix sums of the log-gates over positions, as a regular
--- masked reduction rather than a scan (see the note on gla_attention).
+-- Inclusive prefix sums over positions, as a regular masked reduction
+-- rather than a scan (see the note on gla_attention).
+def prefix_sums_2d [n] [d] (logs: [n][d]f32): [n][d]f32 =
+  tabulate_2d n d (\i c ->
+    f32.sum (map (\r -> if r <= i then logs[r, c] else 0.0f32) (iota n)))
+
 def gate_prefix_sums [n] [d] (gate_logits: [n][d]f32): [n][d]f32 =
-  let logs = map (map log_sigmoid) gate_logits
-  in tabulate_2d n d (\i c ->
-       f32.sum (map (\r -> if r <= i then logs[r, c] else 0.0f32) (iota n)))
+  prefix_sums_2d (map (map log_sigmoid) gate_logits)
+
+-- The RG-LRU log-gate (Griffin, arXiv 2402.19427; Config.GateRgLru): per
+-- channel, log alpha = c · sigmoid(z) · log sigmoid(Λ) with c = 8, and the
+-- state write scaled by sqrt(1 − alpha²) = sqrt(1 − exp(2·log alpha)) so an
+-- open gate does not let fresh input swamp held state.  The scale is folded
+-- into the (already per-head-normalized) key: the token the recurrence
+-- consumes is (q̂, β·k̂, v, alpha), so the gate stays the transition and the
+-- scaled write is part of the contribution — Attention/Linear.agda's
+-- algebra, and every kernel below it, applies unchanged.
+def rglru_log_gate (z: f32) (lam: f32): f32 =
+  8.0f32 * (1.0f32 / (1.0f32 + f32.exp (-z))) * log_sigmoid lam
+
+def rglru_write_scale (log_alpha: f32): f32 =
+  f32.sqrt (1.0f32 - f32.exp (2.0f32 * log_alpha))
 
 -- The production chunk length: a pure execution-schedule choice, invisible
 -- in the denotation by chunk-closed.  Whole window when 64 does not divide.
@@ -278,12 +318,12 @@ def block_tail [n] [d] [p]
   in map2 add x_att ff
 
 def softmax_block [n] [d] [p]
-    (f: i64) (h: i64) (base: i64)
+    (arch: i64) (f: i64) (h: i64) (base: i64)
     (params: [p]f32) (x: [n][d]f32): [n][d]f32 =
   let (_, q, k, values) = attention_inputs base params x
   let attended = causal_attention h q k values
   let ooff = base + d + 3*d*d
-  in block_tail f ooff (ooff + d*d) params x attended
+  in block_tail f ooff (ooff + d*d + softmax_extra arch d h) params x attended
 
 def gla_block [n] [d] [p]
     (chunk: i64) (f: i64) (h: i64) (base: i64)
@@ -297,6 +337,29 @@ def gla_block [n] [d] [p]
   let logs = map (map log_sigmoid) gate_logits
   let attended = gla_attention_chunked chunk h q_unit k_unit values logs
   in block_tail f ooff (ooff + 2*d*d) params x attended
+
+-- The RG-LRU GLA block (Config.GateRgLru): gate_lambda follows walpha, the
+-- log-gate is rglru_log_gate, and the write scale multiplies the normalized
+-- key channel-wise.  A separate definition rather than a branch inside
+-- gla_block, so the differentiated layer loops stay branch-free (the
+-- codegen rule at model_logits).
+def gla_block_rglru [n] [d] [p]
+    (chunk: i64) (f: i64) (h: i64) (base: i64)
+    (params: [p]f32) (x: [n][d]f32): [n][d]f32 =
+  let (normed, q, k, values) = attention_inputs base params x
+  let q_unit = map (l2_normalize_heads h) q
+  let k_unit0 = map (l2_normalize_heads h) k
+  let ooff = base + d + 3*d*d
+  let walpha = matrix (ooff + d*d) d d params
+  let lambda = vector (ooff + 2*d*d) d params
+  let gate_logits = map (matvec walpha) normed
+  let logs = map (\row -> map2 (\z lam -> rglru_log_gate z lam) row lambda)
+                 gate_logits
+  let k_unit = map2 (\lrow krow ->
+                 map2 (\l kc -> kc * rglru_write_scale l) lrow krow)
+               logs k_unit0
+  let attended = gla_attention_chunked chunk h q_unit k_unit values logs
+  in block_tail f ooff (ooff + 2*d*d + d) params x attended
 
 -- The whole-window quadratic form, retained (forward only, no vjp entry)
 -- so the conformance oracle can compare the two executions of the one
@@ -313,6 +376,25 @@ def gla_block_quadratic [n] [d] [p]
   let cum = gate_prefix_sums gate_logits
   let attended = gla_attention h q_unit k_unit values cum
   in block_tail f ooff (ooff + 2*d*d) params x attended
+
+def gla_block_quadratic_rglru [n] [d] [p]
+    (f: i64) (h: i64) (base: i64)
+    (params: [p]f32) (x: [n][d]f32): [n][d]f32 =
+  let (normed, q, k, values) = attention_inputs base params x
+  let q_unit = map (l2_normalize_heads h) q
+  let k_unit0 = map (l2_normalize_heads h) k
+  let ooff = base + d + 3*d*d
+  let walpha = matrix (ooff + d*d) d d params
+  let lambda = vector (ooff + 2*d*d) d params
+  let gate_logits = map (matvec walpha) normed
+  let logs = map (\row -> map2 (\z lam -> rglru_log_gate z lam) row lambda)
+                 gate_logits
+  let k_unit = map2 (\lrow krow ->
+                 map2 (\l kc -> kc * rglru_write_scale l) lrow krow)
+               logs k_unit0
+  let cum = prefix_sums_2d logs
+  let attended = gla_attention h q_unit k_unit values cum
+  in block_tail f ooff (ooff + 2*d*d + d) params x attended
 
 def sigmoid (z: f32): f32 = 1.0f32 / (1.0f32 + f32.exp (-z))
 
@@ -343,6 +425,7 @@ def block_tail_single [d] [p]
 -- GLA state is simply never reset — the StateAlgebra run — while softmax
 -- attends to the trailing window.
 def decode_step_def [p] [gs] [ks]
+    (arch: i64)
     (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64) (ctx: i64)
     (params: [p]f32)
     (position: i64) (token: i64)
@@ -351,7 +434,7 @@ def decode_step_def [p] [gs] [ks]
   let hd = d / h
   let checked = assert (gs == gla_layers n_layers * d * hd &&
                         ks == softmax_layers n_layers * ctx * d &&
-                        p == parameter_count v d f n_layers &&
+                        p == parameter_count arch v d f h n_layers &&
                         position >= 0 && token >= 0 && token < v && ctx > 0)
                        params
   let embedding = matrix 0 v d checked
@@ -360,7 +443,7 @@ def decode_step_def [p] [gs] [ks]
     loop (x, gstate, kc, vc) =
         (copy (embedding[token] :> [d]f32), gla_state, k_cache, v_cache)
     for layer < n_layers do
-      let base = block_base v d f layer
+      let base = block_base arch v d f h layer
       let rms_att = vector base d checked
       let wq = matrix (base + d) d d checked
       let wk = matrix (base + d + d*d) d d checked
@@ -390,16 +473,25 @@ def decode_step_def [p] [gs] [ks]
                   f32.sum (map (\e -> weights[e] * vc[si*ctx*d + e*d + head*hd + j])
                                (iota ctx))))
            let attended = tabulate d (\og -> per_head[og / hd, og % hd])
-           let x' = block_tail_single f ooff (ooff + d*d) checked x attended
+           let x' = block_tail_single f ooff
+                      (ooff + d*d + softmax_extra arch d h) checked x attended
            in (x', gstate, kc, vc)
-         else -- GLA: S' = diag(alpha)·S + k̂ vᵀ, o = q̂ᵀ S'.
+         else -- GLA: S' = diag(alpha)·S + (β·k̂) vᵀ, o = q̂ᵀ S'.
            let gi = layer - layer / 4
            let qhat = l2_normalize_heads h q
-           let khat = l2_normalize_heads h k
+           let khat0 = l2_normalize_heads h k
            let walpha = matrix (ooff + d*d) d d checked
-           -- The materialized gate keeps the sigmoid bit pattern
-           -- (exp . log_sigmoid does not).
-           let alpha = map sigmoid (matvec walpha normed)
+           -- Sigmoid gates materialize sigmoid directly (the bit pattern
+           -- exp . log_sigmoid does not reproduce); RG-LRU gates live in
+           -- log space and scale the key write.  This loop is never
+           -- differentiated, so the branch is harmless here.
+           let (alpha, khat) =
+             if arch_rglru arch
+             then let lambda = vector (ooff + 2*d*d) d checked
+                  let logalpha = map2 rglru_log_gate (matvec walpha normed) lambda
+                  in (map f32.exp logalpha,
+                      map2 (\l kc -> kc * rglru_write_scale l) logalpha khat0)
+             else (map sigmoid (matvec walpha normed), khat0)
            let goff = gi*d*hd
            let s_new = tabulate (d*hd) (\idx ->
              let cg = idx / hd
@@ -411,9 +503,10 @@ def decode_step_def [p] [gs] [ks]
              let j = og % hd
              in f32.sum (map (\c -> qhat[head*hd+c] * s_new[(head*hd+c)*hd + j])
                              (iota hd)))
-           let x' = block_tail_single f ooff (ooff + 2*d*d) checked x attended0
+           let x' = block_tail_single f ooff
+                      (ooff + 2*d*d + gla_extra arch d) checked x attended0
            in (x', gstate, kc, vc)
-  let final_gain = vector (block_base v d f n_layers) d checked
+  let final_gain = vector (block_base arch v d f h n_layers) d checked
   let final_hidden = rms_norm x_final final_gain
   in (map (\word -> dot word final_hidden) embedding, gla_out, k_out, v_out)
 
@@ -421,12 +514,13 @@ def valid_tokens [n] (v: i64) (tokens: [n]i64): bool =
   all (\t -> t >= 0 && t < v) tokens
 
 def model_logits [n] [p]
-    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64) (chunk: i64)
+    (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
+    (chunk: i64)
     (params: [p]f32) (tokens: [n]i64): [n][v]f32 =
   let base_checked = assert (v > 0 && d > 0 && f > 0 && h > 0 &&
                              n_layers > 0 && n > 0) params
   let hd = d / h
-  let expected = parameter_count v d f n_layers
+  let expected = parameter_count arch v d f h n_layers
   let checked = assert (d % h == 0 &&
                         hd % 2 == 0 && p == expected &&
                         chunk > 0 && n % chunk == 0 &&
@@ -437,17 +531,30 @@ def model_logits [n] [p]
   -- groups of four (three GLA then one softmax) plus a GLA-only remainder:
   -- a data-independent `if` inside the differentiated loop gives the two
   -- arms different tape shapes and the GPU codegen of the vjp rejects the
-  -- resulting irregular allocation.
+  -- resulting irregular allocation.  The gate-kind choice obeys the same
+  -- rule: one `if` selecting between two complete loop nests, never a
+  -- branch under the loops.
   let groups = n_layers / 4
   let rest = n_layers % 4
-  let grouped = loop state = initial for g < groups do
-    let s1 = gla_block chunk f h (block_base v d f (4*g)) checked state
-    let s2 = gla_block chunk f h (block_base v d f (4*g + 1)) checked s1
-    let s3 = gla_block chunk f h (block_base v d f (4*g + 2)) checked s2
-    in softmax_block f h (block_base v d f (4*g + 3)) checked s3
-  let hidden = loop state = grouped for r < rest do
-    gla_block chunk f h (block_base v d f (4*groups + r)) checked state
-  let final_gain = vector (block_base v d f n_layers) d checked
+  let hidden =
+    if arch_rglru arch
+    then
+      let grouped = loop state = initial for g < groups do
+        let s1 = gla_block_rglru chunk f h (block_base arch v d f h (4*g)) checked state
+        let s2 = gla_block_rglru chunk f h (block_base arch v d f h (4*g + 1)) checked s1
+        let s3 = gla_block_rglru chunk f h (block_base arch v d f h (4*g + 2)) checked s2
+        in softmax_block arch f h (block_base arch v d f h (4*g + 3)) checked s3
+      in loop state = grouped for r < rest do
+        gla_block_rglru chunk f h (block_base arch v d f h (4*groups + r)) checked state
+    else
+      let grouped = loop state = initial for g < groups do
+        let s1 = gla_block chunk f h (block_base arch v d f h (4*g)) checked state
+        let s2 = gla_block chunk f h (block_base arch v d f h (4*g + 1)) checked s1
+        let s3 = gla_block chunk f h (block_base arch v d f h (4*g + 2)) checked s2
+        in softmax_block arch f h (block_base arch v d f h (4*g + 3)) checked s3
+      in loop state = grouped for r < rest do
+        gla_block chunk f h (block_base arch v d f h (4*groups + r)) checked state
+  let final_gain = vector (block_base arch v d f h n_layers) d checked
   let final_hidden = map (\row -> rms_norm row final_gain) hidden
   -- Tied unembedding: the embedding rows are the vocabulary projections.
   in map (\row -> map (\word -> dot word row) embedding) final_hidden
@@ -455,33 +562,45 @@ def model_logits [n] [p]
 -- Forward-only twin of model_logits through the quadratic GLA form; never
 -- differentiated, exists for the chunked≡quadratic conformance entry.
 def model_logits_quadratic [n] [p]
-    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
+    (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
     (params: [p]f32) (tokens: [n]i64): [n][v]f32 =
   let checked = assert (v > 0 && d > 0 && f > 0 && h > 0 &&
                         n_layers > 0 && n > 0 && d % h == 0 &&
                         (d / h) % 2 == 0 &&
-                        p == parameter_count v d f n_layers &&
+                        p == parameter_count arch v d f h n_layers &&
                         valid_tokens v tokens) params
   let embedding = matrix 0 v d checked
   let initial: [n][d]f32 = map (\token -> embedding[token]) tokens
   let groups = n_layers / 4
   let rest = n_layers % 4
-  let grouped = loop state = initial for g < groups do
-    let s1 = gla_block_quadratic f h (block_base v d f (4*g)) checked state
-    let s2 = gla_block_quadratic f h (block_base v d f (4*g + 1)) checked s1
-    let s3 = gla_block_quadratic f h (block_base v d f (4*g + 2)) checked s2
-    in softmax_block f h (block_base v d f (4*g + 3)) checked s3
-  let hidden = loop state = grouped for r < rest do
-    gla_block_quadratic f h (block_base v d f (4*groups + r)) checked state
-  let final_gain = vector (block_base v d f n_layers) d checked
+  let hidden =
+    if arch_rglru arch
+    then
+      let grouped = loop state = initial for g < groups do
+        let s1 = gla_block_quadratic_rglru f h (block_base arch v d f h (4*g)) checked state
+        let s2 = gla_block_quadratic_rglru f h (block_base arch v d f h (4*g + 1)) checked s1
+        let s3 = gla_block_quadratic_rglru f h (block_base arch v d f h (4*g + 2)) checked s2
+        in softmax_block arch f h (block_base arch v d f h (4*g + 3)) checked s3
+      in loop state = grouped for r < rest do
+        gla_block_quadratic_rglru f h (block_base arch v d f h (4*groups + r)) checked state
+    else
+      let grouped = loop state = initial for g < groups do
+        let s1 = gla_block_quadratic f h (block_base arch v d f h (4*g)) checked state
+        let s2 = gla_block_quadratic f h (block_base arch v d f h (4*g + 1)) checked s1
+        let s3 = gla_block_quadratic f h (block_base arch v d f h (4*g + 2)) checked s2
+        in softmax_block arch f h (block_base arch v d f h (4*g + 3)) checked s3
+      in loop state = grouped for r < rest do
+        gla_block_quadratic f h (block_base arch v d f h (4*groups + r)) checked state
+  let final_gain = vector (block_base arch v d f h n_layers) d checked
   let final_hidden = map (\row -> rms_norm row final_gain) hidden
   in map (\row -> map (\word -> dot word row) embedding) final_hidden
 
 def next_token_loss [n] [p]
-    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64) (chunk: i64)
+    (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
+    (chunk: i64)
     (tokens: [n]i64) (params: [p]f32): f32 =
   let checked_tokens = assert (n >= 2) tokens
-  let scores = model_logits v d f h n_layers chunk params checked_tokens
+  let scores = model_logits arch v d f h n_layers chunk params checked_tokens
   let losses = map (\i ->
     let row = scores[i]
     let target = checked_tokens[i+1]
@@ -492,11 +611,12 @@ def next_token_loss [n] [p]
 
 
 def batch_mean_loss_def [batch] [sequence] [p]
-    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64) (chunk: i64)
+    (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
+    (chunk: i64)
     (params: [p]f32) (tokens: [batch][sequence]i64): f32 =
   let checked_tokens = assert (batch > 0 && sequence >= 2) tokens
   let losses = map
-    (\sample -> next_token_loss v d f h n_layers chunk sample params)
+    (\sample -> next_token_loss arch v d f h n_layers chunk sample params)
     checked_tokens
   in f32.sum losses / f32.i64 batch
 

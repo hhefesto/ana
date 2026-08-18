@@ -3,6 +3,7 @@
 module FormalTransformer.Config
   ( Config (..)
   , GateKind (..)
+  , archCode
   , validateConfig
   , headDim
   , paramCount
@@ -91,6 +92,17 @@ bpe100mPreset = Config 32768 256 768 2048 12 12 GateSigmoid False False
 -- and one softmax layer; eight give six and two.
 glaSmallPreset = Config 258 64 64 192 4 4 GateSigmoid False False
 glaPreset = Config 8192 256 320 864 8 5 GateSigmoid False False
+
+-- The packed architecture word the Futhark entries receive (bit 0 =
+-- GateRgLru, bit 1 = qkNorm, bit 2 = headSinks), mirrored by arch_* in
+-- backend/futhark/model.fut.  Offsets and gate semantics both depend on
+-- it, which is why it crosses the FFI boundary explicitly instead of being
+-- baked into either side.
+archCode :: Config -> Int
+archCode c =
+  (if gateKind c == GateRgLru then 1 else 0)
+    + (if qkNorm c then 2 else 0)
+    + (if headSinks c then 4 else 0)
 
 validateConfig :: Config -> Either String Config
 validateConfig c

@@ -125,6 +125,10 @@ sizePresets =
   , ("bpe100m", bpe100mPreset)
   , ("gla-small", glaSmallPreset)
   , ("gla", glaPreset)
+  -- v3 pilot arms (docs/V3-DECISIONS.md).  bpe10m-v3 (all arms on) joins
+  -- once qk-norm and sinks are implemented.
+  , ("tiny-rglru", tinyPreset { gateKind = GateRgLru })
+  , ("bpe10m-rglru", bpe10mPreset { gateKind = GateRgLru })
   ]
 
 chooseConfig :: String -> IO Config
@@ -1157,12 +1161,25 @@ newCheckpoint cfg identity optCfg clipNorm numerics =
       optCfg identity (realToFrac clipNorm) numerics
     params = either error (U.concat . map initialize) (namedLayout cfg)
     initialize slice
+      | ".gate_lambda" `isSuffixOf` sliceName slice =
+          U.generate (sliceLength slice) (\i -> lambdaInit (sliceOffset slice + i + 1))
       | initZeroOutput && (".wo" `isSuffixOf` sliceName slice
           || ".wdown" `isSuffixOf` sliceName slice) =
           U.replicate (sliceLength slice) 0
       | sliceDecay slice =
           U.generate (sliceLength slice) (\i -> initNoise (sliceOffset slice + i + 1))
       | otherwise = U.replicate (sliceLength slice) 1
+
+-- Griffin's RG-LRU init (arXiv 2402.19427): Λ such that the effective decay
+-- a^c = sigmoid(Λ)^8 is uniform on [0.9, 0.999] — the gates START open,
+-- and training can close them, inverting the v2 pathology where they start
+-- half-closed and never open.  Deterministic per parameter index, like
+-- every other init here.
+lambdaInit :: Int -> Double
+lambdaInit index = log (a / (1 - a))
+  where
+    u = 0.9 + 0.099 * ((hashNoise index + 1) / 2)  -- a^8, uniform [0.9, 0.999)
+    a = u ** (1 / 8)
 
 -- Init experiment overrides (probes only; the initialization is part of a
 -- run's identity, so record any override with a published run).

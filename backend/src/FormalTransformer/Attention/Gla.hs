@@ -131,11 +131,17 @@ closedGla hd (StateMatrix state) tokens =
 -- recurrent≡parallel theorem.  Queries and keys are L2-normalized per head
 -- to bound the state readout.
 --
+-- `writeScales` (Just under Config.GateRgLru) multiplies the normalized key
+-- per channel — the sqrt(1 − alpha²) input coupling.  The token the
+-- recurrence consumes is then (q̂, β·k̂, v, alpha): the scaled write is part
+-- of the token's CONTRIBUTION, the gate stays the transition, and
+-- Linear.agda's algebra (and every theorem over it) applies unchanged.
+--
 -- Every float expression below is character-for-character what the
 -- hand-written recursion in Model.hs computed; only the location of the
 -- recursion changed, into emitAlgebra.
-glaAttention :: Floating a => Config -> [[a]] -> [[a]] -> [[a]] -> [[a]] -> [[a]]
-glaAttention c qs ks vs alphas = map concat (transpose perHead)
+glaAttention :: Floating a => Config -> [[a]] -> [[a]] -> [[a]] -> [[a]] -> Maybe [[a]] -> [[a]]
+glaAttention c qs ks vs alphas writeScales = map concat (transpose perHead)
   where
     hd = headDim c
     perHead = [ headOutputs h | h <- [0 .. headCount c - 1] ]
@@ -147,7 +153,10 @@ glaAttention c qs ks vs alphas = map concat (transpose perHead)
       ]
       where
         qh = map (l2Normalize . (`headSlice` h)) qs
-        kh = map (l2Normalize . (`headSlice` h)) ks
+        kh = case writeScales of
+          Nothing -> map (l2Normalize . (`headSlice` h)) ks
+          Just ws -> zipWith (\w k -> zipWith (*) (headSlice w h)
+                       (l2Normalize (headSlice k h))) ws ks
         vh = map (`headSlice` h) vs
         ah = map (`headSlice` h) alphas
 

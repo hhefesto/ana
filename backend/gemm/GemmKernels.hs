@@ -83,7 +83,8 @@ newtype BoolArray = BoolArray (Ptr CBool_1d)
 data I64Array = I64Array ![Int] !DevI64
 
 data GpuConfig = GpuConfig
-  { gpuVocab :: !Int64
+  { gpuArch :: !Int64  -- packed v3 architecture flags (Config.archCode)
+  , gpuVocab :: !Int64
   , gpuModelDim :: !Int64
   , gpuFfDim :: !Int64
   , gpuHeads :: !Int64
@@ -91,11 +92,20 @@ data GpuConfig = GpuConfig
   , gpuChunk :: !Int64
   } deriving (Eq, Show)
 
+-- The decomposed piece pipeline still computes v2 semantics only: its gate
+-- piece is the sigmoid log-gate (piece_gate_cum) and its softmax piece has
+-- no qk-norm or sinks.  Refuse every v3 arm here, loudly, rather than
+-- training a v3 config with v2 math; the pieces grow v3 support when a
+-- pilot promotes an arm to this backend (docs/V3-DECISIONS.md).
 gpuConfig :: Config -> Either String GpuConfig
 gpuConfig cfg = do
   _ <- validateConfig cfg
+  _ <- if archCode cfg /= 0
+    then Left "the decomposed GEMM backend implements only the v2 architecture (sigmoid gates, no qk-norm, no sinks); use the futhark backends for v3 arms"
+    else Right ()
   pure GpuConfig
-    { gpuVocab = f vocabSize
+    { gpuArch = fromIntegral (archCode cfg)
+    , gpuVocab = f vocabSize
     , gpuModelDim = f modelDim
     , gpuFfDim = f ffDim
     , gpuHeads = f headCount

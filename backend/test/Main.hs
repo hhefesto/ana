@@ -443,10 +443,10 @@ testGlaFrozenReference = do
       ks = glaSample width 0.7 steps
       vs = glaSample width 1.3 steps
       alphas = map (map (\x -> 0.5 + 0.4 * x)) (glaSample width 2.1 steps)
-  assert (glaAttention glaTestConfig qs ks vs alphas == frozenGlaAttention glaTestConfig qs ks vs alphas)
+  assert (glaAttention glaTestConfig qs ks vs alphas Nothing == frozenGlaAttention glaTestConfig qs ks vs alphas)
     "the GLA state-algebra refactor changed the numbers"
   -- Truncation to the shortest input is part of the denotation (zip4').
-  assert (length (glaAttention glaTestConfig qs (take 4 ks) vs alphas) == 4)
+  assert (length (glaAttention glaTestConfig qs (take 4 ks) vs alphas Nothing) == 4)
     "GLA attention no longer truncates to the shortest input"
 
 -- Linear.agda's runGLA-++, proved refl per step.  It is refl here too: the
