@@ -38,13 +38,32 @@ the symmetry like a live trunk) is *worse* than plain tied at this horizon —
 it behaves as input noise, not as usable asymmetry, so it is not a clean
 control here.
 
-**Stance for v3: keep embeddings tied.**  0.095 nats on the head-only
-problem does not come close to justifying ~25M parameters (~22% of the
-budget) that MobileLLM-style evidence says are better spent on depth.  A
-10×-longer probe (HEAD_STEPS=5000, arms T and U) is running to check whether
-the gap widens toward the floor or closes; the stance flips only if the
-converged gap is a large multiple of the 500-step one.  (Result to be
-appended below when it lands.)
+**Preliminary stance (500 steps): keep embeddings tied.**  0.095 nats on
+the head-only problem did not look close to justifying ~22% of the
+parameter budget.  Pre-registered flip condition: the stance flips if the
+converged gap is a large multiple of the 500-step one.
+
+**The 5000-step probe flipped it (same day).**
+
+| arm | 500-step full_loss | 5000-step full_loss | gap to bigram floor |
+|---|---|---|---|
+| T tied | 7.737 | 6.744 (plateaued: EMA 6.73 by step 4400) | 1.847 |
+| U untied | 7.642 | 5.380 (still falling) | 0.483 |
+
+The untied advantage grew 14× (0.095 → 1.365 nats).  The tied arm
+flattened ~1.8 nats above the bigram floor while the untied arm closed to
+within 0.5 — a representational ceiling, not a training-speed difference,
+and exactly the shape `TiedHead.agda`'s impossibility theorem predicts:
+bigram statistics are heavily skew, and the tied head's symmetric Gram
+kernel cannot express skew at any training length.
+
+**Revised stance: tied remains the default, but untying is promoted to a
+mandatory bpe10m pilot arm (§4).**  The probe isolates the head; in the
+full model the trunk can supply context-dependent asymmetry, so the ~1.4
+nats measured here is an upper bound on what the constraint costs
+end-to-end, not an estimate of it.  The pilot that decides is a full
+bpe10m training A/B (HEAD_TIE equivalent at the architecture level),
+parameter-matched by shrinking elsewhere in the untied arm.
 
 ## 2. RG-LRU gate parametrization implemented (2026-08-18)
 
