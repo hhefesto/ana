@@ -10,16 +10,27 @@ single rented consumer GPU.
 | Model | 115,428,096 parameters — GLA/softmax 3:1 hybrid (9 GLA + 3 softmax layers), vocab 32,768 with tied embeddings, context 256 |
 | Data | English Wikipedia interleaved with FineWeb-Edu — 9,700,651 documents, ~5.86B tokens, exactly one pass (51 tokens/parameter) |
 | Plan | `run/mixed-bpe100m-s32000` — 304 shards, 358,276 updates at batch 64, one AdamW trajectory and one cosine schedule fixed before step one |
-| Status | **training now** on one rented RTX 3090 ($0.172/hr) — ~8,400 tok/s, ~8.1 days, ~$33.50 projected |
+| Status | **the master run, training now** on one rented RTX 3090 ($0.172/hr) — past step 245,000 of 358,276 (~68%) as of 2026-08-18 |
 
-The run is in progress; no final quality numbers exist yet and none are
-claimed. A sample from the step-16,000 checkpoint (4.5% of the schedule,
-temperature 0.8) shows where it is — on-topic, correctly registered, and
-factually invented, which is the expected order of acquisition:
+This is *the master run*: `master` is its branch of record, and version 3
+development happens on a separate branch (see Versions below). The run is in
+progress; no final quality numbers exist yet and none are claimed. Two
+samples bracket the trajectory so far. Step 16,000 (4.5% of the schedule) —
+on-topic, correctly registered, and factually invented, which is the
+expected order of acquisition:
 
 > The theory of **evolution that has emerged in recent years by the term
 > "Plasticizationism" was coined in the 1980s to describe the concept of
 > evolution in a number of ways.**
+
+Step 230,000 (64.2%, loss EMA 3.373 and falling monotonically) — coherent,
+chronologically framed, and still wrong in the ordinary way:
+
+> The theory of **prehistory is based on the idea that the earliest humans
+> migrated through a region of Eurasia that was larger than present-day
+> Europe. The pre-Han people were the first people to arrive in the area
+> around the eighth century BCE. They established a trading network that
+> included China, India and Australia.**
 
 One architectural claim from earlier drafts deserves an explicit retraction.
 The design story said position is carried by the GLA gates; measurement says
@@ -59,10 +70,15 @@ nix run .#ana -- --prompt "The theory of" --tokens 256
 With no arguments it uses the last pulled checkpoint (`run/last-checkpoint`),
 falling back to the newest architecture-compatible checkpoint under `run/`;
 `--list` shows what is available locally. Decoding samples the next-token
-distribution: `TEMPERATURE` (default 0.8), `TOP_K` (default 40), `SAMPLE_SEED`
-for reproducibility, `TEMPERATURE=0` for exact greedy argmax. Each response
-begins with the generating checkpoint's exact training percentage and update
-count.
+distribution: `TEMPERATURE` (default 0.8), nucleus sampling via `TOP_P`
+(default 0.95), `TOP_K` (off by default — top-p retains ≥ p of the mass by
+construction, while a fixed k has no such floor; both proved in
+`FormalTransformer/Language/Decoding.agda`), `SAMPLE_SEED` for
+reproducibility, `TEMPERATURE=0` for exact greedy argmax. Trailing
+whitespace is stripped from prompts before encoding (a space attaches to the
+*following* word under this BPE, so a trailing space puts the prompt
+off-manifold). Each response begins with the generating checkpoint's exact
+training percentage and update count.
 
 The tokenizer is discovered from the checkpoint: every checkpoint records its
 tokenizer's identity (a hash over the merge list), and `ana` scans `run/*.bpe`
@@ -169,12 +185,37 @@ nix build .#conformance                   # cross-backend numeric oracle
 nix build .#gemm-conformance              # decomposed vs fused oracle vs Numeric.AD
 ```
 
-Agda proofs build with `Everything.agda` under `--safe --without-K`. The
+Agda proofs build with `Everything.agda` under `--safe --without-K`. Beyond
+the language and reverse-AD laws, the specification now covers decoding
+(`Language/Decoding.agda`: top-p mass retention by construction, top-k's
+lack of any distribution-independent floor), the tied output head
+(`Transformer/TiedHead.agda`: the tied logit kernel is a symmetric Gram
+matrix, so skew bigram preferences are unrepresentable by the head alone),
+and residual-stream mixing (`Transformer/ResidualStream.agda`: mass
+conservation under column-stochastic mixes, and n = 1 rigidity). The
 conformance oracle relates the Haskell `Double` reference, the Futhark backends,
 and `Numeric.AD` under component-specific tolerances — a tested refinement
 relation, not an equality theorem over the reals. `formal-transformer
 compare-checkpoint` diffs two checkpoints element-wise. What is proved, and the
 trusted base that is *not*, are enumerated in the run document.
+
+## Versions
+
+A version number here is a **model generation**, because that is the
+boundary that actually matters in this project: every architecture change is
+a new model identity (checkpoint-incompatible), so changes batch at run
+boundaries. MAJOR = a model generation; MINOR = a landed milestone inside it
+(a completed run's results, a measurement campaign, a batch of spec
+modules); PATCH = tooling and documentation fixes. Each tag is annotated,
+and the annotation records the facts that tie the git state to the weights:
+model config, parameter count, corpus plan, tokenizer identity, checkpoint
+SHA-256, headline numbers.
+
+| tag | generation |
+|---|---|
+| `v1.0.0` | before-the-wikipedia-run: the 10.5M-parameter first model — all of English Wikipedia in one pass, 1.21 bpb held-out (`docs/RUN-2026-07-25-WIKI-FULL.md`) |
+| `v2.0.0` | the-wikipedia-run: the 115M hybrid and everything around it — the 32k tokenizer, the mixed corpus, the cloud training path, the decoding/tied-head/residual-stream specs. The master run is this generation; its final results will land as `v2.1.0`. |
+| *(v3, in progress)* | ana-next, developed on the `ana-next` branch (cabal version 3.0.0 there; `master` stays 2.0.0 to match the running model). Planning basis: [`docs/ANA-NEXT-DESIGN-NOTES.md`](docs/ANA-NEXT-DESIGN-NOTES.md). |
 
 ## Scope
 
