@@ -6,6 +6,10 @@ This document collects (1) what this project has already measured and proved,
 (3) a concrete roadmap for making the formal specification stronger. Nothing
 here touches the current run.
 
+**Status (2026-08-18): this document is the planning basis for version 3.**
+Version 3 development proceeds on the `ana-next` branch, while `master`
+tracks the running v2 model (the master run). See README "Versions".
+
 **Standing constraints for any future version:** Haskell + Futhark backend;
 denotational-specification-first (Agda, `--safe --without-K`); single consumer
 GPU budget (RTX 3090/5090 class); ~100M–1B parameters; every architecture
@@ -17,6 +21,8 @@ run boundaries.
 ## 1. Lessons already banked (measured in this project — highest-trust tier)
 
 These are our own measurements; they outrank any paper claim below.
+When the master run (bpe100m) completes, its final evaluation and generation
+results belong in this section (they land on master as v2.1.0).
 
 ### 1.1 The GLA gates never open (the #1 architecture bug to fix)
 
@@ -27,7 +33,8 @@ recurrent memory. `tau = 16` opens the gates but *loses on loss*, so the fix
 is not a knob turn: the gate parametrization itself needs redesign. This is
 the single most valuable thing to get right in ana-next, and it is exactly
 where the published GLA-successor work (Kimi Delta Attention, Qwen3-Next's
-Gated DeltaNet, Google's Griffin/RecurrentGemma) should be mined — see §2.
+Gated DeltaNet, Google's Griffin/RecurrentGemma) should be mined — see
+§3.3, §3.7 and the ranked attack plan in §6.2.
 A falling clip rate hid an 8× worse gradient tail during diagnosis: watch
 tails, not means.
 
@@ -584,9 +591,7 @@ sum over paths. Two consequences bear on ana:
 dimensions, expect near-total polysemanticity — so "feature = direction, not
 neuron" is the right spec stance, and per-neuron interpretation is a wrong
 target. Mostly out of scope formally (the interesting results are
-optimization-landscape and near-orthogonality arguments). Constitutional AI is
-noted only because its "explicit normative specification" spirit rhymes with
-our spec-first methodology; it is not applicable at our stage.
+optimization-landscape and near-orthogonality arguments).
 
 ### 3.10 Cross-lab training science (optimizers, parametrization, schedules)
 
@@ -961,10 +966,11 @@ frontier results fail us.
    itself into a scaling-law and corpus-evaluation instrument.
 4. **QK-Norm** on the softmax layers (Qwen3 at 0.6B, Gemma 3, GLM, OLMo 2 —
    four independent adopters) plus **zero-centered weight-decayed norm gains**.
-5. **Tie embeddings** (if not already) — at our vocab × dim this frees ~22% of
-   parameters, proportionally a bigger lever than MobileLLM's 11.8% — and run
-   the `head-probe HEAD_TIE=0/1` A/B first (§1.2) so the decision is measured
-   rather than assumed.
+5. **Keep embeddings tied** (they already are — README, `Config.hs`, and
+   `TiedHead.agda` exists because of it): at our vocab × dim tying holds
+   ~22% of parameters, proportionally a bigger lever than MobileLLM's 11.8%.
+   The open decision is *untying* (§1.2) — run the `head-probe HEAD_TIE=0/1`
+   A/B first so the decision is measured rather than assumed.
 6. **Learned per-head sink logits** (or softmax₁): one scalar per head, a
    one-line softmax change, with 160M-scale evidence from StreamingLLM and the
    cleanest accompanying theorem in the document.
