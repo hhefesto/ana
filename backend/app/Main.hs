@@ -56,7 +56,7 @@ main = do
     _ -> putStrLn "usage: formal-transformer (inspect | logits TOKENS | gradcheck | train-smoke | prepare-bytes OUTPUT INPUT... | prepare-stdin OUTPUT | prepare-bpe TOKENIZER OUTPUT INPUT... | prepare-bpe-stdin TOKENIZER OUTPUT | inspect-corpus PATH | inspect-checkpoint PATH | compact-checkpoint INPUT OUTPUT | compare-checkpoint LEFT RIGHT | plan-segment CORPUS DOCUMENT_OFFSET TRAIN_BATCH SIZE | build-eval OUTPUT PLAN RUN_DIR DOCS_PER_SHARD STRIDE | learn-bpe OUTPUT VOCABULARY [MIN_FREQUENCY] | bigram-gate CORPUS [tiny|small|bpe10m|bpe100m])"
 
 tinyConfig :: Config
-tinyConfig = Config 5 6 4 6 2 2
+tinyConfig = Config 5 6 4 6 2 2 GateSigmoid False False
 
 initialParameters :: [Double]
 initialParameters = case namedLayout tinyConfig of

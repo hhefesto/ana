@@ -19,7 +19,7 @@ import System.Exit (die)
 -- parallel closed form, so these comparisons are also the f32 shadow of the
 -- proved recurrent≡parallel theorem.
 config :: Config
-config = Config 5 4 4 6 5 2
+config = Config 5 4 4 6 5 2 GateSigmoid False False
 
 tokens :: [Int]
 tokens = [0, 2, 3, 4]

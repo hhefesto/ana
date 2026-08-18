@@ -12,7 +12,7 @@ module FormalTransformer.Model
   ) where
 
 import Control.Monad (foldM)
-import FormalTransformer.Attention.Gla (glaAttention, l2Normalize)
+import FormalTransformer.Attention.Gla (glaAttention)
 import FormalTransformer.Config
 import FormalTransformer.Layout
 
@@ -244,10 +244,10 @@ runBlockTrace c weights xs = BlockTrace out attended alphas
     vs = map (matVec d d (blockWv weights)) normalized
     alphas = case blockMixer weights of
       SoftmaxMixer -> Nothing
-      GlaMixer walpha -> Just (map (map gateAlpha . matVec d d walpha) normalized)
+      GlaMixer walpha -> Just (map (map (gateAlpha c) . matVec d d walpha) normalized)
     attended = case alphas of
       Nothing -> causalAttention c qs ks vs
-      Just as -> glaAttendedOut c (glaAttention c qs ks vs as)
+      Just as -> glaAttention c qs ks vs as
     afterAttention = zipWith addVec xs (map (matVec d d (blockWo weights)) attended)
     ff x =
       let n = rmsNorm (blockFfGain weights) x
@@ -292,26 +292,16 @@ sigmoid x = 1 / (1 + exp (-x))
 logSigmoid :: (Floating a, Ord a) => a -> a
 logSigmoid z = negate (max (negate z) 0 + log (1 + exp (negate (abs z))))
 
--- The GLA gate with temperature (FormalTransformer.Config.gateTemperature):
--- alpha = sigmoid(z)^(1/tau).  The tau == 1 branch keeps the historical
--- bit pattern for conformance against the recorded references.
-gateAlpha :: (Floating a, Ord a) => a -> a
-gateAlpha z
-  | gateTemperature == 1 = sigmoid z
-  | otherwise = exp (logSigmoid z / realToFrac gateTemperature)
-
--- Per-head L2 normalization of a full d-row, the same map q/k go through.
-l2NormalizeHeads :: Floating a => Config -> [a] -> [a]
-l2NormalizeHeads c x =
-  concat [l2Normalize (take hd (drop (h * hd) x)) | h <- [0 .. headCount c - 1]]
-  where hd = headDim c
-
--- FormalTransformer.Config.glaOutputNorm: normalize the GLA attended
--- output (pre-Wo) per head, or pass it through unchanged.
-glaAttendedOut :: Floating a => Config -> [[a]] -> [[a]]
-glaAttendedOut c attended
-  | glaOutputNorm = map (l2NormalizeHeads c) attended
-  | otherwise = attended
+-- The GLA gate, dispatched on the architecture (Config.gateKind).  The
+-- sigmoid case keeps the v2 bit pattern for conformance against the
+-- recorded references.  The RG-LRU case is not a scalar map — its alpha
+-- pairs the projected logit with the per-channel decay base gate_lambda —
+-- so it is computed where the block has the weights (milestone M3); this
+-- scalar entry point rejects it loudly rather than silently approximating.
+gateAlpha :: (Floating a, Ord a) => Config -> a -> a
+gateAlpha c z = case gateKind c of
+  GateSigmoid -> sigmoid z
+  GateRgLru -> error "gateAlpha: GateRgLru needs gate_lambda (per-channel); scalar gate path does not apply"
 
 -- Softmax full attention, no positional encoding.
 causalAttention :: (Floating a, Ord a) => Config -> [[a]] -> [[a]] -> [[a]] -> [[a]]

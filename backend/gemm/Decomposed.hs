@@ -343,10 +343,7 @@ glaSubBlockOutput ops batch n heads hd chunk x gain wq wk wv wo walpha = do
   gate <- opsDenseForward ops rows d d normalized walpha
   q <- opsL2HeadsForward ops rows d heads q0
   k <- opsL2HeadsForward ops rows d heads k0
-  attentionRaw <- glaAttentionOutput ops batch n heads hd chunk q k value gate
-  attention <- if glaOutputNorm
-    then opsL2HeadsForward ops rows d heads attentionRaw
-    else pure attentionRaw
+  attention <- glaAttentionOutput ops batch n heads hd chunk q k value gate
   projected <- opsDenseForward ops rows d d attention wo
   opsAddForward ops x projected
 
@@ -585,19 +582,13 @@ glaAttentionSubBlockDecomposed ops batch n heads hd chunk x gain wq wk wv wo wal
   gate <- opsDenseForward ops rows d d normalized walpha
   q <- opsL2HeadsForward ops rows d heads q0
   k <- opsL2HeadsForward ops rows d heads k0
-  attentionRaw <- glaAttentionOutput ops batch n heads hd chunk
+  attentionOutput <- glaAttentionOutput ops batch n heads hd chunk
     q k value gate
-  attentionOutput <- if glaOutputNorm
-    then opsL2HeadsForward ops rows d heads attentionRaw
-    else pure attentionRaw
   projected <- opsDenseForward ops rows d d attentionOutput wo
   output <- opsAddForward ops x projected
   (skipBar, projectedBar) <- opsAddBackward ops outputBar
-  (attentionNormBar, woBar) <- opsDenseBackward ops rows d d
+  (attentionBar, woBar) <- opsDenseBackward ops rows d d
     attentionOutput wo projectedBar
-  attentionBar <- if glaOutputNorm
-    then opsL2HeadsBackward ops rows d heads attentionRaw attentionNormBar
-    else pure attentionNormBar
   attentionBackward <- glaAttentionDecomposed ops batch n heads hd chunk
     q k value gate attentionBar
   q0Bar <- opsL2HeadsBackward ops rows d heads q0 (glaQBar attentionBackward)

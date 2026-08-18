@@ -76,7 +76,7 @@ testBpe100mPreset :: IO ()
 testBpe100mPreset = do
   _ <- expectRight (validateConfig bpe100mPreset)
   layout <- expectRight (namedLayout bpe100mPreset)
-  assert (bpe100mPreset == Config 32768 256 768 2048 12 12) "100M preset dimensions differ"
+  assert (bpe100mPreset == Config 32768 256 768 2048 12 12 GateSigmoid False False) "100M preset dimensions differ"
   assert (headDim bpe100mPreset == 64) "100M preset head dimension differs"
   assert (glaLayerCount bpe100mPreset == 9) "100M preset should have 9 GLA layers of 12"
   assert (paramCount bpe100mPreset == 115428096) "100M preset parameter count differs"
@@ -157,7 +157,7 @@ assertNear tolerance expected actual message =
   assert (abs (expected - actual) <= tolerance) (message ++ ": expected " ++ show expected ++ ", got " ++ show actual)
 
 config :: Config
-config = Config 4 5 2 3 1 1
+config = Config 4 5 2 3 1 1 GateSigmoid False False
 
 params :: [Double]
 params = case namedLayout config of
@@ -184,7 +184,7 @@ testBpePreset :: IO ()
 testBpePreset = do
   _ <- expectRight (validateConfig bpe10mPreset)
   layout <- expectRight (namedLayout bpe10mPreset)
-  assert (bpe10mPreset == Config 8192 256 320 864 6 5) "10M BPE preset dimensions differ"
+  assert (bpe10mPreset == Config 8192 256 320 864 6 5 GateSigmoid False False) "10M BPE preset dimensions differ"
   assert (headDim bpe10mPreset == 64) "10M BPE head dimension differs"
   -- Hybrid rule: of 6 layers only index 3 is softmax; 5 GLA gate
   -- projections add 5*320*320 to the former softmax-only 10,059,840.
@@ -197,8 +197,8 @@ testGlaPresets = do
   _ <- expectRight (validateConfig glaSmallPreset)
   layout <- expectRight (namedLayout glaPreset)
   smallLayout <- expectRight (namedLayout glaSmallPreset)
-  assert (glaPreset == Config 8192 256 320 864 8 5) "GLA preset dimensions differ"
-  assert (glaSmallPreset == Config 258 64 64 192 4 4) "GLA small preset dimensions differ"
+  assert (glaPreset == Config 8192 256 320 864 8 5 GateSigmoid False False) "GLA preset dimensions differ"
+  assert (glaSmallPreset == Config 258 64 64 192 4 4 GateSigmoid False False) "GLA small preset dimensions differ"
   -- Exact 3:1 tiling: 8 layers = 6 GLA + 2 softmax; 4 layers = 3 GLA + 1.
   assert (glaLayerCount glaPreset == 6 && glaLayerCount glaSmallPreset == 3)
     "hybrid 3:1 tiling differs"
@@ -390,7 +390,7 @@ testAlgebraFactorization = do
 -- interleaving in `map concat (transpose perHead)` are both exercised.  Only
 -- headDim and headCount are read by glaAttention.
 glaTestConfig :: Config
-glaTestConfig = Config 8 8 8 16 4 2
+glaTestConfig = Config 8 8 8 16 4 2 GateSigmoid False False
 
 -- Deterministic synthetic activations: no RNG, so the frozen-reference
 -- comparison below is reproducible bit for bit across machines.

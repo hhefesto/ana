@@ -121,18 +121,6 @@ def l2_normalize_heads [d] (h: i64) (x: [d]f32): [d]f32 =
 def log_sigmoid (z: f32): f32 =
   -(f32.max (-z) 0.0f32 + f32.log1p (f32.exp (-(f32.abs z))))
 
--- GLA fix arms, mirrored by gateTemperature/glaOutputNorm in
--- FormalTransformer.Config (flip both languages together).  The gate is
--- alpha = sigmoid(z)^(1/tau), i.e. log-gate log_sigmoid(z)/tau: tau = 1 is
--- the historical bit pattern (x/1 is exact); tau = 16 puts the init near
--- alpha ≈ 0.958 so long memory spans keep live gradients.  gla_out_norm
--- applies the q/k per-head L2 normalization to the attended output before
--- Wo, bounding the readout once the gates open.
-def gate_temperature: f32 = 1.0f32
-def gla_out_norm: bool = false
-
-def gate_log (z: f32): f32 = log_sigmoid z / gate_temperature
-
 -- Canonical scalar used by fused blocks and the decomposed SwiGLU piece.
 def silu (z: f32): f32 = z / (1.0f32 + f32.exp (-z))
 
@@ -173,7 +161,7 @@ def gla_attention [n] [d]
 -- Inclusive prefix sums of the log-gates over positions, as a regular
 -- masked reduction rather than a scan (see the note on gla_attention).
 def gate_prefix_sums [n] [d] (gate_logits: [n][d]f32): [n][d]f32 =
-  let logs = map (map gate_log) gate_logits
+  let logs = map (map log_sigmoid) gate_logits
   in tabulate_2d n d (\i c ->
        f32.sum (map (\r -> if r <= i then logs[r, c] else 0.0f32) (iota n)))
 
@@ -306,11 +294,8 @@ def gla_block [n] [d] [p]
   let ooff = base + d + 3*d*d
   let walpha = matrix (ooff + d*d) d d params
   let gate_logits = map (matvec walpha) normed
-  let logs = map (map gate_log) gate_logits
-  let attended0 = gla_attention_chunked chunk h q_unit k_unit values logs
-  let attended = if gla_out_norm
-                 then map (l2_normalize_heads h) attended0
-                 else attended0
+  let logs = map (map log_sigmoid) gate_logits
+  let attended = gla_attention_chunked chunk h q_unit k_unit values logs
   in block_tail f ooff (ooff + 2*d*d) params x attended
 
 -- The whole-window quadratic form, retained (forward only, no vjp entry)
@@ -326,10 +311,7 @@ def gla_block_quadratic [n] [d] [p]
   let walpha = matrix (ooff + d*d) d d params
   let gate_logits = map (matvec walpha) normed
   let cum = gate_prefix_sums gate_logits
-  let attended0 = gla_attention h q_unit k_unit values cum
-  let attended = if gla_out_norm
-                 then map (l2_normalize_heads h) attended0
-                 else attended0
+  let attended = gla_attention h q_unit k_unit values cum
   in block_tail f ooff (ooff + 2*d*d) params x attended
 
 def sigmoid (z: f32): f32 = 1.0f32 / (1.0f32 + f32.exp (-z))
@@ -415,11 +397,9 @@ def decode_step_def [p] [gs] [ks]
            let qhat = l2_normalize_heads h q
            let khat = l2_normalize_heads h k
            let walpha = matrix (ooff + d*d) d d checked
-           -- alpha = sigmoid(z)^(1/tau); the tau == 1 branch keeps the
-           -- historical sigmoid bit pattern (exp∘log_sigmoid does not).
-           let alpha = if gate_temperature == 1.0f32
-                       then map sigmoid (matvec walpha normed)
-                       else map (\z -> f32.exp (gate_log z)) (matvec walpha normed)
+           -- The materialized gate keeps the sigmoid bit pattern
+           -- (exp . log_sigmoid does not).
+           let alpha = map sigmoid (matvec walpha normed)
            let goff = gi*d*hd
            let s_new = tabulate (d*hd) (\idx ->
              let cg = idx / hd
@@ -431,10 +411,7 @@ def decode_step_def [p] [gs] [ks]
              let j = og % hd
              in f32.sum (map (\c -> qhat[head*hd+c] * s_new[(head*hd+c)*hd + j])
                              (iota hd)))
-           let attended = if gla_out_norm
-                          then l2_normalize_heads h attended0
-                          else attended0
-           let x' = block_tail_single f ooff (ooff + 2*d*d) checked x attended
+           let x' = block_tail_single f ooff (ooff + 2*d*d) checked x attended0
            in (x', gstate, kc, vc)
   let final_gain = vector (block_base v d f n_layers) d checked
   let final_hidden = rms_norm x_final final_gain

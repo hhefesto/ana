@@ -215,7 +215,13 @@ SHA-256, headline numbers.
 |---|---|
 | `v1.0.0` | before-the-wikipedia-run: the 10.5M-parameter first model — all of English Wikipedia in one pass, 1.21 bpb held-out (`docs/RUN-2026-07-25-WIKI-FULL.md`) |
 | `v2.0.0` | the-wikipedia-run: the 115M hybrid and everything around it — the 32k tokenizer, the mixed corpus, the cloud training path, the decoding/tied-head/residual-stream specs. The master run is this generation; its final results will land as `v2.1.0`. |
-| *(v3, in progress)* | ana-next, developed on the `ana-next` branch (cabal version 3.0.0 there; `master` stays 2.0.0 to match the running model). Planning basis: [`docs/ANA-NEXT-DESIGN-NOTES.md`](docs/ANA-NEXT-DESIGN-NOTES.md). |
+| *(v3, in progress)* | ana-next, developed on the `ana-next` branch (cabal version 3.0.0 there; `master` stays 2.0.0 to match the running model). Planning basis: [`docs/ANA-NEXT-DESIGN-NOTES.md`](docs/ANA-NEXT-DESIGN-NOTES.md); decisions taken: [`docs/V3-DECISIONS.md`](docs/V3-DECISIONS.md). |
+
+Version 3 carries no backward compatibility: its architecture lives in
+`Config` (gate parametrization, qk-norm, head sinks), the layout version is
+3, and the model identity prefix is `…-v3`. The `ana-next` binary neither
+mints nor loads v2 checkpoints — the master run keeps being pulled and
+sampled with the `master` branch's 2.0.0 binary.
 
 ## Scope
 
