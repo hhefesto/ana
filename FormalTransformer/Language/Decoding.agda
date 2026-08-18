@@ -29,13 +29,19 @@
 
 module FormalTransformer.Language.Decoding where
 
+open import Data.Bool using (true; false; T; if_then_else_)
+open import Data.Empty using (⊥-elim)
+open import Data.Unit using (tt)
 open import Data.List using (List; []; _∷_; take; length; replicate)
-open import Data.Nat using (ℕ; zero; suc; _+_; _*_; _⊓_; _≤_; z≤n; s≤s)
+open import Data.Nat
+  using (ℕ; zero; suc; _+_; _*_; _⊓_; _⊔_; _≤_; _≤ᵇ_; z≤n; s≤s)
 open import Data.Nat.Properties
-  using (+-assoc; +-identityʳ; +-monoʳ-≤; ≤-refl; ≤-antisym; _≤?_)
+  using (+-assoc; +-identityʳ; +-monoʳ-≤; ≤-refl; ≤-antisym; ≤-trans; _≤?_;
+         ⊔-sel; m≤m+n; m≤n+m; *-monoˡ-≤; ≤ᵇ⇒≤; ≤⇒≤ᵇ)
+open import Data.Sum using (inj₁; inj₂)
 open import Relation.Nullary using (yes; no)
 open import Relation.Binary.PropositionalEquality
-  using (_≡_; refl; cong; sym; subst)
+  using (_≡_; refl; cong; sym; subst; trans)
 
 mass : List ℕ → ℕ
 mass [] = zero
@@ -98,3 +104,106 @@ topK-uniform : ∀ k v u → mass (topK k (replicate v u)) ≡ (k ⊓ v) * u
 topK-uniform zero v u = refl
 topK-uniform (suc k) zero u = refl
 topK-uniform (suc k) (suc v) u = cong (u +_) (topK-uniform k v u)
+
+------------------------------------------------------------------------
+-- min-p: the third truncation (Nguyen et al., arXiv 2407.01082).  Keep a
+-- token iff its weight clears a fraction of the maximum weight; the
+-- threshold scales with the model's own confidence — aggressive when the
+-- distribution is peaked, permissive when it is flat.  The fraction
+-- pBase = num/den is carried as a pair of naturals, so the keep test
+-- num · max ≤ den · x is division-free.
+--
+-- The structural properties that motivate adopting it (the paper's
+-- headline quality gains did not replicate; see the design notes §3.11):
+--
+--   minP-retains       retained mass ≥ the maximum weight — in particular
+--                      the argmax always survives when num ≤ den, so
+--                      renormalization is total: min-p has no empty-support
+--                      edge case, unlike a mass target that exceeds the
+--                      total.
+--   minP-conservative  pBase = 0 keeps everything.
+--   minP-antitone      raising pBase only shrinks the kept mass.
+--   minP/topP-incomparable (the two *-keeps/*-drops pairs): min-p and
+--                      top-p refine each other in neither direction.
+
+maxW : List ℕ → ℕ
+maxW [] = zero
+maxW (x ∷ xs) = x ⊔ maxW xs
+
+-- Threshold filtering over the boolean order test, so every keep/drop
+-- decision reduces definitionally (the Dec-valued _≤?_ is stuck on the
+-- same boolean anyway, one wrapper deeper).
+keep : ℕ → ℕ → List ℕ → List ℕ
+keep t den [] = []
+keep t den (x ∷ xs) = if t ≤ᵇ den * x then x ∷ keep t den xs else keep t den xs
+
+minP : ℕ → ℕ → List ℕ → List ℕ
+minP num den xs = keep (num * maxW xs) den xs
+
+-- The maximum survives filtering whenever it passes its own test.  Stated
+-- with the reference maximum M abstracted, because the threshold is a
+-- whole-list quantity while the induction walks the list.
+private
+  keep-max : ∀ t den M xs → t ≤ den * M → maxW xs ≡ M →
+             M ≤ mass (keep t den xs)
+  keep-max t den M [] pass eq rewrite sym eq = z≤n
+  keep-max t den M (x ∷ xs) pass eq
+    with ⊔-sel x (maxW xs) | t ≤ᵇ den * x in kept
+  ... | inj₁ x-max | true =
+    subst (λ z → M ≤ z + mass (keep t den xs))
+      (sym (trans (sym x-max) eq))
+      (m≤m+n M (mass (keep t den xs)))
+  ... | inj₁ x-max | false =
+    ⊥-elim (subst T kept (≤⇒≤ᵇ
+      (subst (λ z → t ≤ den * z) (sym (trans (sym x-max) eq)) pass)))
+  ... | inj₂ rest-max | true =
+    ≤-trans (keep-max t den M xs pass (trans (sym rest-max) eq))
+      (m≤n+m (mass (keep t den xs)) x)
+  ... | inj₂ rest-max | false =
+    keep-max t den M xs pass (trans (sym rest-max) eq)
+
+minP-retains : ∀ num den xs → num ≤ den → maxW xs ≤ mass (minP num den xs)
+minP-retains num den xs h =
+  keep-max (num * maxW xs) den (maxW xs) xs (*-monoˡ-≤ (maxW xs) h) refl
+
+-- pBase = 0 is the identity: 0 · max ≤ den · x always holds.
+minP-conservative : ∀ den xs → minP zero den xs ≡ xs
+minP-conservative den [] = refl
+minP-conservative den (x ∷ xs) = cong (x ∷_) (minP-conservative den xs)
+
+-- Raising the threshold fraction only shrinks the kept mass.
+private
+  keep-antitone : ∀ t t′ den xs → t ≤ t′ →
+                  mass (keep t′ den xs) ≤ mass (keep t den xs)
+  keep-antitone t t′ den [] h = ≤-refl
+  keep-antitone t t′ den (x ∷ xs) h
+    with t′ ≤ᵇ den * x in kept′ | t ≤ᵇ den * x in kept
+  ... | true  | true  = +-monoʳ-≤ x (keep-antitone t t′ den xs h)
+  ... | true  | false =
+    ⊥-elim (subst T kept (≤⇒≤ᵇ
+      (≤-trans h (≤ᵇ⇒≤ t′ (den * x) (subst T (sym kept′) tt)))))
+  ... | false | true  =
+    ≤-trans (keep-antitone t t′ den xs h) (m≤n+m (mass (keep t den xs)) x)
+  ... | false | false = keep-antitone t t′ den xs h
+
+minP-antitone : ∀ num num′ den xs → num ≤ num′ →
+                mass (minP num′ den xs) ≤ mass (minP num den xs)
+minP-antitone num num′ den xs h =
+  keep-antitone (num * maxW xs) (num′ * maxW xs) den xs
+    (*-monoˡ-≤ (maxW xs) h)
+
+-- Incomparability, both directions, by computation.  On (5, 5, 1) a
+-- mass-10 nucleus drops the 1 while min-p at 1/10 keeps it; on (5, 3) a
+-- mass-8 nucleus keeps the 3 while min-p at 9/10 drops it.  Neither
+-- truncation refines the other.
+minP-keeps-tail : minP 1 10 (5 ∷ 5 ∷ 1 ∷ []) ≡ 5 ∷ 5 ∷ 1 ∷ []
+minP-keeps-tail = refl
+
+topP-drops-tail : topP 10 (5 ∷ 5 ∷ 1 ∷ []) ≡ 5 ∷ 5 ∷ []
+topP-drops-tail = refl
+
+topP-keeps-runner-up : topP 8 (5 ∷ 3 ∷ []) ≡ 5 ∷ 3 ∷ []
+topP-keeps-runner-up = refl
+
+minP-drops-runner-up : minP 9 10 (5 ∷ 3 ∷ []) ≡ 5 ∷ []
+minP-drops-runner-up = refl
