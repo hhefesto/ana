@@ -19,7 +19,7 @@ set -euo pipefail
 HOST="${TRAIN_SSH_HOST:-}"
 PORT="${TRAIN_SSH_PORT:-22}"
 KEY="${TRAIN_SSH_KEY:-}"
-REMOTE="${TRAIN_REMOTE_CHECKPOINT:-/root/ana/run/wiki-bpe10m-global.checkpoint}"
+REMOTE="${TRAIN_REMOTE_CHECKPOINT:-/root/formalTransformer/run/wiki-bpe100m-global.checkpoint}"
 DEST=
 
 while [ $# -gt 0 ]; do

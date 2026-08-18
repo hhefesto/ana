@@ -770,7 +770,7 @@ Pulling from a trainer (opt-in; nothing is contacted without --pull/--host):
   --port N                 ssh port (default 22)
   --key PATH               ssh identity file
   --remote-checkpoint PATH remote checkpoint path (default
-                           /root/ana/run/wiki-bpe10m-global.checkpoint)
+                           /root/formalTransformer/run/wiki-bpe100m-global.checkpoint)
 
 A pull lands in run/pulled-HOST-PORT-checkpoints/, never on top of an existing
 checkpoint, and records its destination in run/last-checkpoint for reference.
@@ -866,7 +866,7 @@ USAGE
                 if [ -z "$port" ]; then port="''${WIKI_REMOTE_PORT:-22}"; fi
                 if [ -z "$key" ]; then key="''${WIKI_REMOTE_KEY:-}"; fi
                 if [ -z "$remote_checkpoint" ]; then
-                  remote_checkpoint="''${WIKI_REMOTE_CHECKPOINT:-/root/ana/run/wiki-bpe10m-global.checkpoint}"
+                  remote_checkpoint="''${WIKI_REMOTE_CHECKPOINT:-/root/formalTransformer/run/wiki-bpe100m-global.checkpoint}"
                 fi
                 case "$port" in
                   ""|*[!0-9]*)
@@ -1138,9 +1138,26 @@ USAGE
               pkgs.openssh
             ];
             text = ''
-              host="''${TRAIN_SSH_HOST:-root@154.9.228.248}"
-              port="''${TRAIN_SSH_PORT:-21300}"
-              remote_log="''${TRAIN_REMOTE_LOG:-/root/formalTransformer-5070ti/run/train-cloud-rtx5070ti.log}"
+              # The trainer's address is not a constant: vast reassigns an
+              # instance's public IP without restarting it, so a hardcoded host
+              # here goes stale silently and watch-training just hangs on a
+              # box that no longer answers.  run/remote-box.env is the one
+              # place the current address is written (ana --pull reads it too),
+              # so read it first and let TRAIN_SSH_* override.
+              host="''${TRAIN_SSH_HOST:-}"
+              port="''${TRAIN_SSH_PORT:-}"
+              if [ -f run/remote-box.env ]; then
+                # shellcheck disable=SC1091
+                . run/remote-box.env
+                if [ -z "$host" ]; then host="''${WIKI_REMOTE:-}"; fi
+                if [ -z "$port" ]; then port="''${WIKI_REMOTE_PORT:-}"; fi
+              fi
+              if [ -z "$host" ]; then
+                echo "watch-training: no host; set TRAIN_SSH_HOST or write run/remote-box.env" >&2
+                exit 1
+              fi
+              port="''${port:-22}"
+              remote_log="''${TRAIN_REMOTE_LOG:-/root/formalTransformer/run/train-cloud.log}"
               lines="''${TRAIN_LOG_LINES:-20}"
               reconnect_delay="''${TRAIN_RECONNECT_DELAY:-2}"
 
