@@ -59,6 +59,12 @@ data Config = Config
                         -- with zero-centered weight-decayed gains
   , headSinks :: !Bool  -- learned per-head sink logit in softmax layers
                         -- (FormalTransformer/Attention/Sink.agda)
+  , tiedHead :: !Bool   -- True: the embedding rows are the vocabulary
+                        -- projections (the v2 design; its logit kernel is
+                        -- a symmetric Gram matrix — TiedHead.agda — so
+                        -- skew bigram preferences are unrepresentable by
+                        -- the head alone).  False: a separate unembedding
+                        -- matrix, +vocab*dim parameters (pilot arm A5).
   } deriving (Eq, Show, Generic)
 
 instance Binary Config
@@ -67,15 +73,15 @@ instance Binary Config
 -- The v2-era presets keep v2 semantics (sigmoid gate, no qk-norm, no
 -- sinks) so smoke paths and recorded conformance references stay valid.
 tinyPreset, smallPreset, small4Preset, bpe10mPreset, bpe10mV3Preset, bpe100mPreset, glaSmallPreset, glaPreset :: Config
-tinyPreset = Config 258 16 16 48 1 2 GateSigmoid False False
-smallPreset = Config 258 64 64 192 2 4 GateSigmoid False False
+tinyPreset = Config 258 16 16 48 1 2 GateSigmoid False False True
+smallPreset = Config 258 64 64 192 2 4 GateSigmoid False False True
 -- Depth-matched softmax control for the hybrid A/B (gla-small is 4-layer).
-small4Preset = Config 258 64 64 192 4 4 GateSigmoid False False
-bpe10mPreset = Config 8192 256 320 864 6 5 GateSigmoid False False
+small4Preset = Config 258 64 64 192 4 4 GateSigmoid False False True
+bpe10mPreset = Config 8192 256 320 864 6 5 GateSigmoid False False True
 
 -- The v3 pilot preset: bpe10m dimensions with the v3 arms on.  Pilot A/Bs
 -- flip individual arms from here (docs/V3-DECISIONS.md).
-bpe10mV3Preset = Config 8192 256 320 864 6 5 GateRgLru True True
+bpe10mV3Preset = Config 8192 256 320 864 6 5 GateRgLru True True True
 
 -- The scale-up rung, sized against GPT-2-small (124M) so the comparison is
 -- like-for-like: 115,428,096 parameters, of which the 32,768-piece vocabulary
@@ -87,12 +93,12 @@ bpe10mV3Preset = Config 8192 256 320 864 6 5 GateRgLru True True
 -- ff/d stays at the repo's 2.67, which is the parameter-matched ratio for a
 -- gated FFN (three d*f matrices, not two); 12 layers give 9 GLA and 3 softmax,
 -- holding the 3:1 rule; head dim is 64.
-bpe100mPreset = Config 32768 256 768 2048 12 12 GateSigmoid False False
+bpe100mPreset = Config 32768 256 768 2048 12 12 GateSigmoid False False True
 
 -- Hybrid presets sized for the 3:1 rule below: four layers give three GLA
 -- and one softmax layer; eight give six and two.
-glaSmallPreset = Config 258 64 64 192 4 4 GateSigmoid False False
-glaPreset = Config 8192 256 320 864 8 5 GateSigmoid False False
+glaSmallPreset = Config 258 64 64 192 4 4 GateSigmoid False False True
+glaPreset = Config 8192 256 320 864 8 5 GateSigmoid False False True
 
 -- The model identity a checkpoint is stamped with and resumed against.
 -- Version 3 puts the whole architecture in Config, so `show cfg` IS the
@@ -103,7 +109,8 @@ modelId :: Config -> String
 modelId cfg = "formal-transformer-futhark-hybrid-gla-v3:" ++ show cfg
 
 -- The packed architecture word the Futhark entries receive (bit 0 =
--- GateRgLru, bit 1 = qkNorm, bit 2 = headSinks), mirrored by arch_* in
+-- GateRgLru, bit 1 = qkNorm, bit 2 = headSinks, bit 3 = untied head),
+-- mirrored by arch_* in
 -- backend/futhark/model.fut.  Offsets and gate semantics both depend on
 -- it, which is why it crosses the FFI boundary explicitly instead of being
 -- baked into either side.
@@ -112,6 +119,7 @@ archCode c =
   (if gateKind c == GateRgLru then 1 else 0)
     + (if qkNorm c then 2 else 0)
     + (if headSinks c then 4 else 0)
+    + (if tiedHead c then 0 else 8)
 
 validateConfig :: Config -> Either String Config
 validateConfig c
@@ -169,6 +177,7 @@ paramCount c =
     + (if qkNorm c then softmaxLayerCount c * 2 * headDim c else 0)
     + (if headSinks c then softmaxLayerCount c * headCount c else 0)
     + d
+    + (if tiedHead c then 0 else vocabSize c * d)
   where
     d = modelDim c
     f = ffDim c

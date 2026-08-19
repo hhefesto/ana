@@ -16,7 +16,7 @@ import System.Environment (lookupEnv)
 import System.Exit (die)
 
 config :: Config
-config = Config 5 4 4 6 5 2 GateSigmoid False False
+config = Config 5 4 4 6 5 2 GateSigmoid False False True
 
 tokens :: [Int]
 tokens = [0, 2, 3, 4]

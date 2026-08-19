@@ -26,11 +26,12 @@ import System.Exit (die)
 -- micro-batching, and incremental decode.
 configs :: [(String, Config)]
 configs =
-  [ ("sigmoid", Config 5 4 4 6 5 2 GateSigmoid False False)
-  , ("rglru", Config 5 4 4 6 5 2 GateRgLru False False)
-  , ("qknorm", Config 5 4 4 6 5 2 GateSigmoid True False)
-  , ("sinks", Config 5 4 4 6 5 2 GateSigmoid False True)
-  , ("v3-all", Config 5 4 4 6 5 2 GateRgLru True True)
+  [ ("sigmoid", Config 5 4 4 6 5 2 GateSigmoid False False True)
+  , ("rglru", Config 5 4 4 6 5 2 GateRgLru False False True)
+  , ("qknorm", Config 5 4 4 6 5 2 GateSigmoid True False True)
+  , ("sinks", Config 5 4 4 6 5 2 GateSigmoid False True True)
+  , ("untied", Config 5 4 4 6 5 2 GateSigmoid False False False)
+  , ("v3-all", Config 5 4 4 6 5 2 GateRgLru True True False)
   ]
 
 tokens :: [Int]
@@ -118,7 +119,8 @@ muonConformance (label, config) = do
   mask <- either die pure (decayMask config)
   layout <- either die pure (namedLayout config)
   let slices = [ MuonSlice (sliceOffset s) (sliceRows s) (sliceCols s)
-               | s <- layout, sliceCols s > 1, sliceName s /= "embedding" ]
+               | s <- layout, sliceCols s > 1
+               , sliceName s /= "embedding", sliceName s /= "unembedding" ]
       n = paramCount config
       muonCfg = OptimizerConfig (AdamWConfig 0.002 0.9 0.99 1e-6 0.03 0 10)
                   (Just (MuonConfig 0.9))

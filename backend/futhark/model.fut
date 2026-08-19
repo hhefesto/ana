@@ -36,10 +36,13 @@ def softmax_layers (n_layers: i64): i64 = n_layers / 4
 def gla_layers (n_layers: i64): i64 = n_layers - n_layers / 4
 
 -- Packed v3 architecture flags, mirroring Config.archCode: bit 0 = RG-LRU
--- gates, bit 1 = qk-norm on softmax layers, bit 2 = per-head sink logits.
+-- gates, bit 1 = qk-norm on softmax layers, bit 2 = per-head sink logits,
+-- bit 3 = untied vocabulary projection (a separate unembedding matrix,
+-- placed last so untying moves no existing offset).
 def arch_rglru (arch: i64): bool = arch % 2 == 1
 def arch_qknorm (arch: i64): bool = (arch / 2) % 2 == 1
 def arch_sinks (arch: i64): bool = (arch / 4) % 2 == 1
+def arch_untied (arch: i64): bool = (arch / 8) % 2 == 1
 
 -- Extra parameters each block kind carries under the v3 arms.
 def gla_extra (arch: i64) (d: i64): i64 =
@@ -62,6 +65,14 @@ def block_base (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64)
 def parameter_count (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64)
                     (n_layers: i64): i64 =
   block_base arch v d f h n_layers + d
+    + (if arch_untied arch then v*d else 0)
+
+-- Offset of the vocabulary projection: the separate unembedding matrix
+-- when untied, and offset 0 — the embedding itself — when tied.  One
+-- code path, no branch in the projection.
+def unembed_off (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64)
+                (n_layers: i64): i64 =
+  if arch_untied arch then block_base arch v d f h n_layers + d else 0
 
 def vector [p] (off: i64) (n: i64) (params: [p]f32): [n]f32 =
   take n (drop off params)
@@ -629,7 +640,8 @@ def decode_step_def [p] [gs] [ks]
            in (x', gstate, kc, vc)
   let final_gain = vector (block_base arch v d f h n_layers) d checked
   let final_hidden = rms_norm x_final final_gain
-  in (map (\word -> dot word final_hidden) embedding, gla_out, k_out, v_out)
+  let unembed = matrix (unembed_off arch v d f h n_layers) v d checked
+  in (map (\word -> dot word final_hidden) unembed, gla_out, k_out, v_out)
 
 def valid_tokens [n] (v: i64) (tokens: [n]i64): bool =
   all (\t -> t >= 0 && t < v) tokens
@@ -674,8 +686,10 @@ def model_logits [n] [p]
                 else stack (gla_block chunk f h) (softmax_block f h)))
   let final_gain = vector (block_base arch v d f h n_layers) d checked
   let final_hidden = map (\row -> rms_norm row final_gain) hidden
-  -- Tied unembedding: the embedding rows are the vocabulary projections.
-  in map (\row -> map (\word -> dot word row) embedding) final_hidden
+  -- Vocabulary projection: the embedding rows when tied (unembed_off 0),
+  -- the separate unembedding matrix when untied.
+  let unembed = matrix (unembed_off arch v d f h n_layers) v d checked
+  in map (\row -> map (\word -> dot word row) unembed) final_hidden
 
 -- Forward-only twin of model_logits through the quadratic GLA form; never
 -- differentiated, exists for the chunked≡quadratic conformance entry.
@@ -708,7 +722,8 @@ def model_logits_quadratic [n] [p]
                 else stack (gla_block_quadratic f h) (softmax_block f h)))
   let final_gain = vector (block_base arch v d f h n_layers) d checked
   let final_hidden = map (\row -> rms_norm row final_gain) hidden
-  in map (\row -> map (\word -> dot word row) embedding) final_hidden
+  let unembed = matrix (unembed_off arch v d f h n_layers) v d checked
+  in map (\row -> map (\word -> dot word row) unembed) final_hidden
 
 def next_token_loss [n] [p]
     (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)

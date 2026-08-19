@@ -89,7 +89,7 @@ endToEnd goldenPath = do
     lossValue : gradientValues | not (null gradientValues) ->
       pure (lossValue, gradientValues)
     _ -> fail ("invalid golden file: " ++ goldenPath)
-  let config = Config 5 4 4 6 5 2 GateSigmoid False False
+  let config = Config 5 4 4 6 5 2 GateSigmoid False False True
       parameters = either error (concatMap initialize) (namedLayout config)
       initialize slice
         | sliceDecay slice =

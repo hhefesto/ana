@@ -83,6 +83,7 @@ muonSlicesFor cfg =
   | s <- either (const []) id (namedLayout cfg)
   , sliceCols s > 1
   , sliceName s /= "embedding"
+  , sliceName s /= "unembedding"   -- heads stay on AdamW, like the embedding
   ]
 
 main :: IO ()
@@ -150,6 +151,9 @@ sizePresets =
   , ("bpe10m-rglru", bpe10mPreset { gateKind = GateRgLru })
   , ("bpe10m-qk-sink", bpe10mPreset { qkNorm = True, headSinks = True })
   , ("bpe10m-v3", bpe10mV3Preset)
+  -- Pilot arm A5 (docs/V3-DECISIONS.md): a separate unembedding matrix.
+  , ("tiny-untied", tinyPreset { tiedHead = False })
+  , ("bpe10m-untied", bpe10mPreset { tiedHead = False })
   ]
 
 chooseConfig :: String -> IO Config

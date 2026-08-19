@@ -27,11 +27,12 @@ fullSequenceLogitsGeneric c params tokens = do
   _ <- validateInputs c params tokens
   layout <- namedLayout c
   embedding <- get "embedding" layout
+  unembedding <- if tiedHead c then pure embedding else get "unembedding" layout
   initial <- mapM (embeddingRow c embedding) tokens
   hidden <- foldM (runBlock c params layout) initial [0 .. layerCount c - 1]
   gain <- get "final_rms" layout
   let final = map (rmsNorm gain) hidden
-  pure [map (dot h) (rows (modelDim c) embedding) | h <- final]
+  pure [map (dot h) (rows (modelDim c) unembedding) | h <- final]
   where
     get name layout = case filter ((== name) . sliceName) layout of
       [s] -> sliceValues s params
@@ -81,6 +82,8 @@ fullSequenceStats c params tokens = do
   _ <- validateInputs c params tokens
   layout <- namedLayout c
   embedding <- getSlice "embedding" layout params
+  unembedding <- if tiedHead c then pure embedding
+                 else getSlice "unembedding" layout params
   initial <- mapM (embeddingRow c embedding) tokens
   (finalHidden, statsRev) <- foldM
     (\(xs, acc) i -> do
@@ -90,7 +93,7 @@ fullSequenceStats c params tokens = do
     [0 .. layerCount c - 1]
   gain <- getSlice "final_rms" layout params
   let final = map (rmsNorm gain) finalHidden
-      logits = [map (dot h) (rows (modelDim c) embedding) | h <- final]
+      logits = [map (dot h) (rows (modelDim c) unembedding) | h <- final]
       scored = zip logits (drop 1 tokens)
       losses = [logSumExp z - z !! t | (z, t) <- scored]
       pTargets = [exp (z !! t - logSumExp z) | (z, t) <- scored]

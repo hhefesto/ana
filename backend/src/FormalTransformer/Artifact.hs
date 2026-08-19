@@ -155,7 +155,7 @@ instance Binary Manifest where
 -- The v2-era Config wire format: six Ints, no architecture fields.
 getV2Config :: Get Config
 getV2Config =
-  (\a b c d e f -> Config a b c d e f GateSigmoid False False)
+  (\a b c d e f -> Config a b c d e f GateSigmoid False False True)
     <$> get <*> get <*> get <*> get <*> get <*> get
 
 -- The exact identity string the v2 binary minted for a config (its derived

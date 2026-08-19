@@ -127,7 +127,14 @@ schedule; nothing here touches the master run.
 | A2 attention | `bpe10m-qk-sink` | §6.1 items 4+6 as one arm (both are near-free stabilizers) |
 | A3 optimizer | `bpe10m` + `TRAIN_OPT=muon` | Muon at our scale (community-replicated at d=768; here d=320) |
 | A4 combined | `bpe10m-v3` + `TRAIN_OPT=muon` | interaction of all adopted arms |
-| A5 head | untied output head, parameter-matched | §1's flipped verdict: does the trunk compensate the tied head's skew deficit? (needs the untied-head architecture arm, not yet implemented) |
+| A5 head | `bpe10m-untied` (separate unembedding) | §1's flipped verdict: does the trunk compensate the tied head's skew deficit? Run BOTH comparisons: same-trunk (untied +2.62M params, reported per-parameter) and iso-parameter (tied with ffDim raised ~864→1319 to match), since each matching choice distorts differently |
+
+A5 implementation (2026-08-19): `tiedHead :: Bool` in Config (arch bit 3);
+the `unembedding` slice sits LAST in the layout so untying moves no
+existing offset, and the Futhark projection reads from offset 0 (the
+embedding) when tied — one code path, no branch.  The unembedding stays on
+AdamW under Muon, like the embedding.  Verified by the six-arm conformance
+battery (untied and v3-all-untied arms) and the usual smokes.
 
 Success rules, written before the data: an arm is adopted for the v3
 bpe100m run only if its final validation loss beats A0 by more than the

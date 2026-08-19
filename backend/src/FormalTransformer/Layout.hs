@@ -73,9 +73,12 @@ namedLayout c = do
       , mat ("blocks." ++ show i ++ ".wup") f d True
       , mat ("blocks." ++ show i ++ ".wdown") d f True
       ]
+    -- The unembedding sits LAST so that untying moves no existing offset:
+    -- a tied config's layout is a prefix of the untied one.
     specs = [mat "embedding" (vocabSize c) d True]
       ++ concatMap block [0 .. layerCount c - 1]
       ++ [vec "final_rms" d False]
+      ++ [ mat "unembedding" (vocabSize c) d True | not (tiedHead c) ]
     add (off, acc) (name, len, decay, r, cols) =
       (off + len, acc ++ [Slice name off len decay r cols])
 
