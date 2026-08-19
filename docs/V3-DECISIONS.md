@@ -96,3 +96,44 @@ v3 arms loudly until a pilot promotes one.
 80 steps at 242K parameters is a mechanism check, not a quality verdict —
 whether open gates now *pay* on loss is exactly the bpe10m pilot's question
 (§4 below, `bpe10m-rglru` arm).
+
+## 3. QK-norm and per-head sink logits implemented (2026-08-18)
+
+Notes §6.1 items 4 and 6, both on the softmax layers: per-head RMSNorm on
+q/k with zero-centered weight-decayed gains (bounds every attention logit
+by construction; four independent adopters), and one learned sink logit
+per head, softmaxed beside the scores with its weight dropped — exactly
+the restriction-of-extended-softmax semantics proved in
+`FormalTransformer/Attention/Sink.agda`, so a head can attend to nothing.
+Both init neutral (gains at 1, sinks at unit mass).  Verified by the
+conformance oracle's full battery over five architecture arms (sigmoid /
+rglru / qknorm / sinks / v3-all): forward, vjp vs Numeric.AD,
+chunked-vs-quadratic, micro-batch, incremental decode.  Note for smokes:
+`tiny` has one layer and no softmax block — `small4-v3` is the smallest
+config that trains these arms.
+
+## 4. The bpe10m pilot matrix (defined 2026-08-18; execution awaits GPU)
+
+Protocol per notes §5: matched data via the plan-TSV fingerprint, the
+sequential backend for any byte-exact pair, ≥2 seeds per arm at bpe10m
+scale, decisions on final validation loss against seed noise measured from
+the baseline pair.  All arms train the same token budget with the same
+schedule; nothing here touches the master run.
+
+| arm | preset / setting | decides |
+|---|---|---|
+| A0 baseline | `bpe10m` (v3 code, v2 semantics) | the reference point and the seed-noise floor (2 seeds) |
+| A1 gates | `bpe10m-rglru` | notes §6.2 #1: do open gates pay on loss? Also gate stats + prefix-matching scores |
+| A2 attention | `bpe10m-qk-sink` | §6.1 items 4+6 as one arm (both are near-free stabilizers) |
+| A3 optimizer | `bpe10m` + `TRAIN_OPT=muon` | Muon at our scale (community-replicated at d=768; here d=320) |
+| A4 combined | `bpe10m-v3` + `TRAIN_OPT=muon` | interaction of all adopted arms |
+| A5 head | untied output head, parameter-matched | §1's flipped verdict: does the trunk compensate the tied head's skew deficit? (needs the untied-head architecture arm, not yet implemented) |
+
+Success rules, written before the data: an arm is adopted for the v3
+bpe100m run only if its final validation loss beats A0 by more than the
+measured seed spread, or (A1 only) if loss is within noise while the gate
+half-life and induction-head prefix-matching scores improve materially —
+the mechanism the perplexity curve may hide (notes §6.3).  A2 may also be
+adopted on stability grounds alone (logit tails) at equal loss.  Estimated
+cost: 6 arms × ~2 runs × hours each on one rented GPU — comfortably under
+$20 at 3090 rates.

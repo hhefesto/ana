@@ -51,6 +51,8 @@ tests =
   , ("Bradley finite-tree magnitude", testBradleyMagnitude)
   , ("reverse gradient agrees with finite differences", testGradient)
   , ("AdamW one-step equation", testAdamW)
+  , ("Newton-Schulz drives singular values toward one", testNewtonSchulz)
+  , ("Muon step masks ownership and is deterministic", testMuonStep)
   , ("document split is non-overlapping", testSplit)
   , ("byte tokenizer is lossless", testByteTokenizer)
   , ("FastBPE artifact is strict and lossless", testFastBpe)
@@ -579,6 +581,45 @@ testAdamW = do
   assertVectorsNear 1e-12 [0.05, -0.025] (VU.toList (firstMoment nextState)) "AdamW first moment differs"
   assertVectorsNear 1e-12 [0.0025, 0.000625] (VU.toList (secondMoment nextState)) "AdamW second moment differs"
 
+-- On a scaled identity every singular value starts equal, so five quintic
+-- iterations must land them near 1: NS(3·I) ≈ I.  Also the rectangular
+-- orientation (rows > cols iterates on the transpose) must preserve shape.
+testNewtonSchulz :: IO ()
+testNewtonSchulz = do
+  let o = newtonSchulz 2 2 [3, 0, 0, 3]
+  assert (length o == 4) "Newton-Schulz changed the element count"
+  assertVectorsNear 0.2 [1, 0, 0, 1] o "Newton-Schulz did not orthogonalize 3I"
+  let rect = newtonSchulz 3 2 [1, 0, 0, 1, 0, 0]
+  assert (length rect == 6) "Newton-Schulz changed the rectangular element count"
+
+-- Ownership masking: the Muon momentum lives only on the Muon slice, the
+-- Adam moments only off it, and two identical calls agree exactly.
+testMuonStep :: IO ()
+testMuonStep = do
+  let acfg = AdamWConfig 0.01 0.9 0.99 1e-8 0.1 0 10
+      cfg = OptimizerConfig acfg (Just (MuonConfig 0.9))
+      slices = [MuonSlice 2 2 2]  -- parameters 2..5 form a 2x2 matrix
+      n = 6
+      state = initOptimizerState cfg n
+      params = VU.fromList [1, -1, 0.5, 0.25, -0.5, 0.75]
+      grads = VU.fromList [0.1, -0.2, 0.3, -0.4, 0.5, -0.6]
+      decay = VU.replicate n True
+  (updated, nextState) <- expectRight (muonStep cfg slices decay state params grads)
+  (updated2, _) <- expectRight (muonStep cfg slices decay state params grads)
+  assert (updated == updated2) "Muon step is not deterministic"
+  let momentum = maybe (VU.replicate n (0 :: Double)) id (optMuonMomentum nextState)
+  assert (VU.toList (VU.take 2 momentum) == [0, 0]
+       && VU.toList (VU.drop 2 momentum) == VU.toList (VU.drop 2 grads))
+    "Muon momentum is not masked to its slice"
+  assert (VU.all (== 0) (VU.slice 2 4 (firstMoment (optAdamWState nextState))))
+    "Adam first moment leaked onto the Muon slice"
+  assert (VU.all (/= 0) (VU.take 2 (firstMoment (optAdamWState nextState))))
+    "Adam first moment missing off the Muon slice"
+  -- the non-Muon coordinates must take exactly the AdamW update
+  (adamOnly, _) <- expectRight (adamWStep acfg decay (initAdamW n) params grads)
+  assert (VU.take 2 updated == VU.take 2 adamOnly)
+    "non-Muon coordinates diverged from the AdamW formula"
+
 testSplit :: IO ()
 testSplit = do
   let docs = [Document ("doc-" ++ show i) [2, 3, 2] | i <- [0 :: Int .. 39]]
@@ -680,10 +721,11 @@ testCheckpoint = do
   temporaryDirectory <- getTemporaryDirectory
   let path = temporaryDirectory </> "formal-transformer-roundtrip.bin"
       identity = Identity "tiny-model" "integer-v1" "synthetic-v1"
-      optimizerConfig = AdamWConfig 0.0025 0.8 0.95 1e-7 0.025 3 37
+      optimizerConfig = OptimizerConfig (AdamWConfig 0.0025 0.8 0.95 1e-7 0.025 3 37)
+        (Just (MuonConfig 0.95))
       manifest = Manifest artifactVersion config (paramCount config) canonicalLayoutIdentity
         canonicalLayoutVersion optimizerConfig identity 0.75 Tf32TensorCores
-      checkpoint = Checkpoint manifest (VU.fromList params) (initAdamW (paramCount config)) (Just 1.2345) (PRNGState 1 2 3 4)
+      checkpoint = Checkpoint manifest (VU.fromList params) (initOptimizerState optimizerConfig (paramCount config)) (Just 1.2345) (PRNGState 1 2 3 4)
       cleanup = do exists <- doesFileExist path; if exists then removeFile path else pure ()
   cleanup
   (do
@@ -693,7 +735,7 @@ testCheckpoint = do
       let quantize = VU.fromList . map (realToFrac . (realToFrac :: Double -> Float))
       assert (checkpointManifest loaded == manifest) "checkpoint manifest did not roundtrip exactly"
       assert (checkpointParameters loaded == quantize params) "checkpoint parameters did not roundtrip as f32"
-      assert (checkpointOptimizer loaded == initAdamW (paramCount config)) "checkpoint optimizer did not roundtrip"
+      assert (checkpointOptimizer loaded == initOptimizerState optimizerConfig (paramCount config)) "checkpoint optimizer did not roundtrip"
       assert (checkpointBestValidationLoss loaded == Just 1.2345) "checkpoint best loss did not roundtrip"
       assert (checkpointPRNG loaded == PRNGState 1 2 3 4) "checkpoint PRNG did not roundtrip"
       assert (manifestNumerics (checkpointManifest loaded) == Tf32TensorCores)
@@ -703,20 +745,20 @@ testCheckpoint = do
 testCheckpointMetadata :: IO ()
 testCheckpointMetadata = do
   let identity = Identity "tiny-model" "integer-v1" "synthetic-v1"
-      optimizerConfig = AdamWConfig 1e-3 0.9 0.999 1e-8 0.01 2 10
+      optimizerConfig = OptimizerConfig (AdamWConfig 1e-3 0.9 0.999 1e-8 0.01 2 10) Nothing
       manifest = Manifest artifactVersion config (paramCount config) canonicalLayoutIdentity
         canonicalLayoutVersion optimizerConfig identity 1 Fp32IEEE
-      checkpoint = Checkpoint manifest (VU.fromList params) (initAdamW (paramCount config)) Nothing (PRNGState 1 2 3 4)
+      checkpoint = Checkpoint manifest (VU.fromList params) (initOptimizerState optimizerConfig (paramCount config)) Nothing (PRNGState 1 2 3 4)
       withManifest update = checkpoint { checkpointManifest = update manifest }
-  assert (isLeft (validateCheckpoint (withManifest (\m -> m { manifestOptimizerConfig = optimizerConfig { warmupSteps = 11 } }))))
+  assert (isLeft (validateCheckpoint (withManifest (\m -> m { manifestOptimizerConfig = optimizerConfig { optAdamW = (optAdamW optimizerConfig) { warmupSteps = 11 } } }))))
     "checkpoint accepted warmup beyond total steps"
-  assert (isLeft (validateCheckpoint (withManifest (\m -> m { manifestOptimizerConfig = optimizerConfig { weightDecay = -0.1 } }))))
+  assert (isLeft (validateCheckpoint (withManifest (\m -> m { manifestOptimizerConfig = optimizerConfig { optAdamW = (optAdamW optimizerConfig) { weightDecay = -0.1 } } }))))
     "checkpoint accepted negative weight decay"
   assert (isLeft (validateCheckpoint (withManifest (\m -> m { manifestLayoutIdentity = "" }))))
     "checkpoint accepted empty layout identity"
   assert (isLeft (validateCheckpoint checkpoint { checkpointBestValidationLoss = Just (0 / 0) }))
     "checkpoint accepted non-finite best validation loss"
-  assert (isLeft (validateCheckpoint checkpoint { checkpointOptimizer = (checkpointOptimizer checkpoint) { adamStep = 11 } }))
+  assert (isLeft (validateCheckpoint checkpoint { checkpointOptimizer = (checkpointOptimizer checkpoint) { optAdamWState = (optAdamWState (checkpointOptimizer checkpoint)) { adamStep = 11 } } }))
     "checkpoint accepted optimizer step beyond total steps"
 
 -- Streams are [0,2,3,1] and [0,2,2,1]: pair counts (0,2)=2, (2,3)=1,

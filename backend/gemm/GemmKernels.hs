@@ -34,6 +34,9 @@ module FutharkKernels
   , futharkParameterCount
   , logits
   , adamwStep
+  , muonStepDevice
+  , uploadI64Vector
+  , uploadBoolVector
   , lastLogits
   , decodeStep
   , synchronize
@@ -272,6 +275,22 @@ adamwStep ctx step learningRate beta1 beta2 epsilon weightDecay
   (params', first', second') <- deviceAdamwStep ctx step learningRate beta1
     beta2 epsilon weightDecay params gradient firstMoment secondMoment mask
   pure (F32Array params', F32Array first', F32Array second')
+
+-- The decomposed backend has no Muon kernel yet; TRAIN_OPT=muon on this
+-- backend fails loudly here rather than training with the wrong update
+-- (the same rule as its arch guard in gpuConfig).
+muonStepDevice
+  :: Context -> Int64 -> Float -> Float -> Float -> Float -> Float -> Float
+  -> F32Array -> F32Array -> F32Array -> F32Array -> F32Array
+  -> BoolArray -> BoolArray -> I64Array -> I64Array -> I64Array
+  -> IO (F32Array, F32Array, F32Array, F32Array)
+muonStepDevice _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ = unsupported "muonStepDevice"
+
+uploadI64Vector :: Context -> [Int64] -> IO I64Array
+uploadI64Vector _ _ = unsupported "uploadI64Vector"
+
+uploadBoolVector :: Context -> UV.Vector Bool -> IO BoolArray
+uploadBoolVector _ _ = unsupported "uploadBoolVector"
 
 logits :: Context -> GpuConfig -> Int -> F32Array -> I64Array -> IO [[Float]]
 logits _ _ _ _ _ = unsupported "logits"

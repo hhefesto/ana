@@ -108,8 +108,10 @@ trainSmoke = do
             print loss
             let identity = Identity "smoke-model" "synthetic-token-v1" "synthetic-documents-v1"
                 manifest = Manifest artifactVersion tinyConfig (paramCount tinyConfig)
-                  canonicalLayoutIdentity canonicalLayoutVersion cfg identity 1 Fp32IEEE
-                checkpoint = Checkpoint manifest params finalState (Just loss) (PRNGState 1 2 3 4)
+                  canonicalLayoutIdentity canonicalLayoutVersion
+                  (OptimizerConfig cfg Nothing) identity 1 Fp32IEEE
+                checkpoint = Checkpoint manifest params
+                  (OptimizerState finalState Nothing) (Just loss) (PRNGState 1 2 3 4)
             case validateCheckpoint checkpoint of
               Left message -> putStrLn message
               Right _ -> putStrLn "checkpoint contract valid"
@@ -306,8 +308,8 @@ inspectCheckpoint path = do
       putStrLn ("artifact version: " ++ show (manifestVersion manifest))
       putStrLn ("config: " ++ show (manifestConfig manifest))
       putStrLn ("parameters: " ++ show (manifestParameterCount manifest))
-      putStrLn ("completed step: " ++ show (adamStep (checkpointOptimizer checkpoint)))
-      putStrLn ("total steps: " ++ show (totalSteps (manifestOptimizerConfig manifest)))
+      putStrLn ("completed step: " ++ show (adamStep (optAdamWState (checkpointOptimizer checkpoint))))
+      putStrLn ("total steps: " ++ show (totalSteps (optAdamW (manifestOptimizerConfig manifest))))
       putStrLn ("numerics: " ++ show (manifestNumerics manifest))
       putStrLn ("model: " ++ modelIdentity identity)
       putStrLn ("tokenizer: " ++ tokenizerIdentity identity)
@@ -340,8 +342,8 @@ compareCheckpoint leftPath rightPath = do
           rightManifest = checkpointManifest right
       putStrLn ("left:  " ++ leftPath)
       putStrLn ("right: " ++ rightPath)
-      putStrLn ("completed step: " ++ show (adamStep (checkpointOptimizer left))
-        ++ " vs " ++ show (adamStep (checkpointOptimizer right)))
+      putStrLn ("completed step: " ++ show (adamStep (optAdamWState (checkpointOptimizer left)))
+        ++ " vs " ++ show (adamStep (optAdamWState (checkpointOptimizer right))))
       putStrLn ("numerics: " ++ show (manifestNumerics leftManifest)
         ++ " vs " ++ show (manifestNumerics rightManifest))
       when (manifestConfig leftManifest /= manifestConfig rightManifest)
@@ -349,10 +351,10 @@ compareCheckpoint leftPath rightPath = do
       putStrLn ("config: " ++ show (manifestConfig leftManifest))
       mapM_ (uncurry3 reportVector)
         [ ("parameters", checkpointParameters left, checkpointParameters right)
-        , ("adam first moment", firstMoment (checkpointOptimizer left)
-          , firstMoment (checkpointOptimizer right))
-        , ("adam second moment", secondMoment (checkpointOptimizer left)
-          , secondMoment (checkpointOptimizer right))
+        , ("adam first moment", firstMoment (optAdamWState (checkpointOptimizer left))
+          , firstMoment (optAdamWState (checkpointOptimizer right)))
+        , ("adam second moment", secondMoment (optAdamWState (checkpointOptimizer left))
+          , secondMoment (optAdamWState (checkpointOptimizer right)))
         ]
   where
     uncurry3 f (a, b, c) = f a b c

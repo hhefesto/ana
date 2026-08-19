@@ -52,6 +52,7 @@ parametersFor config = either error (concatMap initialize) (namedLayout config)
 main :: IO ()
 main = do
   mapM_ oracleFor configs
+  mapM_ muonConformance configs
   mapM_ microBatchConformance configs
   mapM_ decodeConformance configs
   mapM_ sizeRejectionConformance configs
@@ -105,6 +106,64 @@ oracleFor (label, config) = do
                       compareVector "AdamW parameters" 2e-5 2e-4 referenceUpdated futharkUpdated
                       compareVector "AdamW first moment" 2e-6 2e-4 (VU.toList (firstMoment referenceState)) futharkM
                       compareVector "AdamW second moment" 2e-7 3e-4 (VU.toList (secondMoment referenceState)) futharkV
+
+-- The combined Muon/AdamW step against its Double reference: the hidden
+-- matrices take the Newton-Schulz update (5 iterations, so f32/f64
+-- divergence compounds — tolerances are looser than AdamW's), everything
+-- else must match the AdamW formula exactly.
+muonConformance :: (String, Config) -> IO ()
+muonConformance (label, config) = do
+  putStrLn ("=== muon step, gate: " ++ label)
+  let parameters = parametersFor config
+  mask <- either die pure (decayMask config)
+  layout <- either die pure (namedLayout config)
+  let slices = [ MuonSlice (sliceOffset s) (sliceRows s) (sliceCols s)
+               | s <- layout, sliceCols s > 1, sliceName s /= "embedding" ]
+      n = paramCount config
+      muonCfg = OptimizerConfig (AdamWConfig 0.002 0.9 0.99 1e-6 0.03 0 10)
+                  (Just (MuonConfig 0.9))
+      oldM = zipWith (\i _ -> 0.0002 * sin (fromIntegral i)) [1 :: Int ..] parameters
+      oldV = zipWith (\i _ -> 0.0003 + 0.00001 * fromIntegral (i `mod` 7)) [1 :: Int ..] parameters
+      oldMomentum = zipWith (\i _ -> 0.0004 * cos (fromIntegral i)) [1 :: Int ..] parameters
+      muonMask = VU.update (VU.replicate n False)
+        (VU.fromList [ (muonOffset s + i, True)
+                     | s <- slices, i <- [0 .. muonRows s * muonCols s - 1] ])
+      canonical which = zipWith (\i x -> if VU.unsafeIndex muonMask i == which then x else 0) [0 ..]
+      state0 = OptimizerState
+        (AdamWState 2 (VU.fromList (canonical False oldM)) (VU.fromList (canonical False oldV)))
+        (Just (VU.fromList (canonical True oldMomentum)))
+  (referenceUpdated, referenceState) <- either die pure
+    (muonStep muonCfg slices mask state0 (VU.fromList parameters)
+      (VU.fromList (map (\i -> 0.01 * sin (fromIntegral i * 1.7)) [1 .. n])))
+  let gradientHost = map (\i -> 0.01 * sin (fromIntegral i * 1.7)) [1 .. n]
+      acfg = optAdamW muonCfg
+  withContext $ \ctx ->
+    withF32 ctx (map realToFrac parameters) $ \deviceP ->
+      withF32 ctx (map realToFrac gradientHost) $ \deviceG ->
+        withF32 ctx (map realToFrac (canonical True oldMomentum)) $ \deviceMom ->
+          withF32 ctx (map realToFrac (canonical False oldM)) $ \deviceM ->
+            withF32 ctx (map realToFrac (canonical False oldV)) $ \deviceV ->
+              withBoolVector ctx mask $ \deviceMask -> do
+                muonMaskD <- uploadBoolVector ctx muonMask
+                offsD <- uploadI64Vector ctx (map (fromIntegral . muonOffset) slices)
+                rowsD <- uploadI64Vector ctx (map (fromIntegral . muonRows) slices)
+                colsD <- uploadI64Vector ctx (map (fromIntegral . muonCols) slices)
+                (p', mom', m', v') <- muonStepDevice ctx 3
+                  (realToFrac (learningRate acfg 3)) 0.9 0.99 1e-6 0.03 0.9
+                  deviceP deviceG deviceMom deviceM deviceV deviceMask
+                  muonMaskD offsD rowsD colsD
+                hostP <- map realToFrac <$> downloadF32 ctx n p'
+                hostMom <- map realToFrac <$> downloadF32 ctx n mom'
+                hostM <- map realToFrac <$> downloadF32 ctx n m'
+                hostV <- map realToFrac <$> downloadF32 ctx n v'
+                mapM_ (freeF32 ctx) [p', mom', m', v']
+                compareVector "Muon parameters" 5e-4 5e-3 (VU.toList referenceUpdated) hostP
+                compareVector "Muon momentum" 5e-5 5e-4
+                  (maybe [] VU.toList (optMuonMomentum referenceState)) hostMom
+                compareVector "Muon adam first moment" 2e-6 2e-4
+                  (VU.toList (firstMoment (optAdamWState referenceState))) hostM
+                compareVector "Muon adam second moment" 2e-7 3e-4
+                  (VU.toList (secondMoment (optAdamWState referenceState))) hostV
 
 -- Incremental decoding must observe the same language as whole-prefix
 -- evaluation: feeding the tokens one decode_step at a time (fixed GLA

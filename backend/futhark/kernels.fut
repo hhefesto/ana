@@ -150,3 +150,17 @@ entry decode_step [gs] [ks]
     : ([v]f32, *[gs]f32, *[ks]f32, *[ks]f32) =
   decode_step_def arch v d f h n_layers ctx params position token
                   gla_state k_cache v_cache
+
+-- One combined Muon/AdamW update; see muon_step_def in model.fut and the
+-- Double-precision reference FormalTransformer.Optimizer.muonStep.
+entry muon_step [p] [k]
+    (step: i64) (learning_rate: f32) (beta1: f32) (beta2: f32)
+    (epsilon: f32) (weight_decay: f32) (muon_beta: f32)
+    (params: [p]f32) (gradient: [p]f32)
+    (momentum: [p]f32) (first_moment: [p]f32) (second_moment: [p]f32)
+    (decay_mask: [p]bool) (muon_mask: [p]bool)
+    (slice_off: [k]i64) (slice_rows: [k]i64) (slice_cols: [k]i64)
+    : ([p]f32, [p]f32, [p]f32, [p]f32) =
+  muon_step_def step learning_rate beta1 beta2 epsilon weight_decay muon_beta
+    params gradient momentum first_moment second_moment decay_mask muon_mask
+    slice_off slice_rows slice_cols

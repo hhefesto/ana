@@ -771,3 +771,80 @@ def adamw_step_def [p]
     in param - learning_rate*(adaptive + decay))
     (zip5 checked m second checked decay_mask)
   in (updated, m, second)
+
+def matmul [a] [b] [cc] (x: [a][b]f32) (y: [b][cc]f32): [a][cc]f32 =
+  let yt = transpose y
+  in map (\xr -> map (\yc -> f32.sum (map2 (*) xr yc)) yt) x
+
+-- Five Newton-Schulz iterations of the Muon quintic X ← aX + (bA + cA²)X,
+-- A = XXᵀ, coefficients (3.4445, −4.7750, 2.0315), on the
+-- Frobenius-normalized input; iterate on the transpose when rows > cols
+-- so the Gram matrix is the small side.  Never differentiated.
+def ns5_core [r] [c] (m0: [r][c]f32): [r][c]f32 =
+  let fro = f32.sqrt (f32.sum (map (\row -> f32.sum (map (\x -> x*x) row)) m0))
+  let x0 = map (map (/ (fro + 1.0e-7f32))) m0
+  in loop x = x0 for _i < 5i64 do
+    let a = matmul x (transpose x)
+    let b = map2 (map2 (\p q -> -4.7750f32 * p + 2.0315f32 * q))
+                 a (matmul a a)
+    let bx = matmul b x
+    in map2 (map2 (\xe be -> 3.4445f32 * xe + be)) x bx
+
+def ns5 [r] [c] (m: [r][c]f32): [r][c]f32 =
+  if r <= c then ns5_core m
+  else transpose (ns5_core (transpose m))
+
+-- One combined Muon/AdamW update (FormalTransformer.Optimizer.muonStep is
+-- the Double-precision reference).  muon_mask marks the parameters owned
+-- by the k Muon slices (the 2-D hidden matrices, described by
+-- slice_off/rows/cols); they take the Nesterov Newton-Schulz update with
+-- Moonshot's RMS matching 0.2·sqrt(max(r,c)) and decoupled weight decay,
+-- everything else takes exactly the adamw_step_def formula.  Momentum and
+-- the Adam moments are masked to their owners so the state stays
+-- canonical (zeros elsewhere).
+def muon_step_def [p] [k]
+    (step: i64) (learning_rate: f32) (beta1: f32) (beta2: f32)
+    (epsilon: f32) (weight_decay: f32) (muon_beta: f32)
+    (params: [p]f32) (gradient: [p]f32)
+    (momentum: [p]f32) (first_moment: [p]f32) (second_moment: [p]f32)
+    (decay_mask: [p]bool) (muon_mask: [p]bool)
+    (slice_off: [k]i64) (slice_rows: [k]i64) (slice_cols: [k]i64)
+    : ([p]f32, [p]f32, [p]f32, [p]f32) =
+  let checked = assert (step > 0 && learning_rate >= 0.0f32 &&
+                        beta1 >= 0.0f32 && beta1 < 1.0f32 &&
+                        beta2 >= 0.0f32 && beta2 < 1.0f32 &&
+                        epsilon > 0.0f32 && weight_decay >= 0.0f32 &&
+                        muon_beta >= 0.0f32 && muon_beta < 1.0f32) params
+  let momentum' = map3 (\mu g on -> if on then muon_beta*mu + g else 0.0f32)
+                       momentum gradient muon_mask
+  let m = map3 (\old g on -> if on then 0.0f32
+                             else beta1*old + (1.0f32-beta1)*g)
+               first_moment gradient muon_mask
+  let second = map3 (\old g on -> if on then 0.0f32
+                                  else beta2*old + (1.0f32-beta2)*g*g)
+                    second_moment gradient muon_mask
+  let m_correction = 1.0f32 - beta1 ** f32.i64 step
+  let v_correction = 1.0f32 - beta2 ** f32.i64 step
+  let adam_updated = map5 (\param mi vi use_decay on ->
+    if on then param
+    else
+      let adaptive = (mi/m_correction) /
+                     (f32.sqrt (vi/v_correction) + epsilon)
+      let decay = if use_decay then weight_decay*param else 0.0f32
+      in param - learning_rate*(adaptive + decay))
+    checked m second decay_mask muon_mask
+  let updated = loop acc = copy adam_updated for i < k do
+    let off = slice_off[i]
+    let r = slice_rows[i]
+    let c = slice_cols[i]
+    let count = r * c
+    let ns_in = tabulate count (\j ->
+      gradient[off+j] + muon_beta * momentum'[off+j])
+    let o = flatten (ns5 (unflatten (ns_in :> [r*c]f32)))
+    let scale = 0.2f32 * f32.sqrt (f32.max (f32.i64 r) (f32.i64 c))
+    let upd = tabulate count (\j ->
+      let pj = acc[off+j]
+      let decay = if decay_mask[off+j] then weight_decay*pj else 0.0f32
+      in pj - learning_rate*(scale * o[j] + decay))
+    in scatter acc (map (+ off) (iota count)) upd
+  in (updated, momentum', m, second)

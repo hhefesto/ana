@@ -92,13 +92,15 @@ data Manifest = Manifest
   , manifestParameterCount :: !Int
   , manifestLayoutIdentity :: !String
   , manifestLayoutVersion :: !Word32
-  , manifestOptimizerConfig :: !AdamWConfig
+  , manifestOptimizerConfig :: !OptimizerConfig
   , manifestIdentity :: !Identity
   , manifestClipNorm :: !Double
   , manifestNumerics :: !Numerics
   } deriving (Eq, Show, Generic)
 
--- Versions 1 and 2 predate explicit numerics. Historical runs used IEEE f32.
+-- Version 4 is the first v3-era format (OptimizerConfig in the manifest,
+-- optional Muon momentum in the checkpoint body); earlier versions belong
+-- to the master branch's binary and are not read here.
 instance Binary Manifest where
   put manifest = do
     put (manifestVersion manifest)
@@ -112,7 +114,7 @@ instance Binary Manifest where
     put (manifestNumerics manifest)
   get = do
     version <- get
-    unless (version >= 1 && version <= artifactVersion)
+    unless (version == artifactVersion)
       (fail ("unsupported checkpoint manifest version: " ++ show (version :: Word32)))
     cfg <- get
     count <- get
@@ -120,26 +122,17 @@ instance Binary Manifest where
     layoutVersion <- get
     optimizer <- get
     identity <- get
-    clip <- if version == 1 then pure 1.0 else get
-    numerics <- if version <= 2 then pure Fp32IEEE else get
+    clip <- get
+    numerics <- get
     pure (Manifest artifactVersion cfg count layoutIdentity layoutVersion optimizer identity clip numerics)
 
 data Checkpoint = Checkpoint
   { checkpointManifest :: !Manifest
   , checkpointParameters :: !(VU.Vector Double)
-  , checkpointOptimizer :: !AdamWState
+  , checkpointOptimizer :: !OptimizerState
   , checkpointBestValidationLoss :: !(Maybe Double)
   , checkpointPRNG :: !PRNGState
   } deriving (Eq, Show, Generic)
-
--- The pre-compact wire format. Its parameter field stays a list because that
--- is what the derived instance encodes; the conversion to the in-memory
--- representation happens at the decode boundary in loadCheckpoint.
-data LegacyCheckpoint = LegacyCheckpoint
-  !Manifest ![Double] !AdamWState !(Maybe Double) !PRNGState
-  deriving (Generic)
-
-instance Binary LegacyCheckpoint
 
 data CorpusArtifact = CorpusArtifact
   { corpusVersion :: !Word32
@@ -155,17 +148,25 @@ data LegacyCorpusArtifact = LegacyCorpusArtifact
 instance Binary LegacyCorpusArtifact
 
 artifactVersion :: Word32
-artifactVersion = 3
+artifactVersion = 4
 
 validateCheckpoint :: Checkpoint -> Either String Checkpoint
 validateCheckpoint checkpoint = do
   let manifest = checkpointManifest checkpoint
       cfg = manifestConfig manifest
       expected = paramCount cfg
-      optimizer = checkpointOptimizer checkpoint
+      optimizer = optAdamWState (checkpointOptimizer checkpoint)
+      momentum = optMuonMomentum (checkpointOptimizer checkpoint)
       optimizerConfig = manifestOptimizerConfig manifest
   _ <- validateConfig cfg
-  _ <- validateAdamWConfig optimizerConfig
+  _ <- validateOptimizerConfig optimizerConfig
+  case (optMuon optimizerConfig, momentum) of
+    (Just _, Just mu)
+      | VU.length mu /= expected -> Left "checkpoint Muon momentum has wrong length"
+      | not (VU.all finite mu) -> Left "checkpoint Muon momentum contains non-finite numbers"
+      | otherwise -> Right ()
+    (Nothing, Nothing) -> Right ()
+    _ -> Left "checkpoint Muon momentum does not match the manifest's optimizer"
   unless (manifestVersion manifest == artifactVersion) (Left "unsupported checkpoint version")
   unless (finite (manifestClipNorm manifest) && manifestClipNorm manifest > 0)
     (Left "manifest gradient clip must be finite and positive")
@@ -177,7 +178,7 @@ validateCheckpoint checkpoint = do
   unless (VU.length (firstMoment optimizer) == expected && VU.length (secondMoment optimizer) == expected)
     (Left "checkpoint optimizer vectors have wrong length")
   unless (adamStep optimizer >= 0) (Left "checkpoint optimizer step is negative")
-  unless (adamStep optimizer <= totalSteps optimizerConfig) (Left "checkpoint optimizer step exceeds configured total steps")
+  unless (adamStep optimizer <= totalSteps (optAdamW optimizerConfig)) (Left "checkpoint optimizer step exceeds configured total steps")
   -- Checked array by array rather than over a concatenation: the three are as
   -- long as the parameter vector, and appending them would build a third copy.
   unless (all (VU.all finite)
@@ -244,13 +245,9 @@ loadCheckpoint path = readArtifactFile "checkpoint" hint path decode
     decode bytes
       | LBS.take 4 bytes == runPut (putWord32be checkpointCompactMagic) =
           decodeCheckpointCompact bytes >>= validateCheckpoint
-      | otherwise = case decodeOrFail bytes of
-          Left (_, _, message) -> Left ("checkpoint decode failed: " ++ message
-            ++ " (is " ++ path ++ " really a checkpoint written by train?)")
-          Right (remaining, _, LegacyCheckpoint manifest params optimizer best rng)
-            | not (LBS.null remaining) -> Left "checkpoint has trailing bytes"
-            | otherwise ->
-                validateCheckpoint (Checkpoint manifest (VU.fromList params) optimizer best rng)
+      | otherwise = Left ("not a compact checkpoint: " ++ path
+          ++ " (this v3 binary reads only version-4 compact checkpoints;"
+          ++ " older formats belong to the master branch's binary)")
 
 checkpointCompactMagic :: Word32
 checkpointCompactMagic = 0x46544332
@@ -287,7 +284,7 @@ loadCheckpointSummary path = do
         Just result -> pure result
         Nothing -> fmap (\checkpoint ->
             ( checkpointManifest checkpoint
-            , adamStep (checkpointOptimizer checkpoint)
+            , adamStep (optAdamWState (checkpointOptimizer checkpoint))
             )) <$> loadCheckpoint path
   where
     summaryPrefixBytes = 65536
@@ -303,10 +300,13 @@ encodeCheckpointCompact checkpoint = runPut $ do
   putWord32be checkpointCompactMagic
   put (checkpointManifest checkpoint)
   putF32Vector (checkpointParameters checkpoint)
-  let optimizer = checkpointOptimizer checkpoint
+  let optimizer = optAdamWState (checkpointOptimizer checkpoint)
   put (adamStep optimizer)
   putF32Vector (firstMoment optimizer)
   putF32Vector (secondMoment optimizer)
+  case optMuonMomentum (checkpointOptimizer checkpoint) of
+    Nothing -> put False
+    Just momentum -> put True >> putF32Vector momentum
   put (checkpointBestValidationLoss checkpoint)
   put (checkpointPRNG checkpoint)
   where
@@ -335,9 +335,12 @@ decodeCheckpointCompact bytes = case runGetOrFail getCheckpoint bytes of
       step <- get
       first <- getF32Vector
       second <- getF32Vector
+      hasMomentum <- get
+      momentum <- if hasMomentum then Just <$> getF32Vector else pure Nothing
       best <- get
       rng <- get
-      pure (Checkpoint manifest params (AdamWState step first second) best rng)
+      pure (Checkpoint manifest params
+             (OptimizerState (AdamWState step first second) momentum) best rng)
     -- The payload is a contiguous run of big-endian f32, so it is taken as one
     -- ByteString and widened in place. Reading it element-wise through Get
     -- would build a boxed list first -- 4.6 GB for one 115M-parameter array,
