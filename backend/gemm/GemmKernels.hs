@@ -324,6 +324,9 @@ batchOf :: I64Array -> IO (Int, Int, DevI64)
 batchOf (I64Array [rows, cols] tokens) = pure (rows, cols, tokens)
 batchOf _ = ioError (userError "expected an i64[2] batch")
 
+-- The decomposed backend computes v2 semantics only (gpuConfig refuses any
+-- nonzero arch word), so the reconstructed Config always carries the
+-- arms-off architecture.
 configOf :: GpuConfig -> Int -> Config
 configOf cfg sequenceLength = Config
   { vocabSize = fromIntegral (gpuVocab cfg)
@@ -332,6 +335,10 @@ configOf cfg sequenceLength = Config
   , ffDim = fromIntegral (gpuFfDim cfg)
   , layerCount = fromIntegral (gpuLayers cfg)
   , headCount = fromIntegral (gpuHeads cfg)
+  , gateKind = GateSigmoid
+  , qkNorm = False
+  , headSinks = False
+  , tiedHead = True
   }
 
 -- Per-op isolation of the training head path at PRODUCTION dims with

@@ -328,14 +328,6 @@ def block_tail [n] [d] [p]
     in matvec wdown hidden) ff_normed
   in map2 add x_att ff
 
-def softmax_block [n] [d] [p]
-    (f: i64) (h: i64) (base: i64)
-    (params: [p]f32) (x: [n][d]f32): [n][d]f32 =
-  let (_, q, k, values) = attention_inputs base params x
-  let attended = causal_attention h q k values
-  let ooff = base + d + 3*d*d
-  in block_tail f ooff (ooff + d*d) params x attended
-
 -- Per-head RMSNorm with shared zero-centered gains (v3 qkNorm): the same
 -- normalization formula as rms_norm, per hd-slice, with gain = 1 + w.
 def qk_normalize [d] (h: i64) (w: []f32) (x: [d]f32): [d]f32 =
@@ -346,11 +338,11 @@ def qk_normalize [d] (h: i64) (w: []f32) (x: [d]f32): [d]f32 =
     in 1.0f32 / f32.sqrt (ms + 1.0e-5f32))
   in tabulate d (\j -> x[j] * scales[j / hd] * (1.0f32 + w[j % hd]))
 
--- Softmax attention with a learned per-head sink logit: the softmax runs
--- over scores ++ [sink] and the sink's weight is dropped — exactly the
--- restriction-of-extended-softmax semantics proved in
--- FormalTransformer/Attention/Sink.agda, so token weights form a
--- subdistribution and a head can attend to nothing.
+-- Softmax attention over scores extended by one per-head sink logit whose
+-- weight is dropped from the value sum (FormalTransformer/Attention/
+-- Sink.agda's restriction semantics).  With the sink at -1e30 its weight
+-- underflows to exactly 0 and the plain attention is reproduced bit for
+-- bit, so this is THE causal attention of the trainer.
 def causal_attention_sink [n] [d]
     (h: i64) (sinks: [h]f32)
     (q: [n][d]f32) (k: [n][d]f32) (v: [n][d]f32): [n][d]f32 =
@@ -376,139 +368,86 @@ def causal_attention_sink [n] [d]
   in tabulate n (\i ->
        flatten (map (\head -> per_head[head, i]) (iota h)) :> [d]f32)
 
--- The v3 softmax-block variants.  Separate definitions per enabled arm —
--- never a branch inside one — so the differentiated layer loops keep a
--- single tape shape (the codegen rule at model_logits).  Extras sit
--- between Wo and rms_ff in Layout.namedLayout order: qk_gain_q [hd],
--- qk_gain_k [hd], then sink [h].
-def softmax_block_qk [n] [d] [p]
-    (f: i64) (h: i64) (base: i64)
+-- One softmax block for every softmax-side arm, single tape shape: q/k
+-- normalization is a value-level select against the raw rows, and the
+-- sink is a permanent extra score slot whose logit is -1e30 when disabled
+-- -- exp underflows to exactly 0, so the plain softmax weights are
+-- reproduced bit for bit (the same argument as the decoder's single
+-- path).  Gain and sink reads fall back to offset 0 when their slices do
+-- not exist; the values are never selected.
+def softmax_block_u [n] [d] [p]
+    (arch: i64) (f: i64) (h: i64) (base: i64)
     (params: [p]f32) (x: [n][d]f32): [n][d]f32 =
   let (_, q0, k0, values) = attention_inputs base params x
   let ooff = base + d + 3*d*d
   let hd = d / h
-  let wq_g = vector (ooff + d*d) hd params
-  let wk_g = vector (ooff + d*d + hd) hd params
-  let q = map (qk_normalize h wq_g) q0
-  let k = map (qk_normalize h wk_g) k0
-  let attended = causal_attention h q k values
-  in block_tail f ooff (ooff + d*d + 2*hd) params x attended
-
-def softmax_block_sink [n] [d] [p]
-    (f: i64) (h: i64) (base: i64)
-    (params: [p]f32) (x: [n][d]f32): [n][d]f32 =
-  let (_, q, k, values) = attention_inputs base params x
-  let ooff = base + d + 3*d*d
-  let sinks = vector (ooff + d*d) h params
+  let qk = arch_qknorm arch
+  let sk = arch_sinks arch
+  let gq_off = if qk then ooff + d*d else 0
+  let gk_off = if qk then ooff + d*d + hd else 0
+  let wq_g = vector gq_off hd params
+  let wk_g = vector gk_off hd params
+  let q = map (\row -> if qk then qk_normalize h wq_g row else row) q0
+  let k = map (\row -> if qk then qk_normalize h wk_g row else row) k0
+  let sink_off = if sk then ooff + d*d + (if qk then 2*hd else 0) else 0
+  let sinks = tabulate h (\i ->
+        if sk then params[sink_off + i] else -1.0e30f32)
   let attended = causal_attention_sink h sinks q k values
-  in block_tail f ooff (ooff + d*d + h) params x attended
+  in block_tail f ooff (ooff + d*d + softmax_extra arch d h) params x attended
 
-def softmax_block_qk_sink [n] [d] [p]
-    (f: i64) (h: i64) (base: i64)
-    (params: [p]f32) (x: [n][d]f32): [n][d]f32 =
-  let (_, q0, k0, values) = attention_inputs base params x
-  let ooff = base + d + 3*d*d
-  let hd = d / h
-  let wq_g = vector (ooff + d*d) hd params
-  let wk_g = vector (ooff + d*d + hd) hd params
-  let sinks = vector (ooff + d*d + 2*hd) h params
-  let q = map (qk_normalize h wq_g) q0
-  let k = map (qk_normalize h wk_g) k0
-  let attended = causal_attention_sink h sinks q k values
-  in block_tail f ooff (ooff + d*d + 2*hd + h) params x attended
-
--- One grouped layer stack over a pair of block functions.  The functions
--- are ordinary (defunctionalized) parameters applied inside the loops —
--- every instantiation below passes complete definitions, so each
--- instantiated stack has one tape shape.  Selection among instantiations
--- happens in model_logits, outside every differentiated loop, and each
--- branch there returns an array (functions are never branch results,
--- which Futhark forbids).
-def run_stack [n] [d] [p]
-    (arch: i64) (v: i64) (f: i64) (h: i64) (n_layers: i64)
-    (gla_blk: i64 -> [p]f32 -> [n][d]f32 -> [n][d]f32)
-    (smax_blk: i64 -> [p]f32 -> [n][d]f32 -> [n][d]f32)
-    (checked: [p]f32) (initial: [n][d]f32): [n][d]f32 =
-  let groups = n_layers / 4
-  let rest = n_layers % 4
-  let grouped = loop state = initial for g < groups do
-    let s1 = gla_blk (block_base arch v d f h (4*g)) checked state
-    let s2 = gla_blk (block_base arch v d f h (4*g + 1)) checked s1
-    let s3 = gla_blk (block_base arch v d f h (4*g + 2)) checked s2
-    in smax_blk (block_base arch v d f h (4*g + 3)) checked s3
-  in loop state = grouped for r < rest do
-    gla_blk (block_base arch v d f h (4*groups + r)) checked state
-
-def gla_block [n] [d] [p]
-    (chunk: i64) (f: i64) (h: i64) (base: i64)
-    (params: [p]f32) (x: [n][d]f32): [n][d]f32 =
-  let (normed, q, k, values) = attention_inputs base params x
-  let q_unit = map (l2_normalize_heads h) q
-  let k_unit = map (l2_normalize_heads h) k
-  let ooff = base + d + 3*d*d
-  let walpha = matrix (ooff + d*d) d d params
-  let gate_logits = map (matvec walpha) normed
-  let logs = map (map log_sigmoid) gate_logits
-  let attended = gla_attention_chunked chunk h q_unit k_unit values logs
-  in block_tail f ooff (ooff + 2*d*d) params x attended
-
--- The RG-LRU GLA block (Config.GateRgLru): gate_lambda follows walpha, the
--- log-gate is rglru_log_gate, and the write scale multiplies the normalized
--- key channel-wise.  A separate definition rather than a branch inside
--- gla_block, so the differentiated layer loops stay branch-free (the
--- codegen rule at model_logits).
-def gla_block_rglru [n] [d] [p]
-    (chunk: i64) (f: i64) (h: i64) (base: i64)
+def gla_block_u [n] [d] [p]
+    (arch: i64) (chunk: i64) (f: i64) (h: i64) (base: i64)
     (params: [p]f32) (x: [n][d]f32): [n][d]f32 =
   let (normed, q, k, values) = attention_inputs base params x
   let q_unit = map (l2_normalize_heads h) q
   let k_unit0 = map (l2_normalize_heads h) k
   let ooff = base + d + 3*d*d
   let walpha = matrix (ooff + d*d) d d params
-  let lambda = vector (ooff + 2*d*d) d params
+  let rglru = arch_rglru arch
+  -- One tape shape for both gate kinds: compute both formulas and select by
+  -- the (loop-invariant) arch scalar.  The selected value is bit-identical
+  -- to the dedicated formula, the unselected branch's adjoint is zero, and
+  -- the vjp'd loop nest exists ONCE instead of once per architecture --
+  -- the 8-way instantiation of the first v3 cut made futhark's codegen
+  -- time explode.  Lambda reads fall back to offset 0 (the embedding,
+  -- always present) when the slice does not exist; the value is never
+  -- selected.
+  let lam_off = if rglru then ooff + 2*d*d else 0
+  let lambda = vector lam_off d params
   let gate_logits = map (matvec walpha) normed
-  let logs = map (\row -> map2 (\z lam -> rglru_log_gate z lam) row lambda)
-                 gate_logits
-  let k_unit = map2 (\lrow krow ->
-                 map2 (\l kc -> kc * rglru_write_scale l) lrow krow)
-               logs k_unit0
+  let logs = map (\row -> map2 (\z lam ->
+        if rglru then rglru_log_gate z lam else log_sigmoid z) row lambda)
+        gate_logits
+  let k_unit = map2 (\lrow krow -> map2 (\l kc ->
+        if rglru then kc * rglru_write_scale l else kc) lrow krow)
+        logs k_unit0
   let attended = gla_attention_chunked chunk h q_unit k_unit values logs
-  in block_tail f ooff (ooff + 2*d*d + d) params x attended
+  in block_tail f ooff (ooff + 2*d*d + gla_extra arch d) params x attended
 
 -- The whole-window quadratic form, retained (forward only, no vjp entry)
 -- so the conformance oracle can compare the two executions of the one
 -- denotation at same-precision tolerances.
-def gla_block_quadratic [n] [d] [p]
-    (f: i64) (h: i64) (base: i64)
-    (params: [p]f32) (x: [n][d]f32): [n][d]f32 =
-  let (normed, q, k, values) = attention_inputs base params x
-  let q_unit = map (l2_normalize_heads h) q
-  let k_unit = map (l2_normalize_heads h) k
-  let ooff = base + d + 3*d*d
-  let walpha = matrix (ooff + d*d) d d params
-  let gate_logits = map (matvec walpha) normed
-  let cum = gate_prefix_sums gate_logits
-  let attended = gla_attention h q_unit k_unit values cum
-  in block_tail f ooff (ooff + 2*d*d) params x attended
-
-def gla_block_quadratic_rglru [n] [d] [p]
-    (f: i64) (h: i64) (base: i64)
+def gla_block_quadratic_u [n] [d] [p]
+    (arch: i64) (f: i64) (h: i64) (base: i64)
     (params: [p]f32) (x: [n][d]f32): [n][d]f32 =
   let (normed, q, k, values) = attention_inputs base params x
   let q_unit = map (l2_normalize_heads h) q
   let k_unit0 = map (l2_normalize_heads h) k
   let ooff = base + d + 3*d*d
   let walpha = matrix (ooff + d*d) d d params
-  let lambda = vector (ooff + 2*d*d) d params
+  let rglru = arch_rglru arch
+  let lam_off = if rglru then ooff + 2*d*d else 0
+  let lambda = vector lam_off d params
   let gate_logits = map (matvec walpha) normed
-  let logs = map (\row -> map2 (\z lam -> rglru_log_gate z lam) row lambda)
-                 gate_logits
-  let k_unit = map2 (\lrow krow ->
-                 map2 (\l kc -> kc * rglru_write_scale l) lrow krow)
-               logs k_unit0
+  let logs = map (\row -> map2 (\z lam ->
+        if rglru then rglru_log_gate z lam else log_sigmoid z) row lambda)
+        gate_logits
+  let k_unit = map2 (\lrow krow -> map2 (\l kc ->
+        if rglru then kc * rglru_write_scale l else kc) lrow krow)
+        logs k_unit0
   let cum = prefix_sums_2d logs
   let attended = gla_attention h q_unit k_unit values cum
-  in block_tail f ooff (ooff + 2*d*d + d) params x attended
+  in block_tail f ooff (ooff + 2*d*d + gla_extra arch d) params x attended
 
 def sigmoid (z: f32): f32 = 1.0f32 / (1.0f32 + f32.exp (-z))
 
@@ -662,28 +601,20 @@ def model_logits [n] [p]
   let initial: [n][d]f32 = map (\token -> embedding[token]) tokens
   -- The hybrid rule is periodic, so the layer loop runs in branch-free
   -- groups of four (three GLA then one softmax) plus a GLA-only remainder:
-  -- a data-independent `if` inside the differentiated loop gives the two
-  -- arms different tape shapes and the GPU codegen of the vjp rejects the
-  -- resulting irregular allocation.  The v3 arms obey the same rule: the
-  -- arch word selects one fully-applied run_stack instantiation here,
-  -- outside every loop, and each instantiation is branch-free inside.
-  let stack gb sb = run_stack arch v f h n_layers gb sb checked initial
-  let hidden =
-    if arch_rglru arch
-    then (if arch_qknorm arch
-          then (if arch_sinks arch
-                then stack (gla_block_rglru chunk f h) (softmax_block_qk_sink f h)
-                else stack (gla_block_rglru chunk f h) (softmax_block_qk f h))
-          else (if arch_sinks arch
-                then stack (gla_block_rglru chunk f h) (softmax_block_sink f h)
-                else stack (gla_block_rglru chunk f h) (softmax_block f h)))
-    else (if arch_qknorm arch
-          then (if arch_sinks arch
-                then stack (gla_block chunk f h) (softmax_block_qk_sink f h)
-                else stack (gla_block chunk f h) (softmax_block_qk f h))
-          else (if arch_sinks arch
-                then stack (gla_block chunk f h) (softmax_block_sink f h)
-                else stack (gla_block chunk f h) (softmax_block f h)))
+  -- an `if` over DIFFERENT TAPE SHAPES inside the differentiated loop is
+  -- what the GPU codegen of the vjp rejects.  The v3 arms live INSIDE the
+  -- blocks as value-level selects over identical shapes, so one nest
+  -- serves every architecture — the per-architecture instantiation this
+  -- replaces multiplied futhark's codegen time unboundedly.
+  let groups = n_layers / 4
+  let rest = n_layers % 4
+  let grouped = loop state = initial for g < groups do
+    let s1 = gla_block_u arch chunk f h (block_base arch v d f h (4*g)) checked state
+    let s2 = gla_block_u arch chunk f h (block_base arch v d f h (4*g + 1)) checked s1
+    let s3 = gla_block_u arch chunk f h (block_base arch v d f h (4*g + 2)) checked s2
+    in softmax_block_u arch f h (block_base arch v d f h (4*g + 3)) checked s3
+  let hidden = loop state = grouped for r < rest do
+    gla_block_u arch chunk f h (block_base arch v d f h (4*groups + r)) checked state
   let final_gain = vector (block_base arch v d f h n_layers) d checked
   let final_hidden = map (\row -> rms_norm row final_gain) hidden
   -- Vocabulary projection: the embedding rows when tied (unembed_off 0),
@@ -703,23 +634,15 @@ def model_logits_quadratic [n] [p]
                         valid_tokens v tokens) params
   let embedding = matrix 0 v d checked
   let initial: [n][d]f32 = map (\token -> embedding[token]) tokens
-  let stack gb sb = run_stack arch v f h n_layers gb sb checked initial
-  let hidden =
-    if arch_rglru arch
-    then (if arch_qknorm arch
-          then (if arch_sinks arch
-                then stack (gla_block_quadratic_rglru f h) (softmax_block_qk_sink f h)
-                else stack (gla_block_quadratic_rglru f h) (softmax_block_qk f h))
-          else (if arch_sinks arch
-                then stack (gla_block_quadratic_rglru f h) (softmax_block_sink f h)
-                else stack (gla_block_quadratic_rglru f h) (softmax_block f h)))
-    else (if arch_qknorm arch
-          then (if arch_sinks arch
-                then stack (gla_block_quadratic f h) (softmax_block_qk_sink f h)
-                else stack (gla_block_quadratic f h) (softmax_block_qk f h))
-          else (if arch_sinks arch
-                then stack (gla_block_quadratic f h) (softmax_block_sink f h)
-                else stack (gla_block_quadratic f h) (softmax_block f h)))
+  let groups = n_layers / 4
+  let rest = n_layers % 4
+  let grouped = loop state = initial for g < groups do
+    let s1 = gla_block_quadratic_u arch f h (block_base arch v d f h (4*g)) checked state
+    let s2 = gla_block_quadratic_u arch f h (block_base arch v d f h (4*g + 1)) checked s1
+    let s3 = gla_block_quadratic_u arch f h (block_base arch v d f h (4*g + 2)) checked s2
+    in softmax_block_u arch f h (block_base arch v d f h (4*g + 3)) checked s3
+  let hidden = loop state = grouped for r < rest do
+    gla_block_quadratic_u arch f h (block_base arch v d f h (4*groups + r)) checked state
   let final_gain = vector (block_base arch v d f h n_layers) d checked
   let final_hidden = map (\row -> rms_norm row final_gain) hidden
   let unembed = matrix (unembed_off arch v d f h n_layers) v d checked
