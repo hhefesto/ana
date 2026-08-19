@@ -36,20 +36,8 @@ import System.IO.Unsafe (unsafePerformIO)
 import Text.Printf (printf)
 import Text.Read (readMaybe)
 
--- The model identity a checkpoint is stamped with and resumed against.
---
--- Version 3 puts the whole architecture in Config -- gate parametrization,
--- qk-norm, head sinks -- so `show cfg` IS the identity and no suffix
--- mechanism exists.  The v2 lesson stands: an architecture knob outside the
--- identity means a checkpoint trained at one setting loads without
--- complaint under another and is silently evaluated as a different model.
--- The rule is now structural: any new architecture choice must be a Config
--- field, or it does not exist.
---
--- v2 checkpoints (identity prefix ...-v2:) are served by the master
--- branch's 2.0.0 binary; this binary neither loads nor mints them.
-modelId :: Config -> String
-modelId cfg = "formal-transformer-futhark-hybrid-gla-v3:" ++ show cfg
+-- modelId lives in FormalTransformer.Config: the identity is a function of
+-- Config alone, and the read-only v2 migration in Artifact needs it too.
 
 -- Schedule experiment overrides; the defaults are the historical constants.
 -- TRAIN_LR / TRAIN_WD / TRAIN_WARMUP change training semantics — use them

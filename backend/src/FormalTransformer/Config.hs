@@ -4,6 +4,7 @@ module FormalTransformer.Config
   ( Config (..)
   , GateKind (..)
   , archCode
+  , modelId
   , validateConfig
   , headDim
   , paramCount
@@ -92,6 +93,14 @@ bpe100mPreset = Config 32768 256 768 2048 12 12 GateSigmoid False False
 -- and one softmax layer; eight give six and two.
 glaSmallPreset = Config 258 64 64 192 4 4 GateSigmoid False False
 glaPreset = Config 8192 256 320 864 8 5 GateSigmoid False False
+
+-- The model identity a checkpoint is stamped with and resumed against.
+-- Version 3 puts the whole architecture in Config, so `show cfg` IS the
+-- identity: an architecture choice outside Config cannot exist, and any
+-- change to it makes existing checkpoints fail resume loudly instead of
+-- being silently reinterpreted.
+modelId :: Config -> String
+modelId cfg = "formal-transformer-futhark-hybrid-gla-v3:" ++ show cfg
 
 -- The packed architecture word the Futhark entries receive (bit 0 =
 -- GateRgLru, bit 1 = qkNorm, bit 2 = headSinks), mirrored by arch_* in

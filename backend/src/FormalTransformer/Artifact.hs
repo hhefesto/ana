@@ -98,9 +98,19 @@ data Manifest = Manifest
   , manifestNumerics :: !Numerics
   } deriving (Eq, Show, Generic)
 
--- Version 4 is the first v3-era format (OptimizerConfig in the manifest,
--- optional Muon momentum in the checkpoint body); earlier versions belong
--- to the master branch's binary and are not read here.
+-- Version 4 is the v3-era format (OptimizerConfig in the manifest,
+-- optional Muon momentum in the checkpoint body).  Version 3 — the master
+-- branch's format, which the live bpe100m run writes — is decoded
+-- READ-ONLY and migrated in memory: its six-field Config becomes the
+-- arms-off v3 Config (GateSigmoid, no qk-norm, no sinks — proved
+-- bit-identical to v2 semantics by the conformance gate), its AdamWConfig
+-- wraps into OptimizerConfig, its layout version 2 maps to 3 (the arms-off
+-- layouts coincide slice for slice), and its model identity string is
+-- rewritten to the v3 identity of that same semantics.  This binary never
+-- WRITES version 3: the returned manifest still says 3 so the body decoder
+-- knows there is no momentum flag, and decodeCheckpointCompact normalizes
+-- it to 4 before the checkpoint leaves the decode boundary.  Versions 1
+-- and 2 stay with the master binary.
 instance Binary Manifest where
   put manifest = do
     put (manifestVersion manifest)
@@ -114,17 +124,55 @@ instance Binary Manifest where
     put (manifestNumerics manifest)
   get = do
     version <- get
-    unless (version == artifactVersion)
-      (fail ("unsupported checkpoint manifest version: " ++ show (version :: Word32)))
-    cfg <- get
-    count <- get
-    layoutIdentity <- get
-    layoutVersion <- get
-    optimizer <- get
-    identity <- get
-    clip <- get
-    numerics <- get
-    pure (Manifest artifactVersion cfg count layoutIdentity layoutVersion optimizer identity clip numerics)
+    if version == artifactVersion
+      then do
+        cfg <- get
+        count <- get
+        layoutIdentity <- get
+        layoutVersion <- get
+        optimizer <- get
+        identity <- get
+        clip <- get
+        numerics <- get
+        pure (Manifest artifactVersion cfg count layoutIdentity layoutVersion optimizer identity clip numerics)
+      else if version == (3 :: Word32)
+        then do
+          cfg <- getV2Config
+          count <- get
+          layoutIdentity <- get
+          layoutVersion <- get
+          unless (layoutVersion == (2 :: Word32))
+            (fail ("v2-era checkpoint has unexpected layout version: " ++ show layoutVersion))
+          adamw <- get
+          identity <- get
+          clip <- get
+          numerics <- get
+          pure (Manifest 3 cfg count layoutIdentity canonicalLayoutVersion
+                 (OptimizerConfig adamw Nothing)
+                 (migrateIdentity cfg identity) clip numerics)
+        else fail ("unsupported checkpoint manifest version: " ++ show version)
+
+-- The v2-era Config wire format: six Ints, no architecture fields.
+getV2Config :: Get Config
+getV2Config =
+  (\a b c d e f -> Config a b c d e f GateSigmoid False False)
+    <$> get <*> get <*> get <*> get <*> get <*> get
+
+-- The exact identity string the v2 binary minted for a config (its derived
+-- Show of the six-field record).  Only an identity that matches it exactly
+-- is rewritten; anything else — the tau/outnorm suffix arms, foreign
+-- prefixes — is left alone and fails the identity checks loudly.
+v2ModelId :: Config -> String
+v2ModelId cfg = "formal-transformer-futhark-hybrid-gla-v2:Config {vocabSize = "
+  ++ show (vocabSize cfg) ++ ", contextSize = " ++ show (contextSize cfg)
+  ++ ", modelDim = " ++ show (modelDim cfg) ++ ", ffDim = " ++ show (ffDim cfg)
+  ++ ", layerCount = " ++ show (layerCount cfg) ++ ", headCount = " ++ show (headCount cfg)
+  ++ "}"
+
+migrateIdentity :: Config -> Identity -> Identity
+migrateIdentity cfg identity
+  | modelIdentity identity == v2ModelId cfg = identity { modelIdentity = modelId cfg }
+  | otherwise = identity
 
 data Checkpoint = Checkpoint
   { checkpointManifest :: !Manifest
@@ -330,15 +378,19 @@ decodeCheckpointCompact bytes = case runGetOrFail getCheckpoint bytes of
     getCheckpoint = do
       magic <- getWord32be
       unless (magic == checkpointCompactMagic) (fail "wrong compact checkpoint magic")
-      manifest <- get
+      manifest0 <- get
       params <- getF32Vector
       step <- get
       first <- getF32Vector
       second <- getF32Vector
-      hasMomentum <- get
+      -- The momentum flag exists only in version-4 bodies; a v2-era body
+      -- goes straight from the second moment to the best-loss field.
+      hasMomentum <- if manifestVersion manifest0 == artifactVersion
+        then get else pure False
       momentum <- if hasMomentum then Just <$> getF32Vector else pure Nothing
       best <- get
       rng <- get
+      let manifest = manifest0 { manifestVersion = artifactVersion }
       pure (Checkpoint manifest params
              (OptimizerState (AdamWState step first second) momentum) best rng)
     -- The payload is a contiguous run of big-endian f32, so it is taken as one

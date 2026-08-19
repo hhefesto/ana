@@ -2,8 +2,12 @@ module Main (main) where
 
 import Control.Exception (Exception, SomeException, displayException, finally, throwIO, try)
 import Control.Monad (forM_, unless)
+import Data.Binary (put)
+import Data.Binary.Put (putFloatbe, putWord32be, putWord64be, runPut)
+import Data.Word (Word32)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
+import qualified Data.ByteString.Lazy as LBS
 import Data.List (transpose)
 import Data.Monoid (Sum (..))
 import qualified Data.Vector.Unboxed as VU
@@ -53,6 +57,7 @@ tests =
   , ("AdamW one-step equation", testAdamW)
   , ("Newton-Schulz drives singular values toward one", testNewtonSchulz)
   , ("Muon step masks ownership and is deterministic", testMuonStep)
+  , ("v2-era checkpoints migrate read-only", testV2Migration)
   , ("document split is non-overlapping", testSplit)
   , ("byte tokenizer is lossless", testByteTokenizer)
   , ("FastBPE artifact is strict and lossless", testFastBpe)
@@ -619,6 +624,65 @@ testMuonStep = do
   (adamOnly, _) <- expectRight (adamWStep acfg decay (initAdamW n) params grads)
   assert (VU.take 2 updated == VU.take 2 adamOnly)
     "non-Muon coordinates diverged from the AdamW formula"
+
+-- A version-3 (master-branch) compact checkpoint, written byte for byte
+-- the way the v2 binary writes it, must decode through the migration:
+-- Config gains the arms-off v3 fields, the layout version maps to the
+-- current one, AdamWConfig wraps into OptimizerConfig with no Muon, and
+-- the model identity string becomes the v3 identity of the same
+-- semantics.
+testV2Migration :: IO ()
+testV2Migration = do
+  temporaryDirectory <- getTemporaryDirectory
+  let path = temporaryDirectory </> "formal-transformer-v2-migration.bin"
+      cfg = tinyPreset
+      n = paramCount cfg
+      v2Identity = "formal-transformer-futhark-hybrid-gla-v2:Config {vocabSize = "
+        ++ show (vocabSize cfg) ++ ", contextSize = " ++ show (contextSize cfg)
+        ++ ", modelDim = " ++ show (modelDim cfg) ++ ", ffDim = " ++ show (ffDim cfg)
+        ++ ", layerCount = " ++ show (layerCount cfg) ++ ", headCount = " ++ show (headCount cfg)
+        ++ "}"
+      adamw = AdamWConfig 3e-4 0.9 0.999 1e-8 0.01 10 100
+      putF32s values = do
+        putWord64be (fromIntegral (length values))
+        mapM_ (putFloatbe . realToFrac) (values :: [Double])
+      bytes = runPut $ do
+        putWord32be 0x46544332
+        put (3 :: Word32)
+        mapM_ put [vocabSize cfg, contextSize cfg, modelDim cfg,
+                   ffDim cfg, layerCount cfg, headCount cfg]
+        put n
+        put canonicalLayoutIdentity
+        put (2 :: Word32)
+        put adamw
+        put (Identity v2Identity "tok-v1" "data-v1")
+        put (0.75 :: Double)
+        put Fp32IEEE
+        putF32s (replicate n 0.5)
+        put (7 :: Int)
+        putF32s (replicate n 0.25)
+        putF32s (replicate n 0.125)
+        put (Just (1.5 :: Double))
+        put (PRNGState 1 2 3 4)
+      cleanup = do exists <- doesFileExist path; if exists then removeFile path else pure ()
+  cleanup
+  (do
+      LBS.writeFile path bytes
+      loaded <- loadCheckpoint path >>= expectRight
+      let manifest = checkpointManifest loaded
+      assert (manifestVersion manifest == artifactVersion) "migrated version is not current"
+      assert (manifestConfig manifest == cfg) "migrated config is not the arms-off v3 config"
+      assert (manifestLayoutVersion manifest == canonicalLayoutVersion) "migrated layout version differs"
+      assert (manifestOptimizerConfig manifest == OptimizerConfig adamw Nothing)
+        "migrated optimizer config is not wrapped AdamW"
+      assert (modelIdentity (manifestIdentity manifest) == modelId cfg)
+        "migrated model identity is not the v3 identity"
+      assert (adamStep (optAdamWState (checkpointOptimizer loaded)) == 7)
+        "migrated optimizer step differs"
+      assert (optMuonMomentum (checkpointOptimizer loaded) == Nothing)
+        "migrated checkpoint invented momentum"
+      assert (checkpointBestValidationLoss loaded == Just 1.5)
+        "migrated best validation loss differs") `finally` cleanup
 
 testSplit :: IO ()
 testSplit = do
