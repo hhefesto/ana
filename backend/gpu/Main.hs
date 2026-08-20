@@ -36,27 +36,8 @@ import System.IO.Unsafe (unsafePerformIO)
 import Text.Printf (printf)
 import Text.Read (readMaybe)
 
--- The model identity a checkpoint is stamped with and resumed against.
---
--- `Config` carries only the six Ints, so the GLA fix arms -- gateTemperature
--- and glaOutputNorm (FormalTransformer.Config) -- were invisible here.  They
--- are architecture: the gate is alpha = sigmoid(z)^(1/tau), so moving tau
--- changes what every GLA layer's decay MEANS.  Without them in the identity a
--- checkpoint trained at one setting loads without complaint under another and
--- is silently evaluated as a different model -- no error, just quietly wrong
--- output from a set of weights that cost days of GPU time.
---
--- The suffix is empty at the historical values, so identities minted before
--- this existed are reproduced byte for byte and every stored checkpoint keeps
--- loading.  Move either arm and validateResume rejects those checkpoints
--- loudly, which is the entire point.
-modelId :: Config -> String
-modelId cfg = "formal-transformer-futhark-hybrid-gla-v2:" ++ show cfg ++ gateSuffix
-  where
-    gateSuffix
-      | gateTemperature == 1 && not glaOutputNorm = ""
-      | otherwise = ":tau=" ++ show gateTemperature
-                 ++ ":outnorm=" ++ show glaOutputNorm
+-- modelId lives in FormalTransformer.Config: the identity is a function of
+-- Config alone, and the read-only v2 migration in Artifact needs it too.
 
 -- Schedule experiment overrides; the defaults are the historical constants.
 -- TRAIN_LR / TRAIN_WD / TRAIN_WARMUP change training semantics — use them
@@ -76,6 +57,34 @@ optimizerFor steps = AdamWConfig
   (envFloat "TRAIN_LR" 3e-4) 0.9 0.999 1e-8
   (envFloat "TRAIN_WD" 0.01)
   (min (envInt "TRAIN_WARMUP" 100) steps) steps
+
+-- The run's optimizer: TRAIN_OPT=muon puts the 2-D hidden matrices on Muon
+-- (Newton-Schulz over Nesterov momentum, TRAIN_MUON_BETA default 0.95, RMS
+-- matched so TRAIN_LR carries over) with AdamW on everything else; the
+-- default is AdamW throughout.  The choice is stamped into the checkpoint
+-- manifest and validated on resume like every other piece of run identity.
+{-# NOINLINE trainOptimizerKind #-}
+trainOptimizerKind :: String
+trainOptimizerKind = unsafePerformIO (maybe "adamw" id <$> lookupEnv "TRAIN_OPT")
+
+optimizerConfigFor :: Int -> OptimizerConfig
+optimizerConfigFor steps = OptimizerConfig (optimizerFor steps) muon
+  where
+    muon = case trainOptimizerKind of
+      "muon" -> Just (MuonConfig (envFloat "TRAIN_MUON_BETA" 0.95))
+      "adamw" -> Nothing
+      other -> error ("TRAIN_OPT must be adamw or muon, got: " ++ other)
+
+-- The Muon-owned slices: every 2-D hidden matrix.  The tied embedding
+-- (also the output head) and every vector-shaped parameter stay on AdamW.
+muonSlicesFor :: Config -> [MuonSlice]
+muonSlicesFor cfg =
+  [ MuonSlice (sliceOffset s) (sliceRows s) (sliceCols s)
+  | s <- either (const []) id (namedLayout cfg)
+  , sliceCols s > 1
+  , sliceName s /= "embedding"
+  , sliceName s /= "unembedding"   -- heads stay on AdamW, like the embedding
+  ]
 
 main :: IO ()
 main = do
@@ -132,6 +141,22 @@ sizePresets =
   , ("bpe100m", bpe100mPreset)
   , ("gla-small", glaSmallPreset)
   , ("gla", glaPreset)
+  -- v3 pilot arms (docs/V3-DECISIONS.md).
+  , ("tiny-rglru", tinyPreset { gateKind = GateRgLru })
+  -- tiny has ONE layer, hence no softmax block: tiny-v3 only exercises the
+  -- gate arm.  small4-v3 (4 layers, one softmax) is the smallest smoke that
+  -- actually runs qk-norm and sinks in training.
+  , ("tiny-v3", tinyPreset { gateKind = GateRgLru, qkNorm = True, headSinks = True })
+  , ("small4-v3", small4Preset { gateKind = GateRgLru, qkNorm = True, headSinks = True })
+  , ("bpe10m-rglru", bpe10mPreset { gateKind = GateRgLru })
+  , ("bpe10m-qk-sink", bpe10mPreset { qkNorm = True, headSinks = True })
+  , ("bpe10m-v3", bpe10mV3Preset)
+  -- The v3 production run (docs/V3-DECISIONS.md section 6): bpe100m
+  -- dimensions, RG-LRU + qk-norm + sinks, tied head.
+  , ("bpe100m-v3", bpe100mV3Preset)
+  -- Pilot arm A5 (docs/V3-DECISIONS.md): a separate unembedding matrix.
+  , ("tiny-untied", tinyPreset { tiedHead = False })
+  , ("bpe10m-untied", bpe10mPreset { tiedHead = False })
   ]
 
 chooseConfig :: String -> IO Config
@@ -176,7 +201,7 @@ actStats corpusPath checkpointPath cfg = do
     ("checkpoint config " ++ show (manifestConfig manifest)
       ++ " does not match requested size " ++ show cfg))
   let params = U.toList (checkpointParameters checkpoint)
-      step = adamStep (checkpointOptimizer checkpoint)
+      step = adamStep (optAdamWState (checkpointOptimizer checkpoint))
   results <- mapM (either die pure . fullSequenceStats cfg params) windows
   let mean xs = sum xs / fromIntegral (length xs) :: Double
       header = "act step=" ++ show step ++ " windows=" ++ show (length results)
@@ -595,7 +620,7 @@ trainInContext ctx corpusPath checkpointPath mode cfg = do
       ++ " = " ++ show epochSteps ++ " steps, global "
       ++ show segmentStart ++ ".." ++ show target ++ "/" ++ show scheduleTotal)
   let identity = Identity (modelId cfg) (corpusTokenizerIdentity corpus) runDatasetIdentity
-      optCfg = optimizerFor scheduleTotal
+      optCfg = optimizerConfigFor scheduleTotal
   existing <- doesFileExist checkpointPath
   checkpoint <- if existing
     then loadCheckpoint checkpointPath >>= either die
@@ -607,33 +632,55 @@ trainInContext ctx corpusPath checkpointPath mode cfg = do
       case initFrom of
         Nothing -> pure fresh
         Just source -> do
-          -- Warm start: copy only the parameters of a compatible previous
-          -- run into a NEW run; identity, schedule, optimizer moments,
-          -- step, and PRNG are all fresh.
+          -- Warm start: copy the parameters of a previous run into a NEW
+          -- run; identity, schedule, optimizer moments, step, and PRNG are
+          -- all fresh.  The source may be a different architecture over the
+          -- same core dimensions — a v2-era checkpoint decodes through the
+          -- read-only migration and lands here as arms-off v3 — in which
+          -- case slices transfer by transferParameters' rules and the rest
+          -- keep their fresh initialization.
           previous <- loadCheckpoint source >>= either die pure
           let previousManifest = checkpointManifest previous
               previousIdentity = manifestIdentity previousManifest
-          when (manifestConfig previousManifest /= cfg)
-            (die ("TRAIN_INIT checkpoint has a different model configuration: " ++ source))
-          when (modelIdentity previousIdentity /= modelId cfg
-            || tokenizerIdentity previousIdentity /= corpusTokenizerIdentity corpus)
-            (die ("TRAIN_INIT checkpoint has a different model or tokenizer identity: " ++ source))
-          logTraining ("warm start: parameters initialized from " ++ source
-            ++ " (completed step " ++ show (adamStep (checkpointOptimizer previous)) ++ ")")
-          pure fresh { checkpointParameters = checkpointParameters previous }
-  when (adamStep (checkpointOptimizer checkpoint) < segmentStart)
+              previousConfig = manifestConfig previousManifest
+              previousStep = adamStep (optAdamWState (checkpointOptimizer previous))
+          when (tokenizerIdentity previousIdentity /= corpusTokenizerIdentity corpus)
+            (die ("TRAIN_INIT checkpoint has a different tokenizer identity: " ++ source))
+          if previousConfig == cfg
+            then do
+              when (modelIdentity previousIdentity /= modelId cfg)
+                (die ("TRAIN_INIT checkpoint has a different model identity: " ++ source))
+              logTraining ("warm start: parameters initialized from " ++ source
+                ++ " (completed step " ++ show previousStep ++ ")")
+              pure fresh { checkpointParameters = checkpointParameters previous }
+            else do
+              (params, transferred, keptFresh) <- either die pure
+                (transferParameters previousConfig cfg
+                  (checkpointParameters previous) (checkpointParameters fresh))
+              logTraining ("warm start: " ++ show (length transferred)
+                ++ " slices transferred from " ++ source
+                ++ " (completed step " ++ show previousStep
+                ++ ", " ++ show previousConfig ++ "); "
+                ++ show (length keptFresh) ++ " freshly initialized: "
+                ++ intercalate ", " keptFresh)
+              pure fresh { checkpointParameters = params }
+  when (adamStep (optAdamWState (checkpointOptimizer checkpoint)) < segmentStart)
     (die "checkpoint is behind this segment's start step")
-  when (adamStep (checkpointOptimizer checkpoint) > target)
+  when (adamStep (optAdamWState (checkpointOptimizer checkpoint)) > target)
     (die "checkpoint has already passed this segment's target step")
   gpuCfg <- gpuConfigIO cfg >>= either die pure
   mask <- either die pure (decayMask cfg)
   let params0 = checkpointParameters checkpoint
       state0 = checkpointOptimizer checkpoint
+      astate0 = optAdamWState state0
       n = paramCount cfg
   logTraining ("training config=" ++ show cfg
     ++ " target=" ++ show target
     ++ " schedule_total=" ++ show scheduleTotal
-    ++ " completed=" ++ show (adamStep state0)
+    ++ " completed=" ++ show (adamStep astate0)
+    ++ " optimizer=" ++ (case optMuon optCfg of
+          Nothing -> "adamw"
+          Just muon -> "muon(beta=" ++ show (muonBeta muon) ++ ")")
     ++ " batch=" ++ show batchSize
     ++ " micro=" ++ show microSize
     ++ " numerics=" ++ show numerics
@@ -647,19 +694,22 @@ trainInContext ctx corpusPath checkpointPath mode cfg = do
       ++ " nats full=" ++ show (gateFullCrossEntropy g) ++ " nats")
   do
     params <- uploadF32Vector ctx params0
-    m <- uploadF32Vector ctx (firstMoment state0)
-    v <- uploadF32Vector ctx (secondMoment state0)
+    m <- uploadF32Vector ctx (firstMoment astate0)
+    v <- uploadF32Vector ctx (secondMoment astate0)
+    momentum0 <- mapM (uploadF32Vector ctx) (optMuonMomentum state0)
     withBoolVector ctx mask $ \deviceMask -> do
       -- DUMP_CHECKPOINTS=1: keep a step-suffixed copy of every snapshot so
       -- the act-stats diagnostic can walk the trajectory afterwards.
       dumpCheckpoints <- (== Just "1") <$> lookupEnv "DUMP_CHECKPOINTS"
-      let saveSnapshot step rng best deviceParams deviceM deviceV = do
+      let saveSnapshot step rng best deviceParams (deviceM, deviceV, deviceMomentum) = do
             hostParams <- downloadF32Vector ctx n deviceParams
             hostM <- downloadF32Vector ctx n deviceM
             hostV <- downloadF32Vector ctx n deviceV
+            hostMomentum <- mapM (downloadF32Vector ctx n) deviceMomentum
             let snapshot = checkpoint
                   { checkpointParameters = hostParams
-                  , checkpointOptimizer = AdamWState step hostM hostV
+                  , checkpointOptimizer =
+                      OptimizerState (AdamWState step hostM hostV) hostMomentum
                   , checkpointBestValidationLoss = best
                   , checkpointPRNG = rng
                   }
@@ -739,20 +789,50 @@ trainInContext ctx corpusPath checkpointPath mode cfg = do
               logTraining ("dumped step-1 gradient (" ++ show n
                 ++ " floats) and batch to " ++ path)
             _ -> pure ()
+      -- The device step: AdamW on everything, or the combined Muon/AdamW
+      -- kernel when the run carries momentum.  The Muon slice descriptors
+      -- and ownership mask are per-run constants, uploaded once here.
+      let a field = realToFrac (field (optAdamW optCfg))
+      doStep <- case optMuon optCfg of
+        Nothing -> pure $ \step lr g ps (ms, vs, _) -> do
+          (ps', ms', vs') <- adamwStep ctx (fromIntegral step) lr
+            (a beta1) (a beta2) (a adamEpsilon) (a weightDecay)
+            ps g ms vs deviceMask
+          pure (ps', (ms', vs', Nothing))
+        Just muon -> do
+          let slices = muonSlicesFor cfg
+              muonMaskHost = U.update (U.replicate n False)
+                (U.fromList [ (muonOffset s + i, True)
+                            | s <- slices
+                            , i <- [0 .. muonRows s * muonCols s - 1] ])
+          when (null slices) (die "TRAIN_OPT=muon but no hidden matrices found")
+          offsD <- uploadI64Vector ctx (map (fromIntegral . muonOffset) slices)
+          rowsD <- uploadI64Vector ctx (map (fromIntegral . muonRows) slices)
+          colsD <- uploadI64Vector ctx (map (fromIntegral . muonCols) slices)
+          muonMaskD <- uploadBoolVector ctx muonMaskHost
+          pure $ \step lr g ps (ms, vs, mmom) -> do
+            momD <- maybe (die "muon step without momentum buffer") pure mmom
+            (ps', mom', ms', vs') <- muonStepDevice ctx (fromIntegral step) lr
+              (a beta1) (a beta2) (a adamEpsilon) (a weightDecay)
+              (realToFrac (muonBeta muon))
+              ps g momD ms vs deviceMask muonMaskD offsD rowsD colsD
+            pure (ps', (ms', vs', Just mom'))
       let resumedBest = checkpointBestValidationLoss checkpoint
           segmentBest = case mode of
-            Segment _ start _ _ _ _ | adamStep state0 == start -> Nothing
+            Segment _ start _ _ _ _ | adamStep astate0 == start -> Nothing
             _ -> resumedBest
           progress0 = TrainingProgress Nothing Nothing segmentBest
-      (paramsFinal, mFinal, vFinal, rngFinal, progressFinal) <-
-        loop ctx gpuCfg n optCfg split sampler target (adamStep state0) microSize checkpointEvery
+      (paramsFinal, optFinal, rngFinal, progressFinal) <-
+        loop ctx gpuCfg n (optAdamW optCfg) split sampler target (adamStep astate0) microSize checkpointEvery
           validateEvery clipNorm bpbScale
           (gateSampleCrossEntropy <$> gate)
-          saveSnapshot dumpSlices dumpVector maskGradient params m v deviceMask (checkpointPRNG checkpoint)
+          saveSnapshot dumpSlices dumpVector maskGradient doStep
+          params (m, v, momentum0) (checkpointPRNG checkpoint)
           progress0
-      saveSnapshot target rngFinal (progressBestValidationLoss progressFinal) paramsFinal mFinal vFinal
+      saveSnapshot target rngFinal (progressBestValidationLoss progressFinal) paramsFinal optFinal
       logTraining ("saved checkpoint at completed step " ++ show target ++ ": " ++ checkpointPath)
-      mapM_ (freeF32 ctx) [paramsFinal, mFinal, vFinal]
+      freeF32 ctx paramsFinal
+      freeDeviceOpt ctx optFinal
 
 -- One segment line of a run plan, as deploy/plan-corpus writes it:
 --   segment <k> <document_offset> <docs> <corpus_id> <tw> <vw> <steps> <seg_start> <seg_end>
@@ -819,7 +899,7 @@ trainPlan planPath runDir checkpointPath size cfg = do
   completed <- do
     existing <- doesFileExist checkpointPath
     if existing
-      then adamStep . checkpointOptimizer <$> (loadCheckpoint checkpointPath >>= either die pure)
+      then adamStep . optAdamWState . checkpointOptimizer <$> (loadCheckpoint checkpointPath >>= either die pure)
       else pure 0
   let remaining = [segment | segment <- segments, planSegmentEnd segment > completed]
       selected = if maxShards > 0 then take maxShards remaining else remaining
@@ -885,8 +965,9 @@ bench corpusPath cfg = do
       optCfg = optimizerFor total
       identity = Identity (modelId cfg) (corpusTokenizerIdentity corpus)
         (corpusDatasetIdentity corpus)
-      fresh = newCheckpoint cfg identity optCfg clipNorm numerics
-      state0 = checkpointOptimizer fresh
+      -- bench measures the AdamW step; a Muon bench arrives with its pilot.
+      fresh = newCheckpoint cfg identity (OptimizerConfig optCfg Nothing) clipNorm numerics
+      state0 = optAdamWState (checkpointOptimizer fresh)
       n = paramCount cfg
   mask <- either die pure (decayMask cfg)
   gpuCfg <- gpuConfigIO cfg >>= either die pure
@@ -983,6 +1064,16 @@ epochSampler batchSize windows = \step rng ->
 segmentSampler :: Int -> Sampler -> Sampler
 segmentSampler segmentStart sampler globalStep = sampler (globalStep - segmentStart)
 
+-- The device-resident optimizer state: AdamW moments plus (under Muon)
+-- the momentum buffer.
+type DeviceOpt = (F32Array, F32Array, Maybe F32Array)
+
+freeDeviceOpt :: Context -> DeviceOpt -> IO ()
+freeDeviceOpt ctx (m, v, momentum) = do
+  freeF32 ctx m
+  freeF32 ctx v
+  mapM_ (freeF32 ctx) momentum
+
 loop
   :: Context
   -> GpuConfig
@@ -998,19 +1089,18 @@ loop
   -> Float
   -> Maybe Double
   -> Maybe Double
-  -> (Int -> PRNGState -> Maybe Double -> F32Array -> F32Array -> F32Array -> IO ())
+  -> (Int -> PRNGState -> Maybe Double -> F32Array -> DeviceOpt -> IO ())
   -> (Int -> F32Array -> F32Array -> IO ())
   -> (Int -> [[Int64]] -> F32Array -> IO ())
   -> (F32Array -> IO F32Array)
+  -> (Int -> Float -> F32Array -> F32Array -> DeviceOpt -> IO (F32Array, DeviceOpt))
   -> F32Array
-  -> F32Array
-  -> F32Array
-  -> BoolArray
+  -> DeviceOpt
   -> PRNGState
   -> TrainingProgress
-  -> IO (F32Array, F32Array, F32Array, PRNGState, TrainingProgress)
-loop ctx gpuCfg n optCfg split sampler target completed microSize checkpointEvery validateEvery clipNorm bpbScale gate saveSnapshot dumpSlices dumpVector maskGradient params m v mask rng progress
-  | completed >= target = pure (params, m, v, rng, progress)
+  -> IO (F32Array, DeviceOpt, PRNGState, TrainingProgress)
+loop ctx gpuCfg n optCfg split sampler target completed microSize checkpointEvery validateEvery clipNorm bpbScale gate saveSnapshot dumpSlices dumpVector maskGradient doStep params opt rng progress
+  | completed >= target = pure (params, opt, rng, progress)
   | otherwise = do
       let step = completed + 1
           (batch, rng') = sampler step rng
@@ -1020,13 +1110,12 @@ loop ctx gpuCfg n optCfg split sampler target completed microSize checkpointEver
       dumpVector step batch gradient
       (gradientNorm, clipped) <- bracket (maskGradient gradient) (freeF32 ctx) $ \g ->
         clipGlobalNorm ctx clipNorm g
-      (params', m', v') <- bracket (pure clipped) (freeF32 ctx) $ \g -> do
-        result@(nextParams, _, _) <- adamwStep ctx (fromIntegral step) lr (f beta1) (f beta2) (f adamEpsilon) (f weightDecay) params g m v mask
+      (params', opt') <- bracket (pure clipped) (freeF32 ctx) $ \g -> do
+        result@(nextParams, _) <- doStep step lr g params opt
         dumpSlices step g nextParams
         pure result
       freeF32 ctx params
-      freeF32 ctx m
-      freeF32 ctx v
+      freeDeviceOpt ctx opt
       let ema = case progressTrainLossEma progress of
             Nothing -> loss
             Just previous -> trainLossEmaDecay * previous + (1 - trainLossEmaDecay) * loss
@@ -1067,10 +1156,9 @@ loop ctx gpuCfg n optCfg split sampler target completed microSize checkpointEver
         ++ " clipped=" ++ boolText (gradientNorm > clipNorm)
         ++ validationText)
       when (step `mod` checkpointEvery == 0 && step /= target) $
-        saveSnapshot step rng' (progressBestValidationLoss progress') params' m' v'
-      loop ctx gpuCfg n optCfg split sampler target step microSize checkpointEvery validateEvery clipNorm bpbScale gate saveSnapshot dumpSlices dumpVector maskGradient
-        params' m' v' mask rng' progress'
-  where f field = realToFrac (field optCfg)
+        saveSnapshot step rng' (progressBestValidationLoss progress') params' opt'
+      loop ctx gpuCfg n optCfg split sampler target step microSize checkpointEvery validateEvery clipNorm bpbScale gate saveSnapshot dumpSlices dumpVector maskGradient doStep
+        params' opt' rng' progress'
 
 logTraining :: String -> IO ()
 logTraining message = do
@@ -1155,21 +1243,42 @@ trainingSequencesFrom offset cfg documents = do
       (any (\token -> token < 2 || token >= vocabSize cfg) (documentTokens document))
       (Left ("document " ++ documentId document ++ " contains a token outside model vocabulary"))
 
-newCheckpoint :: Config -> Identity -> AdamWConfig -> Float -> Numerics -> Checkpoint
+newCheckpoint :: Config -> Identity -> OptimizerConfig -> Float -> Numerics -> Checkpoint
 newCheckpoint cfg identity optCfg clipNorm numerics =
-  Checkpoint manifest params (initAdamW count) Nothing initialPRNG
+  Checkpoint manifest params (initOptimizerState optCfg count) Nothing initialPRNG
   where
     count = paramCount cfg
     manifest = Manifest artifactVersion cfg count canonicalLayoutIdentity canonicalLayoutVersion
       optCfg identity (realToFrac clipNorm) numerics
     params = either error (U.concat . map initialize) (namedLayout cfg)
     initialize slice
+      | ".gate_lambda" `isSuffixOf` sliceName slice =
+          U.generate (sliceLength slice) (\i -> lambdaInit (sliceOffset slice + i + 1))
+      -- Zero-centered qk-norm gains start at gain = 1 + 0, and sink logits
+      -- start at 0 (unit sink mass, e^0 = 1 — Attention/Sink.agda's
+      -- softmax-one reading): both arms begin as near-neutral variants of
+      -- the plain layer and learn away from it.
+      | ".qk_gain_q" `isSuffixOf` sliceName slice
+          || ".qk_gain_k" `isSuffixOf` sliceName slice
+          || ".sink" `isSuffixOf` sliceName slice =
+          U.replicate (sliceLength slice) 0
       | initZeroOutput && (".wo" `isSuffixOf` sliceName slice
           || ".wdown" `isSuffixOf` sliceName slice) =
           U.replicate (sliceLength slice) 0
       | sliceDecay slice =
           U.generate (sliceLength slice) (\i -> initNoise (sliceOffset slice + i + 1))
       | otherwise = U.replicate (sliceLength slice) 1
+
+-- Griffin's RG-LRU init (arXiv 2402.19427): Λ such that the effective decay
+-- a^c = sigmoid(Λ)^8 is uniform on [0.9, 0.999] — the gates START open,
+-- and training can close them, inverting the v2 pathology where they start
+-- half-closed and never open.  Deterministic per parameter index, like
+-- every other init here.
+lambdaInit :: Int -> Double
+lambdaInit index = log (a / (1 - a))
+  where
+    u = 0.9 + 0.099 * ((hashNoise index + 1) / 2)  -- a^8, uniform [0.9, 0.999)
+    a = u ** (1 / 8)
 
 -- Init experiment overrides (probes only; the initialization is part of a
 -- run's identity, so record any override with a published run).
@@ -1209,7 +1318,7 @@ hashNoise index =
       z3 = z2 `xor` (z2 `shiftR` 31)
   in fromIntegral z3 / 9223372036854775808 - 1
 
-validateResume :: Config -> Identity -> AdamWConfig -> Float -> Numerics -> Checkpoint -> IO Checkpoint
+validateResume :: Config -> Identity -> OptimizerConfig -> Float -> Numerics -> Checkpoint -> IO Checkpoint
 validateResume cfg identity optCfg clipNorm numerics checkpoint = do
   let manifest = checkpointManifest checkpoint
   when (manifestConfig manifest /= cfg) (die "checkpoint config does not match requested model size")
@@ -1251,7 +1360,7 @@ checkpointInfo path = do
   (manifest, step) <- loadCheckpointSummary path >>= either die pure
   mtime <- getModificationTime path
   let cfg = manifestConfig manifest
-      scheduled = totalSteps (manifestOptimizerConfig manifest)
+      scheduled = totalSteps (optAdamW (manifestOptimizerConfig manifest))
       described = thousands (paramCount cfg) ++ " parameters (" ++ show cfg ++ ")"
       model = case [label | (label, preset) <- sizePresets, preset == cfg] of
         label : _ -> label ++ " — " ++ described
@@ -1314,8 +1423,8 @@ evaluate checkpointPath corpusPath = do
   scale <- either die pure (bitsPerByteScale tokenizer windows)
   gpuCfg <- gpuConfigIO cfg >>= either die pure
   let chunks = chunksOf microSize windows
-      completed = adamStep (checkpointOptimizer checkpoint)
-      scheduled = totalSteps (manifestOptimizerConfig manifest)
+      completed = adamStep (optAdamWState (checkpointOptimizer checkpoint))
+      scheduled = totalSteps (optAdamW (manifestOptimizerConfig manifest))
   hPutStrLn stderr ("evaluate: " ++ show (length windows) ++ " windows, "
     ++ show (length chunks) ++ " chunks of at most " ++ show microSize)
   results <- withContext $ \ctx ->
@@ -1395,8 +1504,8 @@ generate checkpointPath text budget = do
   let promptBytes = Text.encodeUtf8 (Text.pack stripped)
       prompt = bosToken : encodeWith tokenizer promptBytes
       n = paramCount cfg
-      completed = adamStep (checkpointOptimizer checkpoint)
-      scheduled = totalSteps (manifestOptimizerConfig manifest)
+      completed = adamStep (optAdamWState (checkpointOptimizer checkpoint))
+      scheduled = totalSteps (optAdamW (manifestOptimizerConfig manifest))
       progress = 100 * fromIntegral completed / fromIntegral scheduled :: Double
       emit token = do
         bytes <- either die pure (decodeWith tokenizer [token])

@@ -16,7 +16,7 @@ import System.Environment (lookupEnv)
 import System.Exit (die)
 
 config :: Config
-config = Config 5 4 4 6 5 2
+config = Config 5 4 4 6 5 2 GateSigmoid False False True
 
 tokens :: [Int]
 tokens = [0, 2, 3, 4]
@@ -967,7 +967,7 @@ glaAttentionReference batch n heads hd q k value gate = concat
     go state ((qRow, kRow, valueRow, gateRow) : rest) =
       output : go state' rest
       where
-        alpha = map gateAlpha gateRow
+        alpha = map (gateAlpha config) gateRow
         state' = zipWith3
           (\decay key stateRow -> zipWith (\old valueElement ->
             decay * old + key * valueElement) stateRow valueRow)
@@ -1054,10 +1054,7 @@ glaFullBlockReference batch n heads hd _chunk f packed =
     gate = denseReference d d normalized walpha
     q = concatMap (l2NormalizeHeads heads) (chunksOf d q0)
     k = concatMap (l2NormalizeHeads heads) (chunksOf d k0)
-    attendedRaw = glaAttentionReference batch n heads hd q k value gate
-    attended
-      | glaOutputNorm = concatMap (l2NormalizeHeads heads) (chunksOf d attendedRaw)
-      | otherwise = attendedRaw
+    attended = glaAttentionReference batch n heads hd q k value gate
     afterAttention = zipWith (+) x (denseReference d d attended wo)
 
 unpackGlaBlock

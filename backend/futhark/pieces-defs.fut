@@ -71,7 +71,7 @@ def piece_gate_cum [groups] [chunk] [hd]
   let checked = assert (chunk > 0 && hd > 0) gate_logits
   let logits = unflatten (unflatten checked :> [groups*chunk][hd]f32)
                :> [groups][chunk][hd]f32
-  let logs = map (map (map gate_log)) logits
+  let logs = map (map (map log_sigmoid)) logits
   let relcum = map (\group ->
     tabulate_2d chunk hd (\i c ->
       f32.sum (map (\r -> if r <= i then group[r,c] else 0.0f32)

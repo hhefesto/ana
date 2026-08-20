@@ -12,7 +12,7 @@ module FormalTransformer.Model
   ) where
 
 import Control.Monad (foldM)
-import FormalTransformer.Attention.Gla (glaAttention, l2Normalize)
+import FormalTransformer.Attention.Gla (glaAttention)
 import FormalTransformer.Config
 import FormalTransformer.Layout
 
@@ -27,11 +27,12 @@ fullSequenceLogitsGeneric c params tokens = do
   _ <- validateInputs c params tokens
   layout <- namedLayout c
   embedding <- get "embedding" layout
+  unembedding <- if tiedHead c then pure embedding else get "unembedding" layout
   initial <- mapM (embeddingRow c embedding) tokens
   hidden <- foldM (runBlock c params layout) initial [0 .. layerCount c - 1]
   gain <- get "final_rms" layout
   let final = map (rmsNorm gain) hidden
-  pure [map (dot h) (rows (modelDim c) embedding) | h <- final]
+  pure [map (dot h) (rows (modelDim c) unembedding) | h <- final]
   where
     get name layout = case filter ((== name) . sliceName) layout of
       [s] -> sliceValues s params
@@ -81,6 +82,8 @@ fullSequenceStats c params tokens = do
   _ <- validateInputs c params tokens
   layout <- namedLayout c
   embedding <- getSlice "embedding" layout params
+  unembedding <- if tiedHead c then pure embedding
+                 else getSlice "unembedding" layout params
   initial <- mapM (embeddingRow c embedding) tokens
   (finalHidden, statsRev) <- foldM
     (\(xs, acc) i -> do
@@ -90,7 +93,7 @@ fullSequenceStats c params tokens = do
     [0 .. layerCount c - 1]
   gain <- getSlice "final_rms" layout params
   let final = map (rmsNorm gain) finalHidden
-      logits = [map (dot h) (rows (modelDim c) embedding) | h <- final]
+      logits = [map (dot h) (rows (modelDim c) unembedding) | h <- final]
       scored = zip logits (drop 1 tokens)
       losses = [logSumExp z - z !! t | (z, t) <- scored]
       pTargets = [exp (z !! t - logSumExp z) | (z, t) <- scored]
@@ -121,7 +124,7 @@ runBlockStats c params layout embedded xs blockIndex = do
            , exp (meanOf (map log flat))
            , fromIntegral (length (filter (> 0.9) flat))
                / fromIntegral (max 1 (length flat)))
-      kind = case blockMixer weights of { SoftmaxMixer -> "softmax"; GlaMixer _ -> "gla" }
+      kind = case blockMixer weights of { SoftmaxMixer _ -> "softmax"; GlaMixer _ -> "gla" }
   pure ( out
        , BlockStats blockIndex kind (bucketRms out) (rmsOfRows attended)
            (meanCos out embedded) alphaStats)
@@ -180,8 +183,21 @@ embeddingRow c table token
 -- its gate projection and a SoftmaxMixer cannot carry one, which is the
 -- invariant Layout.namedLayout enforces by hand when it emits `walpha` for
 -- GLA blocks only.  The Bool that used to decide this at three separate call
--- sites is now decided once, where the weights are fetched.
-data Mixer a = SoftmaxMixer | GlaMixer [a]
+-- sites is now decided once, where the weights are fetched.  The gate
+-- parametrization (Config.gateKind) follows the same rule: an RG-LRU gate
+-- cannot lack its per-channel decay base, so it carries it.
+data Mixer a = SoftmaxMixer (SoftmaxExtras a) | GlaMixer (GlaGate a)
+
+data GlaGate a
+  = SigmoidGate [a]      -- walpha
+  | RgLruGate [a] [a]    -- walpha, gate_lambda
+
+-- The v3 softmax-layer arms (Config.qkNorm / Config.headSinks), fetched
+-- only when enabled so a v2 config carries exactly the v2 weights.
+data SoftmaxExtras a = SoftmaxExtras
+  { qkGains :: Maybe ([a], [a])  -- zero-centered: gain = 1 + w, w decayed
+  , sinkLogits :: Maybe [a]      -- one learned logit per head
+  }
 
 data BlockWeights a = BlockWeights
   { blockAttGain :: [a]
@@ -204,8 +220,16 @@ blockWeights c params layout blockIndex = do
   wv <- get "wv"
   wo <- get "wo"
   mixer <- case layerKind c blockIndex of
-    SoftmaxKind -> pure SoftmaxMixer
-    GlaKind -> fmap GlaMixer (get "walpha")
+    SoftmaxKind -> do
+      gains <- if qkNorm c
+        then Just <$> ((,) <$> get "qk_gain_q" <*> get "qk_gain_k")
+        else pure Nothing
+      sinks <- if headSinks c then Just <$> get "sink" else pure Nothing
+      pure (SoftmaxMixer (SoftmaxExtras gains sinks))
+    GlaKind -> case gateKind c of
+      GateSigmoid -> GlaMixer . SigmoidGate <$> get "walpha"
+      GateRgLru ->
+        (\w l -> GlaMixer (RgLruGate w l)) <$> get "walpha" <*> get "gate_lambda"
   ffGain <- get "rms_ff"
   wgate <- get "wgate"
   wup <- get "wup"
@@ -242,12 +266,11 @@ runBlockTrace c weights xs = BlockTrace out attended alphas
     qs = map (matVec d d (blockWq weights)) normalized
     ks = map (matVec d d (blockWk weights)) normalized
     vs = map (matVec d d (blockWv weights)) normalized
-    alphas = case blockMixer weights of
-      SoftmaxMixer -> Nothing
-      GlaMixer walpha -> Just (map (map gateAlpha . matVec d d walpha) normalized)
-    attended = case alphas of
-      Nothing -> causalAttention c qs ks vs
-      Just as -> glaAttendedOut c (glaAttention c qs ks vs as)
+    (alphas, attended) = case blockMixer weights of
+      SoftmaxMixer extras -> (Nothing, causalAttention c extras qs ks vs)
+      GlaMixer gate ->
+        let (as, scales) = glaGates c gate normalized
+        in (Just as, glaAttention c qs ks vs as scales)
     afterAttention = zipWith addVec xs (map (matVec d d (blockWo weights)) attended)
     ff x =
       let n = rmsNorm (blockFfGain weights) x
@@ -292,36 +315,67 @@ sigmoid x = 1 / (1 + exp (-x))
 logSigmoid :: (Floating a, Ord a) => a -> a
 logSigmoid z = negate (max (negate z) 0 + log (1 + exp (negate (abs z))))
 
--- The GLA gate with temperature (FormalTransformer.Config.gateTemperature):
--- alpha = sigmoid(z)^(1/tau).  The tau == 1 branch keeps the historical
--- bit pattern for conformance against the recorded references.
-gateAlpha :: (Floating a, Ord a) => a -> a
-gateAlpha z
-  | gateTemperature == 1 = sigmoid z
-  | otherwise = exp (logSigmoid z / realToFrac gateTemperature)
+-- The GLA gate, dispatched on the architecture (Config.gateKind).  The
+-- sigmoid case keeps the v2 bit pattern for conformance against the
+-- recorded references.  The RG-LRU case is not a scalar map — its alpha
+-- pairs the projected logit with the per-channel decay base gate_lambda —
+-- so it lives in glaGates, where the block has the weights; this scalar
+-- entry point rejects it loudly rather than silently approximating.
+gateAlpha :: (Floating a, Ord a) => Config -> a -> a
+gateAlpha c z = case gateKind c of
+  GateSigmoid -> sigmoid z
+  GateRgLru -> error "gateAlpha: GateRgLru needs gate_lambda (per-channel); use glaGates"
 
--- Per-head L2 normalization of a full d-row, the same map q/k go through.
-l2NormalizeHeads :: Floating a => Config -> [a] -> [a]
-l2NormalizeHeads c x =
-  concat [l2Normalize (take hd (drop (h * hd) x)) | h <- [0 .. headCount c - 1]]
-  where hd = headDim c
+-- Gate semantics per parametrization, over the normalized block input:
+-- (alphas, write scales), both position-major and d-wide.
+--
+--   SigmoidGate  alpha = sigmoid(walpha x), unit write (Nothing keeps the
+--                v2 float path textually identical).
+--   RgLruGate    Griffin's RG-LRU (arXiv 2402.19427, design notes §3.7):
+--                per channel, log alpha = c · sigmoid(z) · log sigmoid(Λ)
+--                with c = 8 — the exponent reshapes the response so
+--                moderate pre-activations already yield near-1 decay — and
+--                the state write is scaled by sqrt(1 − alpha²), computed
+--                from the log-gate as sqrt(1 − exp(2·log alpha)), so an
+--                open gate does not let fresh input swamp held state.
+--                That coupling is what the measured tau = 16 arm lacked
+--                when it opened the gates and lost on loss (Config.hs
+--                history, run/gate-arms-2026-07-31).
+glaGates :: (Floating a, Ord a) => Config -> GlaGate a -> [[a]] -> ([[a]], Maybe [[a]])
+glaGates c (SigmoidGate walpha) normalized =
+  (map (map sigmoid . matVec d d walpha) normalized, Nothing)
+  where d = modelDim c
+glaGates c (RgLruGate walpha lam) normalized =
+  ( map (map exp) logAlphas
+  , Just (map (map (\la -> sqrt (1 - exp (2 * la)))) logAlphas) )
+  where
+    d = modelDim c
+    logAlphas =
+      map (zipWith (\l z -> 8 * sigmoid z * logSigmoid l) lam . matVec d d walpha)
+        normalized
 
--- FormalTransformer.Config.glaOutputNorm: normalize the GLA attended
--- output (pre-Wo) per head, or pass it through unchanged.
-glaAttendedOut :: Floating a => Config -> [[a]] -> [[a]]
-glaAttendedOut c attended
-  | glaOutputNorm = map (l2NormalizeHeads c) attended
-  | otherwise = attended
-
--- Softmax full attention, no positional encoding.
-causalAttention :: (Floating a, Ord a) => Config -> [[a]] -> [[a]] -> [[a]] -> [[a]]
-causalAttention c qs ks vs =
+-- Softmax full attention, no positional encoding.  The v3 arms:
+--
+--   qkGains      per-head RMSNorm on q and k before the scores, with
+--                zero-centered gains (gain = 1 + w, w weight-decayed —
+--                the Qwen3-Next fix for gain drift; notes §3.4).  Bounds
+--                every logit by construction: |score| ≤ |gain|²·hd/√hd.
+--   sinkLogits   one learned logit per head, appended to the scores; the
+--                softmax runs over scores ++ [sink] and the sink's weight
+--                is dropped — exactly the restriction-of-extended-softmax
+--                semantics proved in FormalTransformer/Attention/Sink.agda
+--                (token weights are a subdistribution, deficient by the
+--                sink's share), so a head can attend to nothing.
+causalAttention :: (Floating a, Ord a) => Config -> SoftmaxExtras a -> [[a]] -> [[a]] -> [[a]] -> [[a]]
+causalAttention c extras qs ks vs =
   [ concat
-      [ let qh = headSlice q h
-            sourceKeys = map (\vector -> headSlice vector h) (take (t + 1) ks)
+      [ let qh = normQ (headSlice q h)
+            sourceKeys = map (normK . (\vector -> headSlice vector h)) (take (t + 1) ks)
             sourceValues = map (\vector -> headSlice vector h) (take (t + 1) vs)
             scores = map (\kh -> dot qh kh / sqrt (fromIntegral hd)) sourceKeys
-            weights = softmax scores
+            weights = case sinkLogits extras of
+              Nothing -> softmax scores
+              Just sinks -> init (softmax (scores ++ [sinks !! h]))
         in foldl addVec (replicate hd 0) (zipWith (\w value -> map (w *) value) weights sourceValues)
       | h <- [0 .. headCount c - 1]
       ]
@@ -330,6 +384,9 @@ causalAttention c qs ks vs =
   where
     hd = headDim c
     headSlice vector h = take hd (drop (h * hd) vector)
+    (normQ, normK) = case qkGains extras of
+      Nothing -> (id, id)
+      Just (wq, wk) -> (rmsNorm (map (1 +) wq), rmsNorm (map (1 +) wk))
 
 logSumExp :: (Floating a, Ord a) => [a] -> a
 logSumExp [] = error "logSumExp: empty input"

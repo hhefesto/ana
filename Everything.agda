@@ -9,7 +9,9 @@ import FormalTransformer.Language.Autoregressive
 import FormalTransformer.Language.Trie
 import FormalTransformer.Language.AutoregressiveTrie
 import FormalTransformer.Language.Decoding
+import FormalTransformer.Language.SpeculativeDecoding
 import FormalTransformer.Attention.Linear
+import FormalTransformer.Attention.Sink
 import FormalTransformer.Attention.LinearTrie
 import FormalTransformer.Enriched.Bradley
 import FormalTransformer.AD.Reverse

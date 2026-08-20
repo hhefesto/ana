@@ -8,59 +8,66 @@
 open import "model"
 
 
-entry n_params (v: i64) (d: i64) (f: i64) (n_layers: i64): i64 =
-  assert (v > 0 && d > 0 && f > 0 && n_layers > 0)
-  parameter_count v d f n_layers
+entry n_params (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64)
+    (n_layers: i64): i64 =
+  assert (v > 0 && d > 0 && f > 0 && h > 0 && n_layers > 0)
+  parameter_count arch v d f h n_layers
 
 entry logits [n]
-    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64) (chunk: i64)
-    (params: [parameter_count v d f n_layers]f32)
+    (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
+    (chunk: i64)
+    (params: [parameter_count arch v d f h n_layers]f32)
     (tokens: [n]i64): [n][v]f32 =
-  model_logits v d f h n_layers chunk params tokens
+  model_logits arch v d f h n_layers chunk params tokens
 
 entry last_logits [n]
-    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64) (chunk: i64)
-    (params: [parameter_count v d f n_layers]f32)
+    (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
+    (chunk: i64)
+    (params: [parameter_count arch v d f h n_layers]f32)
     (tokens: [n]i64): [v]f32 =
-  last (model_logits v d f h n_layers chunk params tokens)
+  last (model_logits arch v d f h n_layers chunk params tokens)
 
 -- Conformance-oriented full-prefix inference.  Causality means row i is the
 -- same result as running last_logits on tokens[:i+1].  A shape-safe true KV
 -- cache entry remains pending; this entry intentionally does not fake one.
 entry prefix_logits [n]
-    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64) (chunk: i64)
-    (params: [parameter_count v d f n_layers]f32)
+    (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
+    (chunk: i64)
+    (params: [parameter_count arch v d f h n_layers]f32)
     (tokens: [n]i64): [n][v]f32 =
-  model_logits v d f h n_layers chunk params tokens
+  model_logits arch v d f h n_layers chunk params tokens
 
 -- Forward-only quadratic-GLA twin for the chunked≡quadratic comparison.
 entry logits_quadratic [n]
-    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
-    (params: [parameter_count v d f n_layers]f32)
+    (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
+    (params: [parameter_count arch v d f h n_layers]f32)
     (tokens: [n]i64): [n][v]f32 =
-  model_logits_quadratic v d f h n_layers params tokens
+  model_logits_quadratic arch v d f h n_layers params tokens
 -- Returns (mean next-token cross-entropy, gradient with respect to params).
 entry loss_grad [n]
-    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64) (chunk: i64)
-    (params: [parameter_count v d f n_layers]f32)
-    (tokens: [n]i64): (f32, [parameter_count v d f n_layers]f32) =
-  vjp2 (next_token_loss v d f h n_layers chunk tokens) params 1.0f32
+    (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
+    (chunk: i64)
+    (params: [parameter_count arch v d f h n_layers]f32)
+    (tokens: [n]i64): (f32, [parameter_count arch v d f h n_layers]f32) =
+  vjp2 (next_token_loss arch v d f h n_layers chunk tokens) params 1.0f32
 -- Mean next-token cross-entropy over a nonempty minibatch.  Every sequence
 -- has the same statically known length and contributes equally to the mean.
 entry batch_mean_loss [batch] [sequence]
-    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64) (chunk: i64)
-    (params: [parameter_count v d f n_layers]f32)
+    (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
+    (chunk: i64)
+    (params: [parameter_count arch v d f h n_layers]f32)
     (tokens: [batch][sequence]i64): f32 =
-  batch_mean_loss_def v d f h n_layers chunk params tokens
+  batch_mean_loss_def arch v d f h n_layers chunk params tokens
 
 -- Returns (batch mean loss, gradient of that mean with respect to params).
 entry batch_loss_grad [batch] [sequence]
-    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64) (chunk: i64)
-    (params: [parameter_count v d f n_layers]f32)
+    (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
+    (chunk: i64)
+    (params: [parameter_count arch v d f h n_layers]f32)
     (tokens: [batch][sequence]i64)
-    : (f32, [parameter_count v d f n_layers]f32) =
+    : (f32, [parameter_count arch v d f h n_layers]f32) =
   vjp2 (\candidate ->
-    batch_mean_loss_def v d f h n_layers chunk candidate tokens) params 1.0f32
+    batch_mean_loss_def arch v d f h n_layers chunk candidate tokens) params 1.0f32
 
 entry zero_vector (count: i64): [count]f32 =
   replicate (assert (count >= 0) count) 0.0f32
@@ -81,19 +88,20 @@ entry zero_vector (count: i64): [count]f32 =
 -- textually identical to kernels-opencl.fut so the conformance oracle
 -- (which builds this file) validates the formulation the GPU trainers run.
 entry micro_batch_loss_grad [batch] [sequence]
-    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64) (chunk: i64)
+    (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
+    (chunk: i64)
     (effective_batch: i64)
-    (accumulator: [parameter_count v d f n_layers]f32)
-    (params: [parameter_count v d f n_layers]f32)
+    (accumulator: [parameter_count arch v d f h n_layers]f32)
+    (params: [parameter_count arch v d f h n_layers]f32)
     (tokens: [batch][sequence]i64)
-    : (f32, [parameter_count v d f n_layers]f32) =
+    : (f32, [parameter_count arch v d f h n_layers]f32) =
   let checked = assert (batch > 0 && sequence >= 2 &&
                         effective_batch >= batch) tokens
   let seed = 1.0f32 / f32.i64 effective_batch
   let (loss_sum, accumulated) =
     loop (loss_sum, acc) = (0.0f32, accumulator) for b < batch do
       let (sample_loss, gradient) =
-        vjp2 (next_token_loss v d f h n_layers chunk checked[b]) params seed
+        vjp2 (next_token_loss arch v d f h n_layers chunk checked[b]) params seed
       in (loss_sum + sample_loss, map2 (+) acc gradient)
   in (loss_sum / f32.i64 effective_batch, accumulated)
 
@@ -134,10 +142,25 @@ entry adamw_step [p]
 -- per-layer state (GLA matrices and a NoPE softmax ring-buffer KV cache).
 -- Nondifferentiated, so it does not enlarge the vjp-generated code.
 entry decode_step [gs] [ks]
+    (arch: i64)
     (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64) (ctx: i64)
-    (params: [parameter_count v d f n_layers]f32)
+    (params: [parameter_count arch v d f h n_layers]f32)
     (position: i64) (token: i64)
     (gla_state: *[gs]f32) (k_cache: *[ks]f32) (v_cache: *[ks]f32)
     : ([v]f32, *[gs]f32, *[ks]f32, *[ks]f32) =
-  decode_step_def v d f h n_layers ctx params position token
+  decode_step_def arch v d f h n_layers ctx params position token
                   gla_state k_cache v_cache
+
+-- One combined Muon/AdamW update; see muon_step_def in model.fut and the
+-- Double-precision reference FormalTransformer.Optimizer.muonStep.
+entry muon_step [p] [k]
+    (step: i64) (learning_rate: f32) (beta1: f32) (beta2: f32)
+    (epsilon: f32) (weight_decay: f32) (muon_beta: f32)
+    (params: [p]f32) (gradient: [p]f32)
+    (momentum: [p]f32) (first_moment: [p]f32) (second_moment: [p]f32)
+    (decay_mask: [p]bool) (muon_mask: [p]bool)
+    (slice_off: [k]i64) (slice_rows: [k]i64) (slice_cols: [k]i64)
+    : ([p]f32, [p]f32, [p]f32, [p]f32) =
+  muon_step_def step learning_rate beta1 beta2 epsilon weight_decay muon_beta
+    params gradient momentum first_moment second_moment decay_mask muon_mask
+    slice_off slice_rows slice_cols

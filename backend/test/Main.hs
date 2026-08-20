@@ -2,8 +2,12 @@ module Main (main) where
 
 import Control.Exception (Exception, SomeException, displayException, finally, throwIO, try)
 import Control.Monad (forM_, unless)
+import Data.Binary (put)
+import Data.Binary.Put (putFloatbe, putWord32be, putWord64be, runPut)
+import Data.Word (Word32)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
+import qualified Data.ByteString.Lazy as LBS
 import Data.List (transpose)
 import Data.Monoid (Sum (..))
 import qualified Data.Vector.Unboxed as VU
@@ -32,6 +36,7 @@ main = do
 tests :: [(String, IO ())]
 tests =
   [ ("parameter count and layout coverage", testLayout)
+  , ("cross-architecture warm start transfers by slice", testWarmStartTransfer)
   , ("10M BPE preset has exact dimensions", testBpePreset)
   , ("GLA hybrid presets tile 3:1 with exact counts", testGlaPresets)
   , ("invalid configurations are rejected", testConfigRejection)
@@ -51,6 +56,9 @@ tests =
   , ("Bradley finite-tree magnitude", testBradleyMagnitude)
   , ("reverse gradient agrees with finite differences", testGradient)
   , ("AdamW one-step equation", testAdamW)
+  , ("Newton-Schulz drives singular values toward one", testNewtonSchulz)
+  , ("Muon step masks ownership and is deterministic", testMuonStep)
+  , ("v2-era checkpoints migrate read-only", testV2Migration)
   , ("document split is non-overlapping", testSplit)
   , ("byte tokenizer is lossless", testByteTokenizer)
   , ("FastBPE artifact is strict and lossless", testFastBpe)
@@ -76,7 +84,7 @@ testBpe100mPreset :: IO ()
 testBpe100mPreset = do
   _ <- expectRight (validateConfig bpe100mPreset)
   layout <- expectRight (namedLayout bpe100mPreset)
-  assert (bpe100mPreset == Config 32768 256 768 2048 12 12) "100M preset dimensions differ"
+  assert (bpe100mPreset == Config 32768 256 768 2048 12 12 GateSigmoid False False True) "100M preset dimensions differ"
   assert (headDim bpe100mPreset == 64) "100M preset head dimension differs"
   assert (glaLayerCount bpe100mPreset == 9) "100M preset should have 9 GLA layers of 12"
   assert (paramCount bpe100mPreset == 115428096) "100M preset parameter count differs"
@@ -84,6 +92,13 @@ testBpe100mPreset = do
   -- Tied embeddings: the vocabulary is one d-wide row per piece and nothing else.
   assert (vocabSize bpe100mPreset * modelDim bpe100mPreset == 25165824)
     "100M embedding cost differs"
+  -- The v3 production preset shares every core dimension and adds only the
+  -- arm slices: 9 GLA gate_lambda rows of d, and per softmax layer two
+  -- head-dim qk gains plus one sink per head — 7,332 parameters.
+  v3Layout <- expectRight (namedLayout bpe100mV3Preset)
+  assert (bpe100mV3Preset == bpe100mPreset { gateKind = GateRgLru, qkNorm = True, headSinks = True }) "100M v3 preset must differ from bpe100m only in the arms"
+  assert (paramCount bpe100mV3Preset == 115435428) "100M v3 preset parameter count differs"
+  assert (sum (map sliceLength v3Layout) == 115435428) "100M v3 layout does not cover parameters"
 
 -- A learned tokenizer has to satisfy three things, and all three are checkable
 -- without a reference implementation: the artifact must be readable by the very
@@ -157,7 +172,7 @@ assertNear tolerance expected actual message =
   assert (abs (expected - actual) <= tolerance) (message ++ ": expected " ++ show expected ++ ", got " ++ show actual)
 
 config :: Config
-config = Config 4 5 2 3 1 1
+config = Config 4 5 2 3 1 1 GateSigmoid False False True
 
 params :: [Double]
 params = case namedLayout config of
@@ -180,11 +195,58 @@ testLayout = do
     + glaLayerCount config * modelDim config ^ (2 :: Int)
     + modelDim config) "parameter count formula differs"
 
+-- The warm-start transfer that lets a v3 arms-on run start from v2 (or any
+-- arms-off) weights.  Source values are distinct positives and fresh values
+-- distinct negatives, so every element's provenance is visible: shared
+-- slices must arrive from the source, the unembedding must arrive from the
+-- tied source's embedding, and walpha (across gate kinds), gate_lambda,
+-- the qk gains, and the sinks must keep their fresh initialization.
+testWarmStartTransfer :: IO ()
+testWarmStartTransfer = do
+  let src = Config 4 5 2 3 4 1 GateSigmoid False False True
+      dst = Config 4 5 2 3 4 1 GateRgLru True True False
+  srcLayout <- expectRight (namedLayout src)
+  dstLayout <- expectRight (namedLayout dst)
+  let srcParams = VU.generate (paramCount src) (\i -> fromIntegral i + 1)
+      freshParams = VU.generate (paramCount dst) (\i -> negate (fromIntegral i + 1))
+      sliceOf layout v name = case [s | s <- layout, sliceName s == name] of
+        [s] -> VU.toList (VU.slice (sliceOffset s) (sliceLength s) v)
+        _ -> error ("missing slice " ++ name)
+  (result, transferred, keptFresh) <-
+    expectRight (transferParameters src dst srcParams freshParams)
+  assert (VU.length result == paramCount dst) "transfer result has wrong length"
+  let fromSrc = sliceOf srcLayout srcParams
+      fromFresh = sliceOf dstLayout freshParams
+      got = sliceOf dstLayout result
+  forM_ ["embedding", "blocks.0.wq", "blocks.2.wdown", "blocks.3.wq", "final_rms"] $ \name ->
+    assert (got name == fromSrc name) (name ++ " did not transfer from the source")
+  assert (got "unembedding" == fromSrc "embedding")
+    "unembedding was not seeded from the tied source's embedding"
+  forM_ [ "blocks.0.walpha", "blocks.1.walpha", "blocks.2.walpha"
+        , "blocks.0.gate_lambda", "blocks.3.qk_gain_q", "blocks.3.qk_gain_k"
+        , "blocks.3.sink" ] $ \name ->
+    assert (got name == fromFresh name) (name ++ " should have kept its fresh initialization")
+  assert (length transferred + length keptFresh == length dstLayout)
+    "transfer report does not cover the target layout"
+  assert (keptFresh ==
+    [ "blocks.0.walpha", "blocks.0.gate_lambda"
+    , "blocks.1.walpha", "blocks.1.gate_lambda"
+    , "blocks.2.walpha", "blocks.2.gate_lambda"
+    , "blocks.3.qk_gain_q", "blocks.3.qk_gain_k", "blocks.3.sink"
+    ]) ("unexpected fresh slices: " ++ show keptFresh)
+  -- Same-architecture transfer is the identity, walpha included.
+  (same, _, sameFresh) <- expectRight (transferParameters src src srcParams
+    (VU.map negate srcParams))
+  assert (same == srcParams && null sameFresh) "same-architecture transfer is not the identity"
+  -- Only architecture arms may differ; core dimensions may not.
+  assert (isLeft (transferParameters src (Config 4 5 4 3 4 2 GateSigmoid False False True)
+    srcParams freshParams)) "core-dimension mismatch was accepted"
+
 testBpePreset :: IO ()
 testBpePreset = do
   _ <- expectRight (validateConfig bpe10mPreset)
   layout <- expectRight (namedLayout bpe10mPreset)
-  assert (bpe10mPreset == Config 8192 256 320 864 6 5) "10M BPE preset dimensions differ"
+  assert (bpe10mPreset == Config 8192 256 320 864 6 5 GateSigmoid False False True) "10M BPE preset dimensions differ"
   assert (headDim bpe10mPreset == 64) "10M BPE head dimension differs"
   -- Hybrid rule: of 6 layers only index 3 is softmax; 5 GLA gate
   -- projections add 5*320*320 to the former softmax-only 10,059,840.
@@ -197,8 +259,8 @@ testGlaPresets = do
   _ <- expectRight (validateConfig glaSmallPreset)
   layout <- expectRight (namedLayout glaPreset)
   smallLayout <- expectRight (namedLayout glaSmallPreset)
-  assert (glaPreset == Config 8192 256 320 864 8 5) "GLA preset dimensions differ"
-  assert (glaSmallPreset == Config 258 64 64 192 4 4) "GLA small preset dimensions differ"
+  assert (glaPreset == Config 8192 256 320 864 8 5 GateSigmoid False False True) "GLA preset dimensions differ"
+  assert (glaSmallPreset == Config 258 64 64 192 4 4 GateSigmoid False False True) "GLA small preset dimensions differ"
   -- Exact 3:1 tiling: 8 layers = 6 GLA + 2 softmax; 4 layers = 3 GLA + 1.
   assert (glaLayerCount glaPreset == 6 && glaLayerCount glaSmallPreset == 3)
     "hybrid 3:1 tiling differs"
@@ -390,7 +452,7 @@ testAlgebraFactorization = do
 -- interleaving in `map concat (transpose perHead)` are both exercised.  Only
 -- headDim and headCount are read by glaAttention.
 glaTestConfig :: Config
-glaTestConfig = Config 8 8 8 16 4 2
+glaTestConfig = Config 8 8 8 16 4 2 GateSigmoid False False True
 
 -- Deterministic synthetic activations: no RNG, so the frozen-reference
 -- comparison below is reproducible bit for bit across machines.
@@ -443,10 +505,10 @@ testGlaFrozenReference = do
       ks = glaSample width 0.7 steps
       vs = glaSample width 1.3 steps
       alphas = map (map (\x -> 0.5 + 0.4 * x)) (glaSample width 2.1 steps)
-  assert (glaAttention glaTestConfig qs ks vs alphas == frozenGlaAttention glaTestConfig qs ks vs alphas)
+  assert (glaAttention glaTestConfig qs ks vs alphas Nothing == frozenGlaAttention glaTestConfig qs ks vs alphas)
     "the GLA state-algebra refactor changed the numbers"
   -- Truncation to the shortest input is part of the denotation (zip4').
-  assert (length (glaAttention glaTestConfig qs (take 4 ks) vs alphas) == 4)
+  assert (length (glaAttention glaTestConfig qs (take 4 ks) vs alphas Nothing) == 4)
     "GLA attention no longer truncates to the shortest input"
 
 -- Linear.agda's runGLA-++, proved refl per step.  It is refl here too: the
@@ -579,6 +641,104 @@ testAdamW = do
   assertVectorsNear 1e-12 [0.05, -0.025] (VU.toList (firstMoment nextState)) "AdamW first moment differs"
   assertVectorsNear 1e-12 [0.0025, 0.000625] (VU.toList (secondMoment nextState)) "AdamW second moment differs"
 
+-- On a scaled identity every singular value starts equal, so five quintic
+-- iterations must land them near 1: NS(3·I) ≈ I.  Also the rectangular
+-- orientation (rows > cols iterates on the transpose) must preserve shape.
+testNewtonSchulz :: IO ()
+testNewtonSchulz = do
+  let o = newtonSchulz 2 2 [3, 0, 0, 3]
+  assert (length o == 4) "Newton-Schulz changed the element count"
+  assertVectorsNear 0.2 [1, 0, 0, 1] o "Newton-Schulz did not orthogonalize 3I"
+  let rect = newtonSchulz 3 2 [1, 0, 0, 1, 0, 0]
+  assert (length rect == 6) "Newton-Schulz changed the rectangular element count"
+
+-- Ownership masking: the Muon momentum lives only on the Muon slice, the
+-- Adam moments only off it, and two identical calls agree exactly.
+testMuonStep :: IO ()
+testMuonStep = do
+  let acfg = AdamWConfig 0.01 0.9 0.99 1e-8 0.1 0 10
+      cfg = OptimizerConfig acfg (Just (MuonConfig 0.9))
+      slices = [MuonSlice 2 2 2]  -- parameters 2..5 form a 2x2 matrix
+      n = 6
+      state = initOptimizerState cfg n
+      params = VU.fromList [1, -1, 0.5, 0.25, -0.5, 0.75]
+      grads = VU.fromList [0.1, -0.2, 0.3, -0.4, 0.5, -0.6]
+      decay = VU.replicate n True
+  (updated, nextState) <- expectRight (muonStep cfg slices decay state params grads)
+  (updated2, _) <- expectRight (muonStep cfg slices decay state params grads)
+  assert (updated == updated2) "Muon step is not deterministic"
+  let momentum = maybe (VU.replicate n (0 :: Double)) id (optMuonMomentum nextState)
+  assert (VU.toList (VU.take 2 momentum) == [0, 0]
+       && VU.toList (VU.drop 2 momentum) == VU.toList (VU.drop 2 grads))
+    "Muon momentum is not masked to its slice"
+  assert (VU.all (== 0) (VU.slice 2 4 (firstMoment (optAdamWState nextState))))
+    "Adam first moment leaked onto the Muon slice"
+  assert (VU.all (/= 0) (VU.take 2 (firstMoment (optAdamWState nextState))))
+    "Adam first moment missing off the Muon slice"
+  -- the non-Muon coordinates must take exactly the AdamW update
+  (adamOnly, _) <- expectRight (adamWStep acfg decay (initAdamW n) params grads)
+  assert (VU.take 2 updated == VU.take 2 adamOnly)
+    "non-Muon coordinates diverged from the AdamW formula"
+
+-- A version-3 (master-branch) compact checkpoint, written byte for byte
+-- the way the v2 binary writes it, must decode through the migration:
+-- Config gains the arms-off v3 fields, the layout version maps to the
+-- current one, AdamWConfig wraps into OptimizerConfig with no Muon, and
+-- the model identity string becomes the v3 identity of the same
+-- semantics.
+testV2Migration :: IO ()
+testV2Migration = do
+  temporaryDirectory <- getTemporaryDirectory
+  let path = temporaryDirectory </> "formal-transformer-v2-migration.bin"
+      cfg = tinyPreset
+      n = paramCount cfg
+      v2Identity = "formal-transformer-futhark-hybrid-gla-v2:Config {vocabSize = "
+        ++ show (vocabSize cfg) ++ ", contextSize = " ++ show (contextSize cfg)
+        ++ ", modelDim = " ++ show (modelDim cfg) ++ ", ffDim = " ++ show (ffDim cfg)
+        ++ ", layerCount = " ++ show (layerCount cfg) ++ ", headCount = " ++ show (headCount cfg)
+        ++ "}"
+      adamw = AdamWConfig 3e-4 0.9 0.999 1e-8 0.01 10 100
+      putF32s values = do
+        putWord64be (fromIntegral (length values))
+        mapM_ (putFloatbe . realToFrac) (values :: [Double])
+      bytes = runPut $ do
+        putWord32be 0x46544332
+        put (3 :: Word32)
+        mapM_ put [vocabSize cfg, contextSize cfg, modelDim cfg,
+                   ffDim cfg, layerCount cfg, headCount cfg]
+        put n
+        put canonicalLayoutIdentity
+        put (2 :: Word32)
+        put adamw
+        put (Identity v2Identity "tok-v1" "data-v1")
+        put (0.75 :: Double)
+        put Fp32IEEE
+        putF32s (replicate n 0.5)
+        put (7 :: Int)
+        putF32s (replicate n 0.25)
+        putF32s (replicate n 0.125)
+        put (Just (1.5 :: Double))
+        put (PRNGState 1 2 3 4)
+      cleanup = do exists <- doesFileExist path; if exists then removeFile path else pure ()
+  cleanup
+  (do
+      LBS.writeFile path bytes
+      loaded <- loadCheckpoint path >>= expectRight
+      let manifest = checkpointManifest loaded
+      assert (manifestVersion manifest == artifactVersion) "migrated version is not current"
+      assert (manifestConfig manifest == cfg) "migrated config is not the arms-off v3 config"
+      assert (manifestLayoutVersion manifest == canonicalLayoutVersion) "migrated layout version differs"
+      assert (manifestOptimizerConfig manifest == OptimizerConfig adamw Nothing)
+        "migrated optimizer config is not wrapped AdamW"
+      assert (modelIdentity (manifestIdentity manifest) == modelId cfg)
+        "migrated model identity is not the v3 identity"
+      assert (adamStep (optAdamWState (checkpointOptimizer loaded)) == 7)
+        "migrated optimizer step differs"
+      assert (optMuonMomentum (checkpointOptimizer loaded) == Nothing)
+        "migrated checkpoint invented momentum"
+      assert (checkpointBestValidationLoss loaded == Just 1.5)
+        "migrated best validation loss differs") `finally` cleanup
+
 testSplit :: IO ()
 testSplit = do
   let docs = [Document ("doc-" ++ show i) [2, 3, 2] | i <- [0 :: Int .. 39]]
@@ -680,10 +840,11 @@ testCheckpoint = do
   temporaryDirectory <- getTemporaryDirectory
   let path = temporaryDirectory </> "formal-transformer-roundtrip.bin"
       identity = Identity "tiny-model" "integer-v1" "synthetic-v1"
-      optimizerConfig = AdamWConfig 0.0025 0.8 0.95 1e-7 0.025 3 37
+      optimizerConfig = OptimizerConfig (AdamWConfig 0.0025 0.8 0.95 1e-7 0.025 3 37)
+        (Just (MuonConfig 0.95))
       manifest = Manifest artifactVersion config (paramCount config) canonicalLayoutIdentity
         canonicalLayoutVersion optimizerConfig identity 0.75 Tf32TensorCores
-      checkpoint = Checkpoint manifest (VU.fromList params) (initAdamW (paramCount config)) (Just 1.2345) (PRNGState 1 2 3 4)
+      checkpoint = Checkpoint manifest (VU.fromList params) (initOptimizerState optimizerConfig (paramCount config)) (Just 1.2345) (PRNGState 1 2 3 4)
       cleanup = do exists <- doesFileExist path; if exists then removeFile path else pure ()
   cleanup
   (do
@@ -693,7 +854,7 @@ testCheckpoint = do
       let quantize = VU.fromList . map (realToFrac . (realToFrac :: Double -> Float))
       assert (checkpointManifest loaded == manifest) "checkpoint manifest did not roundtrip exactly"
       assert (checkpointParameters loaded == quantize params) "checkpoint parameters did not roundtrip as f32"
-      assert (checkpointOptimizer loaded == initAdamW (paramCount config)) "checkpoint optimizer did not roundtrip"
+      assert (checkpointOptimizer loaded == initOptimizerState optimizerConfig (paramCount config)) "checkpoint optimizer did not roundtrip"
       assert (checkpointBestValidationLoss loaded == Just 1.2345) "checkpoint best loss did not roundtrip"
       assert (checkpointPRNG loaded == PRNGState 1 2 3 4) "checkpoint PRNG did not roundtrip"
       assert (manifestNumerics (checkpointManifest loaded) == Tf32TensorCores)
@@ -703,20 +864,20 @@ testCheckpoint = do
 testCheckpointMetadata :: IO ()
 testCheckpointMetadata = do
   let identity = Identity "tiny-model" "integer-v1" "synthetic-v1"
-      optimizerConfig = AdamWConfig 1e-3 0.9 0.999 1e-8 0.01 2 10
+      optimizerConfig = OptimizerConfig (AdamWConfig 1e-3 0.9 0.999 1e-8 0.01 2 10) Nothing
       manifest = Manifest artifactVersion config (paramCount config) canonicalLayoutIdentity
         canonicalLayoutVersion optimizerConfig identity 1 Fp32IEEE
-      checkpoint = Checkpoint manifest (VU.fromList params) (initAdamW (paramCount config)) Nothing (PRNGState 1 2 3 4)
+      checkpoint = Checkpoint manifest (VU.fromList params) (initOptimizerState optimizerConfig (paramCount config)) Nothing (PRNGState 1 2 3 4)
       withManifest update = checkpoint { checkpointManifest = update manifest }
-  assert (isLeft (validateCheckpoint (withManifest (\m -> m { manifestOptimizerConfig = optimizerConfig { warmupSteps = 11 } }))))
+  assert (isLeft (validateCheckpoint (withManifest (\m -> m { manifestOptimizerConfig = optimizerConfig { optAdamW = (optAdamW optimizerConfig) { warmupSteps = 11 } } }))))
     "checkpoint accepted warmup beyond total steps"
-  assert (isLeft (validateCheckpoint (withManifest (\m -> m { manifestOptimizerConfig = optimizerConfig { weightDecay = -0.1 } }))))
+  assert (isLeft (validateCheckpoint (withManifest (\m -> m { manifestOptimizerConfig = optimizerConfig { optAdamW = (optAdamW optimizerConfig) { weightDecay = -0.1 } } }))))
     "checkpoint accepted negative weight decay"
   assert (isLeft (validateCheckpoint (withManifest (\m -> m { manifestLayoutIdentity = "" }))))
     "checkpoint accepted empty layout identity"
   assert (isLeft (validateCheckpoint checkpoint { checkpointBestValidationLoss = Just (0 / 0) }))
     "checkpoint accepted non-finite best validation loss"
-  assert (isLeft (validateCheckpoint checkpoint { checkpointOptimizer = (checkpointOptimizer checkpoint) { adamStep = 11 } }))
+  assert (isLeft (validateCheckpoint checkpoint { checkpointOptimizer = (checkpointOptimizer checkpoint) { optAdamWState = (optAdamWState (checkpointOptimizer checkpoint)) { adamStep = 11 } } }))
     "checkpoint accepted optimizer step beyond total steps"
 
 -- Streams are [0,2,3,1] and [0,2,2,1]: pair counts (0,2)=2, (2,3)=1,

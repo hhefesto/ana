@@ -18,8 +18,21 @@ import System.Exit (die)
 -- reference computes GLA in the recurrent form while Futhark computes the
 -- parallel closed form, so these comparisons are also the f32 shadow of the
 -- proved recurrent≡parallel theorem.
-config :: Config
-config = Config 5 4 4 6 5 2
+--
+-- The whole battery runs once per architecture arm: the sigmoid config
+-- guards the v2 float path, and each v3 arm (RG-LRU gate, qk-norm, sinks,
+-- and all three together) is element-wise verified — including its shifted
+-- parameter offsets — across forward, vjp, chunked-vs-quadratic, AdamW,
+-- micro-batching, and incremental decode.
+configs :: [(String, Config)]
+configs =
+  [ ("sigmoid", Config 5 4 4 6 5 2 GateSigmoid False False True)
+  , ("rglru", Config 5 4 4 6 5 2 GateRgLru False False True)
+  , ("qknorm", Config 5 4 4 6 5 2 GateSigmoid True False True)
+  , ("sinks", Config 5 4 4 6 5 2 GateSigmoid False True True)
+  , ("untied", Config 5 4 4 6 5 2 GateSigmoid False False False)
+  , ("v3-all", Config 5 4 4 6 5 2 GateRgLru True True False)
+  ]
 
 tokens :: [Int]
 tokens = [0, 2, 3, 4]
@@ -30,8 +43,8 @@ tokens = [0, 2, 3, 4]
 chunked2 :: GpuConfig -> GpuConfig
 chunked2 cfg = cfg { gpuChunk = 2 }
 
-parameters :: [Double]
-parameters = either error (concatMap initialize) (namedLayout config)
+parametersFor :: Config -> [Double]
+parametersFor config = either error (concatMap initialize) (namedLayout config)
   where
     initialize slice
       | sliceDecay slice = [0.025 * sin (fromIntegral (sliceOffset slice + i + 1) * 0.73) | i <- [0 .. sliceLength slice - 1]]
@@ -39,12 +52,24 @@ parameters = either error (concatMap initialize) (namedLayout config)
 
 main :: IO ()
 main = do
+  mapM_ oracleFor configs
+  mapM_ muonConformance configs
+  mapM_ microBatchConformance configs
+  mapM_ decodeConformance configs
+  mapM_ sizeRejectionConformance configs
+  chunkRejectionConformance (snd (head configs))
+  putStrLn "conformance: all comparisons passed"
+
+oracleFor :: (String, Config) -> IO ()
+oracleFor (label, config) = do
+  putStrLn ("=== gate: " ++ label)
+  let parameters = parametersFor config
   gpuCfg <- either die pure (chunked2 <$> gpuConfig config)
   layout <- either die pure (namedLayout config)
   mask <- either die pure (decayMask config)
   referenceLogits <- either die pure (fullSequenceLogits config parameters tokens)
-  let referenceLoss = sequenceLoss parameters
-      referenceGradient = grad sequenceLoss parameters
+  let referenceLoss = sequenceLoss config parameters
+      referenceGradient = grad (sequenceLoss config) parameters
       optimizerConfig = AdamWConfig 0.002 0.9 0.99 1e-6 0.03 0 10
       oldM = zipWith (\i _ -> 0.0002 * sin (fromIntegral i)) [1 :: Int ..] parameters
       oldV = zipWith (\i _ -> 0.0003 + 0.00001 * fromIntegral (i `mod` 7)) [1 :: Int ..] parameters
@@ -82,19 +107,77 @@ main = do
                       compareVector "AdamW parameters" 2e-5 2e-4 referenceUpdated futharkUpdated
                       compareVector "AdamW first moment" 2e-6 2e-4 (VU.toList (firstMoment referenceState)) futharkM
                       compareVector "AdamW second moment" 2e-7 3e-4 (VU.toList (secondMoment referenceState)) futharkV
-  microBatchConformance
-  decodeConformance
-  sizeRejectionConformance
-  chunkRejectionConformance
-  putStrLn "conformance: all comparisons passed"
+
+-- The combined Muon/AdamW step against its Double reference: the hidden
+-- matrices take the Newton-Schulz update (5 iterations, so f32/f64
+-- divergence compounds — tolerances are looser than AdamW's), everything
+-- else must match the AdamW formula exactly.
+muonConformance :: (String, Config) -> IO ()
+muonConformance (label, config) = do
+  putStrLn ("=== muon step, gate: " ++ label)
+  let parameters = parametersFor config
+  mask <- either die pure (decayMask config)
+  layout <- either die pure (namedLayout config)
+  let slices = [ MuonSlice (sliceOffset s) (sliceRows s) (sliceCols s)
+               | s <- layout, sliceCols s > 1
+               , sliceName s /= "embedding", sliceName s /= "unembedding" ]
+      n = paramCount config
+      muonCfg = OptimizerConfig (AdamWConfig 0.002 0.9 0.99 1e-6 0.03 0 10)
+                  (Just (MuonConfig 0.9))
+      oldM = zipWith (\i _ -> 0.0002 * sin (fromIntegral i)) [1 :: Int ..] parameters
+      oldV = zipWith (\i _ -> 0.0003 + 0.00001 * fromIntegral (i `mod` 7)) [1 :: Int ..] parameters
+      oldMomentum = zipWith (\i _ -> 0.0004 * cos (fromIntegral i)) [1 :: Int ..] parameters
+      muonMask = VU.update (VU.replicate n False)
+        (VU.fromList [ (muonOffset s + i, True)
+                     | s <- slices, i <- [0 .. muonRows s * muonCols s - 1] ])
+      canonical which = zipWith (\i x -> if VU.unsafeIndex muonMask i == which then x else 0) [0 ..]
+      state0 = OptimizerState
+        (AdamWState 2 (VU.fromList (canonical False oldM)) (VU.fromList (canonical False oldV)))
+        (Just (VU.fromList (canonical True oldMomentum)))
+  (referenceUpdated, referenceState) <- either die pure
+    (muonStep muonCfg slices mask state0 (VU.fromList parameters)
+      (VU.fromList (map (\i -> 0.01 * sin (fromIntegral i * 1.7)) [1 .. n])))
+  let gradientHost = map (\i -> 0.01 * sin (fromIntegral i * 1.7)) [1 .. n]
+      acfg = optAdamW muonCfg
+  withContext $ \ctx ->
+    withF32 ctx (map realToFrac parameters) $ \deviceP ->
+      withF32 ctx (map realToFrac gradientHost) $ \deviceG ->
+        withF32 ctx (map realToFrac (canonical True oldMomentum)) $ \deviceMom ->
+          withF32 ctx (map realToFrac (canonical False oldM)) $ \deviceM ->
+            withF32 ctx (map realToFrac (canonical False oldV)) $ \deviceV ->
+              withBoolVector ctx mask $ \deviceMask -> do
+                muonMaskD <- uploadBoolVector ctx muonMask
+                offsD <- uploadI64Vector ctx (map (fromIntegral . muonOffset) slices)
+                rowsD <- uploadI64Vector ctx (map (fromIntegral . muonRows) slices)
+                colsD <- uploadI64Vector ctx (map (fromIntegral . muonCols) slices)
+                (p', mom', m', v') <- muonStepDevice ctx 3
+                  (realToFrac (learningRate acfg 3)) 0.9 0.99 1e-6 0.03 0.9
+                  deviceP deviceG deviceMom deviceM deviceV deviceMask
+                  muonMaskD offsD rowsD colsD
+                hostP <- map realToFrac <$> downloadF32 ctx n p'
+                hostMom <- map realToFrac <$> downloadF32 ctx n mom'
+                hostM <- map realToFrac <$> downloadF32 ctx n m'
+                hostV <- map realToFrac <$> downloadF32 ctx n v'
+                mapM_ (freeF32 ctx) [p', mom', m', v']
+                compareVector "Muon parameters" 5e-4 5e-3 (VU.toList referenceUpdated) hostP
+                compareVector "Muon momentum" 5e-5 5e-4
+                  (maybe [] VU.toList (optMuonMomentum referenceState)) hostMom
+                compareVector "Muon adam first moment" 2e-6 2e-4
+                  (VU.toList (firstMoment (optAdamWState referenceState))) hostM
+                compareVector "Muon adam second moment" 2e-7 3e-4
+                  (VU.toList (secondMoment (optAdamWState referenceState))) hostV
 
 -- Incremental decoding must observe the same language as whole-prefix
 -- evaluation: feeding the tokens one decode_step at a time (fixed GLA
 -- state, softmax ring buffer) must reproduce each row of the batch
 -- forward.  This is the proved cache-run law (Attention/LinearTrie.agda)
--- checked numerically through the mixed hybrid stack.
-decodeConformance :: IO ()
-decodeConformance = do
+-- checked numerically through the mixed hybrid stack — for BOTH gate
+-- parametrizations, since decode_step materializes the RG-LRU gate on a
+-- different code path (per-step recurrence) than the chunked kernels.
+decodeConformance :: (String, Config) -> IO ()
+decodeConformance (label, config) = do
+  putStrLn ("=== decode, gate: " ++ label)
+  let parameters = parametersFor config
   gpuCfg <- either die pure (chunked2 <$> gpuConfig config)
   referenceLogits <- either die pure (fullSequenceLogits config parameters tokens)
   let d = modelDim config
@@ -129,14 +212,16 @@ batchSequences = [[0, 2, 3, 4], [0, 3, 2, 4], [0, 4, 2, 3], [0, 2, 4, 3]]
 -- divergence is f32 summation order; hence the tight tolerances.  The
 -- accumulated gradient is also compared against the Haskell reference at
 -- the ordinary cross-backend gradient tolerances.
-microBatchConformance :: IO ()
-microBatchConformance = do
+microBatchConformance :: (String, Config) -> IO ()
+microBatchConformance (label, config) = do
+  putStrLn ("=== micro-batch, gate: " ++ label)
+  let parameters = parametersFor config
   gpuCfg <- either die pure (chunked2 <$> gpuConfig config)
   let n = paramCount config
       batch = map (map fromIntegral) batchSequences :: [[Int64]]
       width = length (head batch)
       referenceBatchLoss params = sum
-        [ sequenceLossFor sequence' params | sequence' <- batchSequences ]
+        [ sequenceLossFor config sequence' params | sequence' <- batchSequences ]
         / fromIntegral (length batchSequences)
       referenceGradient = grad referenceBatchLoss parameters
   withContext $ \ctx ->
@@ -165,9 +250,12 @@ microBatchConformance = do
 
 -- The parameter length is part of the entry interface type; a mis-sized
 -- vector must be rejected.  Runs in its own context so the poisoned error
--- state cannot leak into other comparisons.
-sizeRejectionConformance :: IO ()
-sizeRejectionConformance = do
+-- state cannot leak into other comparisons.  Run per gate kind: under
+-- RG-LRU a v2-sized vector is exactly the mis-size a wrong arch flag would
+-- produce, so this doubles as the arch-mismatch rejection check.
+sizeRejectionConformance :: (String, Config) -> IO ()
+sizeRejectionConformance (label, config) = do
+  let parameters = parametersFor config
   gpuCfg <- either die pure (chunked2 <$> gpuConfig config)
   outcome <- try $ withContext $ \ctx ->
     withF32 ctx (map realToFrac (drop 1 parameters)) $ \shortParameters ->
@@ -175,13 +263,14 @@ sizeRejectionConformance = do
         (_, gradient) <- lossGrad ctx gpuCfg shortParameters deviceTokens
         freeF32 ctx gradient
   case (outcome :: Either SomeException ()) of
-    Left _ -> putStrLn "size-typed interface rejects mis-sized parameters: exact"
+    Left _ -> putStrLn ("size-typed interface rejects mis-sized parameters (" ++ label ++ "): exact")
     Right () -> die "size-typed interface accepted a mis-sized parameter vector"
 
 -- Exercise the Futhark runtime assertion in a fresh context because a failed
 -- call poisons that context.
-chunkRejectionConformance :: IO ()
-chunkRejectionConformance = do
+chunkRejectionConformance :: Config -> IO ()
+chunkRejectionConformance config = do
+  let parameters = parametersFor config
   gpuCfg <- either die pure (gpuConfig config)
   let invalidCfg = gpuCfg { gpuChunk = 3 }
   outcome <- try $ withContext $ \ctx ->
@@ -193,11 +282,11 @@ chunkRejectionConformance = do
     Left _ -> putStrLn "chunk schedule rejects a non-divisor: exact"
     Right () -> die "chunk schedule accepted a non-divisor"
 
-sequenceLoss :: (Floating a, Ord a) => [a] -> a
-sequenceLoss = sequenceLossFor tokens
+sequenceLoss :: (Floating a, Ord a) => Config -> [a] -> a
+sequenceLoss config = sequenceLossFor config tokens
 
-sequenceLossFor :: (Floating a, Ord a) => [Int] -> [a] -> a
-sequenceLossFor sequenceTokens params = sum losses / fromIntegral (length losses)
+sequenceLossFor :: (Floating a, Ord a) => Config -> [Int] -> [a] -> a
+sequenceLossFor config sequenceTokens params = sum losses / fromIntegral (length losses)
   where
     losses =
       [ either error id (nextTokenCEGeneric config params (take index sequenceTokens) (sequenceTokens !! index))

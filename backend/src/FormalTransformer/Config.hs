@@ -2,6 +2,9 @@
 
 module FormalTransformer.Config
   ( Config (..)
+  , GateKind (..)
+  , archCode
+  , modelId
   , validateConfig
   , headDim
   , paramCount
@@ -9,19 +12,41 @@ module FormalTransformer.Config
   , layerKind
   , isSoftmaxLayer
   , glaLayerCount
+  , softmaxLayerCount
   , tinyPreset
   , smallPreset
   , small4Preset
   , bpe10mPreset
+  , bpe10mV3Preset
   , bpe100mPreset
+  , bpe100mV3Preset
   , glaSmallPreset
   , glaPreset
-  , gateTemperature
-  , glaOutputNorm
   ) where
 
 import Data.Binary (Binary)
 import GHC.Generics (Generic)
+
+-- How a GLA layer's decay gate is parameterized.  This is architecture, not
+-- a knob: the gate defines what every GLA layer's state MEANS, so it lives
+-- in Config and hence in the model identity (backend/gpu/Main.hs modelId).
+--
+--   GateSigmoid  alpha = sigmoid(walpha x) — the v2 gate.  Measured
+--                2026-07-31 (run/gate-arms-2026-07-31, design notes §1.1):
+--                the shipped setting never opens (frac(alpha>0.9) exactly
+--                0.0000, half-life ~0.8 tokens), and the temperature arm
+--                that opened it lost on loss because open gates admit
+--                unscaled input.  The v2-era tau/output-norm arms were
+--                deleted with v2; see git history for their code.
+--   GateRgLru    Griffin's RG-LRU reparametrization (arXiv 2402.19427):
+--                alpha = a^(c·r) with r = sigmoid(walpha x), a = sigmoid(Λ)
+--                learned per channel, c = 8, and the state write scaled by
+--                sqrt(1 − alpha²) so open gates do not cause interference —
+--                the measured failure mode of the temperature arm.
+data GateKind = GateSigmoid | GateRgLru
+  deriving (Eq, Show, Generic)
+
+instance Binary GateKind
 
 data Config = Config
   { vocabSize :: !Int
@@ -30,17 +55,34 @@ data Config = Config
   , ffDim :: !Int
   , layerCount :: !Int
   , headCount :: !Int
+  , gateKind :: !GateKind
+  , qkNorm :: !Bool     -- per-head RMSNorm on q/k in softmax layers,
+                        -- with zero-centered weight-decayed gains
+  , headSinks :: !Bool  -- learned per-head sink logit in softmax layers
+                        -- (FormalTransformer/Attention/Sink.agda)
+  , tiedHead :: !Bool   -- True: the embedding rows are the vocabulary
+                        -- projections (the v2 design; its logit kernel is
+                        -- a symmetric Gram matrix — TiedHead.agda — so
+                        -- skew bigram preferences are unrepresentable by
+                        -- the head alone).  False: a separate unembedding
+                        -- matrix, +vocab*dim parameters (pilot arm A5).
   } deriving (Eq, Show, Generic)
 
 instance Binary Config
 
 -- The trainer presets live here so every host and gate shares one value.
-tinyPreset, smallPreset, small4Preset, bpe10mPreset, bpe100mPreset, glaSmallPreset, glaPreset :: Config
-tinyPreset = Config 258 16 16 48 1 2
-smallPreset = Config 258 64 64 192 2 4
+-- The v2-era presets keep v2 semantics (sigmoid gate, no qk-norm, no
+-- sinks) so smoke paths and recorded conformance references stay valid.
+tinyPreset, smallPreset, small4Preset, bpe10mPreset, bpe10mV3Preset, bpe100mPreset, bpe100mV3Preset, glaSmallPreset, glaPreset :: Config
+tinyPreset = Config 258 16 16 48 1 2 GateSigmoid False False True
+smallPreset = Config 258 64 64 192 2 4 GateSigmoid False False True
 -- Depth-matched softmax control for the hybrid A/B (gla-small is 4-layer).
-small4Preset = Config 258 64 64 192 4 4
-bpe10mPreset = Config 8192 256 320 864 6 5
+small4Preset = Config 258 64 64 192 4 4 GateSigmoid False False True
+bpe10mPreset = Config 8192 256 320 864 6 5 GateSigmoid False False True
+
+-- The v3 pilot preset: bpe10m dimensions with the v3 arms on.  Pilot A/Bs
+-- flip individual arms from here (docs/V3-DECISIONS.md).
+bpe10mV3Preset = Config 8192 256 320 864 6 5 GateRgLru True True True
 
 -- The scale-up rung, sized against GPT-2-small (124M) so the comparison is
 -- like-for-like: 115,428,096 parameters, of which the 32,768-piece vocabulary
@@ -52,12 +94,39 @@ bpe10mPreset = Config 8192 256 320 864 6 5
 -- ff/d stays at the repo's 2.67, which is the parameter-matched ratio for a
 -- gated FFN (three d*f matrices, not two); 12 layers give 9 GLA and 3 softmax,
 -- holding the 3:1 rule; head dim is 64.
-bpe100mPreset = Config 32768 256 768 2048 12 12
+bpe100mPreset = Config 32768 256 768 2048 12 12 GateSigmoid False False True
+
+-- The v3 production preset: bpe100m dimensions with RG-LRU gates, qk-norm
+-- and sinks; the head stays tied.  Adopted by user decision 2026-08-20
+-- (docs/V3-DECISIONS.md section 6) for the warm-started successor to the v2
+-- master run, skipping the section-4 pilot matrix.
+bpe100mV3Preset = Config 32768 256 768 2048 12 12 GateRgLru True True True
 
 -- Hybrid presets sized for the 3:1 rule below: four layers give three GLA
 -- and one softmax layer; eight give six and two.
-glaSmallPreset = Config 258 64 64 192 4 4
-glaPreset = Config 8192 256 320 864 8 5
+glaSmallPreset = Config 258 64 64 192 4 4 GateSigmoid False False True
+glaPreset = Config 8192 256 320 864 8 5 GateSigmoid False False True
+
+-- The model identity a checkpoint is stamped with and resumed against.
+-- Version 3 puts the whole architecture in Config, so `show cfg` IS the
+-- identity: an architecture choice outside Config cannot exist, and any
+-- change to it makes existing checkpoints fail resume loudly instead of
+-- being silently reinterpreted.
+modelId :: Config -> String
+modelId cfg = "formal-transformer-futhark-hybrid-gla-v3:" ++ show cfg
+
+-- The packed architecture word the Futhark entries receive (bit 0 =
+-- GateRgLru, bit 1 = qkNorm, bit 2 = headSinks, bit 3 = untied head),
+-- mirrored by arch_* in
+-- backend/futhark/model.fut.  Offsets and gate semantics both depend on
+-- it, which is why it crosses the FFI boundary explicitly instead of being
+-- baked into either side.
+archCode :: Config -> Int
+archCode c =
+  (if gateKind c == GateRgLru then 1 else 0)
+    + (if qkNorm c then 2 else 0)
+    + (if headSinks c then 4 else 0)
+    + (if tiedHead c then 0 else 8)
 
 validateConfig :: Config -> Either String Config
 validateConfig c
@@ -73,51 +142,6 @@ validateConfig c
 
 headDim :: Config -> Int
 headDim c = modelDim c `div` headCount c
-
--- GLA fix arms, mirrored by `gate_temperature`/`gla_out_norm` in
--- backend/futhark/model.fut (flip both languages together).  The gate is
--- alpha = sigmoid(z)^(1/gateTemperature): at temperature 1 this is the
--- historical sigmoid bit pattern; larger temperatures put the init near
--- alpha ≈ 0.5^(1/tau) (tau=16 gives ≈0.958) so memory spans longer than a
--- couple of tokens have live gradients.  glaOutputNorm applies the same
--- per-head L2 normalization as q/k to the attended output before Wo,
--- bounding the readout once the gates open (the unnormalized sum grows
--- like 1/(1-alpha)).
---
--- MEASURED 2026-07-31, three arms at glaSmallPreset, 600 steps, batch 8, on
--- 715K byte tokens, sequential backend (multicore is not reproducible), same
--- schedule and same PRNG throughout.  Numbers are per-GLA-layer from act-stats.
---
---   arm            alpha_mean   frac>0.9   att_rms   clipped   final val
---   tau=1  (ships) 0.41-0.49    0.0000     0.25-0.48 539/600   3.2251
---   tau=16         0.93-0.94    0.88-0.93  1.58-2.02 228/600   3.3079
---   tau=16 + norm  0.94-0.95    0.88-0.99  0.25000   525/600   3.2438
---
--- The diagnosis above is CONFIRMED and is worse than it reads: at tau=1 the
--- fraction of gates above 0.9 is exactly 0.0000 in every GLA layer after 600
--- steps.  Training does not open them.  Memory half-life is ~0.8 tokens, so
--- the GLA layers are very nearly memoryless -- they are not doing the thing
--- GLA exists to do.  tau=16 opens them (half-life ~9.5 tokens) and
--- glaOutputNorm pins att_rms to exactly 1/sqrt(headDim), giving the tightest
--- residual stream of the three.
---
--- But NEITHER ARM WINS on loss at this horizon, so both stay off.  tau=16
--- alone is 2.5% worse and its apparently-halved clip rate is misleading: the
--- median gradient norm merely fell below the clip (0.91 vs 1.43) while the
--- tail got 8x WORSE (max 54.1 vs 6.67).  tau=16+norm lands within 0.6% of
--- baseline with max 22.1.  600 steps of code and markdown at 242K parameters
--- is a mechanism probe, not a quality verdict -- a longer memory cannot pay
--- off in a horizon barely longer than the memory span.  The real experiment is
--- a bpe10m/bpe100m A/B on a GPU.
---
--- These are architecture, so modelId (backend/gpu/Main.hs) folds them into the
--- model identity: moving either one makes every existing checkpoint fail
--- validateResume rather than being silently reinterpreted.
-gateTemperature :: Double
-gateTemperature = 1
-
-glaOutputNorm :: Bool
-glaOutputNorm = False
 
 -- The hybrid attention rule: every fourth layer is softmax full attention,
 -- the rest are gated linear attention (GLA).  The rule is part of the
@@ -145,13 +169,22 @@ isSoftmaxLayer c i = layerKind c i == SoftmaxKind
 glaLayerCount :: Config -> Int
 glaLayerCount c = layerCount c - layerCount c `div` 4
 
--- GLA blocks carry one extra d*d gate projection (walpha).
+softmaxLayerCount :: Config -> Int
+softmaxLayerCount c = layerCount c `div` 4
+
+-- GLA blocks carry one extra d*d gate projection (walpha); the v3 arms add
+-- their parameters only when enabled, so a config with every arm off has
+-- exactly the v2 count.  Layout.namedLayout mirrors this term for term.
 paramCount :: Config -> Int
 paramCount c =
   vocabSize c * d
     + layerCount c * (4 * d * d + 3 * f * d + 2 * d)
     + glaLayerCount c * d * d
+    + (if gateKind c == GateRgLru then glaLayerCount c * d else 0)
+    + (if qkNorm c then softmaxLayerCount c * 2 * headDim c else 0)
+    + (if headSinks c then softmaxLayerCount c * headCount c else 0)
     + d
+    + (if tiedHead c then 0 else vocabSize c * d)
   where
     d = modelDim c
     f = ffDim c

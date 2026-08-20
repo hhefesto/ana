@@ -5,14 +5,21 @@
 -- proofs live in FormalTransformer/Attention/Linear.agda and
 -- docs/RUN-2026-07-25-WIKI-FULL.md.
 --
--- Layout:
+-- Layout (Layout.namedLayout is the Haskell mirror; keep them identical):
 --   embedding [v][d]; then, for each block:
 --   rms_att [d], Wq/Wk/Wv/Wo [d][d],
---   (GLA blocks only: Walpha [d][d]),
+--   (GLA blocks only: Walpha [d][d], then gate_lambda [d] under RG-LRU),
+--   (softmax blocks only, when enabled: qk_gain_q/qk_gain_k [d/h],
+--    sink [h]),
 --   rms_ff [d], Wgate/Wup [f][d], Wdown [d][f]; finally rms_final [d].
 --
+-- The v3 architecture (Config.gateKind/qkNorm/headSinks) arrives packed in
+-- one `arch` integer — see arch_rglru below — because it moves parameter
+-- offsets and gate semantics, and an architecture flag outside the entry
+-- interface would let one layout be silently read as another.
+--
 -- All public model entries state the exact parameter length in their
--- interface type: params must have size parameter_count v d f n_layers, so
+-- interface type: params must have size parameter_count arch v d f h n_layers, so
 -- a mis-laid-out vector is rejected at the entry boundary.  Assertions
 -- cover only the constraints size types cannot express: v,d,f,h,n_layers
 -- > 0, d % h == 0, an even head dimension d/h, token IDs in [0,v), and
@@ -28,16 +35,44 @@ def softmax_layers (n_layers: i64): i64 = n_layers / 4
 
 def gla_layers (n_layers: i64): i64 = n_layers - n_layers / 4
 
-def parameter_count (v: i64) (d: i64) (f: i64) (n_layers: i64): i64 =
-  v*d + n_layers*(4*d*d + 3*f*d + 2*d) + (n_layers - n_layers / 4)*d*d + d
+-- Packed v3 architecture flags, mirroring Config.archCode: bit 0 = RG-LRU
+-- gates, bit 1 = qk-norm on softmax layers, bit 2 = per-head sink logits,
+-- bit 3 = untied vocabulary projection (a separate unembedding matrix,
+-- placed last so untying moves no existing offset).
+def arch_rglru (arch: i64): bool = arch % 2 == 1
+def arch_qknorm (arch: i64): bool = (arch / 2) % 2 == 1
+def arch_sinks (arch: i64): bool = (arch / 4) % 2 == 1
+def arch_untied (arch: i64): bool = (arch / 8) % 2 == 1
+
+-- Extra parameters each block kind carries under the v3 arms.
+def gla_extra (arch: i64) (d: i64): i64 =
+  if arch_rglru arch then d else 0
+def softmax_extra (arch: i64) (d: i64) (h: i64): i64 =
+  (if arch_qknorm arch then 2*(d/h) else 0) + (if arch_sinks arch then h else 0)
 
 def block_size (d: i64) (f: i64): i64 =
   4*d*d + 3*f*d + 2*d
 
--- Offset of block `layer`: every earlier block contributes the softmax block
--- size and the earlier GLA blocks add their gate projection.
-def block_base (v: i64) (d: i64) (f: i64) (layer: i64): i64 =
-  v*d + layer*block_size d f + (layer - layer / 4)*d*d
+-- Offset of block `layer`: every earlier block contributes the shared block
+-- size, earlier GLA blocks add their gate projection (and decay base), and
+-- earlier softmax blocks their enabled extras.
+def block_base (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64)
+               (layer: i64): i64 =
+  v*d + layer*block_size d f
+      + (layer - layer / 4)*(d*d + gla_extra arch d)
+      + (layer / 4)*softmax_extra arch d h
+
+def parameter_count (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64)
+                    (n_layers: i64): i64 =
+  block_base arch v d f h n_layers + d
+    + (if arch_untied arch then v*d else 0)
+
+-- Offset of the vocabulary projection: the separate unembedding matrix
+-- when untied, and offset 0 — the embedding itself — when tied.  One
+-- code path, no branch in the projection.
+def unembed_off (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64)
+                (n_layers: i64): i64 =
+  if arch_untied arch then block_base arch v d f h n_layers + d else 0
 
 def vector [p] (off: i64) (n: i64) (params: [p]f32): [n]f32 =
   take n (drop off params)
@@ -121,18 +156,6 @@ def l2_normalize_heads [d] (h: i64) (x: [d]f32): [d]f32 =
 def log_sigmoid (z: f32): f32 =
   -(f32.max (-z) 0.0f32 + f32.log1p (f32.exp (-(f32.abs z))))
 
--- GLA fix arms, mirrored by gateTemperature/glaOutputNorm in
--- FormalTransformer.Config (flip both languages together).  The gate is
--- alpha = sigmoid(z)^(1/tau), i.e. log-gate log_sigmoid(z)/tau: tau = 1 is
--- the historical bit pattern (x/1 is exact); tau = 16 puts the init near
--- alpha ≈ 0.958 so long memory spans keep live gradients.  gla_out_norm
--- applies the q/k per-head L2 normalization to the attended output before
--- Wo, bounding the readout once the gates open.
-def gate_temperature: f32 = 1.0f32
-def gla_out_norm: bool = false
-
-def gate_log (z: f32): f32 = log_sigmoid z / gate_temperature
-
 -- Canonical scalar used by fused blocks and the decomposed SwiGLU piece.
 def silu (z: f32): f32 = z / (1.0f32 + f32.exp (-z))
 
@@ -170,12 +193,28 @@ def gla_attention [n] [d]
   in tabulate n (\i ->
        flatten (map (\head -> per_head[head, i]) (iota h)) :> [d]f32)
 
--- Inclusive prefix sums of the log-gates over positions, as a regular
--- masked reduction rather than a scan (see the note on gla_attention).
+-- Inclusive prefix sums over positions, as a regular masked reduction
+-- rather than a scan (see the note on gla_attention).
+def prefix_sums_2d [n] [d] (logs: [n][d]f32): [n][d]f32 =
+  tabulate_2d n d (\i c ->
+    f32.sum (map (\r -> if r <= i then logs[r, c] else 0.0f32) (iota n)))
+
 def gate_prefix_sums [n] [d] (gate_logits: [n][d]f32): [n][d]f32 =
-  let logs = map (map gate_log) gate_logits
-  in tabulate_2d n d (\i c ->
-       f32.sum (map (\r -> if r <= i then logs[r, c] else 0.0f32) (iota n)))
+  prefix_sums_2d (map (map log_sigmoid) gate_logits)
+
+-- The RG-LRU log-gate (Griffin, arXiv 2402.19427; Config.GateRgLru): per
+-- channel, log alpha = c · sigmoid(z) · log sigmoid(Λ) with c = 8, and the
+-- state write scaled by sqrt(1 − alpha²) = sqrt(1 − exp(2·log alpha)) so an
+-- open gate does not let fresh input swamp held state.  The scale is folded
+-- into the (already per-head-normalized) key: the token the recurrence
+-- consumes is (q̂, β·k̂, v, alpha), so the gate stays the transition and the
+-- scaled write is part of the contribution — Attention/Linear.agda's
+-- algebra, and every kernel below it, applies unchanged.
+def rglru_log_gate (z: f32) (lam: f32): f32 =
+  8.0f32 * (1.0f32 / (1.0f32 + f32.exp (-z))) * log_sigmoid lam
+
+def rglru_write_scale (log_alpha: f32): f32 =
+  f32.sqrt (1.0f32 - f32.exp (2.0f32 * log_alpha))
 
 -- The production chunk length: a pure execution-schedule choice, invisible
 -- in the denotation by chunk-closed.  Whole window when 64 does not divide.
@@ -289,48 +328,126 @@ def block_tail [n] [d] [p]
     in matvec wdown hidden) ff_normed
   in map2 add x_att ff
 
-def softmax_block [n] [d] [p]
-    (f: i64) (h: i64) (base: i64)
-    (params: [p]f32) (x: [n][d]f32): [n][d]f32 =
-  let (_, q, k, values) = attention_inputs base params x
-  let attended = causal_attention h q k values
-  let ooff = base + d + 3*d*d
-  in block_tail f ooff (ooff + d*d) params x attended
+-- Per-head RMSNorm with shared zero-centered gains (v3 qkNorm): the same
+-- normalization formula as rms_norm, per hd-slice, with gain = 1 + w.
+def qk_normalize [d] (h: i64) (w: []f32) (x: [d]f32): [d]f32 =
+  let hd = d / h
+  let scales = tabulate h (\head ->
+    let base = head * hd
+    let ms = f32.sum (map (\c -> x[base+c] * x[base+c]) (iota hd)) / f32.i64 hd
+    in 1.0f32 / f32.sqrt (ms + 1.0e-5f32))
+  in tabulate d (\j -> x[j] * scales[j / hd] * (1.0f32 + w[j % hd]))
 
-def gla_block [n] [d] [p]
-    (chunk: i64) (f: i64) (h: i64) (base: i64)
+-- Softmax attention over scores extended by one per-head sink logit whose
+-- weight is dropped from the value sum (FormalTransformer/Attention/
+-- Sink.agda's restriction semantics).  With the sink at -1e30 its weight
+-- underflows to exactly 0 and the plain attention is reproduced bit for
+-- bit, so this is THE causal attention of the trainer.
+def causal_attention_sink [n] [d]
+    (h: i64) (sinks: [h]f32)
+    (q: [n][d]f32) (k: [n][d]f32) (v: [n][d]f32): [n][d]f32 =
+  let hd = d / h
+  let inv_scale = 1.0f32 / f32.sqrt (f32.i64 hd)
+  let per_head =
+    tabulate h (\head ->
+      let head_base = head * hd
+      let qh = map (\row -> take hd (drop head_base row)) q
+      let kh = map (\row -> take hd (drop head_base row)) k
+      let vh = map (\row -> take hd (drop head_base row)) v
+      in map (\i ->
+           let scores = tabulate (n+1) (\j ->
+             if j == n then sinks[head]
+             else if j <= i
+             then dot qh[i] kh[j] * inv_scale
+             else -1.0e30f32)
+           let weights = softmax scores
+           in tabulate hd (\within_head ->
+                f32.sum (map2 (*) (take n weights)
+                  (map (\j -> vh[j, within_head]) (iota n)))))
+           (iota n))
+  in tabulate n (\i ->
+       flatten (map (\head -> per_head[head, i]) (iota h)) :> [d]f32)
+
+-- One softmax block for every softmax-side arm, single tape shape: q/k
+-- normalization is a value-level select against the raw rows, and the
+-- sink is a permanent extra score slot whose logit is -1e30 when disabled
+-- -- exp underflows to exactly 0, so the plain softmax weights are
+-- reproduced bit for bit (the same argument as the decoder's single
+-- path).  Gain and sink reads fall back to offset 0 when their slices do
+-- not exist; the values are never selected.
+def softmax_block_u [n] [d] [p]
+    (arch: i64) (f: i64) (h: i64) (base: i64)
+    (params: [p]f32) (x: [n][d]f32): [n][d]f32 =
+  let (_, q0, k0, values) = attention_inputs base params x
+  let ooff = base + d + 3*d*d
+  let hd = d / h
+  let qk = arch_qknorm arch
+  let sk = arch_sinks arch
+  let gq_off = if qk then ooff + d*d else 0
+  let gk_off = if qk then ooff + d*d + hd else 0
+  let wq_g = vector gq_off hd params
+  let wk_g = vector gk_off hd params
+  let q = map (\row -> if qk then qk_normalize h wq_g row else row) q0
+  let k = map (\row -> if qk then qk_normalize h wk_g row else row) k0
+  let sink_off = if sk then ooff + d*d + (if qk then 2*hd else 0) else 0
+  let sinks = tabulate h (\i ->
+        if sk then params[sink_off + i] else -1.0e30f32)
+  let attended = causal_attention_sink h sinks q k values
+  in block_tail f ooff (ooff + d*d + softmax_extra arch d h) params x attended
+
+def gla_block_u [n] [d] [p]
+    (arch: i64) (chunk: i64) (f: i64) (h: i64) (base: i64)
     (params: [p]f32) (x: [n][d]f32): [n][d]f32 =
   let (normed, q, k, values) = attention_inputs base params x
   let q_unit = map (l2_normalize_heads h) q
-  let k_unit = map (l2_normalize_heads h) k
+  let k_unit0 = map (l2_normalize_heads h) k
   let ooff = base + d + 3*d*d
   let walpha = matrix (ooff + d*d) d d params
+  let rglru = arch_rglru arch
+  -- One tape shape for both gate kinds: compute both formulas and select by
+  -- the (loop-invariant) arch scalar.  The selected value is bit-identical
+  -- to the dedicated formula, the unselected branch's adjoint is zero, and
+  -- the vjp'd loop nest exists ONCE instead of once per architecture --
+  -- the 8-way instantiation of the first v3 cut made futhark's codegen
+  -- time explode.  Lambda reads fall back to offset 0 (the embedding,
+  -- always present) when the slice does not exist; the value is never
+  -- selected.
+  let lam_off = if rglru then ooff + 2*d*d else 0
+  let lambda = vector lam_off d params
   let gate_logits = map (matvec walpha) normed
-  let logs = map (map gate_log) gate_logits
-  let attended0 = gla_attention_chunked chunk h q_unit k_unit values logs
-  let attended = if gla_out_norm
-                 then map (l2_normalize_heads h) attended0
-                 else attended0
-  in block_tail f ooff (ooff + 2*d*d) params x attended
+  let logs = map (\row -> map2 (\z lam ->
+        if rglru then rglru_log_gate z lam else log_sigmoid z) row lambda)
+        gate_logits
+  let k_unit = map2 (\lrow krow -> map2 (\l kc ->
+        if rglru then kc * rglru_write_scale l else kc) lrow krow)
+        logs k_unit0
+  let attended = gla_attention_chunked chunk h q_unit k_unit values logs
+  in block_tail f ooff (ooff + 2*d*d + gla_extra arch d) params x attended
 
 -- The whole-window quadratic form, retained (forward only, no vjp entry)
 -- so the conformance oracle can compare the two executions of the one
 -- denotation at same-precision tolerances.
-def gla_block_quadratic [n] [d] [p]
-    (f: i64) (h: i64) (base: i64)
+def gla_block_quadratic_u [n] [d] [p]
+    (arch: i64) (f: i64) (h: i64) (base: i64)
     (params: [p]f32) (x: [n][d]f32): [n][d]f32 =
   let (normed, q, k, values) = attention_inputs base params x
   let q_unit = map (l2_normalize_heads h) q
-  let k_unit = map (l2_normalize_heads h) k
+  let k_unit0 = map (l2_normalize_heads h) k
   let ooff = base + d + 3*d*d
   let walpha = matrix (ooff + d*d) d d params
+  let rglru = arch_rglru arch
+  let lam_off = if rglru then ooff + 2*d*d else 0
+  let lambda = vector lam_off d params
   let gate_logits = map (matvec walpha) normed
-  let cum = gate_prefix_sums gate_logits
-  let attended0 = gla_attention h q_unit k_unit values cum
-  let attended = if gla_out_norm
-                 then map (l2_normalize_heads h) attended0
-                 else attended0
-  in block_tail f ooff (ooff + 2*d*d) params x attended
+  let logs = map (\row -> map2 (\z lam ->
+        if rglru then rglru_log_gate z lam else log_sigmoid z) row lambda)
+        gate_logits
+  let k_unit = map2 (\lrow krow -> map2 (\l kc ->
+        if rglru then kc * rglru_write_scale l else kc) lrow krow)
+        logs k_unit0
+  let cum = prefix_sums_2d logs
+  let attended = gla_attention h q_unit k_unit values cum
+  in block_tail f ooff (ooff + 2*d*d + gla_extra arch d) params x attended
 
 def sigmoid (z: f32): f32 = 1.0f32 / (1.0f32 + f32.exp (-z))
 
@@ -361,6 +478,7 @@ def block_tail_single [d] [p]
 -- GLA state is simply never reset — the StateAlgebra run — while softmax
 -- attends to the trailing window.
 def decode_step_def [p] [gs] [ks]
+    (arch: i64)
     (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64) (ctx: i64)
     (params: [p]f32)
     (position: i64) (token: i64)
@@ -369,7 +487,7 @@ def decode_step_def [p] [gs] [ks]
   let hd = d / h
   let checked = assert (gs == gla_layers n_layers * d * hd &&
                         ks == softmax_layers n_layers * ctx * d &&
-                        p == parameter_count v d f n_layers &&
+                        p == parameter_count arch v d f h n_layers &&
                         position >= 0 && token >= 0 && token < v && ctx > 0)
                        params
   let embedding = matrix 0 v d checked
@@ -378,7 +496,7 @@ def decode_step_def [p] [gs] [ks]
     loop (x, gstate, kc, vc) =
         (copy (embedding[token] :> [d]f32), gla_state, k_cache, v_cache)
     for layer < n_layers do
-      let base = block_base v d f layer
+      let base = block_base arch v d f h layer
       let rms_att = vector base d checked
       let wq = matrix (base + d) d d checked
       let wk = matrix (base + d + d*d) d d checked
@@ -389,18 +507,36 @@ def decode_step_def [p] [gs] [ks]
       let k = matvec wk normed
       let vvec = matvec wv normed
       in if layer % 4 == 3
-         then -- NoPE softmax attention over the ring-buffer cache.
+         then -- NoPE softmax attention over the ring-buffer cache.  Under
+              -- qkNorm the key is normalized BEFORE caching (its normalized
+              -- value never changes, matching the batch forward) and the
+              -- query per step; under headSinks the score vector carries one
+              -- extra slot whose weight is dropped from the value sum
+              -- (Attention/Sink.agda).  With sinks off that slot's logit is
+              -- -1e30, whose exp underflows to exactly 0, so the v2 weights
+              -- are reproduced bit for bit through the single code path.
            let si = layer / 4
            let slot = position % ctx
            let koff = si*ctx*d + slot*d
-           let kc = scatter kc (map (+ koff) (iota d)) k
+           let (q_att, k_store) =
+             if arch_qknorm arch
+             then let wq_g = vector (ooff + d*d) hd checked
+                  let wk_g = vector (ooff + d*d + hd) hd checked
+                  in (qk_normalize h wq_g q, qk_normalize h wk_g k)
+             else (q, k)
+           let sink_off = ooff + d*d + (if arch_qknorm arch then 2*hd else 0)
+           let kc = scatter kc (map (+ koff) (iota d)) k_store
            let vc = scatter vc (map (+ koff) (iota d)) vvec
            let m = i64.min (position + 1) ctx
            let per_head = tabulate h (\head ->
-             let scores = tabulate ctx (\e ->
-               if e < m
+             let scores = tabulate (ctx+1) (\e ->
+               if e == ctx
+               then (if arch_sinks arch
+                     then checked[sink_off + head]
+                     else -1.0e30f32)
+               else if e < m
                then inv_scale * f32.sum (map (\c ->
-                      q[head*hd+c] * kc[si*ctx*d + e*d + head*hd + c])
+                      q_att[head*hd+c] * kc[si*ctx*d + e*d + head*hd + c])
                       (iota hd))
                else -1.0e30f32)
              let weights = softmax scores
@@ -408,18 +544,25 @@ def decode_step_def [p] [gs] [ks]
                   f32.sum (map (\e -> weights[e] * vc[si*ctx*d + e*d + head*hd + j])
                                (iota ctx))))
            let attended = tabulate d (\og -> per_head[og / hd, og % hd])
-           let x' = block_tail_single f ooff (ooff + d*d) checked x attended
+           let x' = block_tail_single f ooff
+                      (ooff + d*d + softmax_extra arch d h) checked x attended
            in (x', gstate, kc, vc)
-         else -- GLA: S' = diag(alpha)·S + k̂ vᵀ, o = q̂ᵀ S'.
+         else -- GLA: S' = diag(alpha)·S + (β·k̂) vᵀ, o = q̂ᵀ S'.
            let gi = layer - layer / 4
            let qhat = l2_normalize_heads h q
-           let khat = l2_normalize_heads h k
+           let khat0 = l2_normalize_heads h k
            let walpha = matrix (ooff + d*d) d d checked
-           -- alpha = sigmoid(z)^(1/tau); the tau == 1 branch keeps the
-           -- historical sigmoid bit pattern (exp∘log_sigmoid does not).
-           let alpha = if gate_temperature == 1.0f32
-                       then map sigmoid (matvec walpha normed)
-                       else map (\z -> f32.exp (gate_log z)) (matvec walpha normed)
+           -- Sigmoid gates materialize sigmoid directly (the bit pattern
+           -- exp . log_sigmoid does not reproduce); RG-LRU gates live in
+           -- log space and scale the key write.  This loop is never
+           -- differentiated, so the branch is harmless here.
+           let (alpha, khat) =
+             if arch_rglru arch
+             then let lambda = vector (ooff + 2*d*d) d checked
+                  let logalpha = map2 rglru_log_gate (matvec walpha normed) lambda
+                  in (map f32.exp logalpha,
+                      map2 (\l kc -> kc * rglru_write_scale l) logalpha khat0)
+             else (map sigmoid (matvec walpha normed), khat0)
            let goff = gi*d*hd
            let s_new = tabulate (d*hd) (\idx ->
              let cg = idx / hd
@@ -431,25 +574,25 @@ def decode_step_def [p] [gs] [ks]
              let j = og % hd
              in f32.sum (map (\c -> qhat[head*hd+c] * s_new[(head*hd+c)*hd + j])
                              (iota hd)))
-           let attended = if gla_out_norm
-                          then l2_normalize_heads h attended0
-                          else attended0
-           let x' = block_tail_single f ooff (ooff + 2*d*d) checked x attended
+           let x' = block_tail_single f ooff
+                      (ooff + 2*d*d + gla_extra arch d) checked x attended0
            in (x', gstate, kc, vc)
-  let final_gain = vector (block_base v d f n_layers) d checked
+  let final_gain = vector (block_base arch v d f h n_layers) d checked
   let final_hidden = rms_norm x_final final_gain
-  in (map (\word -> dot word final_hidden) embedding, gla_out, k_out, v_out)
+  let unembed = matrix (unembed_off arch v d f h n_layers) v d checked
+  in (map (\word -> dot word final_hidden) unembed, gla_out, k_out, v_out)
 
 def valid_tokens [n] (v: i64) (tokens: [n]i64): bool =
   all (\t -> t >= 0 && t < v) tokens
 
 def model_logits [n] [p]
-    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64) (chunk: i64)
+    (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
+    (chunk: i64)
     (params: [p]f32) (tokens: [n]i64): [n][v]f32 =
   let base_checked = assert (v > 0 && d > 0 && f > 0 && h > 0 &&
                              n_layers > 0 && n > 0) params
   let hd = d / h
-  let expected = parameter_count v d f n_layers
+  let expected = parameter_count arch v d f h n_layers
   let checked = assert (d % h == 0 &&
                         hd % 2 == 0 && p == expected &&
                         chunk > 0 && n % chunk == 0 &&
@@ -458,53 +601,59 @@ def model_logits [n] [p]
   let initial: [n][d]f32 = map (\token -> embedding[token]) tokens
   -- The hybrid rule is periodic, so the layer loop runs in branch-free
   -- groups of four (three GLA then one softmax) plus a GLA-only remainder:
-  -- a data-independent `if` inside the differentiated loop gives the two
-  -- arms different tape shapes and the GPU codegen of the vjp rejects the
-  -- resulting irregular allocation.
+  -- an `if` over DIFFERENT TAPE SHAPES inside the differentiated loop is
+  -- what the GPU codegen of the vjp rejects.  The v3 arms live INSIDE the
+  -- blocks as value-level selects over identical shapes, so one nest
+  -- serves every architecture — the per-architecture instantiation this
+  -- replaces multiplied futhark's codegen time unboundedly.
   let groups = n_layers / 4
   let rest = n_layers % 4
   let grouped = loop state = initial for g < groups do
-    let s1 = gla_block chunk f h (block_base v d f (4*g)) checked state
-    let s2 = gla_block chunk f h (block_base v d f (4*g + 1)) checked s1
-    let s3 = gla_block chunk f h (block_base v d f (4*g + 2)) checked s2
-    in softmax_block f h (block_base v d f (4*g + 3)) checked s3
+    let s1 = gla_block_u arch chunk f h (block_base arch v d f h (4*g)) checked state
+    let s2 = gla_block_u arch chunk f h (block_base arch v d f h (4*g + 1)) checked s1
+    let s3 = gla_block_u arch chunk f h (block_base arch v d f h (4*g + 2)) checked s2
+    in softmax_block_u arch f h (block_base arch v d f h (4*g + 3)) checked s3
   let hidden = loop state = grouped for r < rest do
-    gla_block chunk f h (block_base v d f (4*groups + r)) checked state
-  let final_gain = vector (block_base v d f n_layers) d checked
+    gla_block_u arch chunk f h (block_base arch v d f h (4*groups + r)) checked state
+  let final_gain = vector (block_base arch v d f h n_layers) d checked
   let final_hidden = map (\row -> rms_norm row final_gain) hidden
-  -- Tied unembedding: the embedding rows are the vocabulary projections.
-  in map (\row -> map (\word -> dot word row) embedding) final_hidden
+  -- Vocabulary projection: the embedding rows when tied (unembed_off 0),
+  -- the separate unembedding matrix when untied.
+  let unembed = matrix (unembed_off arch v d f h n_layers) v d checked
+  in map (\row -> map (\word -> dot word row) unembed) final_hidden
 
 -- Forward-only twin of model_logits through the quadratic GLA form; never
 -- differentiated, exists for the chunked≡quadratic conformance entry.
 def model_logits_quadratic [n] [p]
-    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
+    (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
     (params: [p]f32) (tokens: [n]i64): [n][v]f32 =
   let checked = assert (v > 0 && d > 0 && f > 0 && h > 0 &&
                         n_layers > 0 && n > 0 && d % h == 0 &&
                         (d / h) % 2 == 0 &&
-                        p == parameter_count v d f n_layers &&
+                        p == parameter_count arch v d f h n_layers &&
                         valid_tokens v tokens) params
   let embedding = matrix 0 v d checked
   let initial: [n][d]f32 = map (\token -> embedding[token]) tokens
   let groups = n_layers / 4
   let rest = n_layers % 4
   let grouped = loop state = initial for g < groups do
-    let s1 = gla_block_quadratic f h (block_base v d f (4*g)) checked state
-    let s2 = gla_block_quadratic f h (block_base v d f (4*g + 1)) checked s1
-    let s3 = gla_block_quadratic f h (block_base v d f (4*g + 2)) checked s2
-    in softmax_block f h (block_base v d f (4*g + 3)) checked s3
+    let s1 = gla_block_quadratic_u arch f h (block_base arch v d f h (4*g)) checked state
+    let s2 = gla_block_quadratic_u arch f h (block_base arch v d f h (4*g + 1)) checked s1
+    let s3 = gla_block_quadratic_u arch f h (block_base arch v d f h (4*g + 2)) checked s2
+    in softmax_block_u arch f h (block_base arch v d f h (4*g + 3)) checked s3
   let hidden = loop state = grouped for r < rest do
-    gla_block_quadratic f h (block_base v d f (4*groups + r)) checked state
-  let final_gain = vector (block_base v d f n_layers) d checked
+    gla_block_quadratic_u arch f h (block_base arch v d f h (4*groups + r)) checked state
+  let final_gain = vector (block_base arch v d f h n_layers) d checked
   let final_hidden = map (\row -> rms_norm row final_gain) hidden
-  in map (\row -> map (\word -> dot word row) embedding) final_hidden
+  let unembed = matrix (unembed_off arch v d f h n_layers) v d checked
+  in map (\row -> map (\word -> dot word row) unembed) final_hidden
 
 def next_token_loss [n] [p]
-    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64) (chunk: i64)
+    (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
+    (chunk: i64)
     (tokens: [n]i64) (params: [p]f32): f32 =
   let checked_tokens = assert (n >= 2) tokens
-  let scores = model_logits v d f h n_layers chunk params checked_tokens
+  let scores = model_logits arch v d f h n_layers chunk params checked_tokens
   let losses = map (\i ->
     let row = scores[i]
     let target = checked_tokens[i+1]
@@ -515,11 +664,12 @@ def next_token_loss [n] [p]
 
 
 def batch_mean_loss_def [batch] [sequence] [p]
-    (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64) (chunk: i64)
+    (arch: i64) (v: i64) (d: i64) (f: i64) (h: i64) (n_layers: i64)
+    (chunk: i64)
     (params: [p]f32) (tokens: [batch][sequence]i64): f32 =
   let checked_tokens = assert (batch > 0 && sequence >= 2) tokens
   let losses = map
-    (\sample -> next_token_loss v d f h n_layers chunk sample params)
+    (\sample -> next_token_loss arch v d f h n_layers chunk sample params)
     checked_tokens
   in f32.sum losses / f32.i64 batch
 
@@ -559,3 +709,80 @@ def adamw_step_def [p]
     in param - learning_rate*(adaptive + decay))
     (zip5 checked m second checked decay_mask)
   in (updated, m, second)
+
+def matmul [a] [b] [cc] (x: [a][b]f32) (y: [b][cc]f32): [a][cc]f32 =
+  let yt = transpose y
+  in map (\xr -> map (\yc -> f32.sum (map2 (*) xr yc)) yt) x
+
+-- Five Newton-Schulz iterations of the Muon quintic X ← aX + (bA + cA²)X,
+-- A = XXᵀ, coefficients (3.4445, −4.7750, 2.0315), on the
+-- Frobenius-normalized input; iterate on the transpose when rows > cols
+-- so the Gram matrix is the small side.  Never differentiated.
+def ns5_core [r] [c] (m0: [r][c]f32): [r][c]f32 =
+  let fro = f32.sqrt (f32.sum (map (\row -> f32.sum (map (\x -> x*x) row)) m0))
+  let x0 = map (map (/ (fro + 1.0e-7f32))) m0
+  in loop x = x0 for _i < 5i64 do
+    let a = matmul x (transpose x)
+    let b = map2 (map2 (\p q -> -4.7750f32 * p + 2.0315f32 * q))
+                 a (matmul a a)
+    let bx = matmul b x
+    in map2 (map2 (\xe be -> 3.4445f32 * xe + be)) x bx
+
+def ns5 [r] [c] (m: [r][c]f32): [r][c]f32 =
+  if r <= c then ns5_core m
+  else transpose (ns5_core (transpose m))
+
+-- One combined Muon/AdamW update (FormalTransformer.Optimizer.muonStep is
+-- the Double-precision reference).  muon_mask marks the parameters owned
+-- by the k Muon slices (the 2-D hidden matrices, described by
+-- slice_off/rows/cols); they take the Nesterov Newton-Schulz update with
+-- Moonshot's RMS matching 0.2·sqrt(max(r,c)) and decoupled weight decay,
+-- everything else takes exactly the adamw_step_def formula.  Momentum and
+-- the Adam moments are masked to their owners so the state stays
+-- canonical (zeros elsewhere).
+def muon_step_def [p] [k]
+    (step: i64) (learning_rate: f32) (beta1: f32) (beta2: f32)
+    (epsilon: f32) (weight_decay: f32) (muon_beta: f32)
+    (params: [p]f32) (gradient: [p]f32)
+    (momentum: [p]f32) (first_moment: [p]f32) (second_moment: [p]f32)
+    (decay_mask: [p]bool) (muon_mask: [p]bool)
+    (slice_off: [k]i64) (slice_rows: [k]i64) (slice_cols: [k]i64)
+    : ([p]f32, [p]f32, [p]f32, [p]f32) =
+  let checked = assert (step > 0 && learning_rate >= 0.0f32 &&
+                        beta1 >= 0.0f32 && beta1 < 1.0f32 &&
+                        beta2 >= 0.0f32 && beta2 < 1.0f32 &&
+                        epsilon > 0.0f32 && weight_decay >= 0.0f32 &&
+                        muon_beta >= 0.0f32 && muon_beta < 1.0f32) params
+  let momentum' = map3 (\mu g on -> if on then muon_beta*mu + g else 0.0f32)
+                       momentum gradient muon_mask
+  let m = map3 (\old g on -> if on then 0.0f32
+                             else beta1*old + (1.0f32-beta1)*g)
+               first_moment gradient muon_mask
+  let second = map3 (\old g on -> if on then 0.0f32
+                                  else beta2*old + (1.0f32-beta2)*g*g)
+                    second_moment gradient muon_mask
+  let m_correction = 1.0f32 - beta1 ** f32.i64 step
+  let v_correction = 1.0f32 - beta2 ** f32.i64 step
+  let adam_updated = map5 (\param mi vi use_decay on ->
+    if on then param
+    else
+      let adaptive = (mi/m_correction) /
+                     (f32.sqrt (vi/v_correction) + epsilon)
+      let decay = if use_decay then weight_decay*param else 0.0f32
+      in param - learning_rate*(adaptive + decay))
+    checked m second decay_mask muon_mask
+  let updated = loop acc = copy adam_updated for i < k do
+    let off = slice_off[i]
+    let r = slice_rows[i]
+    let c = slice_cols[i]
+    let count = r * c
+    let ns_in = tabulate count (\j ->
+      gradient[off+j] + muon_beta * momentum'[off+j])
+    let o = flatten (ns5 (unflatten (ns_in :> [r*c]f32)))
+    let scale = 0.2f32 * f32.sqrt (f32.max (f32.i64 r) (f32.i64 c))
+    let upd = tabulate count (\j ->
+      let pj = acc[off+j]
+      let decay = if decay_mask[off+j] then weight_decay*pj else 0.0f32
+      in pj - learning_rate*(scale * o[j] + decay))
+    in scatter acc (map (+ off) (iota count)) upd
+  in (updated, momentum', m, second)

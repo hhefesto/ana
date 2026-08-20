@@ -92,13 +92,25 @@ data Manifest = Manifest
   , manifestParameterCount :: !Int
   , manifestLayoutIdentity :: !String
   , manifestLayoutVersion :: !Word32
-  , manifestOptimizerConfig :: !AdamWConfig
+  , manifestOptimizerConfig :: !OptimizerConfig
   , manifestIdentity :: !Identity
   , manifestClipNorm :: !Double
   , manifestNumerics :: !Numerics
   } deriving (Eq, Show, Generic)
 
--- Versions 1 and 2 predate explicit numerics. Historical runs used IEEE f32.
+-- Version 4 is the v3-era format (OptimizerConfig in the manifest,
+-- optional Muon momentum in the checkpoint body).  Version 3 — the master
+-- branch's format, which the live bpe100m run writes — is decoded
+-- READ-ONLY and migrated in memory: its six-field Config becomes the
+-- arms-off v3 Config (GateSigmoid, no qk-norm, no sinks — proved
+-- bit-identical to v2 semantics by the conformance gate), its AdamWConfig
+-- wraps into OptimizerConfig, its layout version 2 maps to 3 (the arms-off
+-- layouts coincide slice for slice), and its model identity string is
+-- rewritten to the v3 identity of that same semantics.  This binary never
+-- WRITES version 3: the returned manifest still says 3 so the body decoder
+-- knows there is no momentum flag, and decodeCheckpointCompact normalizes
+-- it to 4 before the checkpoint leaves the decode boundary.  Versions 1
+-- and 2 stay with the master binary.
 instance Binary Manifest where
   put manifest = do
     put (manifestVersion manifest)
@@ -112,34 +124,63 @@ instance Binary Manifest where
     put (manifestNumerics manifest)
   get = do
     version <- get
-    unless (version >= 1 && version <= artifactVersion)
-      (fail ("unsupported checkpoint manifest version: " ++ show (version :: Word32)))
-    cfg <- get
-    count <- get
-    layoutIdentity <- get
-    layoutVersion <- get
-    optimizer <- get
-    identity <- get
-    clip <- if version == 1 then pure 1.0 else get
-    numerics <- if version <= 2 then pure Fp32IEEE else get
-    pure (Manifest artifactVersion cfg count layoutIdentity layoutVersion optimizer identity clip numerics)
+    if version == artifactVersion
+      then do
+        cfg <- get
+        count <- get
+        layoutIdentity <- get
+        layoutVersion <- get
+        optimizer <- get
+        identity <- get
+        clip <- get
+        numerics <- get
+        pure (Manifest artifactVersion cfg count layoutIdentity layoutVersion optimizer identity clip numerics)
+      else if version == (3 :: Word32)
+        then do
+          cfg <- getV2Config
+          count <- get
+          layoutIdentity <- get
+          layoutVersion <- get
+          unless (layoutVersion == (2 :: Word32))
+            (fail ("v2-era checkpoint has unexpected layout version: " ++ show layoutVersion))
+          adamw <- get
+          identity <- get
+          clip <- get
+          numerics <- get
+          pure (Manifest 3 cfg count layoutIdentity canonicalLayoutVersion
+                 (OptimizerConfig adamw Nothing)
+                 (migrateIdentity cfg identity) clip numerics)
+        else fail ("unsupported checkpoint manifest version: " ++ show version)
+
+-- The v2-era Config wire format: six Ints, no architecture fields.
+getV2Config :: Get Config
+getV2Config =
+  (\a b c d e f -> Config a b c d e f GateSigmoid False False True)
+    <$> get <*> get <*> get <*> get <*> get <*> get
+
+-- The exact identity string the v2 binary minted for a config (its derived
+-- Show of the six-field record).  Only an identity that matches it exactly
+-- is rewritten; anything else — the tau/outnorm suffix arms, foreign
+-- prefixes — is left alone and fails the identity checks loudly.
+v2ModelId :: Config -> String
+v2ModelId cfg = "formal-transformer-futhark-hybrid-gla-v2:Config {vocabSize = "
+  ++ show (vocabSize cfg) ++ ", contextSize = " ++ show (contextSize cfg)
+  ++ ", modelDim = " ++ show (modelDim cfg) ++ ", ffDim = " ++ show (ffDim cfg)
+  ++ ", layerCount = " ++ show (layerCount cfg) ++ ", headCount = " ++ show (headCount cfg)
+  ++ "}"
+
+migrateIdentity :: Config -> Identity -> Identity
+migrateIdentity cfg identity
+  | modelIdentity identity == v2ModelId cfg = identity { modelIdentity = modelId cfg }
+  | otherwise = identity
 
 data Checkpoint = Checkpoint
   { checkpointManifest :: !Manifest
   , checkpointParameters :: !(VU.Vector Double)
-  , checkpointOptimizer :: !AdamWState
+  , checkpointOptimizer :: !OptimizerState
   , checkpointBestValidationLoss :: !(Maybe Double)
   , checkpointPRNG :: !PRNGState
   } deriving (Eq, Show, Generic)
-
--- The pre-compact wire format. Its parameter field stays a list because that
--- is what the derived instance encodes; the conversion to the in-memory
--- representation happens at the decode boundary in loadCheckpoint.
-data LegacyCheckpoint = LegacyCheckpoint
-  !Manifest ![Double] !AdamWState !(Maybe Double) !PRNGState
-  deriving (Generic)
-
-instance Binary LegacyCheckpoint
 
 data CorpusArtifact = CorpusArtifact
   { corpusVersion :: !Word32
@@ -155,17 +196,25 @@ data LegacyCorpusArtifact = LegacyCorpusArtifact
 instance Binary LegacyCorpusArtifact
 
 artifactVersion :: Word32
-artifactVersion = 3
+artifactVersion = 4
 
 validateCheckpoint :: Checkpoint -> Either String Checkpoint
 validateCheckpoint checkpoint = do
   let manifest = checkpointManifest checkpoint
       cfg = manifestConfig manifest
       expected = paramCount cfg
-      optimizer = checkpointOptimizer checkpoint
+      optimizer = optAdamWState (checkpointOptimizer checkpoint)
+      momentum = optMuonMomentum (checkpointOptimizer checkpoint)
       optimizerConfig = manifestOptimizerConfig manifest
   _ <- validateConfig cfg
-  _ <- validateAdamWConfig optimizerConfig
+  _ <- validateOptimizerConfig optimizerConfig
+  case (optMuon optimizerConfig, momentum) of
+    (Just _, Just mu)
+      | VU.length mu /= expected -> Left "checkpoint Muon momentum has wrong length"
+      | not (VU.all finite mu) -> Left "checkpoint Muon momentum contains non-finite numbers"
+      | otherwise -> Right ()
+    (Nothing, Nothing) -> Right ()
+    _ -> Left "checkpoint Muon momentum does not match the manifest's optimizer"
   unless (manifestVersion manifest == artifactVersion) (Left "unsupported checkpoint version")
   unless (finite (manifestClipNorm manifest) && manifestClipNorm manifest > 0)
     (Left "manifest gradient clip must be finite and positive")
@@ -177,7 +226,7 @@ validateCheckpoint checkpoint = do
   unless (VU.length (firstMoment optimizer) == expected && VU.length (secondMoment optimizer) == expected)
     (Left "checkpoint optimizer vectors have wrong length")
   unless (adamStep optimizer >= 0) (Left "checkpoint optimizer step is negative")
-  unless (adamStep optimizer <= totalSteps optimizerConfig) (Left "checkpoint optimizer step exceeds configured total steps")
+  unless (adamStep optimizer <= totalSteps (optAdamW optimizerConfig)) (Left "checkpoint optimizer step exceeds configured total steps")
   -- Checked array by array rather than over a concatenation: the three are as
   -- long as the parameter vector, and appending them would build a third copy.
   unless (all (VU.all finite)
@@ -244,13 +293,9 @@ loadCheckpoint path = readArtifactFile "checkpoint" hint path decode
     decode bytes
       | LBS.take 4 bytes == runPut (putWord32be checkpointCompactMagic) =
           decodeCheckpointCompact bytes >>= validateCheckpoint
-      | otherwise = case decodeOrFail bytes of
-          Left (_, _, message) -> Left ("checkpoint decode failed: " ++ message
-            ++ " (is " ++ path ++ " really a checkpoint written by train?)")
-          Right (remaining, _, LegacyCheckpoint manifest params optimizer best rng)
-            | not (LBS.null remaining) -> Left "checkpoint has trailing bytes"
-            | otherwise ->
-                validateCheckpoint (Checkpoint manifest (VU.fromList params) optimizer best rng)
+      | otherwise = Left ("not a compact checkpoint: " ++ path
+          ++ " (this v3 binary reads only version-4 compact checkpoints;"
+          ++ " older formats belong to the master branch's binary)")
 
 checkpointCompactMagic :: Word32
 checkpointCompactMagic = 0x46544332
@@ -287,7 +332,7 @@ loadCheckpointSummary path = do
         Just result -> pure result
         Nothing -> fmap (\checkpoint ->
             ( checkpointManifest checkpoint
-            , adamStep (checkpointOptimizer checkpoint)
+            , adamStep (optAdamWState (checkpointOptimizer checkpoint))
             )) <$> loadCheckpoint path
   where
     summaryPrefixBytes = 65536
@@ -303,10 +348,13 @@ encodeCheckpointCompact checkpoint = runPut $ do
   putWord32be checkpointCompactMagic
   put (checkpointManifest checkpoint)
   putF32Vector (checkpointParameters checkpoint)
-  let optimizer = checkpointOptimizer checkpoint
+  let optimizer = optAdamWState (checkpointOptimizer checkpoint)
   put (adamStep optimizer)
   putF32Vector (firstMoment optimizer)
   putF32Vector (secondMoment optimizer)
+  case optMuonMomentum (checkpointOptimizer checkpoint) of
+    Nothing -> put False
+    Just momentum -> put True >> putF32Vector momentum
   put (checkpointBestValidationLoss checkpoint)
   put (checkpointPRNG checkpoint)
   where
@@ -330,14 +378,21 @@ decodeCheckpointCompact bytes = case runGetOrFail getCheckpoint bytes of
     getCheckpoint = do
       magic <- getWord32be
       unless (magic == checkpointCompactMagic) (fail "wrong compact checkpoint magic")
-      manifest <- get
+      manifest0 <- get
       params <- getF32Vector
       step <- get
       first <- getF32Vector
       second <- getF32Vector
+      -- The momentum flag exists only in version-4 bodies; a v2-era body
+      -- goes straight from the second moment to the best-loss field.
+      hasMomentum <- if manifestVersion manifest0 == artifactVersion
+        then get else pure False
+      momentum <- if hasMomentum then Just <$> getF32Vector else pure Nothing
       best <- get
       rng <- get
-      pure (Checkpoint manifest params (AdamWState step first second) best rng)
+      let manifest = manifest0 { manifestVersion = artifactVersion }
+      pure (Checkpoint manifest params
+             (OptimizerState (AdamWState step first second) momentum) best rng)
     -- The payload is a contiguous run of big-endian f32, so it is taken as one
     -- ByteString and widened in place. Reading it element-wise through Get
     -- would build a boxed list first -- 4.6 GB for one 115M-parameter array,

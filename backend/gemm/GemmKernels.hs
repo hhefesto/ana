@@ -34,6 +34,9 @@ module FutharkKernels
   , futharkParameterCount
   , logits
   , adamwStep
+  , muonStepDevice
+  , uploadI64Vector
+  , uploadBoolVector
   , lastLogits
   , decodeStep
   , synchronize
@@ -83,7 +86,8 @@ newtype BoolArray = BoolArray (Ptr CBool_1d)
 data I64Array = I64Array ![Int] !DevI64
 
 data GpuConfig = GpuConfig
-  { gpuVocab :: !Int64
+  { gpuArch :: !Int64  -- packed v3 architecture flags (Config.archCode)
+  , gpuVocab :: !Int64
   , gpuModelDim :: !Int64
   , gpuFfDim :: !Int64
   , gpuHeads :: !Int64
@@ -91,11 +95,20 @@ data GpuConfig = GpuConfig
   , gpuChunk :: !Int64
   } deriving (Eq, Show)
 
+-- The decomposed piece pipeline still computes v2 semantics only: its gate
+-- piece is the sigmoid log-gate (piece_gate_cum) and its softmax piece has
+-- no qk-norm or sinks.  Refuse every v3 arm here, loudly, rather than
+-- training a v3 config with v2 math; the pieces grow v3 support when a
+-- pilot promotes an arm to this backend (docs/V3-DECISIONS.md).
 gpuConfig :: Config -> Either String GpuConfig
 gpuConfig cfg = do
   _ <- validateConfig cfg
+  _ <- if archCode cfg /= 0
+    then Left "the decomposed GEMM backend implements only the v2 architecture (sigmoid gates, no qk-norm, no sinks); use the futhark backends for v3 arms"
+    else Right ()
   pure GpuConfig
-    { gpuVocab = f vocabSize
+    { gpuArch = fromIntegral (archCode cfg)
+    , gpuVocab = f vocabSize
     , gpuModelDim = f modelDim
     , gpuFfDim = f ffDim
     , gpuHeads = f headCount
@@ -263,6 +276,22 @@ adamwStep ctx step learningRate beta1 beta2 epsilon weightDecay
     beta2 epsilon weightDecay params gradient firstMoment secondMoment mask
   pure (F32Array params', F32Array first', F32Array second')
 
+-- The decomposed backend has no Muon kernel yet; TRAIN_OPT=muon on this
+-- backend fails loudly here rather than training with the wrong update
+-- (the same rule as its arch guard in gpuConfig).
+muonStepDevice
+  :: Context -> Int64 -> Float -> Float -> Float -> Float -> Float -> Float
+  -> F32Array -> F32Array -> F32Array -> F32Array -> F32Array
+  -> BoolArray -> BoolArray -> I64Array -> I64Array -> I64Array
+  -> IO (F32Array, F32Array, F32Array, F32Array)
+muonStepDevice _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ = unsupported "muonStepDevice"
+
+uploadI64Vector :: Context -> [Int64] -> IO I64Array
+uploadI64Vector _ _ = unsupported "uploadI64Vector"
+
+uploadBoolVector :: Context -> UV.Vector Bool -> IO BoolArray
+uploadBoolVector _ _ = unsupported "uploadBoolVector"
+
 logits :: Context -> GpuConfig -> Int -> F32Array -> I64Array -> IO [[Float]]
 logits _ _ _ _ _ = unsupported "logits"
 
@@ -295,6 +324,9 @@ batchOf :: I64Array -> IO (Int, Int, DevI64)
 batchOf (I64Array [rows, cols] tokens) = pure (rows, cols, tokens)
 batchOf _ = ioError (userError "expected an i64[2] batch")
 
+-- The decomposed backend computes v2 semantics only (gpuConfig refuses any
+-- nonzero arch word), so the reconstructed Config always carries the
+-- arms-off architecture.
 configOf :: GpuConfig -> Int -> Config
 configOf cfg sequenceLength = Config
   { vocabSize = fromIntegral (gpuVocab cfg)
@@ -303,6 +335,10 @@ configOf cfg sequenceLength = Config
   , ffDim = fromIntegral (gpuFfDim cfg)
   , layerCount = fromIntegral (gpuLayers cfg)
   , headCount = fromIntegral (gpuHeads cfg)
+  , gateKind = GateSigmoid
+  , qkNorm = False
+  , headSinks = False
+  , tiedHead = True
   }
 
 -- Per-op isolation of the training head path at PRODUCTION dims with
