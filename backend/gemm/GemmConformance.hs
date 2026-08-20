@@ -1,14 +1,16 @@
 module Main (main) where
 
 import Arena (arenaForget, arenaPop, arenaPush, arenaRegister)
-import Control.Monad (unless)
+import Control.Monad (forM_, unless)
 import Buffer
 import Data.Int (Int64)
 import Data.List (sort)
+import qualified Data.Vector.Unboxed as VU
 import Decomposed
 import FormalTransformer.Config
 import FormalTransformer.Layout
 import FormalTransformer.Model
+import FormalTransformer.Optimizer
 import Numeric.AD (grad)
 import Parameters
 import PiecesConformance
@@ -18,6 +20,19 @@ import System.Exit (die)
 config :: Config
 config = Config 5 4 4 6 5 2 GateSigmoid False False True
 
+-- The tied arms of the six-arm battery (backend/conformance covers the
+-- untied ones; the decomposed backend keeps the tied head).  Layers 0-2
+-- and 4 are GLA, layer 3 softmax, so every arm exercises both block kinds
+-- and the mixed dispatch.
+batteryConfigs :: [(String, Config)]
+batteryConfigs =
+  [ ("sigmoid", config)
+  , ("rglru", config { gateKind = GateRgLru })
+  , ("qknorm", config { qkNorm = True })
+  , ("sinks", config { headSinks = True })
+  , ("v3-tied", config { gateKind = GateRgLru, qkNorm = True, headSinks = True })
+  ]
+
 tokens :: [Int]
 tokens = [0, 2, 3, 4]
 
@@ -25,7 +40,10 @@ batchTokens :: [[Int]]
 batchTokens = [tokens, [0, 3, 2, 4]]
 
 parameters :: [Double]
-parameters = either error (concatMap initialize) (namedLayout config)
+parameters = parametersFor config
+
+parametersFor :: Config -> [Double]
+parametersFor cfg = either error (concatMap initialize) (namedLayout cfg)
   where
     initialize slice
       | sliceDecay slice = [0.025 * sin (fromIntegral (sliceOffset slice + i + 1) * 0.73) | i <- [0 .. sliceLength slice - 1]]
@@ -38,7 +56,8 @@ main = do
   withContext $ \ctx -> do
     pieceSmoke ctx
     dataMovementSmoke ctx
-    oracleSmoke ctx
+    forM_ batteryConfigs (oracleSmoke ctx)
+    forM_ batteryConfigs (muonSmoke ctx)
     putStrLn "gemm conformance: initial piece/oracle smoke passed"
 
 -- The nested-arena rules decide what the CUDA runtime frees and when, and a
@@ -122,6 +141,9 @@ pieceSmoke ctx = do
   rmsNormSmoke ctx
   l2NormHeadsSmoke ctx
   siluGateSmoke ctx
+  qkNormSmoke ctx
+  sinkSoftmaxSmoke ctx
+  rglruPiecesSmoke ctx
   feedForwardSmoke ctx
   softmaxAttentionSmoke ctx
   softmaxAttentionSubBlockSmoke ctx
@@ -201,6 +223,183 @@ l2Normalize :: Floating a => [a] -> [a]
 l2Normalize xs = map (/ norm) xs
   where
     norm = sqrt (sum (map (\x -> x * x) xs) + 1e-6)
+
+-- Per-head RMSNorm with shared zero-centered gains (v3 qkNorm), the
+-- qk_normalize formula from model.fut.
+qkNormReference :: Floating a => Int -> [a] -> [a] -> [a]
+qkNormReference heads gain xs = concatMap normalizeHead (chunksOf hd xs)
+  where
+    hd = length xs `div` heads
+    normalizeHead ys = zipWith (\g y -> y * scale * (1 + g)) gain ys
+      where
+        ms = sum (map (\y -> y * y) ys) / fromIntegral hd
+        scale = 1 / sqrt (ms + 1e-5)
+
+qkNormSmoke :: Context -> IO ()
+qkNormSmoke ctx = do
+  let rows = 3
+      dim = 6
+      heads = 3
+      hd = dim `div` heads
+      x = [0.9, -1.4, 0.3, 2.1, -0.8, 1.7,
+           -0.2, 0.6, -1.1, 0.4, 1.3, -2.2,
+           1.8, -0.5, 0.7, -1.6, 0.1, 0.95] :: [Double]
+      gain = [0.15, -0.3] :: [Double]
+      outputBar = [0.4, -0.7, 1.2, -0.3, 0.8, -1.5,
+                   0.25, -0.55, 0.95, 1.05, -0.35, 0.65,
+                   -0.85, 0.45, -0.15, 1.35, -1.05, 0.75] :: [Double]
+      expected = concatMap (qkNormReference heads gain) (chunksOf dim x)
+      scalarX xs' = sum (zipWith (*)
+        (concatMap (qkNormReference heads (map realToFrac gain)) (chunksOf dim xs'))
+        (map realToFrac outputBar))
+      scalarGain gs = sum (zipWith (*)
+        (concatMap (qkNormReference heads gs) (chunksOf dim (map realToFrac x)))
+        (map realToFrac outputBar))
+  unless (hd == length gain) (die "qkNormSmoke shape mismatch")
+  withF32 ctx (map realToFrac x) $ \xArr ->
+    withF32 ctx (map realToFrac gain) $ \gainArr -> do
+      actual <- pieceQkNorm ctx rows dim heads xArr gainArr
+      compareVector "piece qk-norm forward" 1e-6 1e-6 expected (map realToFrac actual)
+      withF32 ctx (map realToFrac outputBar) $ \barArr -> do
+        (xBar, gainBar) <- pieceQkNormBackward ctx rows dim heads xArr gainArr barArr
+        compareVector "piece qk-norm x pullback" 1e-5 1e-5 (grad scalarX x)
+          (map realToFrac xBar)
+        compareVector "piece qk-norm gain pullback" 1e-5 1e-5 (grad scalarGain gain)
+          (map realToFrac gainBar)
+
+-- The extended softmax with a per-head sink slot whose weight is dropped
+-- (Attention/Sink.agda); groups = batch*heads with head = group `mod` heads.
+sinkSoftmaxReference :: (Floating a, Ord a) => Int -> Int -> Int -> [a] -> [a] -> [a]
+sinkSoftmaxReference n hd heads sinks scores = concat
+  [ take n (softmaxReference (row ++ [sinks !! (g `mod` heads)]))
+  | (g, groupRows) <- zip [0 ..] (chunksOf (n * n) scores)
+  , (i, rawRow) <- zip [0 :: Int ..] (chunksOf n groupRows)
+  , let row = [ if j <= i then rawRow !! j / sqrt (fromIntegral hd) else -1e30
+              | j <- [0 .. n - 1] ]
+  ]
+
+sinkSoftmaxSmoke :: Context -> IO ()
+sinkSoftmaxSmoke ctx = do
+  let batch = 2
+      heads = 2
+      groups = batch * heads
+      n = 3
+      hd = 2
+      count = groups * n * n
+      scores = [0.4 * sin (fromIntegral i * 0.61) | i <- [1 .. count]] :: [Double]
+      sinks = [0.3, -0.6] :: [Double]
+      outputBar = [0.5 * cos (fromIntegral i * 0.37) | i <- [1 .. count]] :: [Double]
+      expected = sinkSoftmaxReference n hd heads sinks scores
+      scalarScores ss = sum (zipWith (*)
+        (sinkSoftmaxReference n hd heads (map realToFrac sinks) ss)
+        (map realToFrac outputBar))
+      scalarSinks sk = sum (zipWith (*)
+        (sinkSoftmaxReference n hd heads sk (map realToFrac scores))
+        (map realToFrac outputBar))
+  withF32 ctx (map realToFrac scores) $ \scoresArr ->
+    withF32 ctx (map realToFrac sinks) $ \sinksArr -> do
+      actual <- pieceCausalSoftmaxSink ctx groups n hd heads scoresArr sinksArr
+      compareVector "piece sink softmax forward" 1e-6 1e-6 expected
+        (map realToFrac actual)
+      withF32 ctx (map realToFrac outputBar) $ \barArr -> do
+        (scoresBar, sinksBar) <- pieceCausalSoftmaxSinkBackward ctx groups n hd heads
+          scoresArr sinksArr barArr
+        compareVector "piece sink softmax scores pullback" 1e-5 1e-5
+          (grad scalarScores scores) (map realToFrac scoresBar)
+        compareVector "piece sink softmax sinks pullback" 1e-5 1e-5
+          (grad scalarSinks sinks) (map realToFrac sinksBar)
+
+-- The RG-LRU formulas (model.fut rglru_log_gate / rglru_write_scale).
+rglruLogGateReference :: Floating a => [a] -> [a] -> [a]
+rglruLogGateReference lam zs = concatMap
+  (zipWith (\l z -> 8 * sigmoidRef z * logSigmoidRef l) lam)
+  (chunksOf (length lam) zs)
+
+sigmoidRef :: Floating a => a -> a
+sigmoidRef z = 1 / (1 + exp (-z))
+
+logSigmoidRef :: Floating a => a -> a
+logSigmoidRef z = negate (log (1 + exp (negate z)))
+
+rglruWriteScaleReference :: Floating a => [a] -> [a] -> [a]
+rglruWriteScaleReference logs ks =
+  zipWith (\l kc -> kc * sqrt (1 - exp (2 * l))) logs ks
+
+rglruPiecesSmoke :: Context -> IO ()
+rglruPiecesSmoke ctx = do
+  let rows = 3
+      dim = 4
+      z = [0.7 * sin (fromIntegral i * 0.83) | i <- [1 .. rows * dim]] :: [Double]
+      lam = [0.9, -0.4, 1.6, 0.2] :: [Double]
+      outputBar = [0.6 * cos (fromIntegral i * 0.29) | i <- [1 .. rows * dim]] :: [Double]
+      expectedLogs = rglruLogGateReference lam z
+      scalarZ zs = sum (zipWith (*)
+        (rglruLogGateReference (map realToFrac lam) zs) (map realToFrac outputBar))
+      scalarLam ls = sum (zipWith (*)
+        (rglruLogGateReference ls (map realToFrac z)) (map realToFrac outputBar))
+  withF32 ctx (map realToFrac z) $ \zArr ->
+    withF32 ctx (map realToFrac lam) $ \lamArr -> do
+      actualLogs <- pieceRglruLogGate ctx rows dim zArr lamArr
+      compareVector "piece rglru log-gate forward" 1e-6 1e-6 expectedLogs
+        (map realToFrac actualLogs)
+      withF32 ctx (map realToFrac outputBar) $ \barArr -> do
+        (zBar, lamBar) <- pieceRglruLogGateBackward ctx rows dim zArr lamArr barArr
+        compareVector "piece rglru log-gate z pullback" 1e-5 1e-5 (grad scalarZ z)
+          (map realToFrac zBar)
+        compareVector "piece rglru log-gate lambda pullback" 1e-5 1e-5
+          (grad scalarLam lam) (map realToFrac lamBar)
+  -- The write scale over the log-gates the previous piece produced.
+  let logs = expectedLogs
+      ks = [0.5 * cos (fromIntegral i * 0.53) | i <- [1 .. rows * dim]] :: [Double]
+      count = rows * dim
+      expectedScaled = rglruWriteScaleReference logs ks
+      scalarLogs ls = sum (zipWith (*)
+        (rglruWriteScaleReference ls (map realToFrac ks)) (map realToFrac outputBar))
+      scalarK ks' = sum (zipWith (*)
+        (rglruWriteScaleReference (map realToFrac logs) ks') (map realToFrac outputBar))
+  withF32 ctx (map realToFrac logs) $ \logsArr ->
+    withF32 ctx (map realToFrac ks) $ \kArr -> do
+      actualScaled <- pieceRglruWriteScale ctx count logsArr kArr
+      compareVector "piece rglru write-scale forward" 1e-6 1e-6 expectedScaled
+        (map realToFrac actualScaled)
+      withF32 ctx (map realToFrac outputBar) $ \barArr -> do
+        (logsBar, kBar) <- pieceRglruWriteScaleBackward ctx count logsArr kArr barArr
+        compareVector "piece rglru write-scale logs pullback" 1e-5 1e-5
+          (grad scalarLogs logs) (map realToFrac logsBar)
+        compareVector "piece rglru write-scale k pullback" 1e-5 1e-5
+          (grad scalarK ks) (map realToFrac kBar)
+  -- gate_cum over already-log-space gates: prefix sums only.
+  let groups = 2
+      chunk = 3
+      hd = 2
+      cumCount = groups * chunk * hd
+      cumLogs = map (negate . abs) [0.31 * sin (fromIntegral i * 0.47) | i <- [1 .. cumCount]] :: [Double]
+      relBarH = [0.2 * cos (fromIntegral i * 0.59) | i <- [1 .. cumCount]] :: [Double]
+      decBarH = [0.4 * sin (fromIntegral i * 0.71) | i <- [1 .. groups * hd]] :: [Double]
+      cumReference ls =
+        [ [ [ sum [ group !! r !! c | r <- [0 .. i] ]
+            | c <- [0 .. hd - 1] ]
+          | i <- [0 .. chunk - 1] ]
+        | group <- map (chunksOf hd) (chunksOf (chunk * hd) ls)
+        ]
+      relOf ls = concat (concat (cumReference ls))
+      decOf ls = concat [ last cum | cum <- cumReference ls ]
+      expectedRel = relOf cumLogs
+      expectedDec = decOf cumLogs
+      scalarCum ls = sum (zipWith (*) (relOf ls) (map realToFrac relBarH))
+        + sum (zipWith (*) (decOf ls) (map realToFrac decBarH))
+  withF32 ctx (map realToFrac cumLogs) $ \logsArr -> do
+    (actualRel, actualDec) <- pieceGateCumLogs ctx groups chunk hd logsArr
+    compareVector "piece gate-cum-logs relcum" 1e-6 1e-6 expectedRel
+      (map realToFrac actualRel)
+    compareVector "piece gate-cum-logs dec" 1e-6 1e-6 expectedDec
+      (map realToFrac actualDec)
+    withF32 ctx (map realToFrac relBarH) $ \relBarArr ->
+      withF32 ctx (map realToFrac decBarH) $ \decBarArr -> do
+        actualBar <- pieceGateCumLogsBackward ctx groups chunk hd logsArr
+          relBarArr decBarArr
+        compareVector "piece gate-cum-logs pullback" 1e-5 1e-5
+          (grad scalarCum cumLogs) (map realToFrac actualBar)
 
 siluGateSmoke :: Context -> IO ()
 siluGateSmoke ctx = do
@@ -344,6 +543,16 @@ conformancePieceOps ctx = PieceOps
   , opsCausalSoftmaxBackward = causalSoftmaxBackwardList ctx
   , opsGateCumForward = gateCumList ctx
   , opsGateCumBackward = gateCumBackwardList ctx
+  , opsGateCumLogsForward = gateCumLogsList ctx
+  , opsGateCumLogsBackward = gateCumLogsBackwardList ctx
+  , opsRglruLogGateForward = rglruLogGateList ctx
+  , opsRglruLogGateBackward = rglruLogGateBackwardList ctx
+  , opsRglruWriteScaleForward = rglruWriteScaleList ctx
+  , opsRglruWriteScaleBackward = rglruWriteScaleBackwardList ctx
+  , opsQkNormForward = qkNormList ctx
+  , opsQkNormBackward = qkNormBackwardList ctx
+  , opsCausalSoftmaxSinkForward = causalSoftmaxSinkList ctx
+  , opsCausalSoftmaxSinkBackward = causalSoftmaxSinkBackwardList ctx
   , opsQkDecayForward = qkDecayList ctx
   , opsQkDecayBackward = qkDecayBackwardList ctx
   , opsGlaIntraForward = glaIntraList ctx
@@ -497,7 +706,7 @@ softmaxAttentionSmoke ctx = do
         (map realToFrac q) (map realToFrac k) vs) (map realToFrac outputBar)
   actual <- softmaxAttentionDecomposed (conformancePieceOps ctx) batch n heads hd
     (map realToFrac q) (map realToFrac k) (map realToFrac value)
-    (map realToFrac outputBar)
+    Nothing (map realToFrac outputBar)
   compareVector "decomposed softmax attention forward" 3e-5 3e-5 expected
     (map realToFrac (softmaxOutput actual))
   compareVector "decomposed softmax attention Q pullback" 5e-5 5e-5 (grad scalarQ q)
@@ -545,9 +754,12 @@ softmaxAttentionSubBlockSmoke ctx = do
       scalarWo ws = dotList (softmaxAttentionSubBlockReference batch n heads hd
         (map realToFrac x) (map realToFrac gain) (map realToFrac wq)
         (map realToFrac wk) (map realToFrac wv) ws) (map realToFrac outputBar)
+  let subBlockWeights = SoftmaxBlockWeights
+        (map realToFrac gain) (map realToFrac wq) (map realToFrac wk)
+        (map realToFrac wv) (map realToFrac wo) Nothing Nothing Nothing
+        [] [] [] []
   actual <- softmaxAttentionSubBlockDecomposed (conformancePieceOps ctx) batch n heads hd
-    (map realToFrac x) (map realToFrac gain) (map realToFrac wq)
-    (map realToFrac wk) (map realToFrac wv) (map realToFrac wo)
+    (map realToFrac x) subBlockWeights
     (map realToFrac outputBar)
   compareVector "decomposed softmax sub-block forward" 5e-5 5e-5 expected
     (map realToFrac (softmaxBlockOutput actual))
@@ -633,7 +845,8 @@ softmaxFullBlockSmoke ctx = do
         (map realToFrac rmsFf) (map realToFrac wgate) (map realToFrac wup) weights)
       actualWeights = SoftmaxBlockWeights
         (map realToFrac rmsAtt) (map realToFrac wq) (map realToFrac wk)
-        (map realToFrac wv) (map realToFrac wo) (map realToFrac rmsFf)
+        (map realToFrac wv) (map realToFrac wo) Nothing Nothing Nothing
+        (map realToFrac rmsFf)
         (map realToFrac wgate) (map realToFrac wup) (map realToFrac wdown)
   actual <- softmaxBlockDecomposed (conformancePieceOps ctx) batch n heads hd f
     (map realToFrac x) actualWeights (map realToFrac outputBar)
@@ -754,6 +967,67 @@ gateCumBackwardList ctx groups chunk hd gateLogits relBar decBar =
   withF32 ctx gateLogits $ \gateArr ->
     withF32 ctx relBar $ \relBarArr ->
       withF32 ctx decBar $ pieceGateCumBackward ctx groups chunk hd gateArr relBarArr
+
+gateCumLogsList :: Context -> Int -> Int -> Int -> [Float] -> IO ([Float], [Float])
+gateCumLogsList ctx groups chunk hd logs =
+  withF32 ctx logs $ pieceGateCumLogs ctx groups chunk hd
+
+gateCumLogsBackwardList
+  :: Context -> Int -> Int -> Int -> [Float] -> [Float] -> [Float] -> IO [Float]
+gateCumLogsBackwardList ctx groups chunk hd logs relBar decBar =
+  withF32 ctx logs $ \logsArr ->
+    withF32 ctx relBar $ \relBarArr ->
+      withF32 ctx decBar $ pieceGateCumLogsBackward ctx groups chunk hd logsArr relBarArr
+
+rglruLogGateList :: Context -> Int -> Int -> [Float] -> [Float] -> IO [Float]
+rglruLogGateList ctx rows d z lam =
+  withF32 ctx z $ \zArr ->
+    withF32 ctx lam $ pieceRglruLogGate ctx rows d zArr
+
+rglruLogGateBackwardList
+  :: Context -> Int -> Int -> [Float] -> [Float] -> [Float] -> IO ([Float], [Float])
+rglruLogGateBackwardList ctx rows d z lam bar =
+  withF32 ctx z $ \zArr ->
+    withF32 ctx lam $ \lamArr ->
+      withF32 ctx bar $ pieceRglruLogGateBackward ctx rows d zArr lamArr
+
+rglruWriteScaleList :: Context -> [Float] -> [Float] -> IO [Float]
+rglruWriteScaleList ctx logs k =
+  withF32 ctx logs $ \logsArr ->
+    withF32 ctx k $ pieceRglruWriteScale ctx (length logs) logsArr
+
+rglruWriteScaleBackwardList
+  :: Context -> [Float] -> [Float] -> [Float] -> IO ([Float], [Float])
+rglruWriteScaleBackwardList ctx logs k bar =
+  withF32 ctx logs $ \logsArr ->
+    withF32 ctx k $ \kArr ->
+      withF32 ctx bar $ pieceRglruWriteScaleBackward ctx (length logs) logsArr kArr
+
+qkNormList :: Context -> Int -> Int -> Int -> [Float] -> [Float] -> IO [Float]
+qkNormList ctx rows d heads x gain =
+  withF32 ctx x $ \xArr ->
+    withF32 ctx gain $ pieceQkNorm ctx rows d heads xArr
+
+qkNormBackwardList
+  :: Context -> Int -> Int -> Int -> [Float] -> [Float] -> [Float] -> IO ([Float], [Float])
+qkNormBackwardList ctx rows d heads x gain bar =
+  withF32 ctx x $ \xArr ->
+    withF32 ctx gain $ \gainArr ->
+      withF32 ctx bar $ pieceQkNormBackward ctx rows d heads xArr gainArr
+
+causalSoftmaxSinkList
+  :: Context -> Int -> Int -> Int -> Int -> [Float] -> [Float] -> IO [Float]
+causalSoftmaxSinkList ctx groups n hd heads scores sinks =
+  withF32 ctx scores $ \scoresArr ->
+    withF32 ctx sinks $ pieceCausalSoftmaxSink ctx groups n hd heads scoresArr
+
+causalSoftmaxSinkBackwardList
+  :: Context -> Int -> Int -> Int -> Int -> [Float] -> [Float] -> [Float]
+  -> IO ([Float], [Float])
+causalSoftmaxSinkBackwardList ctx groups n hd heads scores sinks bar =
+  withF32 ctx scores $ \scoresArr ->
+    withF32 ctx sinks $ \sinksArr ->
+      withF32 ctx bar $ pieceCausalSoftmaxSinkBackward ctx groups n hd heads scoresArr sinksArr
 
 qkDecayList
   :: Context -> Int -> Int -> Int -> [Float] -> [Float] -> [Float] -> [Float]
@@ -910,7 +1184,7 @@ glaAttentionSmoke ctx = do
       scalarGate gates = objective (glaAttentionReference batch n heads hd
         (map realToFrac q) (map realToFrac k) (map realToFrac value) gates)
   actual <- glaAttentionDecomposed (conformancePieceOps ctx) batch n heads hd chunk
-    (map realToFrac q) (map realToFrac k) (map realToFrac value)
+    False (map realToFrac q) (map realToFrac k) (map realToFrac value)
     (map realToFrac gate) (map realToFrac outputBar)
   compareVector "decomposed GLA nc>4 forward" 1e-4 1e-4 expected
     (map realToFrac (glaOutput actual))
@@ -1011,6 +1285,7 @@ glaFullBlockSmoke ctx = do
       weights = GlaBlockWeights
         (map realToFrac rmsAtt) (map realToFrac wq) (map realToFrac wk)
         (map realToFrac wv) (map realToFrac wo) (map realToFrac walpha)
+        Nothing
         (map realToFrac rmsFf) (map realToFrac wgate) (map realToFrac wup)
         (map realToFrac wdown)
   actual <- glaBlockDecomposed (conformancePieceOps ctx) batch n heads hd chunk f
@@ -1075,56 +1350,122 @@ unpackGlaBlock rows d f packed =
     (wup, rest10) = splitAt (f * d) rest9
     (wdown, _) = splitAt (d * f) rest10
 
-oracleSmoke :: Context -> IO ()
-oracleSmoke ctx = do
-  let arch = fromIntegral (archCode config)
-      vocab = fromIntegral (vocabSize config)
-      dim = fromIntegral (modelDim config)
-      ff = fromIntegral (ffDim config)
-      heads = fromIntegral (headCount config)
-      layers = fromIntegral (layerCount config)
+oracleSmoke :: Context -> (String, Config) -> IO ()
+oracleSmoke ctx (label, cfg) = do
+  putStrLn ("=== oracle + decomposed traversal, arm: " ++ label)
+  let arch = fromIntegral (archCode cfg)
+      vocab = fromIntegral (vocabSize cfg)
+      dim = fromIntegral (modelDim cfg)
+      ff = fromIntegral (ffDim cfg)
+      heads = fromIntegral (headCount cfg)
+      layers = fromIntegral (layerCount cfg)
       chunk = 2
-      paramFloats = map realToFrac parameters
+      armParameters = parametersFor cfg
+      paramFloats = map realToFrac armParameters
       tokenInts = map fromIntegral tokens :: [Int64]
+      tag name = name ++ " (" ++ label ++ ")"
   count <- oracleParameterCount ctx arch vocab dim ff heads layers
-  assertExact "oracle parameter count" (fromIntegral (paramCount config)) count
-  referenceLogits <- either die pure (fullSequenceLogits config parameters tokens)
+  assertExact (tag "oracle parameter count") (fromIntegral (paramCount cfg)) count
+  referenceLogits <- either die pure (fullSequenceLogits cfg armParameters tokens)
   withF32 ctx paramFloats $ \paramsArr ->
     withI64 ctx tokenInts $ \tokensArr -> do
       actualLogits <- oracleLogits ctx (length tokens) arch vocab dim ff heads layers chunk paramsArr tokensArr
-      compareVector "oracle logits" 3e-4 3e-4 (concat referenceLogits) (map realToFrac actualLogits)
+      compareVector (tag "oracle logits") 3e-4 3e-4 (concat referenceLogits) (map realToFrac actualLogits)
   let referenceBatchLoss params = sum
-        [ sequenceLossFor sequenceTokens params | sequenceTokens <- batchTokens ]
+        [ sequenceLossFor cfg sequenceTokens params | sequenceTokens <- batchTokens ]
         / fromIntegral (length batchTokens)
-      referenceGradient = grad referenceBatchLoss parameters
+      referenceGradient = grad referenceBatchLoss armParameters
       flatBatch = concatMap (map fromIntegral) batchTokens :: [Int64]
   withF32 ctx paramFloats $ \paramsArr ->
     withI64 ctx flatBatch $ \tokensArr -> do
       (loss, gradientValues) <- oracleBatchLossGrad ctx (fromIntegral (length batchTokens))
         (fromIntegral (length tokens)) arch vocab dim ff heads layers chunk paramsArr tokensArr
-      compareScalar "oracle batch loss" 3e-4 3e-4 (referenceBatchLoss parameters) (realToFrac loss)
-      compareVector "oracle batch gradient" 2e-3 2e-2 referenceGradient (map realToFrac gradientValues)
+      compareScalar (tag "oracle batch loss") 3e-4 3e-4 (referenceBatchLoss armParameters) (realToFrac loss)
+      compareVector (tag "oracle batch gradient") 2e-3 2e-2 referenceGradient (map realToFrac gradientValues)
       dumpPath <- lookupEnv "GEMM_CONFORMANCE_DUMP"
       case dumpPath of
-        Just path ->
-          writeFile path (unlines (show loss : map show gradientValues))
+        -- The base config keeps the historical golden name (raw-probe e2e
+        -- replays it); every arm also writes its own, so the device replay
+        -- can cover the v3 pieces too.
+        Just path -> do
+          let armPath = if label == "sigmoid" then path else path ++ "." ++ label
+          writeFile armPath (unlines (show loss : map show gradientValues))
         Nothing -> pure ()
       (decomposedLoss, decomposedGradient) <- modelLossGradDecomposed
-        (conformancePieceOps ctx) config (fromIntegral chunk)
+        (conformancePieceOps ctx) cfg (fromIntegral chunk)
         (length batchTokens) (length batchTokens)
         paramFloats flatBatch
-      compareScalar "decomposed hybrid loss vs fused oracle" 1e-4 1e-4
+      compareScalar (tag "decomposed hybrid loss vs fused oracle") 1e-4 1e-4
         (realToFrac loss) (realToFrac decomposedLoss)
-      compareVector "decomposed hybrid every gradient vs fused oracle" 1e-4 1e-3
+      compareVector (tag "decomposed hybrid every gradient vs fused oracle") 1e-4 1e-3
         (map realToFrac gradientValues) (map realToFrac decomposedGradient)
-      compareVector "decomposed hybrid every gradient vs Numeric.AD" 2e-3 2e-2
+      compareVector (tag "decomposed hybrid every gradient vs Numeric.AD") 2e-3 2e-2
         referenceGradient (map realToFrac decomposedGradient)
 
-sequenceLossFor :: (Floating a, Ord a) => [Int] -> [a] -> a
-sequenceLossFor sequenceTokens params = sum losses / fromIntegral (length losses)
+-- The combined Muon/AdamW step of the pieces build against the Double
+-- reference, per battery arm (the arm decides which slices are hidden
+-- matrices: walpha joins under both gate kinds, gate_lambda and the
+-- qk gains and sinks stay on AdamW).  Mirrors backend/conformance's
+-- muonConformance.
+muonSmoke :: Context -> (String, Config) -> IO ()
+muonSmoke ctx (label, cfg) = do
+  putStrLn ("=== muon step (pieces build), arm: " ++ label)
+  let armParameters = parametersFor cfg
+  mask <- either die pure (decayMask cfg)
+  layout <- either die pure (namedLayout cfg)
+  let slices = [ MuonSlice (sliceOffset s) (sliceRows s) (sliceCols s)
+               | s <- layout, sliceCols s > 1
+               , sliceName s /= "embedding", sliceName s /= "unembedding" ]
+      n = paramCount cfg
+      muonCfg = OptimizerConfig (AdamWConfig 0.002 0.9 0.99 1e-6 0.03 0 10)
+                  (Just (MuonConfig 0.9))
+      oldM = zipWith (\i _ -> 0.0002 * sin (fromIntegral i)) [1 :: Int ..] armParameters
+      oldV = zipWith (\i _ -> 0.0003 + 0.00001 * fromIntegral (i `mod` 7)) [1 :: Int ..] armParameters
+      oldMomentum = zipWith (\i _ -> 0.0004 * cos (fromIntegral i)) [1 :: Int ..] armParameters
+      muonMask = VU.update (VU.replicate n False)
+        (VU.fromList [ (muonOffset s + i, True)
+                     | s <- slices, i <- [0 .. muonRows s * muonCols s - 1] ])
+      canonical which = zipWith (\i x -> if VU.unsafeIndex muonMask i == which then x else 0) [0 ..]
+      state0 = OptimizerState
+        (AdamWState 2 (VU.fromList (canonical False oldM)) (VU.fromList (canonical False oldV)))
+        (Just (VU.fromList (canonical True oldMomentum)))
+      gradientHost = map (\i -> 0.01 * sin (fromIntegral i * 1.7)) [1 .. n]
+      acfg = optAdamW muonCfg
+      tag name = name ++ " (" ++ label ++ ")"
+  (referenceUpdated, referenceState) <- either die pure
+    (muonStep muonCfg slices mask state0 (VU.fromList armParameters)
+      (VU.fromList gradientHost))
+  withF32 ctx (map realToFrac armParameters) $ \deviceP ->
+    withF32 ctx (map realToFrac gradientHost) $ \deviceG ->
+      withF32 ctx (map realToFrac (canonical True oldMomentum)) $ \deviceMom ->
+        withF32 ctx (map realToFrac (canonical False oldM)) $ \deviceM ->
+          withF32 ctx (map realToFrac (canonical False oldV)) $ \deviceV ->
+            withBoolArray ctx (VU.toList mask) $ \deviceMask ->
+              withBoolArray ctx (VU.toList muonMask) $ \muonMaskArr ->
+                withI64 ctx (map (fromIntegral . muonOffset) slices) $ \offsArr ->
+                  withI64 ctx (map (fromIntegral . muonRows) slices) $ \rowsArr ->
+                    withI64 ctx (map (fromIntegral . muonCols) slices) $ \colsArr -> do
+                      (p', mom', m', v') <- confMuonStep ctx n 3
+                        (realToFrac (learningRate acfg 3)) 0.9 0.99 1e-6 0.03 0.9
+                        deviceP deviceG deviceMom deviceM deviceV deviceMask
+                        muonMaskArr offsArr rowsArr colsArr
+                      compareVector (tag "muon parameters") 5e-4 5e-3
+                        (VU.toList referenceUpdated) (map realToFrac p')
+                      compareVector (tag "muon momentum") 5e-5 5e-4
+                        (maybe [] VU.toList (optMuonMomentum referenceState))
+                        (map realToFrac mom')
+                      compareVector (tag "muon adam first moment") 2e-6 2e-4
+                        (VU.toList (firstMoment (optAdamWState referenceState)))
+                        (map realToFrac m')
+                      compareVector (tag "muon adam second moment") 2e-7 3e-4
+                        (VU.toList (secondMoment (optAdamWState referenceState)))
+                        (map realToFrac v')
+
+sequenceLossFor :: (Floating a, Ord a) => Config -> [Int] -> [a] -> a
+sequenceLossFor cfg sequenceTokens params = sum losses / fromIntegral (length losses)
   where
     losses =
-      [ either error id (nextTokenCEGeneric config params (take index sequenceTokens) (sequenceTokens !! index))
+      [ either error id (nextTokenCEGeneric cfg params (take index sequenceTokens) (sequenceTokens !! index))
       | index <- [1 .. length sequenceTokens - 1]
       ]
 

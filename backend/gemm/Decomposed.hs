@@ -71,6 +71,28 @@ data PieceOps buf tok = PieceOps
   , opsGateCumForward :: Int -> Int -> Int -> buf -> IO (buf, buf)
   , opsGateCumBackward :: Int -> Int -> Int -> buf -> buf -> buf
       -> IO buf
+    -- The v3 arm pieces.  GateCumLogs is GateCum for a gate already in log
+    -- space (the RG-LRU path); RglruLogGate/RglruWriteScale are the RG-LRU
+    -- log-gate against the [d]-wide decay base and the sqrt(1-alpha^2)
+    -- write scale on the normalized key; QkNorm is the per-head RMSNorm
+    -- with shared gains; CausalSoftmaxSink is the softmax with one
+    -- per-head sink slot whose weight is dropped (its extra Int is the
+    -- head count, for head = group `mod` heads).
+  , opsGateCumLogsForward :: Int -> Int -> Int -> buf -> IO (buf, buf)
+  , opsGateCumLogsBackward :: Int -> Int -> Int -> buf -> buf -> buf
+      -> IO buf
+  , opsRglruLogGateForward :: Int -> Int -> buf -> buf -> IO buf
+  , opsRglruLogGateBackward :: Int -> Int -> buf -> buf -> buf
+      -> IO (buf, buf)
+  , opsRglruWriteScaleForward :: buf -> buf -> IO buf
+  , opsRglruWriteScaleBackward :: buf -> buf -> buf -> IO (buf, buf)
+  , opsQkNormForward :: Int -> Int -> Int -> buf -> buf -> IO buf
+  , opsQkNormBackward :: Int -> Int -> Int -> buf -> buf -> buf
+      -> IO (buf, buf)
+  , opsCausalSoftmaxSinkForward :: Int -> Int -> Int -> Int -> buf -> buf
+      -> IO buf
+  , opsCausalSoftmaxSinkBackward :: Int -> Int -> Int -> Int -> buf -> buf
+      -> buf -> IO (buf, buf)
   , opsQkDecayForward :: Int -> Int -> Int -> buf -> buf -> buf
       -> buf -> IO (buf, buf)
   , opsQkDecayBackward :: Int -> Int -> Int -> buf -> buf -> buf
@@ -120,6 +142,7 @@ data SoftmaxAttentionResult buf = SoftmaxAttentionResult
   , softmaxQBar :: !buf
   , softmaxKBar :: !buf
   , softmaxVBar :: !buf
+  , softmaxSinkBar :: !(Maybe buf)
   }
 
 data SoftmaxAttentionSubBlockResult buf = SoftmaxAttentionSubBlockResult
@@ -130,14 +153,23 @@ data SoftmaxAttentionSubBlockResult buf = SoftmaxAttentionSubBlockResult
   , softmaxBlockWkBar :: !buf
   , softmaxBlockWvBar :: !buf
   , softmaxBlockWoBar :: !buf
+  , softmaxBlockQkGainQBar :: !(Maybe buf)
+  , softmaxBlockQkGainKBar :: !(Maybe buf)
+  , softmaxBlockSinkBar :: !(Maybe buf)
   }
 
+-- The Maybe fields are the v3 arms: present exactly when the config's
+-- layout carries the slice (parseModelWeights decides from the layout, so
+-- presence is data-driven and the traversal needs no Config).
 data SoftmaxBlockWeights buf = SoftmaxBlockWeights
   { softmaxRmsAtt :: !buf
   , softmaxWq :: !buf
   , softmaxWk :: !buf
   , softmaxWv :: !buf
   , softmaxWo :: !buf
+  , softmaxQkGainQ :: !(Maybe buf)
+  , softmaxQkGainK :: !(Maybe buf)
+  , softmaxSink :: !(Maybe buf)
   , softmaxRmsFf :: !buf
   , softmaxWgate :: !buf
   , softmaxWup :: !buf
@@ -152,6 +184,9 @@ data SoftmaxBlockResult buf = SoftmaxBlockResult
   , fullSoftmaxWkBar :: !buf
   , fullSoftmaxWvBar :: !buf
   , fullSoftmaxWoBar :: !buf
+  , fullSoftmaxQkGainQBar :: !(Maybe buf)
+  , fullSoftmaxQkGainKBar :: !(Maybe buf)
+  , fullSoftmaxSinkBar :: !(Maybe buf)
   , fullSoftmaxRmsFfBar :: !buf
   , fullSoftmaxWgateBar :: !buf
   , fullSoftmaxWupBar :: !buf
@@ -175,8 +210,11 @@ data GlaAttentionSubBlockResult buf = GlaAttentionSubBlockResult
   , glaBlockAttentionWvBar :: !buf
   , glaBlockAttentionWoBar :: !buf
   , glaBlockAttentionWalphaBar :: !buf
+  , glaBlockAttentionGateLambdaBar :: !(Maybe buf)
   }
 
+-- glaGateLambda present exactly when the gate is RG-LRU (the layout
+-- carries blocks.i.gate_lambda); Nothing is the v2 sigmoid gate.
 data GlaBlockWeights buf = GlaBlockWeights
   { glaRmsAtt :: !buf
   , glaWq :: !buf
@@ -184,6 +222,7 @@ data GlaBlockWeights buf = GlaBlockWeights
   , glaWv :: !buf
   , glaWo :: !buf
   , glaWalpha :: !buf
+  , glaGateLambda :: !(Maybe buf)
   , glaRmsFf :: !buf
   , glaWgate :: !buf
   , glaWup :: !buf
@@ -199,6 +238,7 @@ data GlaBlockResult buf = GlaBlockResult
   , fullGlaWvBar :: !buf
   , fullGlaWoBar :: !buf
   , fullGlaWalphaBar :: !buf
+  , fullGlaGateLambdaBar :: !(Maybe buf)
   , fullGlaRmsFfBar :: !buf
   , fullGlaWgateBar :: !buf
   , fullGlaWupBar :: !buf
@@ -255,29 +295,41 @@ feedForwardOutput ops rows d f x gain wgate wup wdown = do
 
 softmaxAttentionOutput
   :: PieceOps buf tok -> Int -> Int -> Int -> Int
-  -> buf -> buf -> buf -> IO buf
-softmaxAttentionOutput ops batch n heads hd q k value = do
+  -> buf -> buf -> buf -> Maybe buf -> IO buf
+softmaxAttentionOutput ops batch n heads hd q k value sinks = do
   let groups = batch * heads
   qHeads <- opsSplitHeadsForward ops batch n heads hd q
   kHeads <- opsSplitHeadsForward ops batch n heads hd k
   valueHeads <- opsSplitHeadsForward ops batch n heads hd value
   scores <- opsBatchedGemmForward ops NoTrans Trans groups n hd n hd n n qHeads kHeads
-  weights <- opsCausalSoftmaxForward ops groups n hd scores
+  weights <- case sinks of
+    Nothing -> opsCausalSoftmaxForward ops groups n hd scores
+    Just sink -> opsCausalSoftmaxSinkForward ops groups n hd heads scores sink
   attendedHeads <- opsBatchedGemmForward ops NoTrans NoTrans groups n n n hd n hd weights valueHeads
   opsMergeHeadsForward ops batch n heads hd attendedHeads
 
+-- The q/k dense outputs pass through the optional per-head RMSNorm with
+-- shared gains before attention (v3 qkNorm).
+qkNormalized
+  :: PieceOps buf tok -> Int -> Int -> Int -> buf -> Maybe buf -> IO buf
+qkNormalized ops rows d heads raw = maybe (pure raw)
+  (opsQkNormForward ops rows d heads raw)
+
 softmaxSubBlockOutput
   :: PieceOps buf tok -> Int -> Int -> Int -> Int
-  -> buf -> buf -> buf -> buf -> buf -> buf -> IO buf
-softmaxSubBlockOutput ops batch n heads hd x gain wq wk wv wo = do
+  -> buf -> SoftmaxBlockWeights buf -> IO buf
+softmaxSubBlockOutput ops batch n heads hd x weights = do
   let d = heads * hd
       rows = batch * n
-  normalized <- opsRmsForward ops rows d x gain
-  q <- opsDenseForward ops rows d d normalized wq
-  k <- opsDenseForward ops rows d d normalized wk
-  value <- opsDenseForward ops rows d d normalized wv
+  normalized <- opsRmsForward ops rows d x (softmaxRmsAtt weights)
+  q0 <- opsDenseForward ops rows d d normalized (softmaxWq weights)
+  k0 <- opsDenseForward ops rows d d normalized (softmaxWk weights)
+  value <- opsDenseForward ops rows d d normalized (softmaxWv weights)
+  q <- qkNormalized ops rows d heads q0 (softmaxQkGainQ weights)
+  k <- qkNormalized ops rows d heads k0 (softmaxQkGainK weights)
   attention <- softmaxAttentionOutput ops batch n heads hd q k value
-  projected <- opsDenseForward ops rows d d attention wo
+    (softmaxSink weights)
+  projected <- opsDenseForward ops rows d d attention (softmaxWo weights)
   opsAddForward ops x projected
 
 softmaxBlockForwardOutput
@@ -286,16 +338,18 @@ softmaxBlockForwardOutput
 softmaxBlockForwardOutput ops batch n heads hd f x weights = do
   let d = heads * hd
       rows = batch * n
-  attention <- softmaxSubBlockOutput ops batch n heads hd x
-    (softmaxRmsAtt weights) (softmaxWq weights) (softmaxWk weights)
-    (softmaxWv weights) (softmaxWo weights)
+  attention <- softmaxSubBlockOutput ops batch n heads hd x weights
   feedForwardOutput ops rows d f attention (softmaxRmsFf weights)
     (softmaxWgate weights) (softmaxWup weights) (softmaxWdown weights)
 
+-- gatesAreLogs: False is the v2 sigmoid path (gateInput carries raw gate
+-- logits; gate_cum applies log_sigmoid), True is the RG-LRU path
+-- (gateInput carries log-gates computed upstream, and the k passed in is
+-- already write-scaled).
 glaAttentionOutput
-  :: PieceOps buf tok -> Int -> Int -> Int -> Int -> Int
+  :: PieceOps buf tok -> Int -> Int -> Int -> Int -> Int -> Bool
   -> buf -> buf -> buf -> buf -> IO buf
-glaAttentionOutput ops batch n heads hd chunk q k value gateLogits = do
+glaAttentionOutput ops batch n heads hd chunk gatesAreLogs q k value gateInput = do
   unless (chunk > 0 && n > 0 && n `mod` chunk == 0) $
     ioError (userError "GLA chunk must be positive and divide sequence length")
   let headGroups = batch * heads
@@ -303,12 +357,13 @@ glaAttentionOutput ops batch n heads hd chunk q k value gateLogits = do
       chunkGroups = headGroups * chunkCount
       chunkElements = chunk * hd
       stateElements = hd * hd
+      gateCum = if gatesAreLogs then opsGateCumLogsForward else opsGateCumForward
   zeroState <- opsZeros ops (headGroups * stateElements)
   qHeads <- opsSplitHeadsForward ops batch n heads hd q
   kHeads <- opsSplitHeadsForward ops batch n heads hd k
   valueHeads <- opsSplitHeadsForward ops batch n heads hd value
-  gateHeads <- opsSplitHeadsForward ops batch n heads hd gateLogits
-  (relcum, dec) <- opsGateCumForward ops chunkGroups chunk hd gateHeads
+  gateHeads <- opsSplitHeadsForward ops batch n heads hd gateInput
+  (relcum, dec) <- gateCum ops chunkGroups chunk hd gateHeads
   (qScaled, kScaled) <- opsQkDecayForward ops chunkGroups chunk hd
     qHeads kHeads relcum dec
   contributions <- opsBatchedGemmForward ops Trans NoTrans chunkGroups chunk hd chunk hd
@@ -330,21 +385,40 @@ glaAttentionOutput ops batch n heads hd chunk q k value gateLogits = do
   attendedHeads <- opsAddForward ops inter intra
   opsMergeHeadsForward ops batch n heads hd attendedHeads
 
+-- The RG-LRU gate rewrites the attention inputs: the raw walpha projection
+-- becomes the log-gate against the decay base, and the normalized key is
+-- scaled by sqrt(1-alpha^2) before it enters the recurrence (both intra
+-- and inter chunk terms consume the scaled key, matching gla_block_u in
+-- model.fut).  Shared by the forward-only and decomposed sub-blocks so
+-- the recomputed forward is the same expression.
+glaGatePath
+  :: PieceOps buf tok -> Int -> Int -> Maybe buf -> buf -> buf
+  -> IO (Bool, buf, buf)
+glaGatePath ops rows d gateLambda gate kUnit = case gateLambda of
+  Nothing -> pure (False, gate, kUnit)
+  Just lam -> do
+    logs <- opsRglruLogGateForward ops rows d gate lam
+    kScaled <- opsRglruWriteScaleForward ops logs kUnit
+    pure (True, logs, kScaled)
+
 glaSubBlockOutput
   :: PieceOps buf tok -> Int -> Int -> Int -> Int -> Int
-  -> buf -> buf -> buf -> buf -> buf -> buf -> buf -> IO buf
-glaSubBlockOutput ops batch n heads hd chunk x gain wq wk wv wo walpha = do
+  -> buf -> GlaBlockWeights buf -> IO buf
+glaSubBlockOutput ops batch n heads hd chunk x weights = do
   let d = heads * hd
       rows = batch * n
-  normalized <- opsRmsForward ops rows d x gain
-  q0 <- opsDenseForward ops rows d d normalized wq
-  k0 <- opsDenseForward ops rows d d normalized wk
-  value <- opsDenseForward ops rows d d normalized wv
-  gate <- opsDenseForward ops rows d d normalized walpha
+  normalized <- opsRmsForward ops rows d x (glaRmsAtt weights)
+  q0 <- opsDenseForward ops rows d d normalized (glaWq weights)
+  k0 <- opsDenseForward ops rows d d normalized (glaWk weights)
+  value <- opsDenseForward ops rows d d normalized (glaWv weights)
+  gate <- opsDenseForward ops rows d d normalized (glaWalpha weights)
   q <- opsL2HeadsForward ops rows d heads q0
-  k <- opsL2HeadsForward ops rows d heads k0
-  attention <- glaAttentionOutput ops batch n heads hd chunk q k value gate
-  projected <- opsDenseForward ops rows d d attention wo
+  kUnit <- opsL2HeadsForward ops rows d heads k0
+  (gatesAreLogs, gateInput, k) <- glaGatePath ops rows d
+    (glaGateLambda weights) gate kUnit
+  attention <- glaAttentionOutput ops batch n heads hd chunk gatesAreLogs
+    q k value gateInput
+  projected <- opsDenseForward ops rows d d attention (glaWo weights)
   opsAddForward ops x projected
 
 glaBlockForwardOutput
@@ -353,9 +427,7 @@ glaBlockForwardOutput
 glaBlockForwardOutput ops batch n heads hd chunk f x weights = do
   let d = heads * hd
       rows = batch * n
-  attention <- glaSubBlockOutput ops batch n heads hd chunk x
-    (glaRmsAtt weights) (glaWq weights) (glaWk weights) (glaWv weights)
-    (glaWo weights) (glaWalpha weights)
+  attention <- glaSubBlockOutput ops batch n heads hd chunk x weights
   feedForwardOutput ops rows d f attention (glaRmsFf weights)
     (glaWgate weights) (glaWup weights) (glaWdown weights)
 
@@ -368,9 +440,10 @@ softmaxAttentionDecomposed
   -> buf
   -> buf
   -> buf
+  -> Maybe buf
   -> buf
   -> IO (SoftmaxAttentionResult buf)
-softmaxAttentionDecomposed ops batch n heads hd q k value outputBar = do
+softmaxAttentionDecomposed ops batch n heads hd q k value sinks outputBar = do
   let groups = batch * heads
       tokenCount = batch * n * heads * hd
       scoreCount = groups * n * n
@@ -378,13 +451,22 @@ softmaxAttentionDecomposed ops batch n heads hd q k value outputBar = do
   kHeads <- opsSplitHeadsForward ops batch n heads hd k
   valueHeads <- opsSplitHeadsForward ops batch n heads hd value
   scores <- opsBatchedGemmForward ops NoTrans Trans groups n hd n hd n n qHeads kHeads
-  weights <- opsCausalSoftmaxForward ops groups n hd scores
+  weights <- case sinks of
+    Nothing -> opsCausalSoftmaxForward ops groups n hd scores
+    Just sink -> opsCausalSoftmaxSinkForward ops groups n hd heads scores sink
   attendedHeads <- opsBatchedGemmForward ops NoTrans NoTrans groups n n n hd n hd weights valueHeads
   output <- opsMergeHeadsForward ops batch n heads hd attendedHeads
   attendedHeadsBar <- opsMergeHeadsBackward ops batch n heads hd outputBar
   (weightsBar, valueHeadsBar) <- opsBatchedGemmBackward ops NoTrans NoTrans
     groups n n n hd n hd weights valueHeads attendedHeadsBar
-  scoresBar <- opsCausalSoftmaxBackward ops groups n hd scores weightsBar
+  (scoresBar, sinkBar) <- case sinks of
+    Nothing -> do
+      scoresBar <- opsCausalSoftmaxBackward ops groups n hd scores weightsBar
+      pure (scoresBar, Nothing)
+    Just sink -> do
+      (scoresBar, sinkBar) <- opsCausalSoftmaxSinkBackward ops groups n hd heads
+        scores sink weightsBar
+      pure (scoresBar, Just sinkBar)
   (qHeadsBar, kHeadsBar) <- opsBatchedGemmBackward ops NoTrans Trans
     groups n hd n hd n n qHeads kHeads scoresBar
   qBar <- opsSplitHeadsBackward ops batch n heads hd qHeadsBar
@@ -393,7 +475,7 @@ softmaxAttentionDecomposed ops batch n heads hd q k value outputBar = do
   unless (all (== tokenCount) (map (opsLength ops) [output, qBar, kBar, valueBar])
     && opsLength ops scores == scoreCount) $
     ioError (userError "decomposed softmax attention produced an invalid buffer length")
-  pure (SoftmaxAttentionResult output qBar kBar valueBar)
+  pure (SoftmaxAttentionResult output qBar kBar valueBar sinkBar)
 
 softmaxAttentionSubBlockDecomposed
   :: PieceOps buf tok
@@ -402,38 +484,54 @@ softmaxAttentionSubBlockDecomposed
   -> Int
   -> Int
   -> buf
-  -> buf
-  -> buf
-  -> buf
-  -> buf
-  -> buf
+  -> SoftmaxBlockWeights buf
   -> buf
   -> IO (SoftmaxAttentionSubBlockResult buf)
-softmaxAttentionSubBlockDecomposed ops batch n heads hd x gain wq wk wv wo outputBar = do
+softmaxAttentionSubBlockDecomposed ops batch n heads hd x weights outputBar = do
   let d = heads * hd
       rows = batch * n
+      gain = softmaxRmsAtt weights
+      wq = softmaxWq weights
+      wk = softmaxWk weights
+      wv = softmaxWv weights
+      wo = softmaxWo weights
   normalized <- opsRmsForward ops rows d x gain
-  q <- opsDenseForward ops rows d d normalized wq
-  k <- opsDenseForward ops rows d d normalized wk
+  q0 <- opsDenseForward ops rows d d normalized wq
+  k0 <- opsDenseForward ops rows d d normalized wk
   value <- opsDenseForward ops rows d d normalized wv
+  q <- qkNormalized ops rows d heads q0 (softmaxQkGainQ weights)
+  k <- qkNormalized ops rows d heads k0 (softmaxQkGainK weights)
   attentionOutput <- softmaxAttentionOutput ops batch n heads hd q k value
+    (softmaxSink weights)
   projected <- opsDenseForward ops rows d d attentionOutput wo
   output <- opsAddForward ops x projected
   (skipBar, projectedBar) <- opsAddBackward ops outputBar
   (attentionBar, woBar) <- opsDenseBackward ops rows d d
     attentionOutput wo projectedBar
-  attentionBackward <- softmaxAttentionDecomposed ops batch n heads hd q k value attentionBar
-  (normalizedQBar, wqBar) <- opsDenseBackward ops rows d d normalized wq
-    (softmaxQBar attentionBackward)
-  (normalizedKBar, wkBar) <- opsDenseBackward ops rows d d normalized wk
-    (softmaxKBar attentionBackward)
+  attentionBackward <- softmaxAttentionDecomposed ops batch n heads hd q k value
+    (softmaxSink weights) attentionBar
+  (q0Bar, gainQBar) <- case softmaxQkGainQ weights of
+    Nothing -> pure (softmaxQBar attentionBackward, Nothing)
+    Just gq -> do
+      (q0Bar, gBar) <- opsQkNormBackward ops rows d heads q0 gq
+        (softmaxQBar attentionBackward)
+      pure (q0Bar, Just gBar)
+  (k0Bar, gainKBar) <- case softmaxQkGainK weights of
+    Nothing -> pure (softmaxKBar attentionBackward, Nothing)
+    Just gk -> do
+      (k0Bar, gBar) <- opsQkNormBackward ops rows d heads k0 gk
+        (softmaxKBar attentionBackward)
+      pure (k0Bar, Just gBar)
+  (normalizedQBar, wqBar) <- opsDenseBackward ops rows d d normalized wq q0Bar
+  (normalizedKBar, wkBar) <- opsDenseBackward ops rows d d normalized wk k0Bar
   (normalizedVBar, wvBar) <- opsDenseBackward ops rows d d normalized wv
     (softmaxVBar attentionBackward)
   normalizedQKBar <- opsAddForward ops normalizedQBar normalizedKBar
   normalizedBar <- opsAddForward ops normalizedQKBar normalizedVBar
   (rmsXBar, gainBar) <- opsRmsBackward ops rows d x gain normalizedBar
   xBar <- opsAddForward ops skipBar rmsXBar
-  pure (SoftmaxAttentionSubBlockResult output xBar gainBar wqBar wkBar wvBar woBar)
+  pure (SoftmaxAttentionSubBlockResult output xBar gainBar wqBar wkBar wvBar woBar
+    gainQBar gainKBar (softmaxSinkBar attentionBackward))
 
 softmaxBlockDecomposed
   :: PieceOps buf tok
@@ -449,15 +547,12 @@ softmaxBlockDecomposed
 softmaxBlockDecomposed ops batch n heads hd f x weights outputBar = do
   let d = heads * hd
       rows = batch * n
-  attentionOutput <- softmaxSubBlockOutput ops batch n heads hd x
-    (softmaxRmsAtt weights) (softmaxWq weights) (softmaxWk weights)
-    (softmaxWv weights) (softmaxWo weights)
+  attentionOutput <- softmaxSubBlockOutput ops batch n heads hd x weights
   ff <- feedForwardDecomposed ops rows d f attentionOutput
     (softmaxRmsFf weights) (softmaxWgate weights) (softmaxWup weights)
     (softmaxWdown weights) outputBar
   attention <- softmaxAttentionSubBlockDecomposed ops batch n heads hd x
-    (softmaxRmsAtt weights) (softmaxWq weights) (softmaxWk weights)
-    (softmaxWv weights) (softmaxWo weights) (ffXBar ff)
+    weights (ffXBar ff)
   pure (SoftmaxBlockResult
     (ffOutput ff)
     (softmaxBlockXBar attention)
@@ -466,6 +561,9 @@ softmaxBlockDecomposed ops batch n heads hd f x weights outputBar = do
     (softmaxBlockWkBar attention)
     (softmaxBlockWvBar attention)
     (softmaxBlockWoBar attention)
+    (softmaxBlockQkGainQBar attention)
+    (softmaxBlockQkGainKBar attention)
+    (softmaxBlockSinkBar attention)
     (ffGainBar ff)
     (ffWgateBar ff)
     (ffWupBar ff)
@@ -478,13 +576,14 @@ glaAttentionDecomposed
   -> Int
   -> Int
   -> Int
+  -> Bool
   -> buf
   -> buf
   -> buf
   -> buf
   -> buf
   -> IO (GlaAttentionResult buf)
-glaAttentionDecomposed ops batch n heads hd chunk q k value gateLogits outputBar = do
+glaAttentionDecomposed ops batch n heads hd chunk gatesAreLogs q k value gateInput outputBar = do
   unless (chunk > 0 && n > 0 && n `mod` chunk == 0) $
     ioError (userError "GLA chunk must be positive and divide sequence length")
   let headGroups = batch * heads
@@ -493,12 +592,14 @@ glaAttentionDecomposed ops batch n heads hd chunk q k value gateLogits outputBar
       chunkElements = chunk * hd
       stateElements = hd * hd
       tokenCount = batch * n * heads * hd
+      gateCum = if gatesAreLogs then opsGateCumLogsForward else opsGateCumForward
+      gateCumBwd = if gatesAreLogs then opsGateCumLogsBackward else opsGateCumBackward
   zeroState <- opsZeros ops (headGroups * stateElements)
   qHeads <- opsSplitHeadsForward ops batch n heads hd q
   kHeads <- opsSplitHeadsForward ops batch n heads hd k
   valueHeads <- opsSplitHeadsForward ops batch n heads hd value
-  gateHeads <- opsSplitHeadsForward ops batch n heads hd gateLogits
-  (relcum, dec) <- opsGateCumForward ops chunkGroups chunk hd gateHeads
+  gateHeads <- opsSplitHeadsForward ops batch n heads hd gateInput
+  (relcum, dec) <- gateCum ops chunkGroups chunk hd gateHeads
   (qScaled, kScaled) <- opsQkDecayForward ops chunkGroups chunk hd
     qHeads kHeads relcum dec
   contributions <- opsBatchedGemmForward ops Trans NoTrans chunkGroups chunk hd chunk hd
@@ -536,7 +637,7 @@ glaAttentionDecomposed ops batch n heads hd chunk q k value gateLogits outputBar
   valueHeadsBar <- opsAddForward ops vIntraBar vInterBar
   relBar <- opsAddForward ops relIntraBar relDecayBar
   decBar <- opsAddForward ops decStateBar decDecayBar
-  gateHeadsBar <- opsGateCumBackward ops chunkGroups chunk hd gateHeads relBar decBar
+  gateHeadsBar <- gateCumBwd ops chunkGroups chunk hd gateHeads relBar decBar
   qBar <- opsSplitHeadsBackward ops batch n heads hd qHeadsBar
   kBar <- opsSplitHeadsBackward ops batch n heads hd kHeadsBar
   valueBar <- opsSplitHeadsBackward ops batch n heads hd valueHeadsBar
@@ -564,48 +665,65 @@ glaAttentionSubBlockDecomposed
   -> Int
   -> Int
   -> buf
-  -> buf
-  -> buf
-  -> buf
-  -> buf
-  -> buf
-  -> buf
+  -> GlaBlockWeights buf
   -> buf
   -> IO (GlaAttentionSubBlockResult buf)
-glaAttentionSubBlockDecomposed ops batch n heads hd chunk x gain wq wk wv wo walpha outputBar = do
+glaAttentionSubBlockDecomposed ops batch n heads hd chunk x weights outputBar = do
   let d = heads * hd
       rows = batch * n
+      gain = glaRmsAtt weights
+      wq = glaWq weights
+      wk = glaWk weights
+      wv = glaWv weights
+      wo = glaWo weights
+      walpha = glaWalpha weights
   normalized <- opsRmsForward ops rows d x gain
   q0 <- opsDenseForward ops rows d d normalized wq
   k0 <- opsDenseForward ops rows d d normalized wk
   value <- opsDenseForward ops rows d d normalized wv
   gate <- opsDenseForward ops rows d d normalized walpha
   q <- opsL2HeadsForward ops rows d heads q0
-  k <- opsL2HeadsForward ops rows d heads k0
-  attentionOutput <- glaAttentionOutput ops batch n heads hd chunk
-    q k value gate
+  kUnit <- opsL2HeadsForward ops rows d heads k0
+  (gatesAreLogs, gateInput, k) <- glaGatePath ops rows d
+    (glaGateLambda weights) gate kUnit
+  attentionOutput <- glaAttentionOutput ops batch n heads hd chunk gatesAreLogs
+    q k value gateInput
   projected <- opsDenseForward ops rows d d attentionOutput wo
   output <- opsAddForward ops x projected
   (skipBar, projectedBar) <- opsAddBackward ops outputBar
   (attentionBar, woBar) <- opsDenseBackward ops rows d d
     attentionOutput wo projectedBar
   attentionBackward <- glaAttentionDecomposed ops batch n heads hd chunk
-    q k value gate attentionBar
+    gatesAreLogs q k value gateInput attentionBar
+  -- Under RG-LRU the attention's k cotangent is against the scaled key and
+  -- its gate cotangent is against the log-gates; pull both back through
+  -- the write scale and the log-gate to reach the raw walpha projection,
+  -- the unit key, and the decay base.
+  (gateBar, lambdaBar, kUnitBar) <- case glaGateLambda weights of
+    Nothing -> pure (glaGateBar attentionBackward, Nothing,
+      glaKBar attentionBackward)
+    Just lam -> do
+      -- gateInput IS the log-gates on this path (glaGatePath computed them).
+      (logsScaleBar, kUnitBar) <- opsRglruWriteScaleBackward ops gateInput kUnit
+        (glaKBar attentionBackward)
+      logsBar <- opsAddForward ops (glaGateBar attentionBackward) logsScaleBar
+      (gateBar, lamBar) <- opsRglruLogGateBackward ops rows d gate lam logsBar
+      pure (gateBar, Just lamBar, kUnitBar)
   q0Bar <- opsL2HeadsBackward ops rows d heads q0 (glaQBar attentionBackward)
-  k0Bar <- opsL2HeadsBackward ops rows d heads k0 (glaKBar attentionBackward)
+  k0Bar <- opsL2HeadsBackward ops rows d heads k0 kUnitBar
   (normalizedQBar, wqBar) <- opsDenseBackward ops rows d d normalized wq q0Bar
   (normalizedKBar, wkBar) <- opsDenseBackward ops rows d d normalized wk k0Bar
   (normalizedVBar, wvBar) <- opsDenseBackward ops rows d d normalized wv
     (glaVBar attentionBackward)
   (normalizedGateBar, walphaBar) <- opsDenseBackward ops rows d d normalized walpha
-    (glaGateBar attentionBackward)
+    gateBar
   normalizedQKBar <- opsAddForward ops normalizedQBar normalizedKBar
   normalizedQKVBar <- opsAddForward ops normalizedQKBar normalizedVBar
   normalizedBar <- opsAddForward ops normalizedQKVBar normalizedGateBar
   (rmsXBar, gainBar) <- opsRmsBackward ops rows d x gain normalizedBar
   xBar <- opsAddForward ops skipBar rmsXBar
   pure (GlaAttentionSubBlockResult output xBar gainBar wqBar wkBar wvBar
-    woBar walphaBar)
+    woBar walphaBar lambdaBar)
 
 glaBlockDecomposed
   :: PieceOps buf tok
@@ -622,15 +740,12 @@ glaBlockDecomposed
 glaBlockDecomposed ops batch n heads hd chunk f x weights outputBar = do
   let d = heads * hd
       rows = batch * n
-  attentionOutput <- glaSubBlockOutput ops batch n heads hd chunk x
-    (glaRmsAtt weights) (glaWq weights) (glaWk weights) (glaWv weights)
-    (glaWo weights) (glaWalpha weights)
+  attentionOutput <- glaSubBlockOutput ops batch n heads hd chunk x weights
   ff <- feedForwardDecomposed ops rows d f attentionOutput
     (glaRmsFf weights) (glaWgate weights) (glaWup weights)
     (glaWdown weights) outputBar
   attention <- glaAttentionSubBlockDecomposed ops batch n heads hd chunk x
-    (glaRmsAtt weights) (glaWq weights) (glaWk weights) (glaWv weights)
-    (glaWo weights) (glaWalpha weights) (ffXBar ff)
+    weights (ffXBar ff)
   pure (GlaBlockResult
     (ffOutput ff)
     (glaBlockAttentionXBar attention)
@@ -640,6 +755,7 @@ glaBlockDecomposed ops batch n heads hd chunk f x weights outputBar = do
     (glaBlockAttentionWvBar attention)
     (glaBlockAttentionWoBar attention)
     (glaBlockAttentionWalphaBar attention)
+    (glaBlockAttentionGateLambdaBar attention)
     (ffGainBar ff)
     (ffWgateBar ff)
     (ffWupBar ff)
@@ -804,6 +920,9 @@ reverseLayer ops batch n heads hd chunk f (outputBar, gradients)
       pure ((bar, slices), bar : map snd slices)
   pure (xBar, named : gradients)
 
+-- Emission order MUST match namedLayout's slice order (assembleGradient's
+-- contiguity precondition): the arm slices sit between walpha/wo and
+-- rms_ff, exactly as in Layout.hs.
 glaNamedGradient :: Int -> GlaBlockResult buf -> [(String, buf)]
 glaNamedGradient layer result =
   [ (prefix ++ "rms_att", fullGlaRmsAttBar result)
@@ -812,7 +931,11 @@ glaNamedGradient layer result =
   , (prefix ++ "wv", fullGlaWvBar result)
   , (prefix ++ "wo", fullGlaWoBar result)
   , (prefix ++ "walpha", fullGlaWalphaBar result)
-  , (prefix ++ "rms_ff", fullGlaRmsFfBar result)
+  ]
+  ++ [ (prefix ++ "gate_lambda", lam)
+     | Just lam <- [fullGlaGateLambdaBar result] ]
+  ++
+  [ (prefix ++ "rms_ff", fullGlaRmsFfBar result)
   , (prefix ++ "wgate", fullGlaWgateBar result)
   , (prefix ++ "wup", fullGlaWupBar result)
   , (prefix ++ "wdown", fullGlaWdownBar result)
@@ -827,7 +950,12 @@ softmaxNamedGradient layer result =
   , (prefix ++ "wk", fullSoftmaxWkBar result)
   , (prefix ++ "wv", fullSoftmaxWvBar result)
   , (prefix ++ "wo", fullSoftmaxWoBar result)
-  , (prefix ++ "rms_ff", fullSoftmaxRmsFfBar result)
+  ]
+  ++ [ (prefix ++ "qk_gain_q", gq) | Just gq <- [fullSoftmaxQkGainQBar result] ]
+  ++ [ (prefix ++ "qk_gain_k", gk) | Just gk <- [fullSoftmaxQkGainKBar result] ]
+  ++ [ (prefix ++ "sink", sink) | Just sink <- [fullSoftmaxSinkBar result] ]
+  ++
+  [ (prefix ++ "rms_ff", fullSoftmaxRmsFfBar result)
   , (prefix ++ "wgate", fullSoftmaxWgateBar result)
   , (prefix ++ "wup", fullSoftmaxWupBar result)
   , (prefix ++ "wdown", fullSoftmaxWdownBar result)
@@ -863,14 +991,23 @@ parseModelWeights ops cfg layout params = do
       wup <- get "wup"
       wdown <- get "wdown"
       if isSoftmaxLayer cfg layer
-        then pure (SoftmaxLayerWeights
-          (SoftmaxBlockWeights rmsAtt wq wk wv wo rmsFf wgate wup wdown))
+        then do
+          gainQ <- getWhen (qkNorm cfg) "qk_gain_q"
+          gainK <- getWhen (qkNorm cfg) "qk_gain_k"
+          sink <- getWhen (headSinks cfg) "sink"
+          pure (SoftmaxLayerWeights
+            (SoftmaxBlockWeights rmsAtt wq wk wv wo gainQ gainK sink
+              rmsFf wgate wup wdown))
         else do
           walpha <- get "walpha"
+          gateLambda <- getWhen (gateKind cfg == GateRgLru) "gate_lambda"
           pure (GlaLayerWeights
-            (GlaBlockWeights rmsAtt wq wk wv wo walpha rmsFf wgate wup wdown))
+            (GlaBlockWeights rmsAtt wq wk wv wo walpha gateLambda
+              rmsFf wgate wup wdown))
       where
         get suffix = weight ("blocks." ++ show layer ++ "." ++ suffix)
+        getWhen present suffix =
+          if present then Just <$> get suffix else pure Nothing
 
 reverseChunk
   :: PieceOps buf tok

@@ -220,7 +220,9 @@
               mkdir -p $out/bin $out/share/formal-transformer
               cp gemm-conformance $out/bin/
               cp gemm-conformance-results.txt $out/share/formal-transformer/
-              cp gemm-oracle-golden.txt $out/share/formal-transformer/
+              # The base golden plus one per battery arm (gemm-oracle-golden.txt.rglru
+              # etc.), for raw-probe's on-device element-wise replays.
+              cp gemm-oracle-golden.txt* $out/share/formal-transformer/
               runHook postInstall
             '';
           };

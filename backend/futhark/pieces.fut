@@ -32,6 +32,46 @@ entry piece_gate_cum_bwd (groups: i64) (chunk: i64) (hd: i64)
   let (_, input_bar) = vjp2 piece_gate_cum gate_logits (relcum_bar, dec_bar)
   in input_bar
 
+entry piece_gate_cum_logs_fwd (groups: i64) (chunk: i64) (hd: i64)
+    (log_gates: [groups*chunk*hd]f32)
+    : ([groups*chunk*hd]f32, [groups*hd]f32) =
+  piece_gate_cum_logs log_gates
+
+entry piece_gate_cum_logs_bwd (groups: i64) (chunk: i64) (hd: i64)
+    (log_gates: [groups*chunk*hd]f32)
+    (relcum_bar: [groups*chunk*hd]f32) (dec_bar: [groups*hd]f32)
+    : [groups*chunk*hd]f32 =
+  let (_, input_bar) = vjp2 piece_gate_cum_logs log_gates (relcum_bar, dec_bar)
+  in input_bar
+
+entry piece_rglru_log_gate_fwd (rows: i64) (d: i64)
+    (z: [rows*d]f32) (lam: [d]f32): [rows*d]f32 =
+  piece_rglru_log_gate (z, lam)
+
+entry piece_rglru_log_gate_bwd (rows: i64) (d: i64)
+    (z: [rows*d]f32) (lam: [d]f32) (output_bar: [rows*d]f32)
+    : ([rows*d]f32, [d]f32) =
+  let (_, bars) = vjp2 piece_rglru_log_gate (z, lam) output_bar in bars
+
+entry piece_rglru_write_scale_fwd [count]
+    (logs: [count]f32) (k: [count]f32): [count]f32 =
+  piece_rglru_write_scale (logs, k)
+
+entry piece_rglru_write_scale_bwd [count]
+    (logs: [count]f32) (k: [count]f32) (output_bar: [count]f32)
+    : ([count]f32, [count]f32) =
+  let (_, bars) = vjp2 piece_rglru_write_scale (logs, k) output_bar in bars
+
+entry piece_qk_norm_fwd (rows: i64) (d: i64) (h: i64)
+    (x: [rows*d]f32) (gain: [d/h]f32): [rows*d]f32 =
+  piece_qk_norm h (x, gain)
+
+entry piece_qk_norm_bwd (rows: i64) (d: i64) (h: i64)
+    (x: [rows*d]f32) (gain: [d/h]f32) (output_bar: [rows*d]f32)
+    : ([rows*d]f32, [d/h]f32) =
+  let (_, bars) = vjp2 (\inputs -> piece_qk_norm h inputs) (x, gain) output_bar
+  in bars
+
 entry piece_qk_decay_fwd (groups: i64) (chunk: i64) (hd: i64)
     (q: [groups*chunk*hd]f32) (k: [groups*chunk*hd]f32)
     (relcum: [groups*chunk*hd]f32) (dec: [groups*hd]f32)
@@ -84,6 +124,20 @@ entry piece_causal_softmax_bwd (groups: i64) (n: i64)
     (weights_bar: [groups*n*n]f32): [groups*n*n]f32 =
   let (_, scores_bar) = vjp2 (piece_causal_softmax head_dim) scores weights_bar
   in scores_bar
+
+entry piece_causal_softmax_sink_fwd (groups: i64) (n: i64)
+    (head_dim: i64) (h: i64)
+    (scores: [groups*n*n]f32) (sinks: [h]f32): [groups*n*n]f32 =
+  piece_causal_softmax_sink head_dim (scores, sinks)
+
+entry piece_causal_softmax_sink_bwd (groups: i64) (n: i64)
+    (head_dim: i64) (h: i64)
+    (scores: [groups*n*n]f32) (sinks: [h]f32)
+    (weights_bar: [groups*n*n]f32)
+    : ([groups*n*n]f32, [h]f32) =
+  let (_, bars) = vjp2 (\inputs -> piece_causal_softmax_sink head_dim inputs)
+                       (scores, sinks) weights_bar
+  in bars
 
 entry piece_silu_gate_fwd [count]
     (gate: [count]f32) (up: [count]f32): [count]f32 =
@@ -175,3 +229,18 @@ entry adamw_step [p]
     (decay_mask: [p]bool): ([p]f32, [p]f32, [p]f32) =
   adamw_step_def step learning_rate beta1 beta2 epsilon weight_decay
                  params gradient first_moment second_moment decay_mask
+
+-- One combined Muon/AdamW update; the same muon_step_def the fused
+-- backends run (model.fut), with FormalTransformer.Optimizer.muonStep as
+-- the Double-precision reference.
+entry muon_step [p] [k]
+    (step: i64) (learning_rate: f32) (beta1: f32) (beta2: f32)
+    (epsilon: f32) (weight_decay: f32) (muon_beta: f32)
+    (params: [p]f32) (gradient: [p]f32)
+    (momentum: [p]f32) (first_moment: [p]f32) (second_moment: [p]f32)
+    (decay_mask: [p]bool) (muon_mask: [p]bool)
+    (slice_off: [k]i64) (slice_rows: [k]i64) (slice_cols: [k]i64)
+    : ([p]f32, [p]f32, [p]f32, [p]f32) =
+  muon_step_def step learning_rate beta1 beta2 epsilon weight_decay muon_beta
+    params gradient momentum first_moment second_moment decay_mask muon_mask
+    slice_off slice_rows slice_cols

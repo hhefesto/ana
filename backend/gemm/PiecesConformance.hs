@@ -4,6 +4,7 @@ module PiecesConformance
   ( Context
   , F32Array
   , I64Array
+  , BoolArray
   , withContext
   , withF32
   , withI64
@@ -31,6 +32,18 @@ module PiecesConformance
   , pieceCausalSoftmaxBackward
   , pieceGateCum
   , pieceGateCumBackward
+  , pieceGateCumLogs
+  , pieceGateCumLogsBackward
+  , pieceRglruLogGate
+  , pieceRglruLogGateBackward
+  , pieceRglruWriteScale
+  , pieceRglruWriteScaleBackward
+  , pieceQkNorm
+  , pieceQkNormBackward
+  , pieceCausalSoftmaxSink
+  , pieceCausalSoftmaxSinkBackward
+  , withBoolArray
+  , confMuonStep
   , pieceQkDecay
   , pieceQkDecayBackward
   , pieceGlaIntra
@@ -53,10 +66,12 @@ data CContextConfig
 data CContext
 data CF32_1d
 data CI64_1d
+data CBool_1d
 
 newtype Context = Context (Ptr CContext)
 newtype F32Array = F32Array (Ptr CF32_1d)
 newtype I64Array = I64Array (Ptr CI64_1d)
+newtype BoolArray = BoolArray (Ptr CBool_1d)
 
 withContext :: (Context -> IO a) -> IO a
 withContext action = bracket c_config_new c_config_free $ \cfg -> do
@@ -319,6 +334,152 @@ pieceGateCumBackward (Context ctx) groups chunk headDim (F32Array gateLogits) (F
       (downloadF32 (Context ctx) (groups * chunk * headDim))
   where f = fromIntegral
 
+pieceGateCumLogs :: Context -> Int -> Int -> Int -> F32Array -> IO ([Float], [Float])
+pieceGateCumLogs (Context ctx) groups chunk headDim (F32Array logs) =
+  alloca $ \relOut -> alloca $ \decOut -> do
+    entry_conf_piece_gate_cum_logs_fwd ctx relOut decOut (f groups) (f chunk) (f headDim) logs
+      >>= check ctx "conf_piece_gate_cum_logs_fwd"
+    c_context_sync ctx >>= check ctx "piece_gate_cum_logs_fwd sync"
+    relArr <- F32Array <$> peek relOut
+    decArr <- F32Array <$> peek decOut
+    rel <- bracket (pure relArr) (freeF32 (Context ctx))
+      (downloadF32 (Context ctx) (groups * chunk * headDim))
+    dec <- bracket (pure decArr) (freeF32 (Context ctx))
+      (downloadF32 (Context ctx) (groups * headDim))
+    pure (rel, dec)
+  where f = fromIntegral
+
+pieceGateCumLogsBackward :: Context -> Int -> Int -> Int -> F32Array -> F32Array -> F32Array -> IO [Float]
+pieceGateCumLogsBackward (Context ctx) groups chunk headDim (F32Array logs) (F32Array relBar) (F32Array decBar) =
+  alloca $ \out -> do
+    entry_conf_piece_gate_cum_logs_bwd ctx out (f groups) (f chunk) (f headDim)
+      logs relBar decBar >>= check ctx "conf_piece_gate_cum_logs_bwd"
+    c_context_sync ctx >>= check ctx "piece_gate_cum_logs_bwd sync"
+    arr <- F32Array <$> peek out
+    bracket (pure arr) (freeF32 (Context ctx))
+      (downloadF32 (Context ctx) (groups * chunk * headDim))
+  where f = fromIntegral
+
+pieceRglruLogGate :: Context -> Int -> Int -> F32Array -> F32Array -> IO [Float]
+pieceRglruLogGate (Context ctx) rows dim (F32Array z) (F32Array lam) = alloca $ \out -> do
+  entry_conf_piece_rglru_log_gate_fwd ctx out (f rows) (f dim) z lam
+    >>= check ctx "conf_piece_rglru_log_gate_fwd"
+  c_context_sync ctx >>= check ctx "piece_rglru_log_gate_fwd sync"
+  arr <- F32Array <$> peek out
+  bracket (pure arr) (freeF32 (Context ctx)) (downloadF32 (Context ctx) (rows * dim))
+  where f = fromIntegral
+
+pieceRglruLogGateBackward :: Context -> Int -> Int -> F32Array -> F32Array -> F32Array -> IO ([Float], [Float])
+pieceRglruLogGateBackward (Context ctx) rows dim (F32Array z) (F32Array lam) (F32Array bar) =
+  alloca $ \zOut -> alloca $ \lamOut -> do
+    entry_conf_piece_rglru_log_gate_bwd ctx zOut lamOut (f rows) (f dim) z lam bar
+      >>= check ctx "conf_piece_rglru_log_gate_bwd"
+    c_context_sync ctx >>= check ctx "piece_rglru_log_gate_bwd sync"
+    zArr <- F32Array <$> peek zOut
+    lamArr <- F32Array <$> peek lamOut
+    zValues <- bracket (pure zArr) (freeF32 (Context ctx)) (downloadF32 (Context ctx) (rows * dim))
+    lamValues <- bracket (pure lamArr) (freeF32 (Context ctx)) (downloadF32 (Context ctx) dim)
+    pure (zValues, lamValues)
+  where f = fromIntegral
+
+pieceRglruWriteScale :: Context -> Int -> F32Array -> F32Array -> IO [Float]
+pieceRglruWriteScale (Context ctx) count (F32Array logs) (F32Array k) = alloca $ \out -> do
+  entry_conf_piece_rglru_write_scale_fwd ctx out logs k
+    >>= check ctx "conf_piece_rglru_write_scale_fwd"
+  c_context_sync ctx >>= check ctx "piece_rglru_write_scale_fwd sync"
+  arr <- F32Array <$> peek out
+  bracket (pure arr) (freeF32 (Context ctx)) (downloadF32 (Context ctx) count)
+
+pieceRglruWriteScaleBackward :: Context -> Int -> F32Array -> F32Array -> F32Array -> IO ([Float], [Float])
+pieceRglruWriteScaleBackward (Context ctx) count (F32Array logs) (F32Array k) (F32Array bar) =
+  alloca $ \logsOut -> alloca $ \kOut -> do
+    entry_conf_piece_rglru_write_scale_bwd ctx logsOut kOut logs k bar
+      >>= check ctx "conf_piece_rglru_write_scale_bwd"
+    c_context_sync ctx >>= check ctx "piece_rglru_write_scale_bwd sync"
+    logsArr <- F32Array <$> peek logsOut
+    kArr <- F32Array <$> peek kOut
+    logsValues <- bracket (pure logsArr) (freeF32 (Context ctx)) (downloadF32 (Context ctx) count)
+    kValues <- bracket (pure kArr) (freeF32 (Context ctx)) (downloadF32 (Context ctx) count)
+    pure (logsValues, kValues)
+
+pieceQkNorm :: Context -> Int -> Int -> Int -> F32Array -> F32Array -> IO [Float]
+pieceQkNorm (Context ctx) rows dim heads (F32Array x) (F32Array gain) = alloca $ \out -> do
+  entry_conf_piece_qk_norm_fwd ctx out (f rows) (f dim) (f heads) x gain
+    >>= check ctx "conf_piece_qk_norm_fwd"
+  c_context_sync ctx >>= check ctx "piece_qk_norm_fwd sync"
+  arr <- F32Array <$> peek out
+  bracket (pure arr) (freeF32 (Context ctx)) (downloadF32 (Context ctx) (rows * dim))
+  where f = fromIntegral
+
+pieceQkNormBackward :: Context -> Int -> Int -> Int -> F32Array -> F32Array -> F32Array -> IO ([Float], [Float])
+pieceQkNormBackward (Context ctx) rows dim heads (F32Array x) (F32Array gain) (F32Array bar) =
+  alloca $ \xOut -> alloca $ \gainOut -> do
+    entry_conf_piece_qk_norm_bwd ctx xOut gainOut (f rows) (f dim) (f heads) x gain bar
+      >>= check ctx "conf_piece_qk_norm_bwd"
+    c_context_sync ctx >>= check ctx "piece_qk_norm_bwd sync"
+    xArr <- F32Array <$> peek xOut
+    gainArr <- F32Array <$> peek gainOut
+    xValues <- bracket (pure xArr) (freeF32 (Context ctx)) (downloadF32 (Context ctx) (rows * dim))
+    gainValues <- bracket (pure gainArr) (freeF32 (Context ctx)) (downloadF32 (Context ctx) (dim `div` heads))
+    pure (xValues, gainValues)
+  where f = fromIntegral
+
+pieceCausalSoftmaxSink :: Context -> Int -> Int -> Int -> Int -> F32Array -> F32Array -> IO [Float]
+pieceCausalSoftmaxSink (Context ctx) groups n headDim heads (F32Array scores) (F32Array sinks) = alloca $ \out -> do
+  entry_conf_piece_causal_softmax_sink_fwd ctx out (f groups) (f n) (f headDim) (f heads) scores sinks
+    >>= check ctx "conf_piece_causal_softmax_sink_fwd"
+  c_context_sync ctx >>= check ctx "piece_causal_softmax_sink_fwd sync"
+  arr <- F32Array <$> peek out
+  bracket (pure arr) (freeF32 (Context ctx)) (downloadF32 (Context ctx) (groups * n * n))
+  where f = fromIntegral
+
+pieceCausalSoftmaxSinkBackward :: Context -> Int -> Int -> Int -> Int -> F32Array -> F32Array -> F32Array -> IO ([Float], [Float])
+pieceCausalSoftmaxSinkBackward (Context ctx) groups n headDim heads (F32Array scores) (F32Array sinks) (F32Array bar) =
+  alloca $ \scoresOut -> alloca $ \sinksOut -> do
+    entry_conf_piece_causal_softmax_sink_bwd ctx scoresOut sinksOut
+      (f groups) (f n) (f headDim) (f heads) scores sinks bar
+      >>= check ctx "conf_piece_causal_softmax_sink_bwd"
+    c_context_sync ctx >>= check ctx "piece_causal_softmax_sink_bwd sync"
+    scoresArr <- F32Array <$> peek scoresOut
+    sinksArr <- F32Array <$> peek sinksOut
+    scoresValues <- bracket (pure scoresArr) (freeF32 (Context ctx)) (downloadF32 (Context ctx) (groups * n * n))
+    sinksValues <- bracket (pure sinksArr) (freeF32 (Context ctx)) (downloadF32 (Context ctx) heads)
+    pure (scoresValues, sinksValues)
+  where f = fromIntegral
+
+withBoolArray :: Context -> [Bool] -> (BoolArray -> IO a) -> IO a
+withBoolArray ctx values = bracket (uploadBoolArr ctx values) (freeBoolArr ctx)
+
+uploadBoolArr :: Context -> [Bool] -> IO BoolArray
+uploadBoolArr (Context ctx) values =
+  withArray (map (\b -> if b then 1 else 0 :: Word8) values) $ \ptr ->
+    checkedPtr ctx "upload bool[1]" (c_new_bool_1d ctx ptr (fromIntegral (length values))) BoolArray
+
+freeBoolArr :: Context -> BoolArray -> IO ()
+freeBoolArr (Context ctx) (BoolArray arr) = c_free_bool_1d ctx arr >>= check ctx "free bool[1]"
+
+-- The combined Muon/AdamW step against the pieces build of muon_step_def;
+-- FormalTransformer.Optimizer.muonStep is the Double reference.
+confMuonStep
+  :: Context -> Int -> Int64 -> Float -> Float -> Float -> Float -> Float -> Float
+  -> F32Array -> F32Array -> F32Array -> F32Array -> F32Array
+  -> BoolArray -> BoolArray -> I64Array -> I64Array -> I64Array
+  -> IO ([Float], [Float], [Float], [Float])
+confMuonStep (Context ctx) count step lr b1 b2 eps wd muBeta
+    (F32Array params) (F32Array gradient) (F32Array momentum)
+    (F32Array firstMoment) (F32Array secondMoment)
+    (BoolArray decayMask) (BoolArray muonMask)
+    (I64Array offs) (I64Array rows) (I64Array cols) =
+  alloca $ \pOut -> alloca $ \momOut -> alloca $ \mOut -> alloca $ \vOut -> do
+    entry_conf_muon_step ctx pOut momOut mOut vOut step lr b1 b2 eps wd muBeta
+      params gradient momentum firstMoment secondMoment decayMask muonMask
+      offs rows cols >>= check ctx "conf_muon_step"
+    c_context_sync ctx >>= check ctx "conf_muon_step sync"
+    let download slot = do
+          arr <- F32Array <$> peek slot
+          bracket (pure arr) (freeF32 (Context ctx)) (downloadF32 (Context ctx) count)
+    (,,,) <$> download pOut <*> download momOut <*> download mOut <*> download vOut
+
 pieceQkDecay :: Context -> Int -> Int -> Int -> F32Array -> F32Array -> F32Array -> F32Array -> IO ([Float], [Float])
 pieceQkDecay (Context ctx) groups chunk headDim (F32Array q) (F32Array k) (F32Array rel) (F32Array dec) =
   alloca $ \qOut -> alloca $ \kOut -> do
@@ -447,6 +608,8 @@ foreign import ccall safe "futhark_context_sync" c_context_sync :: Ptr CContext 
 
 foreign import ccall unsafe "futhark_new_f32_1d" c_new_f32_1d :: Ptr CContext -> Ptr Float -> Int64 -> IO (Ptr CF32_1d)
 foreign import ccall unsafe "futhark_new_i64_1d" c_new_i64_1d :: Ptr CContext -> Ptr Int64 -> Int64 -> IO (Ptr CI64_1d)
+foreign import ccall unsafe "futhark_new_bool_1d" c_new_bool_1d :: Ptr CContext -> Ptr Word8 -> Int64 -> IO (Ptr CBool_1d)
+foreign import ccall safe "futhark_free_bool_1d" c_free_bool_1d :: Ptr CContext -> Ptr CBool_1d -> IO CInt
 foreign import ccall safe "futhark_values_f32_1d" c_values_f32_1d :: Ptr CContext -> Ptr CF32_1d -> Ptr Float -> IO CInt
 foreign import ccall safe "futhark_free_f32_1d" c_free_f32_1d :: Ptr CContext -> Ptr CF32_1d -> IO CInt
 foreign import ccall safe "futhark_free_i64_1d" c_free_i64_1d :: Ptr CContext -> Ptr CI64_1d -> IO CInt
@@ -472,6 +635,17 @@ foreign import ccall safe "futhark_entry_conf_piece_merge_heads_fwd" entry_conf_
 foreign import ccall safe "futhark_entry_conf_piece_merge_heads_bwd" entry_conf_piece_merge_heads_bwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> IO CInt
 foreign import ccall safe "futhark_entry_conf_piece_causal_softmax_fwd" entry_conf_piece_causal_softmax_fwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> IO CInt
 foreign import ccall safe "futhark_entry_conf_piece_causal_softmax_bwd" entry_conf_piece_causal_softmax_bwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_conf_piece_gate_cum_logs_fwd" entry_conf_piece_gate_cum_logs_fwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_conf_piece_gate_cum_logs_bwd" entry_conf_piece_gate_cum_logs_bwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_conf_piece_rglru_log_gate_fwd" entry_conf_piece_rglru_log_gate_fwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_conf_piece_rglru_log_gate_bwd" entry_conf_piece_rglru_log_gate_bwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_conf_piece_rglru_write_scale_fwd" entry_conf_piece_rglru_write_scale_fwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_conf_piece_rglru_write_scale_bwd" entry_conf_piece_rglru_write_scale_bwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_conf_piece_qk_norm_fwd" entry_conf_piece_qk_norm_fwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_conf_piece_qk_norm_bwd" entry_conf_piece_qk_norm_bwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_conf_piece_causal_softmax_sink_fwd" entry_conf_piece_causal_softmax_sink_fwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_conf_piece_causal_softmax_sink_bwd" entry_conf_piece_causal_softmax_sink_bwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_conf_muon_step" entry_conf_muon_step :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Int64 -> Float -> Float -> Float -> Float -> Float -> Float -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CBool_1d -> Ptr CBool_1d -> Ptr CI64_1d -> Ptr CI64_1d -> Ptr CI64_1d -> IO CInt
 foreign import ccall safe "futhark_entry_conf_piece_gate_cum_fwd" entry_conf_piece_gate_cum_fwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> IO CInt
 foreign import ccall safe "futhark_entry_conf_piece_gate_cum_bwd" entry_conf_piece_gate_cum_bwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
 foreign import ccall safe "futhark_entry_conf_piece_qk_decay_fwd" entry_conf_piece_qk_decay_fwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt

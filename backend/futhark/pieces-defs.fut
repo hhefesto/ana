@@ -79,6 +79,53 @@ def piece_gate_cum [groups] [chunk] [hd]
   let dec = map (\group -> group[chunk-1]) relcum
   in (flatten (flatten relcum), flatten dec)
 
+-- piece_gate_cum for a gate that is ALREADY in log space (the RG-LRU path
+-- computes log alpha upstream in piece_rglru_log_gate): the same prefix
+-- sums with the log_sigmoid map removed.  Kept separate rather than
+-- branching inside piece_gate_cum so the sigmoid path's tape is untouched.
+def piece_gate_cum_logs [groups] [chunk] [hd]
+    (log_gates: [groups*chunk*hd]f32)
+    : ([groups*chunk*hd]f32, [groups*hd]f32) =
+  let checked = assert (chunk > 0 && hd > 0) log_gates
+  let logs = unflatten (unflatten checked :> [groups*chunk][hd]f32)
+             :> [groups][chunk][hd]f32
+  let relcum = map (\group ->
+    tabulate_2d chunk hd (\i c ->
+      f32.sum (map (\r -> if r <= i then group[r,c] else 0.0f32)
+                   (iota chunk)))) logs
+  let dec = map (\group -> group[chunk-1]) relcum
+  in (flatten (flatten relcum), flatten dec)
+
+-- The RG-LRU log-gate as a piece (model.fut's rglru_log_gate is the
+-- formula): per channel, log alpha = 8 · sigmoid(z) · log sigmoid(Λ), with
+-- the learned decay base Λ shared across positions.  Written like
+-- piece_rms: a map over rows against the [d]-wide parameter, so the vjp's
+-- lambda cotangent is the same row-reduction shape as rms_norm's gain.
+def piece_rglru_log_gate [rows] [d]
+    (inputs: ([rows*d]f32, [d]f32)): [rows*d]f32 =
+  let (z_flat, lam) = inputs
+  let checked = assert (d > 0) z_flat
+  in flatten (map (\row -> map2 rglru_log_gate row lam)
+              (unflatten checked :> [rows][d]f32))
+
+-- The RG-LRU state-write scale beta = sqrt(1 - alpha^2) folded into the
+-- (already per-head-normalized) key, elementwise over whatever layout the
+-- caller uses: k'[i] = k[i] * beta(log_alpha[i]).
+def piece_rglru_write_scale [count]
+    (inputs: ([count]f32, [count]f32)): [count]f32 =
+  let (logs, k) = inputs
+  in map2 (\l kc -> kc * rglru_write_scale l) logs k
+
+-- Per-head RMSNorm on q/k with shared zero-centered gains (v3 qkNorm).
+-- qk_normalize in model.fut is the formula; gain has hd = d/h entries
+-- shared across heads, applied as (1 + w).
+def piece_qk_norm [rows] [d] [hd]
+    (h: i64) (inputs: ([rows*d]f32, [hd]f32)): [rows*d]f32 =
+  let (x_flat, gain) = inputs
+  let checked = assert (h > 0 && d > 0 && d % h == 0 && hd * h == d) x_flat
+  in flatten (map (qk_normalize h gain)
+              (unflatten checked :> [rows][d]f32))
+
 def piece_qk_decay [groups] [chunk] [hd]
     (inputs: ([groups*chunk*hd]f32, [groups*chunk*hd]f32,
               [groups*chunk*hd]f32, [groups*hd]f32))
@@ -215,6 +262,27 @@ def piece_causal_softmax [groups] [n]
   in flatten (flatten (tabulate_2d groups n (\g i ->
        softmax (tabulate n (\j ->
          if j <= i then scores[g,i,j] * scale else -1.0e30f32)))))
+
+-- piece_causal_softmax extended by one per-head sink logit whose weight is
+-- dropped from the returned row (Attention/Sink.agda's restriction
+-- semantics: softmax over scores ++ [sink], then drop the sink's weight).
+-- groups is batch*h with the head minor, so head = g % h.  The output
+-- shape is unchanged, so the downstream PV contraction needs no change.
+def piece_causal_softmax_sink [groups] [n] [h]
+    (head_dim: i64)
+    (inputs: ([groups*n*n]f32, [h]f32)): [groups*n*n]f32 =
+  let (scores_flat, sinks) = inputs
+  let checked = assert (n > 0 && head_dim > 0 && h > 0 && groups % h == 0)
+                       scores_flat
+  let scores = unflatten (unflatten checked :> [groups*n][n]f32)
+               :> [groups][n][n]f32
+  let scale = 1.0f32 / f32.sqrt (f32.i64 head_dim)
+  in flatten (flatten (tabulate_2d groups n (\g i ->
+       let extended = softmax (tabulate (n+1) (\j ->
+             if j == n then sinks[g % h]
+             else if j <= i then scores[g,i,j] * scale
+             else -1.0e30f32))
+       in take n extended :> [n]f32)))
 
 def piece_silu_gate [count]
     (inputs: ([count]f32, [count]f32)): [count]f32 =

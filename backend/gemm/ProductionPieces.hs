@@ -36,6 +36,7 @@ module ProductionPieces
   , deviceAccumulate
   , deviceClipGlobalNorm
   , deviceAdamwStep
+  , deviceMuonStep
   , pushArena
   , popArenaKeeping
   , markFutharkDirty
@@ -111,6 +112,16 @@ productionPieceOpsWith extend ctx = extend PieceOps
   , opsCausalSoftmaxBackward = causalSoftmaxBackward ctx
   , opsGateCumForward = gateCumForward ctx
   , opsGateCumBackward = gateCumBackward ctx
+  , opsGateCumLogsForward = gateCumLogsForward ctx
+  , opsGateCumLogsBackward = gateCumLogsBackward ctx
+  , opsRglruLogGateForward = rglruLogGateForward ctx
+  , opsRglruLogGateBackward = rglruLogGateBackward ctx
+  , opsRglruWriteScaleForward = rglruWriteScaleForward ctx
+  , opsRglruWriteScaleBackward = rglruWriteScaleBackward ctx
+  , opsQkNormForward = qkNormForward ctx
+  , opsQkNormBackward = qkNormBackward ctx
+  , opsCausalSoftmaxSinkForward = causalSoftmaxSinkForward ctx
+  , opsCausalSoftmaxSinkBackward = causalSoftmaxSinkBackward ctx
   , opsQkDecayForward = qkDecayForward ctx
   , opsQkDecayBackward = qkDecayBackward ctx
   , opsGlaIntraForward = glaIntraForward ctx
@@ -345,6 +356,74 @@ gateCumBackward ctx groups chunk headDim (DevF32 gate _) (DevF32 rel _)
     entryPieceGateCumBwd (rawContext ctx) out (f groups) (f chunk) (f headDim)
       gate rel dec
 
+gateCumLogsForward :: Context -> Int -> Int -> Int -> DevF32 -> IO (DevF32, DevF32)
+gateCumLogsForward ctx groups chunk headDim (DevF32 logs _) =
+  output2 ctx "piece_gate_cum_logs_fwd"
+    [groups * chunk * headDim, groups * headDim] $ \[relOut, decOut] ->
+      entryPieceGateCumLogsFwd (rawContext ctx) relOut decOut (f groups)
+        (f chunk) (f headDim) logs
+
+gateCumLogsBackward :: Context -> Int -> Int -> Int -> DevF32 -> DevF32 -> DevF32
+  -> IO DevF32
+gateCumLogsBackward ctx groups chunk headDim (DevF32 logs _) (DevF32 rel _)
+    (DevF32 dec _) =
+  output1 ctx "piece_gate_cum_logs_bwd" (groups * chunk * headDim) $ \[out] ->
+    entryPieceGateCumLogsBwd (rawContext ctx) out (f groups) (f chunk)
+      (f headDim) logs rel dec
+
+rglruLogGateForward :: Context -> Int -> Int -> DevF32 -> DevF32 -> IO DevF32
+rglruLogGateForward ctx rows dim (DevF32 z _) (DevF32 lam _) =
+  output1 ctx "piece_rglru_log_gate_fwd" (rows * dim) $ \[out] ->
+    entryPieceRglruLogGateFwd (rawContext ctx) out (f rows) (f dim) z lam
+
+rglruLogGateBackward :: Context -> Int -> Int -> DevF32 -> DevF32 -> DevF32
+  -> IO (DevF32, DevF32)
+rglruLogGateBackward ctx rows dim (DevF32 z _) (DevF32 lam _) (DevF32 bar _) =
+  output2 ctx "piece_rglru_log_gate_bwd" [rows * dim, dim] $ \[zOut, lamOut] ->
+    entryPieceRglruLogGateBwd (rawContext ctx) zOut lamOut (f rows) (f dim)
+      z lam bar
+
+rglruWriteScaleForward :: Context -> DevF32 -> DevF32 -> IO DevF32
+rglruWriteScaleForward ctx (DevF32 logs count) (DevF32 k _) =
+  output1 ctx "piece_rglru_write_scale_fwd" count $ \[out] ->
+    entryPieceRglruWriteScaleFwd (rawContext ctx) out logs k
+
+rglruWriteScaleBackward :: Context -> DevF32 -> DevF32 -> DevF32
+  -> IO (DevF32, DevF32)
+rglruWriteScaleBackward ctx (DevF32 logs count) (DevF32 k _) (DevF32 bar _) =
+  output2 ctx "piece_rglru_write_scale_bwd" [count, count] $ \[logsOut, kOut] ->
+    entryPieceRglruWriteScaleBwd (rawContext ctx) logsOut kOut logs k bar
+
+qkNormForward :: Context -> Int -> Int -> Int -> DevF32 -> DevF32 -> IO DevF32
+qkNormForward ctx rows dim heads (DevF32 x _) (DevF32 gain _) =
+  output1 ctx "piece_qk_norm_fwd" (rows * dim) $ \[out] ->
+    entryPieceQkNormFwd (rawContext ctx) out (f rows) (f dim) (f heads) x gain
+
+qkNormBackward :: Context -> Int -> Int -> Int -> DevF32 -> DevF32 -> DevF32
+  -> IO (DevF32, DevF32)
+qkNormBackward ctx rows dim heads (DevF32 x _) (DevF32 gain _) (DevF32 bar _) =
+  output2 ctx "piece_qk_norm_bwd" [rows * dim, dim `div` heads] $
+    \[xOut, gainOut] ->
+      entryPieceQkNormBwd (rawContext ctx) xOut gainOut (f rows) (f dim)
+        (f heads) x gain bar
+
+causalSoftmaxSinkForward :: Context -> Int -> Int -> Int -> Int -> DevF32
+  -> DevF32 -> IO DevF32
+causalSoftmaxSinkForward ctx groups n headDim heads (DevF32 scores count)
+    (DevF32 sinks _) =
+  output1 ctx "piece_causal_softmax_sink_fwd" count $ \[out] ->
+    entryPieceCausalSoftmaxSinkFwd (rawContext ctx) out (f groups) (f n)
+      (f headDim) (f heads) scores sinks
+
+causalSoftmaxSinkBackward :: Context -> Int -> Int -> Int -> Int -> DevF32
+  -> DevF32 -> DevF32 -> IO (DevF32, DevF32)
+causalSoftmaxSinkBackward ctx groups n headDim heads (DevF32 scores count)
+    (DevF32 sinks _) (DevF32 bar _) =
+  output2 ctx "piece_causal_softmax_sink_bwd" [count, heads] $
+    \[scoresOut, sinksOut] ->
+      entryPieceCausalSoftmaxSinkBwd (rawContext ctx) scoresOut sinksOut
+        (f groups) (f n) (f headDim) (f heads) scores sinks bar
+
 qkDecayForward :: Context -> Int -> Int -> Int -> DevF32 -> DevF32 -> DevF32
   -> DevF32 -> IO (DevF32, DevF32)
 qkDecayForward ctx groups chunk headDim (DevF32 q _) (DevF32 k _)
@@ -504,6 +583,24 @@ deviceAdamwStep ctx step learningRate beta1 beta2 epsilon weightDecay
     entryAdamwStep (rawContext ctx) paramsOut mOut vOut step learningRate
       beta1 beta2 epsilon weightDecay params gradient firstMoment secondMoment
       mask
+
+-- One combined Muon/AdamW update (muon_step in pieces.fut delegates to the
+-- same muon_step_def the fused backends run).  Returns
+-- (params', momentum', firstMoment', secondMoment').
+deviceMuonStep
+  :: Context -> Int64 -> Float -> Float -> Float -> Float -> Float -> Float
+  -> DevF32 -> DevF32 -> DevF32 -> DevF32 -> DevF32
+  -> Ptr CBool_1d -> Ptr CBool_1d -> DevI64 -> DevI64 -> DevI64
+  -> IO (DevF32, DevF32, DevF32, DevF32)
+deviceMuonStep ctx step learningRate beta1 beta2 epsilon weightDecay muonBeta
+    (DevF32 params count) (DevF32 gradient _) (DevF32 momentum _)
+    (DevF32 firstMoment _) (DevF32 secondMoment _) decayMask muonMask
+    (DevI64 offs _) (DevI64 rows _) (DevI64 cols _) =
+  output4 ctx "muon_step" [count, count, count, count] $
+    \[paramsOut, momentumOut, mOut, vOut] ->
+      entryMuonStep (rawContext ctx) paramsOut momentumOut mOut vOut step
+        learningRate beta1 beta2 epsilon weightDecay muonBeta params gradient
+        momentum firstMoment secondMoment decayMask muonMask offs rows cols
 
 -- The raw device pointer backing a Futhark array, for the cuBLAS boundary.
 -- The wrapper and its Futhark owner must stay live through both barriers;
@@ -740,6 +837,17 @@ foreign import ccall safe "futhark_entry_piece_causal_softmax_fwd" entryPieceCau
 foreign import ccall safe "futhark_entry_piece_causal_softmax_bwd" entryPieceCausalSoftmaxBwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
 foreign import ccall safe "futhark_entry_piece_gate_cum_fwd" entryPieceGateCumFwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> IO CInt
 foreign import ccall safe "futhark_entry_piece_gate_cum_bwd" entryPieceGateCumBwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_piece_gate_cum_logs_fwd" entryPieceGateCumLogsFwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_piece_gate_cum_logs_bwd" entryPieceGateCumLogsBwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_piece_rglru_log_gate_fwd" entryPieceRglruLogGateFwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_piece_rglru_log_gate_bwd" entryPieceRglruLogGateBwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_piece_rglru_write_scale_fwd" entryPieceRglruWriteScaleFwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_piece_rglru_write_scale_bwd" entryPieceRglruWriteScaleBwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_piece_qk_norm_fwd" entryPieceQkNormFwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_piece_qk_norm_bwd" entryPieceQkNormBwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_piece_causal_softmax_sink_fwd" entryPieceCausalSoftmaxSinkFwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_piece_causal_softmax_sink_bwd" entryPieceCausalSoftmaxSinkBwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
+foreign import ccall safe "futhark_entry_muon_step" entryMuonStep :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Int64 -> Float -> Float -> Float -> Float -> Float -> Float -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CBool_1d -> Ptr CBool_1d -> Ptr CI64_1d -> Ptr CI64_1d -> Ptr CI64_1d -> IO CInt
 foreign import ccall safe "futhark_entry_piece_qk_decay_fwd" entryPieceQkDecayFwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
 foreign import ccall safe "futhark_entry_piece_qk_decay_bwd" entryPieceQkDecayBwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt
 foreign import ccall safe "futhark_entry_piece_gla_intra_fwd" entryPieceGlaIntraFwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> Ptr CF32_1d -> IO CInt

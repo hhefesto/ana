@@ -22,8 +22,9 @@ main = do
   arguments <- getArgs
   case arguments of
     [] -> probes
-    ["e2e", goldenPath] -> endToEnd goldenPath
-    _ -> fail "usage: raw-probe [e2e GOLDEN_PATH]"
+    ["e2e", goldenPath] -> endToEnd goldenPath "sigmoid"
+    ["e2e", goldenPath, arm] -> endToEnd goldenPath arm
+    _ -> fail "usage: raw-probe [e2e GOLDEN_PATH [sigmoid|rglru|qknorm|sinks|v3-tied]]"
 
 probes :: IO ()
 probes = withProductionContext $ \ctx -> do
@@ -81,16 +82,25 @@ probes = withProductionContext $ \ctx -> do
 -- gradient entry against the fused-oracle golden values dumped by the CPU
 -- conformance driver (GEMM_CONFORMANCE_DUMP). Inputs replicate
 -- GemmConformance exactly: the deterministic layout initialization and the
--- fixed two-sequence token batch.
-endToEnd :: FilePath -> IO ()
-endToEnd goldenPath = do
+-- fixed two-sequence token batch.  The optional arm selects the battery
+-- config the golden was dumped for (GemmConformance writes one golden per
+-- arm as GOLDEN.<arm>, base "sigmoid" under the bare name).
+endToEnd :: FilePath -> String -> IO ()
+endToEnd goldenPath arm = do
   golden <- lines <$> readFile goldenPath
   (goldenLoss, goldenGradient) <- case map read golden :: [Float] of
     lossValue : gradientValues | not (null gradientValues) ->
       pure (lossValue, gradientValues)
     _ -> fail ("invalid golden file: " ++ goldenPath)
-  let config = Config 5 4 4 6 5 2 GateSigmoid False False True
-      parameters = either error (concatMap initialize) (namedLayout config)
+  let base = Config 5 4 4 6 5 2 GateSigmoid False False True
+  config <- case arm of
+    "sigmoid" -> pure base
+    "rglru" -> pure base { gateKind = GateRgLru }
+    "qknorm" -> pure base { qkNorm = True }
+    "sinks" -> pure base { headSinks = True }
+    "v3-tied" -> pure base { gateKind = GateRgLru, qkNorm = True, headSinks = True }
+    other -> fail ("unknown arm: " ++ other)
+  let parameters = either error (concatMap initialize) (namedLayout config)
       initialize slice
         | sliceDecay slice =
             [ 0.025 * sin (fromIntegral (sliceOffset slice + i + 1) * (0.73 :: Double))

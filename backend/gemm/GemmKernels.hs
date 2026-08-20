@@ -64,6 +64,7 @@ import ProductionPieces
   , deviceAccumulate
   , deviceAdamwStep
   , deviceClipGlobalNorm
+  , deviceMuonStep
   , deviceZeros
   , freeBool
   , freeI64
@@ -95,17 +96,17 @@ data GpuConfig = GpuConfig
   , gpuChunk :: !Int64
   } deriving (Eq, Show)
 
--- The decomposed piece pipeline still computes v2 semantics only: its gate
--- piece is the sigmoid log-gate (piece_gate_cum) and its softmax piece has
--- no qk-norm or sinks.  Refuse every v3 arm here, loudly, rather than
--- training a v3 config with v2 math; the pieces grow v3 support when a
--- pilot promotes an arm to this backend (docs/V3-DECISIONS.md).
+-- The decomposed piece pipeline carries the v3 arms (RG-LRU gates,
+-- qk-norm, sinks) since the bpe100m-v3 port; the ONE arm it does not have
+-- is the untied head — the head path reads the embedding for both gather
+-- and logits, so an unembedding slice would be silently ignored.  Refuse
+-- that loudly rather than train it with tied math.
 gpuConfig :: Config -> Either String GpuConfig
 gpuConfig cfg = do
   _ <- validateConfig cfg
-  _ <- if archCode cfg /= 0
-    then Left "the decomposed GEMM backend implements only the v2 architecture (sigmoid gates, no qk-norm, no sinks); use the futhark backends for v3 arms"
-    else Right ()
+  _ <- if tiedHead cfg
+    then Right ()
+    else Left "the decomposed GEMM backend implements only the tied head; use the futhark backends for the untied arm"
   pure GpuConfig
     { gpuArch = fromIntegral (archCode cfg)
     , gpuVocab = f vocabSize
@@ -276,21 +277,30 @@ adamwStep ctx step learningRate beta1 beta2 epsilon weightDecay
     beta2 epsilon weightDecay params gradient firstMoment secondMoment mask
   pure (F32Array params', F32Array first', F32Array second')
 
--- The decomposed backend has no Muon kernel yet; TRAIN_OPT=muon on this
--- backend fails loudly here rather than training with the wrong update
--- (the same rule as its arch guard in gpuConfig).
+-- One combined Muon/AdamW device update: the same muon_step_def the fused
+-- backends run, exposed as a pieces entry.  The slice descriptors and
+-- ownership mask are uploaded once per run by the driver.
 muonStepDevice
   :: Context -> Int64 -> Float -> Float -> Float -> Float -> Float -> Float
   -> F32Array -> F32Array -> F32Array -> F32Array -> F32Array
   -> BoolArray -> BoolArray -> I64Array -> I64Array -> I64Array
   -> IO (F32Array, F32Array, F32Array, F32Array)
-muonStepDevice _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ = unsupported "muonStepDevice"
+muonStepDevice ctx step lr b1 b2 eps wd muBeta
+    (F32Array params) (F32Array gradient) (F32Array momentum)
+    (F32Array firstMoment) (F32Array secondMoment)
+    (BoolArray decayMask) (BoolArray muonMask)
+    (I64Array _ offs) (I64Array _ rows) (I64Array _ cols) = do
+  (params', momentum', m', v') <- deviceMuonStep ctx step lr b1 b2 eps wd
+    muBeta params gradient momentum firstMoment secondMoment decayMask
+    muonMask offs rows cols
+  pure (F32Array params', F32Array momentum', F32Array m', F32Array v')
 
 uploadI64Vector :: Context -> [Int64] -> IO I64Array
-uploadI64Vector _ _ = unsupported "uploadI64Vector"
+uploadI64Vector ctx values =
+  I64Array [length values] <$> uploadI64 ctx values
 
 uploadBoolVector :: Context -> UV.Vector Bool -> IO BoolArray
-uploadBoolVector _ _ = unsupported "uploadBoolVector"
+uploadBoolVector ctx values = BoolArray <$> PP.uploadBoolVector ctx values
 
 logits :: Context -> GpuConfig -> Int -> F32Array -> I64Array -> IO [[Float]]
 logits _ _ _ _ _ = unsupported "logits"
@@ -324,9 +334,9 @@ batchOf :: I64Array -> IO (Int, Int, DevI64)
 batchOf (I64Array [rows, cols] tokens) = pure (rows, cols, tokens)
 batchOf _ = ioError (userError "expected an i64[2] batch")
 
--- The decomposed backend computes v2 semantics only (gpuConfig refuses any
--- nonzero arch word), so the reconstructed Config always carries the
--- arms-off architecture.
+-- Reconstructs the Config from the packed arch word (Config.archCode's
+-- bit assignment: 1 = RG-LRU, 2 = qk-norm, 4 = sinks, 8 = untied).  The
+-- untied bit never survives gpuConfig, so tiedHead is always True here.
 configOf :: GpuConfig -> Int -> Config
 configOf cfg sequenceLength = Config
   { vocabSize = fromIntegral (gpuVocab cfg)
@@ -335,11 +345,13 @@ configOf cfg sequenceLength = Config
   , ffDim = fromIntegral (gpuFfDim cfg)
   , layerCount = fromIntegral (gpuLayers cfg)
   , headCount = fromIntegral (gpuHeads cfg)
-  , gateKind = GateSigmoid
-  , qkNorm = False
-  , headSinks = False
+  , gateKind = if arch `mod` 2 == 1 then GateRgLru else GateSigmoid
+  , qkNorm = (arch `div` 2) `mod` 2 == 1
+  , headSinks = (arch `div` 4) `mod` 2 == 1
   , tiedHead = True
   }
+  where
+    arch = fromIntegral (gpuArch cfg) :: Int
 
 -- Per-op isolation of the training head path at PRODUCTION dims with
 -- synthetic deterministic data: dense forward (cuBLAS), piece_ce_bwd,
