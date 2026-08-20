@@ -95,27 +95,27 @@ freeF32 (Context ctx) (F32Array arr) = c_free_f32_1d ctx arr >>= check ctx "free
 freeI64 :: Context -> I64Array -> IO ()
 freeI64 (Context ctx) (I64Array arr) = c_free_i64_1d ctx arr >>= check ctx "free i64[1]"
 
-oracleParameterCount :: Context -> Int64 -> Int64 -> Int64 -> Int64 -> IO Int64
-oracleParameterCount (Context ctx) vocab dim ff layers = alloca $ \out -> do
-  entry_oracle_n_params ctx out vocab dim ff layers >>= check ctx "oracle_n_params"
+oracleParameterCount :: Context -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> IO Int64
+oracleParameterCount (Context ctx) arch vocab dim ff heads layers = alloca $ \out -> do
+  entry_oracle_n_params ctx out arch vocab dim ff heads layers >>= check ctx "oracle_n_params"
   c_context_sync ctx >>= check ctx "oracle_n_params sync"
   peek out
 
-oracleLogits :: Context -> Int -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> F32Array -> I64Array -> IO [Float]
-oracleLogits (Context ctx) sequenceLength vocab dim ff heads layers chunk (F32Array params) (I64Array tokens) = alloca $ \out -> do
-  entry_oracle_logits ctx out vocab dim ff heads layers chunk params tokens >>= check ctx "oracle_logits"
+oracleLogits :: Context -> Int -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> F32Array -> I64Array -> IO [Float]
+oracleLogits (Context ctx) sequenceLength arch vocab dim ff heads layers chunk (F32Array params) (I64Array tokens) = alloca $ \out -> do
+  entry_oracle_logits ctx out arch vocab dim ff heads layers chunk params tokens >>= check ctx "oracle_logits"
   c_context_sync ctx >>= check ctx "oracle_logits sync"
   arr <- F32Array <$> peek out
   bracket (pure arr) (freeF32 (Context ctx)) (downloadF32 (Context ctx) (sequenceLength * fromIntegral vocab))
 
-oracleBatchLossGrad :: Context -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> F32Array -> I64Array -> IO (Float, [Float])
-oracleBatchLossGrad (Context ctx) batch sequenceLength vocab dim ff heads layers chunk (F32Array params) (I64Array tokens) =
+oracleBatchLossGrad :: Context -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> F32Array -> I64Array -> IO (Float, [Float])
+oracleBatchLossGrad (Context ctx) batch sequenceLength arch vocab dim ff heads layers chunk (F32Array params) (I64Array tokens) =
   alloca $ \loss -> alloca $ \gradient -> do
-    entry_oracle_batch_loss_grad ctx loss gradient batch sequenceLength vocab dim ff heads layers chunk params tokens
+    entry_oracle_batch_loss_grad ctx loss gradient batch sequenceLength arch vocab dim ff heads layers chunk params tokens
       >>= check ctx "oracle_batch_loss_grad"
     c_context_sync ctx >>= check ctx "oracle_batch_loss_grad sync"
     gradientArr <- F32Array <$> peek gradient
-    count <- fromIntegral <$> oracleParameterCount (Context ctx) vocab dim ff layers
+    count <- fromIntegral <$> oracleParameterCount (Context ctx) arch vocab dim ff heads layers
     values <- bracket (pure gradientArr) (freeF32 (Context ctx))
       (downloadF32 (Context ctx) count)
     (, values) <$> peek loss
@@ -451,9 +451,9 @@ foreign import ccall safe "futhark_values_f32_1d" c_values_f32_1d :: Ptr CContex
 foreign import ccall safe "futhark_free_f32_1d" c_free_f32_1d :: Ptr CContext -> Ptr CF32_1d -> IO CInt
 foreign import ccall safe "futhark_free_i64_1d" c_free_i64_1d :: Ptr CContext -> Ptr CI64_1d -> IO CInt
 
-foreign import ccall safe "futhark_entry_oracle_n_params" entry_oracle_n_params :: Ptr CContext -> Ptr Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> IO CInt
-foreign import ccall safe "futhark_entry_oracle_logits" entry_oracle_logits :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CI64_1d -> IO CInt
-foreign import ccall safe "futhark_entry_oracle_batch_loss_grad" entry_oracle_batch_loss_grad :: Ptr CContext -> Ptr Float -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CI64_1d -> IO CInt
+foreign import ccall safe "futhark_entry_oracle_n_params" entry_oracle_n_params :: Ptr CContext -> Ptr Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> IO CInt
+foreign import ccall safe "futhark_entry_oracle_logits" entry_oracle_logits :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CI64_1d -> IO CInt
+foreign import ccall safe "futhark_entry_oracle_batch_loss_grad" entry_oracle_batch_loss_grad :: Ptr CContext -> Ptr Float -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CI64_1d -> IO CInt
 foreign import ccall safe "futhark_entry_conf_piece_ce_fwd" entry_conf_piece_ce_fwd :: Ptr CContext -> Ptr Float -> Int64 -> Int64 -> Int64 -> Int64 -> Ptr CF32_1d -> Ptr CI64_1d -> IO CInt
 foreign import ccall safe "futhark_entry_conf_piece_ce_bwd" entry_conf_piece_ce_bwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Int64 -> Float -> Ptr CF32_1d -> Ptr CI64_1d -> IO CInt
 foreign import ccall safe "futhark_entry_conf_piece_embed_gather_bwd" entry_conf_piece_embed_gather_bwd :: Ptr CContext -> Ptr (Ptr CF32_1d) -> Int64 -> Int64 -> Int64 -> Ptr CI64_1d -> Ptr CF32_1d -> IO CInt

@@ -1077,7 +1077,8 @@ unpackGlaBlock rows d f packed =
 
 oracleSmoke :: Context -> IO ()
 oracleSmoke ctx = do
-  let vocab = fromIntegral (vocabSize config)
+  let arch = fromIntegral (archCode config)
+      vocab = fromIntegral (vocabSize config)
       dim = fromIntegral (modelDim config)
       ff = fromIntegral (ffDim config)
       heads = fromIntegral (headCount config)
@@ -1085,12 +1086,12 @@ oracleSmoke ctx = do
       chunk = 2
       paramFloats = map realToFrac parameters
       tokenInts = map fromIntegral tokens :: [Int64]
-  count <- oracleParameterCount ctx vocab dim ff layers
+  count <- oracleParameterCount ctx arch vocab dim ff heads layers
   assertExact "oracle parameter count" (fromIntegral (paramCount config)) count
   referenceLogits <- either die pure (fullSequenceLogits config parameters tokens)
   withF32 ctx paramFloats $ \paramsArr ->
     withI64 ctx tokenInts $ \tokensArr -> do
-      actualLogits <- oracleLogits ctx (length tokens) vocab dim ff heads layers chunk paramsArr tokensArr
+      actualLogits <- oracleLogits ctx (length tokens) arch vocab dim ff heads layers chunk paramsArr tokensArr
       compareVector "oracle logits" 3e-4 3e-4 (concat referenceLogits) (map realToFrac actualLogits)
   let referenceBatchLoss params = sum
         [ sequenceLossFor sequenceTokens params | sequenceTokens <- batchTokens ]
@@ -1100,7 +1101,7 @@ oracleSmoke ctx = do
   withF32 ctx paramFloats $ \paramsArr ->
     withI64 ctx flatBatch $ \tokensArr -> do
       (loss, gradientValues) <- oracleBatchLossGrad ctx (fromIntegral (length batchTokens))
-        (fromIntegral (length tokens)) vocab dim ff heads layers chunk paramsArr tokensArr
+        (fromIntegral (length tokens)) arch vocab dim ff heads layers chunk paramsArr tokensArr
       compareScalar "oracle batch loss" 3e-4 3e-4 (referenceBatchLoss parameters) (realToFrac loss)
       compareVector "oracle batch gradient" 2e-3 2e-2 referenceGradient (map realToFrac gradientValues)
       dumpPath <- lookupEnv "GEMM_CONFORMANCE_DUMP"
