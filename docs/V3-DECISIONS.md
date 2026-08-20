@@ -215,3 +215,33 @@ against A0 cannot be localized to gates vs qk/sinks vs Muon vs the warm
 start), and §4's success rules never fire.  The warm start itself is the
 §5 machinery working as intended.  If the combined run underperforms the
 v2 baseline, the pilots remain the pre-registered fallback.
+
+## 7. The v3 arms are ported to the decomposed GEMM backend (2026-08-20)
+
+The §6 launch attempt measured the plain Futhark CUDA trainer at
+~82 s/step ≈ 200 tok/s at bpe100m on the 3090 — ~57× slower than the
+GEMM trainer and ~340 days for the plan — so the run was stopped after
+13 steps (no v3 checkpoint had been written; the warm start relaunches
+cleanly) and the arms were ported to the decomposed GEMM backend
+instead.
+
+The port adds five pieces (RG-LRU log-gate against the decay base, the
+√(1−α²) write scale on the normalized key, gate-cum over log-space
+gates, per-head qk-RMSNorm with shared gains, and the sink-slot causal
+softmax) with vjp2 pullbacks, carries the arm weights through the
+decomposed traversal as layout-driven fields, and un-stubs the Muon
+device step by exposing the SAME muon_step_def the fused backends run.
+The untied head remains refused (the head path is tied by
+construction).
+
+Verified 2026-08-20, per the element-wise discipline: every new piece
+against Numeric.AD; a five-arm tied battery (sigmoid / rglru / qknorm /
+sinks / v3-tied) in which the decomposed traversal reproduces the fused
+oracle AND Numeric.AD on every gradient element (max-abs ~1e-7 at f32);
+the Muon step against Optimizer.muonStep per arm; and a fixed a latent
+argument-order bug — the conformance FFI had never been updated for the
+arch-word entries of commit 24c4ac4.  One fused-oracle golden per arm
+ships with gemm-conformance for raw-probe's on-device replay
+(`raw-probe e2e GOLDEN <arm>`).  deploy/bpe100m-v3.env now points at
+result-gemm with micro-batch 64 and tf32/stream, the settings of the
+measured production baseline.
