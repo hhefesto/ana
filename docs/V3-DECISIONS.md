@@ -144,3 +144,44 @@ the mechanism the perplexity curve may hide (notes §6.3).  A2 may also be
 adopted on stability grounds alone (logit tails) at equal loss.  Estimated
 cost: 6 arms × ~2 runs × hours each on one rented GPU — comfortably under
 $20 at 3090 rates.
+
+## 5. Cross-architecture warm start: v2 weights may seed v3 arms (2026-08-20)
+
+The v2 read-only migration originally stopped at sampling: v3 could decode
+the master run's checkpoints but deliberately could not train from them.
+That restriction is now removed (user decision, 2026-08-20).  TRAIN_INIT
+accepts a source checkpoint of a DIFFERENT architecture over the same core
+dimensions — in particular a v2-era checkpoint, which decodes through the
+migration as arms-off v3 — and `transferParameters`
+(FormalTransformer.Layout) builds the new run's initial parameters:
+
+- a slice transfers when its name and shape mean the same thing in both
+  layouts (embedding, wq/wk/wv/wo, FFN matrices, norms — the bulk of the
+  parameters);
+- `walpha` does NOT transfer across gate kinds: the same projection feeds a
+  different gate formula under RG-LRU, so its trained values are noise
+  there;
+- an untied run's `unembedding` seeds from a tied source's embedding, which
+  computes exactly the function the tied head was trained to;
+- new arm slices (`gate_lambda`, `qk_gain_q/k`, `sink`) keep their fresh
+  init, which is open or neutral by construction.
+
+Everything else about the new run is fresh: identity, schedule, optimizer
+moments, step, PRNG.  Resume (`validateResume`) is unchanged — a checkpoint
+still cannot silently CONTINUE as a different run; warm start mints a new
+one.  The live bpe100m master run is untouched: its checkpoints are only
+ever read.
+
+The §4 pilot matrix is unaffected: pilot arms still train from scratch
+(warm-started arms would not be comparable to A0), and its success rules
+stand as pre-registered.  Warm start exists for what comes after — carrying
+the master run's learned weights into whichever architecture the pilots
+adopt, instead of paying for the trunk twice.
+
+Verified 2026-08-20: unit test "cross-architecture warm start transfers by
+slice" (provenance of every slice kind, identity on same architecture,
+core-dim mismatch rejected); the migration test still passes; sequential
+smoke — tiny arms-off base warm-started into tiny-rglru (11 slices
+transferred, walpha + gate_lambda fresh) and tiny-untied (13 transferred
+including the seeded unembedding, 0 fresh), both training with falling
+loss; train-plan-gate.sh stays byte-exact.

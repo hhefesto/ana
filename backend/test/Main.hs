@@ -36,6 +36,7 @@ main = do
 tests :: [(String, IO ())]
 tests =
   [ ("parameter count and layout coverage", testLayout)
+  , ("cross-architecture warm start transfers by slice", testWarmStartTransfer)
   , ("10M BPE preset has exact dimensions", testBpePreset)
   , ("GLA hybrid presets tile 3:1 with exact counts", testGlaPresets)
   , ("invalid configurations are rejected", testConfigRejection)
@@ -186,6 +187,53 @@ testLayout = do
     + layerCount config * (4 * modelDim config ^ (2 :: Int) + 3 * ffDim config * modelDim config + 2 * modelDim config)
     + glaLayerCount config * modelDim config ^ (2 :: Int)
     + modelDim config) "parameter count formula differs"
+
+-- The warm-start transfer that lets a v3 arms-on run start from v2 (or any
+-- arms-off) weights.  Source values are distinct positives and fresh values
+-- distinct negatives, so every element's provenance is visible: shared
+-- slices must arrive from the source, the unembedding must arrive from the
+-- tied source's embedding, and walpha (across gate kinds), gate_lambda,
+-- the qk gains, and the sinks must keep their fresh initialization.
+testWarmStartTransfer :: IO ()
+testWarmStartTransfer = do
+  let src = Config 4 5 2 3 4 1 GateSigmoid False False True
+      dst = Config 4 5 2 3 4 1 GateRgLru True True False
+  srcLayout <- expectRight (namedLayout src)
+  dstLayout <- expectRight (namedLayout dst)
+  let srcParams = VU.generate (paramCount src) (\i -> fromIntegral i + 1)
+      freshParams = VU.generate (paramCount dst) (\i -> negate (fromIntegral i + 1))
+      sliceOf layout v name = case [s | s <- layout, sliceName s == name] of
+        [s] -> VU.toList (VU.slice (sliceOffset s) (sliceLength s) v)
+        _ -> error ("missing slice " ++ name)
+  (result, transferred, keptFresh) <-
+    expectRight (transferParameters src dst srcParams freshParams)
+  assert (VU.length result == paramCount dst) "transfer result has wrong length"
+  let fromSrc = sliceOf srcLayout srcParams
+      fromFresh = sliceOf dstLayout freshParams
+      got = sliceOf dstLayout result
+  forM_ ["embedding", "blocks.0.wq", "blocks.2.wdown", "blocks.3.wq", "final_rms"] $ \name ->
+    assert (got name == fromSrc name) (name ++ " did not transfer from the source")
+  assert (got "unembedding" == fromSrc "embedding")
+    "unembedding was not seeded from the tied source's embedding"
+  forM_ [ "blocks.0.walpha", "blocks.1.walpha", "blocks.2.walpha"
+        , "blocks.0.gate_lambda", "blocks.3.qk_gain_q", "blocks.3.qk_gain_k"
+        , "blocks.3.sink" ] $ \name ->
+    assert (got name == fromFresh name) (name ++ " should have kept its fresh initialization")
+  assert (length transferred + length keptFresh == length dstLayout)
+    "transfer report does not cover the target layout"
+  assert (keptFresh ==
+    [ "blocks.0.walpha", "blocks.0.gate_lambda"
+    , "blocks.1.walpha", "blocks.1.gate_lambda"
+    , "blocks.2.walpha", "blocks.2.gate_lambda"
+    , "blocks.3.qk_gain_q", "blocks.3.qk_gain_k", "blocks.3.sink"
+    ]) ("unexpected fresh slices: " ++ show keptFresh)
+  -- Same-architecture transfer is the identity, walpha included.
+  (same, _, sameFresh) <- expectRight (transferParameters src src srcParams
+    (VU.map negate srcParams))
+  assert (same == srcParams && null sameFresh) "same-architecture transfer is not the identity"
+  -- Only architecture arms may differ; core dimensions may not.
+  assert (isLeft (transferParameters src (Config 4 5 4 3 4 2 GateSigmoid False False True)
+    srcParams freshParams)) "core-dimension mismatch was accepted"
 
 testBpePreset :: IO ()
 testBpePreset = do

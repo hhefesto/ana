@@ -629,20 +629,38 @@ trainInContext ctx corpusPath checkpointPath mode cfg = do
       case initFrom of
         Nothing -> pure fresh
         Just source -> do
-          -- Warm start: copy only the parameters of a compatible previous
-          -- run into a NEW run; identity, schedule, optimizer moments,
-          -- step, and PRNG are all fresh.
+          -- Warm start: copy the parameters of a previous run into a NEW
+          -- run; identity, schedule, optimizer moments, step, and PRNG are
+          -- all fresh.  The source may be a different architecture over the
+          -- same core dimensions — a v2-era checkpoint decodes through the
+          -- read-only migration and lands here as arms-off v3 — in which
+          -- case slices transfer by transferParameters' rules and the rest
+          -- keep their fresh initialization.
           previous <- loadCheckpoint source >>= either die pure
           let previousManifest = checkpointManifest previous
               previousIdentity = manifestIdentity previousManifest
-          when (manifestConfig previousManifest /= cfg)
-            (die ("TRAIN_INIT checkpoint has a different model configuration: " ++ source))
-          when (modelIdentity previousIdentity /= modelId cfg
-            || tokenizerIdentity previousIdentity /= corpusTokenizerIdentity corpus)
-            (die ("TRAIN_INIT checkpoint has a different model or tokenizer identity: " ++ source))
-          logTraining ("warm start: parameters initialized from " ++ source
-            ++ " (completed step " ++ show (adamStep (optAdamWState (checkpointOptimizer previous))) ++ ")")
-          pure fresh { checkpointParameters = checkpointParameters previous }
+              previousConfig = manifestConfig previousManifest
+              previousStep = adamStep (optAdamWState (checkpointOptimizer previous))
+          when (tokenizerIdentity previousIdentity /= corpusTokenizerIdentity corpus)
+            (die ("TRAIN_INIT checkpoint has a different tokenizer identity: " ++ source))
+          if previousConfig == cfg
+            then do
+              when (modelIdentity previousIdentity /= modelId cfg)
+                (die ("TRAIN_INIT checkpoint has a different model identity: " ++ source))
+              logTraining ("warm start: parameters initialized from " ++ source
+                ++ " (completed step " ++ show previousStep ++ ")")
+              pure fresh { checkpointParameters = checkpointParameters previous }
+            else do
+              (params, transferred, keptFresh) <- either die pure
+                (transferParameters previousConfig cfg
+                  (checkpointParameters previous) (checkpointParameters fresh))
+              logTraining ("warm start: " ++ show (length transferred)
+                ++ " slices transferred from " ++ source
+                ++ " (completed step " ++ show previousStep
+                ++ ", " ++ show previousConfig ++ "); "
+                ++ show (length keptFresh) ++ " freshly initialized: "
+                ++ intercalate ", " keptFresh)
+              pure fresh { checkpointParameters = params }
   when (adamStep (optAdamWState (checkpointOptimizer checkpoint)) < segmentStart)
     (die "checkpoint is behind this segment's start step")
   when (adamStep (optAdamWState (checkpointOptimizer checkpoint)) > target)
