@@ -92,6 +92,13 @@ testBpe100mPreset = do
   -- Tied embeddings: the vocabulary is one d-wide row per piece and nothing else.
   assert (vocabSize bpe100mPreset * modelDim bpe100mPreset == 25165824)
     "100M embedding cost differs"
+  -- The v3 production preset shares every core dimension and adds only the
+  -- arm slices: 9 GLA gate_lambda rows of d, and per softmax layer two
+  -- head-dim qk gains plus one sink per head — 7,332 parameters.
+  v3Layout <- expectRight (namedLayout bpe100mV3Preset)
+  assert (bpe100mV3Preset == bpe100mPreset { gateKind = GateRgLru, qkNorm = True, headSinks = True }) "100M v3 preset must differ from bpe100m only in the arms"
+  assert (paramCount bpe100mV3Preset == 115435428) "100M v3 preset parameter count differs"
+  assert (sum (map sliceLength v3Layout) == 115435428) "100M v3 layout does not cover parameters"
 
 -- A learned tokenizer has to satisfy three things, and all three are checkable
 -- without a reference implementation: the artifact must be readable by the very

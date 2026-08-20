@@ -19,6 +19,7 @@ module FormalTransformer.Config
   , bpe10mPreset
   , bpe10mV3Preset
   , bpe100mPreset
+  , bpe100mV3Preset
   , glaSmallPreset
   , glaPreset
   ) where
@@ -72,7 +73,7 @@ instance Binary Config
 -- The trainer presets live here so every host and gate shares one value.
 -- The v2-era presets keep v2 semantics (sigmoid gate, no qk-norm, no
 -- sinks) so smoke paths and recorded conformance references stay valid.
-tinyPreset, smallPreset, small4Preset, bpe10mPreset, bpe10mV3Preset, bpe100mPreset, glaSmallPreset, glaPreset :: Config
+tinyPreset, smallPreset, small4Preset, bpe10mPreset, bpe10mV3Preset, bpe100mPreset, bpe100mV3Preset, glaSmallPreset, glaPreset :: Config
 tinyPreset = Config 258 16 16 48 1 2 GateSigmoid False False True
 smallPreset = Config 258 64 64 192 2 4 GateSigmoid False False True
 -- Depth-matched softmax control for the hybrid A/B (gla-small is 4-layer).
@@ -94,6 +95,12 @@ bpe10mV3Preset = Config 8192 256 320 864 6 5 GateRgLru True True True
 -- gated FFN (three d*f matrices, not two); 12 layers give 9 GLA and 3 softmax,
 -- holding the 3:1 rule; head dim is 64.
 bpe100mPreset = Config 32768 256 768 2048 12 12 GateSigmoid False False True
+
+-- The v3 production preset: bpe100m dimensions with RG-LRU gates, qk-norm
+-- and sinks; the head stays tied.  Adopted by user decision 2026-08-20
+-- (docs/V3-DECISIONS.md section 6) for the warm-started successor to the v2
+-- master run, skipping the section-4 pilot matrix.
+bpe100mV3Preset = Config 32768 256 768 2048 12 12 GateRgLru True True True
 
 -- Hybrid presets sized for the 3:1 rule below: four layers give three GLA
 -- and one softmax layer; eight give six and two.

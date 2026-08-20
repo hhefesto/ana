@@ -185,3 +185,33 @@ smoke — tiny arms-off base warm-started into tiny-rglru (11 slices
 transferred, walpha + gate_lambda fresh) and tiny-untied (13 transferred
 including the seeded unembedding, 0 fresh), both training with falling
 loss; train-plan-gate.sh stays byte-exact.
+
+## 6. The §4 pilot matrix is skipped; v3 goes straight to bpe100m (2026-08-20)
+
+**User decision, recorded as a protocol deviation**: the pre-registered
+bpe10m pilot matrix will not run.  The v2 master run is interrupted at step
+~336K/358,276 (93.9%, train-loss EMA 3.376; the final LR-decay steps are
+foregone), its checkpoint is pulled as the final v2 artifact, and the box
+is repurposed for a **warm-started v3 bpe100m run**:
+
+- **Preset `bpe100m-v3`**: bpe100m dimensions with RG-LRU gates, qk-norm
+  and sinks; the head stays tied.  115,435,428 parameters — the arms add
+  7,332 (nine per-channel `gate_lambda` rows plus, per softmax layer, two
+  head-dim qk gains and one sink per head).
+- **Warm start** (§5): `TRAIN_INIT` from the pulled v2 checkpoint.  Every
+  matrix transfers except the nine GLA `walpha` projections (gate kind
+  changed, so their trained values are noise under RG-LRU); the arm slices
+  start fresh (open/neutral by construction).
+- **Optimizer: Muon** (`TRAIN_OPT=muon`, hidden matrices only) — adopted
+  without its A3 pilot, stacking a second unpiloted change on the run.
+- **Backend**: the Futhark CUDA trainer (`formal-transformer-cuda`); the
+  decomposed GEMM backend still refuses v3 arms (§2).  Its bpe100m
+  throughput on the 3090 is unmeasured, so the launch carries an explicit
+  **measure-first gate**: tok/s over the first checkpoints projects the
+  full-run wall time and cost, reported before the run is left unattended.
+
+What this loses, stated plainly: no arm-by-arm attribution (a regression
+against A0 cannot be localized to gates vs qk/sinks vs Muon vs the warm
+start), and §4's success rules never fire.  The warm start itself is the
+§5 machinery working as intended.  If the combined run underperforms the
+v2 baseline, the pilots remain the pre-registered fallback.

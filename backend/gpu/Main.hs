@@ -151,6 +151,9 @@ sizePresets =
   , ("bpe10m-rglru", bpe10mPreset { gateKind = GateRgLru })
   , ("bpe10m-qk-sink", bpe10mPreset { qkNorm = True, headSinks = True })
   , ("bpe10m-v3", bpe10mV3Preset)
+  -- The v3 production run (docs/V3-DECISIONS.md section 6): bpe100m
+  -- dimensions, RG-LRU + qk-norm + sinks, tied head.
+  , ("bpe100m-v3", bpe100mV3Preset)
   -- Pilot arm A5 (docs/V3-DECISIONS.md): a separate unembedding matrix.
   , ("tiny-untied", tinyPreset { tiedHead = False })
   , ("bpe10m-untied", bpe10mPreset { tiedHead = False })
