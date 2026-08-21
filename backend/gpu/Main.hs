@@ -543,6 +543,7 @@ data TrainingProgress = TrainingProgress
   { progressTrainLossEma :: !(Maybe Float)
   , progressPreviousValidationLoss :: !(Maybe Float)
   , progressBestValidationLoss :: !(Maybe Double)
+  , progressSkippedSteps :: !Int
   }
 
 parseTarget :: String -> IO TargetSpec
@@ -821,7 +822,7 @@ trainInContext ctx corpusPath checkpointPath mode cfg = do
           segmentBest = case mode of
             Segment _ start _ _ _ _ | adamStep astate0 == start -> Nothing
             _ -> resumedBest
-          progress0 = TrainingProgress Nothing Nothing segmentBest
+          progress0 = TrainingProgress Nothing Nothing segmentBest 0
       (paramsFinal, optFinal, rngFinal, progressFinal) <-
         loop ctx gpuCfg n (optAdamW optCfg) split sampler target (adamStep astate0) microSize checkpointEvery
           validateEvery clipNorm bpbScale
@@ -1110,16 +1111,45 @@ loop ctx gpuCfg n optCfg split sampler target completed microSize checkpointEver
       dumpVector step batch gradient
       (gradientNorm, clipped) <- bracket (maskGradient gradient) (freeF32 ctx) $ \g ->
         clipGlobalNorm ctx clipNorm g
-      (params', opt') <- bracket (pure clipped) (freeF32 ctx) $ \g -> do
-        result@(nextParams, _) <- doStep step lr g params opt
-        dumpSlices step g nextParams
-        pure result
-      freeF32 ctx params
-      freeDeviceOpt ctx opt
-      let ema = case progressTrainLossEma progress of
+      -- A non-finite gradient must never become a parameter update.
+      -- clip_global_norm rescales only when norm > max_norm, and both
+      -- NaN > max_norm and inf-scaled arithmetic defeat that test, so an
+      -- unclipped NaN flows straight through the optimizer and poisons
+      -- every parameter -- which is exactly how the first v3 run died at
+      -- step 5,006 (2026-08-21) and then burned 994 further steps on NaN.
+      -- Skip the step instead: same parameters, same moments, same
+      -- validation, next batch.  Give up only if it never recovers.
+      let finiteNorm = not (isNaN gradientNorm || isInfinite gradientNorm)
+          skipped = progressSkippedSteps progress + 1
+      when (not finiteNorm && skipped > maxConsecutiveSkips) (die
+        ("gradient norm has been non-finite for " ++ show skipped
+          ++ " consecutive steps, through step " ++ show step
+          ++ ": stopping rather than training on nothing"))
+      (params', opt') <- if not finiteNorm
+        then do
+          logTraining ("skipping step=" ++ show step
+            ++ " gradient_norm=" ++ formatFloat gradientNorm
+            ++ " consecutive=" ++ show skipped)
+          freeF32 ctx clipped
+          pure (params, opt)
+        else do
+          result <- bracket (pure clipped) (freeF32 ctx) $ \g -> do
+            r@(nextParams, _) <- doStep step lr g params opt
+            dumpSlices step g nextParams
+            pure r
+          freeF32 ctx params
+          freeDeviceOpt ctx opt
+          pure result
+      let emaNext = case progressTrainLossEma progress of
             Nothing -> loss
             Just previous -> trainLossEmaDecay * previous + (1 - trainLossEmaDecay) * loss
-          progressWithLoss = progress { progressTrainLossEma = Just ema }
+          -- A skipped step contributes nothing to the trend either.
+          emaKept = if finiteNorm then Just emaNext else progressTrainLossEma progress
+          ema = maybe emaNext id emaKept
+          progressWithLoss = progress
+            { progressTrainLossEma = emaKept
+            , progressSkippedSteps = if finiteNorm then 0 else skipped
+            }
       (progress', validationText) <- if null (validation split) || (step `mod` validateEvery /= 0 && step /= target)
         then pure (progressWithLoss, "")
         else do
@@ -1154,6 +1184,7 @@ loop ctx gpuCfg n optCfg split sampler target completed microSize checkpointEver
         ++ " train_loss_ema=" ++ formatFloat ema
         ++ " gradient_norm=" ++ formatFloat gradientNorm
         ++ " clipped=" ++ boolText (gradientNorm > clipNorm)
+        ++ (if finiteNorm then "" else " skipped=true")
         ++ validationText)
       when (step `mod` checkpointEvery == 0 && step /= target) $
         saveSnapshot step rng' (progressBestValidationLoss progress') params' opt'
@@ -1176,6 +1207,13 @@ formatSignedFloat = printf "%+.7g"
 
 trainLossEmaDecay :: Float
 trainLossEmaDecay = 0.98
+
+-- How many consecutive non-finite gradients the trainer tolerates before it
+-- stops.  A single one is a rare data/precision event worth stepping over;
+-- a run of them means the parameters or the loss surface are already gone,
+-- and continuing only burns rented GPU time.
+maxConsecutiveSkips :: Int
+maxConsecutiveSkips = 20
 
 boolText :: Bool -> String
 boolText True = "true"

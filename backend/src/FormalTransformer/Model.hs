@@ -9,6 +9,7 @@ module FormalTransformer.Model
   , BlockStats (..)
   , fullSequenceStats
   , gateAlpha
+  , rglruLogAlphaCap
   ) where
 
 import Control.Monad (foldM)
@@ -338,6 +339,7 @@ gateAlpha c z = case gateKind c of
 --                the state write is scaled by sqrt(1 − alpha²), computed
 --                from the log-gate as sqrt(1 − exp(2·log alpha)), so an
 --                open gate does not let fresh input swamp held state.
+--                log alpha is capped at rglruLogAlphaCap; see there.
 --                That coupling is what the measured tau = 16 arm lacked
 --                when it opened the gates and lost on loss (Config.hs
 --                history, run/gate-arms-2026-07-31).
@@ -351,8 +353,19 @@ glaGates c (RgLruGate walpha lam) normalized =
   where
     d = modelDim c
     logAlphas =
-      map (zipWith (\l z -> 8 * sigmoid z * logSigmoid l) lam . matVec d d walpha)
+      map (zipWith (\l z -> min rglruLogAlphaCap (8 * sigmoid z * logSigmoid l))
+            lam . matVec d d walpha)
         normalized
+
+-- The largest log alpha the RG-LRU gate may take, mirroring model.fut's
+-- rglru_log_alpha_cap: alpha <= 0.9999.  sqrt(1 - alpha^2) has an infinite
+-- derivative at alpha = 1, and in f32 the radicand collapses to exactly 0
+-- for |log alpha| < 3e-8, so the pullback is +/-inf under a perfectly
+-- finite loss -- the failure that ended the first v3 run at step 5,006
+-- (2026-08-21).  Capped, the state still retains 97.5% of itself across
+-- the whole 256-token context, so nothing expressible is lost.
+rglruLogAlphaCap :: Floating a => a
+rglruLogAlphaCap = -1.0e-4
 
 -- Softmax full attention, no positional encoding.  The v3 arms:
 --

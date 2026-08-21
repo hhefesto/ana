@@ -310,9 +310,9 @@ sinkSoftmaxSmoke ctx = do
           (grad scalarSinks sinks) (map realToFrac sinksBar)
 
 -- The RG-LRU formulas (model.fut rglru_log_gate / rglru_write_scale).
-rglruLogGateReference :: Floating a => [a] -> [a] -> [a]
+rglruLogGateReference :: (Floating a, Ord a) => [a] -> [a] -> [a]
 rglruLogGateReference lam zs = concatMap
-  (zipWith (\l z -> 8 * sigmoidRef z * logSigmoidRef l) lam)
+  (zipWith (\l z -> min rglruLogAlphaCap (8 * sigmoidRef z * logSigmoidRef l)) lam)
   (chunksOf (length lam) zs)
 
 sigmoidRef :: Floating a => a -> a
@@ -321,9 +321,9 @@ sigmoidRef z = 1 / (1 + exp (-z))
 logSigmoidRef :: Floating a => a -> a
 logSigmoidRef z = negate (log (1 + exp (negate z)))
 
-rglruWriteScaleReference :: Floating a => [a] -> [a] -> [a]
+rglruWriteScaleReference :: (Floating a, Ord a) => [a] -> [a] -> [a]
 rglruWriteScaleReference logs ks =
-  zipWith (\l kc -> kc * sqrt (1 - exp (2 * l))) logs ks
+  zipWith (\l kc -> kc * sqrt (1 - exp (2 * min rglruLogAlphaCap l))) logs ks
 
 rglruPiecesSmoke :: Context -> IO ()
 rglruPiecesSmoke ctx = do

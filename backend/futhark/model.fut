@@ -156,8 +156,18 @@ def l2_normalize_heads [d] (h: i64) (x: [d]f32): [d]f32 =
 def log_sigmoid (z: f32): f32 =
   -(f32.max (-z) 0.0f32 + f32.log1p (f32.exp (-(f32.abs z))))
 
+-- The branch matters for the PULLBACK, not for the value.  Written the
+-- naive way, 1/(1 + exp(-z)), f32 overflows exp(-z) to inf below z = -89:
+-- the forward is a clean 0 but the reverse pass computes inf/inf^2 = NaN.
+-- Measured 2026-08-21 -- the same shape of fault as rglru_write_scale
+-- below, and the same silent one.  For z >= 0 this is bit-identical to the
+-- naive form, and for z < 0 it agrees to a rounding step.
+def sigmoid (z: f32): f32 =
+  if z >= 0.0f32 then 1.0f32 / (1.0f32 + f32.exp (-z))
+  else let e = f32.exp z in e / (1.0f32 + e)
+
 -- Canonical scalar used by fused blocks and the decomposed SwiGLU piece.
-def silu (z: f32): f32 = z / (1.0f32 + f32.exp (-z))
+def silu (z: f32): f32 = z * sigmoid z
 
 -- Gated linear attention in the PARALLEL closed form licensed by the proved
 -- recurrent≡parallel theorem (FormalTransformer/Attention/Linear.agda): per
@@ -210,11 +220,31 @@ def gate_prefix_sums [n] [d] (gate_logits: [n][d]f32): [n][d]f32 =
 -- consumes is (q̂, β·k̂, v, alpha), so the gate stays the transition and the
 -- scaled write is part of the contribution — Attention/Linear.agda's
 -- algebra, and every kernel below it, applies unchanged.
-def rglru_log_gate (z: f32) (lam: f32): f32 =
-  8.0f32 * (1.0f32 / (1.0f32 + f32.exp (-z))) * log_sigmoid lam
+-- alpha is capped just below 1.  sqrt(1 - alpha^2) is not Lipschitz at
+-- alpha = 1: its derivative -exp(2L)/sqrt(1 - exp(2L)) diverges there, and
+-- in f32 the forward is worse than the maths -- exp(2L) rounds to exactly
+-- 1.0 for |2L| < 6e-8, so the radicand is exactly 0, the value is 0, and
+-- the pullback is exactly +/-inf while the loss stays perfectly finite.
+-- That killed the first v3 run at step 5,006 (2026-08-21): one channel
+-- reached sigmoid(z) ~ 2e-9, log alpha ~ -5e-9, the gradient went
+-- non-finite, clip_global_norm let it through (NaN > max_norm is false),
+-- and every parameter was NaN one step later.
+--
+-- The cap costs nothing the model can express: at alpha = 0.9999 the state
+-- still survives the whole 256-token window at 97.5% (half-life 6,931
+-- tokens, 27x the context), while |d scale / d log alpha| is bounded by 71.
+def rglru_log_alpha_cap: f32 = -1.0e-4f32
 
+def rglru_log_gate (z: f32) (lam: f32): f32 =
+  f32.min rglru_log_alpha_cap
+    (8.0f32 * sigmoid z * log_sigmoid lam)
+
+-- Clamped here too, so the piece is total for every argument rather than
+-- only for the ones rglru_log_gate produces: gla_block_u keeps ONE tape
+-- shape for both gate kinds, so under GateSigmoid this still runs on
+-- log_sigmoid z, which reaches 0 for large positive z.
 def rglru_write_scale (log_alpha: f32): f32 =
-  f32.sqrt (1.0f32 - f32.exp (2.0f32 * log_alpha))
+  f32.sqrt (1.0f32 - f32.exp (2.0f32 * f32.min rglru_log_alpha_cap log_alpha))
 
 -- The production chunk length: a pure execution-schedule choice, invisible
 -- in the denotation by chunk-closed.  Whole window when 64 does not divide.
@@ -448,8 +478,6 @@ def gla_block_quadratic_u [n] [d] [p]
   let cum = prefix_sums_2d logs
   let attended = gla_attention h q_unit k_unit values cum
   in block_tail f ooff (ooff + 2*d*d + gla_extra arch d) params x attended
-
-def sigmoid (z: f32): f32 = 1.0f32 / (1.0f32 + f32.exp (-z))
 
 -- Output projection, residual, and SwiGLU for a single position.
 def block_tail_single [d] [p]

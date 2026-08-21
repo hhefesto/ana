@@ -94,3 +94,40 @@ entry test_chunk_equivalence: bool =
      && close (logits 0 3 4 4 2 1 2 params tokens) reference
      && close (logits 0 3 4 4 2 1 3 params tokens) reference
      && close (logits 0 3 4 4 2 1 6 params tokens) reference
+
+-- The RG-LRU write scale sqrt(1 - alpha^2) is singular at alpha = 1: the
+-- derivative -exp(2L)/sqrt(1 - exp(2L)) diverges, and in f32 exp(2L) rounds
+-- to exactly 1 for |2L| < 6e-8, so the forward is 0 and the pullback is
+-- +/-inf under a perfectly finite loss.  That is how the first v3 run died
+-- at step 5,006 (2026-08-21); rglru_log_alpha_cap is why it cannot recur.
+-- Both endpoints of the gate are checked, not just the singular one.
+-- ==
+-- entry: test_rglru_write_scale_total
+-- input { }
+-- output { true }
+entry test_rglru_write_scale_total: bool =
+  let finite (x: f32): bool = !f32.isnan x && !f32.isinf x
+  let logs = [0.0f32, -1.0e-9f32, -1.0e-8f32, -1.0e-6f32, -1.0e-4f32,
+              -1.0e-2f32, -1.0f32, -160.0f32]
+  let fwd = map rglru_write_scale logs
+  let bwd = map (\l -> vjp rglru_write_scale l 1.0f32) logs
+  in all finite fwd && all finite bwd && all (\b -> b > 0.0f32) fwd
+
+-- The same check through the composition the block actually differentiates,
+-- over the whole reachable (z, lambda) corner: sigmoid(z) underflows to 0
+-- below z ~ -90, and log sigmoid(lambda) rounds to 0 above lambda ~ 17.
+-- ==
+-- entry: test_rglru_gate_total
+-- input { }
+-- output { true }
+entry test_rglru_gate_total: bool =
+  let finite (x: f32): bool = !f32.isnan x && !f32.isinf x
+  let contribution (z: f32) (lam: f32): f32 =
+    rglru_write_scale (rglru_log_gate z lam)
+  let zs = [-120.0f32, -80.0f32, -40.0f32, -20.0f32, 0.0f32, 20.0f32, 80.0f32]
+  let lams = [-40.0f32, -1.0f32, 0.0f32, 1.0f32, 20.0f32, 60.0f32, 120.0f32]
+  let pairs = flatten (map (\z -> map (\l -> (z, l)) lams) zs)
+  let values = map (\p -> contribution p.0 p.1) pairs
+  let dz = map (\p -> vjp (\z -> contribution z p.1) p.0 1.0f32) pairs
+  let dlam = map (\p -> vjp (contribution p.0) p.1 1.0f32) pairs
+  in all finite values && all finite dz && all finite dlam
