@@ -15,25 +15,77 @@
       # source makes its output hash depend on every tracked file, so a commit
       # touching only prose invalidated every derivation and the next
       # `nix run .#ana` paid for a fresh `futhark c` plus GHC -O2 before it
-      # could pull a checkpoint.  Nothing here compiles documentation, run
-      # artifacts, vendored weights or references, and the wrapper scripts
-      # reach run/ and weights/ through the caller's working directory rather
-      # than the store, so excluding them changes no behaviour -- only how
-      # often the compiler runs.  This is an allowlist: a new buildable
-      # directory has to be added here, which is the failure we want (a build
-      # error naming the missing file) rather than the one we had.
-      buildSrc = nixpkgs.lib.fileset.toSource {
-        root = ./.;
-        fileset = nixpkgs.lib.fileset.unions [
-          ./backend
-          ./FormalTransformer
-          ./Everything.agda
-          ./formal-transformer.agda-lib
-          ./formal-transformer.cabal
-          ./cabal.project
-          ./LICENSE
-        ];
-      };
+      # could pull a checkpoint.  A first fix allowlisted the buildable
+      # directories; this applies the same argument one level deeper, inside
+      # backend/: each derivation names exactly the directories it compiles,
+      # so a backend/gemm edit no longer rebuilds the sequential trainer that
+      # `ana` needs (measured on the 60 commits before this one: 4 rebuilt the
+      # trainer while touching neither backend/gpu, backend/src, nor
+      # backend/futhark).  A derivation reaching outside its set fails loudly
+      # at build time with the compiler naming the missing file, which is the
+      # failure we want.  `root` stays ./. in every set: buildPhases cd into
+      # the unpacked source and use repo-relative paths, so only the file set
+      # narrows.
+      sourceOf =
+        paths:
+        nixpkgs.lib.fileset.toSource {
+          root = ./.;
+          fileset = nixpkgs.lib.fileset.unions paths;
+        };
+      # backend/futhark filtered to the .fut sources: the directory also
+      # carries generated files (pieces-conformance.c, tests.c, and their
+      # binaries) that `futhark test` rewrites in the dev shell; no
+      # derivation reads them, and no .fut uses `-- input @file`, so
+      # rewriting them must not dirty any build input.
+      futharkFiles = nixpkgs.lib.fileset.fileFilter (f: f.hasExt "fut") ./backend/futhark;
+      # cabal's three hs-source-dirs.
+      haskellSrc = sourceOf [
+        ./formal-transformer.cabal
+        ./cabal.project
+        ./LICENSE
+        ./backend/src
+        ./backend/app
+        ./backend/test
+      ];
+      futharkSrc = sourceOf [ futharkFiles ];
+      # The GPU hosts consume a generated kernels.c from another derivation,
+      # never a .fut; sequential/multicore run futhark in-tree and need the
+      # .fut sources too.  backend/futhark stays whole (as futharkFiles) in
+      # those sets even though kernels.fut's import closure is smaller;
+      # narrowing to per-program closures is a deliberate follow-up commit.
+      gpuHostSrc = sourceOf [
+        ./backend/gpu
+        ./backend/src
+      ];
+      gpuHostKernelSrc = sourceOf [
+        ./backend/gpu
+        ./backend/src
+        futharkFiles
+      ];
+      # gemm-blas-test's closure is gemm-only today; if a neighbour import of
+      # FormalTransformer.* appears, switch it to gemmHostSrc (checks.gemm-blas
+      # catches this).
+      gemmSrc = sourceOf [ ./backend/gemm ];
+      gemmHostSrc = sourceOf [
+        ./backend/gemm
+        ./backend/src
+      ];
+      gemmCudaSrc = sourceOf [
+        ./backend/gemm
+        ./backend/gpu
+        ./backend/src
+      ];
+      conformanceSrc = sourceOf [
+        ./backend/conformance
+        ./backend/gpu
+        ./backend/src
+        futharkFiles
+      ];
+      agdaSrc = sourceOf [
+        ./FormalTransformer
+        ./Everything.agda
+        ./formal-transformer.agda-lib
+      ];
     in
     {
       packages = forAllSystems (
@@ -43,7 +95,7 @@
             inherit system;
             config.allowUnfree = true;
           };
-          haskellPackage = pkgs.haskellPackages.callCabal2nix "formal-transformer" buildSrc { };
+          haskellPackage = pkgs.haskellPackages.callCabal2nix "formal-transformer" haskellSrc { };
           futharkKernels = self.packages.${system}.futhark-kernels;
           futharkKernelsCuda = self.packages.${system}.futhark-kernels-cuda;
           # CUDA userspace. Futhark JIT-compiles its kernel PTX through NVRTC at
@@ -81,7 +133,7 @@
           futhark-kernels = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-futhark-kernels";
             version = "3.0.0";
-            src = buildSrc;
+            src = futharkSrc;
             nativeBuildInputs = [ pkgs.futhark ];
             buildPhase = ''
               runHook preBuild
@@ -103,7 +155,7 @@
           futhark-kernels-cuda = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-futhark-kernels-cuda";
             version = "3.0.0";
-            src = buildSrc;
+            src = futharkSrc;
             nativeBuildInputs = [ pkgs.futhark ];
             buildPhase = ''
               runHook preBuild
@@ -122,7 +174,7 @@
           futhark-pieces = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-futhark-pieces";
             version = "3.0.0";
-            src = buildSrc;
+            src = futharkSrc;
             nativeBuildInputs = [ pkgs.futhark ];
             buildPhase = ''
               runHook preBuild
@@ -141,7 +193,7 @@
           futhark-pieces-cuda = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-futhark-pieces-cuda";
             version = "3.0.0";
-            src = buildSrc;
+            src = futharkSrc;
             nativeBuildInputs = [ pkgs.futhark ];
             buildPhase = ''
               runHook preBuild
@@ -161,7 +213,7 @@
           futhark-pieces-conformance = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-futhark-pieces-conformance";
             version = "3.0.0";
-            src = buildSrc;
+            src = futharkSrc;
             nativeBuildInputs = [ pkgs.futhark ];
             buildPhase = ''
               runHook preBuild
@@ -180,7 +232,7 @@
           gemm-blas-test = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-gemm-blas-test";
             version = "3.0.0";
-            src = buildSrc;
+            src = gemmSrc;
             nativeBuildInputs = [ gemmGhc ];
             buildInputs = [ pkgs.openblas ];
             buildPhase = ''
@@ -200,7 +252,7 @@
           gemm-conformance = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-gemm-conformance";
             version = "3.0.0";
-            src = buildSrc;
+            src = gemmHostSrc;
             nativeBuildInputs = [ conformanceGhc ];
             buildInputs = [ pkgs.openblas ];
             buildPhase = ''
@@ -229,7 +281,7 @@
           formal-transformer-gpu = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-gpu";
             version = "3.0.0";
-            src = buildSrc;
+            src = gpuHostSrc;
             nativeBuildInputs = [
               gpuGhc
               pkgs.pkg-config
@@ -257,7 +309,7 @@
           formal-transformer-cuda = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-cuda";
             version = "3.0.0";
-            src = buildSrc;
+            src = gpuHostSrc;
             __structuredAttrs = true;
             strictDeps = true;
             nativeBuildInputs = [
@@ -305,7 +357,7 @@
           formal-transformer-gemm-cuda = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-gemm-cuda";
             version = "3.0.0";
-            src = buildSrc;
+            src = gemmCudaSrc;
             __structuredAttrs = true;
             strictDeps = true;
             nativeBuildInputs = [
@@ -380,7 +432,7 @@
           formal-transformer-sequential = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-sequential";
             version = "3.0.0";
-            src = buildSrc;
+            src = gpuHostKernelSrc;
             nativeBuildInputs = [
               gpuGhc
               pkgs.futhark
@@ -409,7 +461,7 @@
           formal-transformer-multicore = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-multicore";
             version = "3.0.0";
-            src = buildSrc;
+            src = gpuHostKernelSrc;
             nativeBuildInputs = [
               gpuGhc
               pkgs.futhark
@@ -434,7 +486,7 @@
           conformance = pkgs.stdenv.mkDerivation {
             pname = "formal-transformer-conformance";
             version = "3.0.0";
-            src = buildSrc;
+            src = conformanceSrc;
             nativeBuildInputs = [
               conformanceGhc
               pkgs.futhark
@@ -476,7 +528,7 @@
             pkgs.runCommand "formal-transformer-agda-check"
               {
                 nativeBuildInputs = [ agda ];
-                src = buildSrc;
+                src = agdaSrc;
               }
               ''
                 cp -r $src source
@@ -489,7 +541,7 @@
             pkgs.runCommand "formal-transformer-futhark-check"
               {
                 nativeBuildInputs = [ pkgs.futhark pkgs.stdenv.cc ];
-                src = buildSrc;
+                src = futharkSrc;
               }
               ''
                 cp -r $src source
