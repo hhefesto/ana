@@ -245,3 +245,65 @@ ships with gemm-conformance for raw-probe's on-device replay
 (`raw-probe e2e GOLDEN <arm>`).  deploy/bpe100m-v3.env now points at
 result-gemm with micro-batch 64 and tf32/stream, the settings of the
 measured production baseline.
+
+## 8. The RG-LRU gate is capped at alpha = 0.9999 (2026-08-21)
+
+The first v3 run died at step 6,000 on `checkpoint Muon momentum
+contains non-finite numbers`.  That message is `validateCheckpoint`
+refusing a NaN snapshot on **save** — the last correct thing in the
+chain, not the fault, and the reason the step-4,940 checkpoint survived
+intact.
+
+The fault is §2's write scale, `beta(L) = sqrt(1 - exp(2L))`, at
+alpha = 1.  It is not Lipschitz there: `dbeta/dL = -exp(2L)/sqrt(1 -
+exp(2L))` diverges as `L -> 0`.  f32 makes it worse than the maths —
+`exp(2L)` rounds to exactly 1.0 for `|2L| < 6e-8`, so the radicand is
+exactly 0, the forward value is a clean 0, and the pullback is a literal
+1/0.  Measured through the production composition `kc *
+rglru_write_scale (rglru_log_gate z lam)`: at z = -20, lambda = +1 the
+value is 0.0 and `d/dz` is +inf; at log alpha = -1e-7 the pullback is
+already -2365.
+
+The log shows exactly that shape.  Step 5,006 has a **finite**
+`train_loss=3.4358122` and `gradient_norm=NaN`.  Nothing downstream
+stopped it: `clip_global_norm` rescales only when `norm > max_norm`, and
+`NaN > max_norm` is False, so the clip was the identity on a NaN
+gradient (`clipped=false` in the log), the Muon/AdamW step applied it,
+and every parameter was NaN one step later.  994 further steps trained
+on nothing.
+
+Decision: cap `log alpha <= -1e-4`, i.e. `alpha <= 0.9999`, in all three
+implementations of the denotation — `backend/futhark/model.fut`,
+`backend/src/FormalTransformer/Model.hs`, and
+`backend/gemm/GemmConformance.hs`.  This is a real restriction of the
+model class and a small one: at alpha = 0.9999 the state still survives
+the whole 256-token window at 97.5% (half-life 6,931 tokens, 27x the
+context), while `|dbeta/d log alpha|` is bounded by 71.  It binds only
+where the old code returned 0 with an infinite gradient — i.e. only
+where training was already undefined.
+
+Two further copies of the same fault were found while fixing it and are
+now stable branches, with no change to the denotation: written
+`1/(1 + exp(-z))`, sigmoid overflows `exp(-z)` to inf below z = -89 and
+its pullback becomes `inf/inf^2 = NaN` under a forward value of 0; silu
+had it too.
+
+The trainer no longer applies a non-finite update at all.  It skips such
+a step, logs `skipped=true`, and stops only after 20 consecutive skips —
+so the next singularity we have not found costs one step, not a run.
+`tests.fut` gains `test_rglru_write_scale_total` and
+`test_rglru_gate_total`, which assert value AND pullback are finite
+across the whole reachable (z, lambda) corner; both fail on the old
+`model.fut`.
+
+The pre-launch gates of §7 did not catch this because their probe inputs
+never came near alpha = 1 — and alpha -> 1 is precisely what §2 adopted
+RG-LRU to make reachable.  The rule this leaves: **a finite loss is not
+evidence of a finite gradient.**  Test pullbacks at the singular
+arguments of the forward, not at the comfortable ones.
+
+Verified in production: the run resumed from the intact step-4,940
+checkpoint, whose stored PRNG state replays the same batches, so step
+5,006 is a direct A/B.  It now reads `train_loss=3.4358063
+gradient_norm=0.3495149` — the loss agreeing to six significant figures
+with the pre-fix run, the gradient finite.
