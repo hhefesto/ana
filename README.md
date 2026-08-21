@@ -2,20 +2,22 @@
 
 A denotationally specified autoregressive transformer — written from a
 mathematical specification in Agda, refined through a Haskell reference and
-Futhark kernels, and now training its second, 115M-parameter model on a
+Futhark kernels, and now training its third, 115M-parameter model on a
 single rented consumer GPU.
 
 | | |
 |---|---|
 | Model | 115,428,096 parameters — GLA/softmax 3:1 hybrid (9 GLA + 3 softmax layers), vocab 32,768 with tied embeddings, context 256 |
 | Data | English Wikipedia interleaved with FineWeb-Edu — 9,700,651 documents, ~5.86B tokens, exactly one pass (51 tokens/parameter) |
-| Plan | `run/mixed-bpe100m-s32000` — 304 shards, 358,276 updates at batch 64, one AdamW trajectory and one cosine schedule fixed before step one |
-| Status | **the master run, training now** on one rented RTX 3090 ($0.172/hr) — past step 245,000 of 358,276 (~68%) as of 2026-08-18 |
+| Plan | `run/mixed-bpe100m-s32000` — 304 shards, 358,276 updates at batch 64, one optimizer trajectory and one cosine schedule fixed before step one |
+| Status | the v2 master run was **stopped by decision on 2026-08-20** at step 337,244 of 358,276 (94.1%) on one rented RTX 3090 ($0.172/hr); its final checkpoint (step 336,872, sha256 `b18ae97b…`) is recorded in [`docs/WEIGHTS-V2-MASTER-RUN.md`](docs/WEIGHTS-V2-MASTER-RUN.md), and the **v3 run now trains on the same box**, warm-started from it |
 
-This is *the master run*: `master` is its branch of record, and version 3
-development happens on a separate branch (see Versions below). The run is in
-progress; no final quality numbers exist yet and none are claimed. Two
-samples bracket the trajectory so far. Step 16,000 (4.5% of the schedule) —
+This was *the master run*: `master` is its branch of record, and the v3
+generation that succeeded it has since merged onto `master` (see Versions
+below). The run ended by decision at 94.1% — the remaining schedule was
+worth less than the same GPU-hours spent on the v3 architecture — so its
+numbers are final for that checkpoint but are not end-of-schedule numbers.
+Two samples bracket the trajectory. Step 16,000 (4.5% of the schedule) —
 on-topic, correctly registered, and factually invented, which is the
 expected order of acquisition:
 
@@ -42,6 +44,23 @@ off; the knobs are folded into the model identity with a backward-compatible
 empty suffix (`backend/gpu/Main.hs`, `gateSuffix`). Long-range structure rides
 on the three NoPE softmax layers. The evidence is in
 `backend/src/FormalTransformer/Config.hs` and `run/gate-arms-2026-07-31/`.
+That finding is v2's; v3's RG-LRU gate parametrization is the fix, and its
+gates measure open (fraction of α above 0.9 = 1.0000).
+
+## Why `ana`
+
+Short for **anamorphism** — an unfold, the categorical dual of a fold. A
+fold consumes a structure down to a value; an unfold grows one from a seed,
+corecursively, for as long as you keep asking. That is what autoregressive
+generation *is*: from a state, emit a token and a next state, with no
+predetermined end.
+
+The specification says this literally, not by analogy.
+`FormalTransformer/Language/Autoregressive.agda` carries the model as a
+coalgebra — `out : State → W`, `step : State → A → W × State` — and
+sampling is that coalgebra's unfold; the space it unfolds into,
+`FormalTransformer/Language/Trie.agda`, is a coinductive record of
+continuations.
 
 ## The previous run: all of English Wikipedia, once
 
@@ -214,14 +233,17 @@ SHA-256, headline numbers.
 | tag | generation |
 |---|---|
 | `v1.0.0` | before-the-wikipedia-run: the 10.5M-parameter first model — all of English Wikipedia in one pass, 1.21 bpb held-out (`docs/RUN-2026-07-25-WIKI-FULL.md`) |
-| `v2.0.0` | the-wikipedia-run: the 115M hybrid and everything around it — the 32k tokenizer, the mixed corpus, the cloud training path, the decoding/tied-head/residual-stream specs. The master run is this generation; its final results will land as `v2.1.0`. |
-| *(v3, in progress)* | ana-next, developed on the `ana-next` branch (cabal version 3.0.0 there; `master` stays 2.0.0 to match the running model). Planning basis: [`docs/ANA-NEXT-DESIGN-NOTES.md`](docs/ANA-NEXT-DESIGN-NOTES.md); decisions taken: [`docs/V3-DECISIONS.md`](docs/V3-DECISIONS.md). |
+| `v2.0.0` | the-wikipedia-run: the 115M hybrid and everything around it — the 32k tokenizer, the mixed corpus, the cloud training path, the decoding/tied-head/residual-stream specs. The master run is this generation; it ended at 94.1% and its final checkpoint is recorded in [`docs/WEIGHTS-V2-MASTER-RUN.md`](docs/WEIGHTS-V2-MASTER-RUN.md). |
+| *(v3, in progress)* | ana-next, merged onto `master` on 2026-08-20 (merge `3b94ef4`); `master` carries cabal version 3.0.0. Planning basis: [`docs/ANA-NEXT-DESIGN-NOTES.md`](docs/ANA-NEXT-DESIGN-NOTES.md); decisions taken: [`docs/V3-DECISIONS.md`](docs/V3-DECISIONS.md). |
 
-Version 3 carries no backward compatibility: its architecture lives in
-`Config` (gate parametrization, qk-norm, head sinks), the layout version is
-3, and the model identity prefix is `…-v3`. The `ana-next` binary neither
-mints nor loads v2 checkpoints — the master run keeps being pulled and
-sampled with the `master` branch's 2.0.0 binary.
+Version 3 carries no backward compatibility going forward: its architecture
+lives in `Config` (gate parametrization, qk-norm, head sinks), the layout
+version is 3, and the model identity prefix is `…-v3`. The 3.0.0 binary
+never *mints* v2 checkpoints, but it decodes them read-only through a
+one-way migration, and `TRAIN_INIT` can warm-start a v3 run from one — the
+live v3 run transferred 110 of its 137 weight slices from the v2 master-run
+checkpoint that way. What it cannot do is *resume* a v2 checkpoint as the
+same run.
 
 ## Scope
 
