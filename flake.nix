@@ -824,7 +824,7 @@ Pulling from a trainer (opt-in; nothing is contacted without --pull/--host):
   --port N                 ssh port (default 22)
   --key PATH               ssh identity file
   --remote-checkpoint PATH remote checkpoint path (default
-                           /root/formalTransformer/run/wiki-bpe100m-global.checkpoint)
+                           /root/formalTransformer/run/wiki-bpe100m-v3-global.checkpoint)
 
 A pull lands in run/pulled-HOST-PORT-checkpoints/, never on top of an existing
 checkpoint, and records its destination in run/last-checkpoint for reference.
@@ -920,7 +920,7 @@ USAGE
                 if [ -z "$port" ]; then port="''${WIKI_REMOTE_PORT:-22}"; fi
                 if [ -z "$key" ]; then key="''${WIKI_REMOTE_KEY:-}"; fi
                 if [ -z "$remote_checkpoint" ]; then
-                  remote_checkpoint="''${WIKI_REMOTE_CHECKPOINT:-/root/formalTransformer/run/wiki-bpe100m-global.checkpoint}"
+                  remote_checkpoint="''${WIKI_REMOTE_CHECKPOINT:-/root/formalTransformer/run/wiki-bpe100m-v3-global.checkpoint}"
                 fi
                 case "$port" in
                   ""|*[!0-9]*)

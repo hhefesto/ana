@@ -107,7 +107,7 @@ override and still fails closed on an identity mismatch.
 ```bash
 # pull the live run's newest checkpoint and sample it (CPU is fine)
 nix run .#ana -- --pull --host root@HOST --port N \
-  --remote-checkpoint /root/formalTransformer/run/wiki-bpe100m-global.checkpoint
+  --remote-checkpoint /root/formalTransformer/run/wiki-bpe100m-v3-global.checkpoint
 
 # sample an already-pulled bpe100m checkpoint offline
 nix run .#ana -- --prompt "The theory of"
