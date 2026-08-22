@@ -26,20 +26,35 @@ count, is what fixes the model size.
 
 ## Measurements taken while designing this
 
-**Document packing is worth about 1.6B tokens.** The trainer cuts documents into
-non-overlapping windows and discards the remainder, so a document shorter than
-one window contributes nothing. Measured over 300,000 documents of
-`run/mixed-corpus.jsonl`:
+**Document packing roughly doubles the usable corpus at context 1024.** The
+trainer cuts documents into non-overlapping windows and discards the remainder,
+so a document shorter than one window contributes nothing at all. Measured over
+a uniform sample of 388,027 documents (every 25th across all 9.7M of
+`run/mixed-corpus.jsonl`; mean 3,099 B, median 1,468 B), against the same slice
+packed to 128 KB:
 
 | | ctx 256 | ctx 512 | ctx 1024 |
 |---|---|---|---|
-| bytes surviving, unpacked | 93.5% | 87.1% | **75.5%** |
-| bytes surviving, packed to 128 KB | 99.3% | 98.6% | **98.5%** |
-| documents yielding no window at all | 9.7% | 25.9% | **51.3% → 0.00%** |
+| documents yielding no window at all | 40.9% | 63.5% | **82.4%** |
+| bytes surviving, unpacked | 82.9% | 69.8% | **51.9%** |
+| bytes surviving, packed to 128 KB | 99.6% | 99.2% | **98.3%** |
+| zero-window documents after packing | 0.00% | 0.00% | **0.00%** |
 
-Moving to context 1024 without packing would have thrown away a quarter of the
-corpus. `deploy/pack-corpus.py` does the packing and streams, so the packed
-copy never has to exist on disk.
+At context 1024 barely half the corpus would have reached the model. In tokens:
+~30 GB of text is ~7B tokens at this tokenizer, of which unpacked windowing
+would keep ~3.6B — short of Chinchilla scale for 463M all by itself. Packed it
+is ~7B. `deploy/pack-corpus.py` does the packing and streams, so the packed copy
+never has to exist on disk.
+
+The same effect applies retroactively: at context 256, where v2 and v3 trained,
+40.9% of corpus documents never produced a single training window and ~17% of
+bytes were never seen. That is not a bug in those runs, but it does mean their
+effective corpus was smaller than the shard counts suggest.
+
+A first measurement of this used the first 300,000 lines of the corpus and put
+the context-1024 loss at 24.5% rather than 48.1%. Wikipedia is article-ordered
+with a stub tail, so the head of the file has documents 2.2x larger than the
+corpus mean (8,519 B against 3,867 B/line) -- a head sample is not a sample.
 
 **No existing eval corpus could measure the v2/v3 models.** `evaluate` gates on
 the corpus's tokenizer identity matching the checkpoint's, and:

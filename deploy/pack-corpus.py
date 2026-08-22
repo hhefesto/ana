@@ -8,30 +8,24 @@ and every document donates its tail to the floor.  That is survivable at
 context 256 and ruinous at 1024: measured over 300,000 documents of
 run/mixed-corpus.jsonl, 51.3% of documents fall under the ~4.4 KB needed for a
 single window and only 75.5% of all bytes survive the cut, against 93.5% at
-context 256.  Packing recovers essentially all of it -- about 1.6B tokens on
-that corpus.  Measured on that same 300,000-document sample, byte survival at
-context 1024 against the packing target:
+context 256.  Measured over a uniform sample of 388,027 documents (every 25th
+across all 9.7M of run/mixed-corpus.jsonl), against the same corpus packed to
+128 KB -- percentage of bytes that land inside a full window:
 
-    unpacked  75.5%   (51.3% of documents yield no window at all)
-     64 KB    97.3%
-    128 KB    98.5%   <- the default: clears 98% while keeping twice as many
-    256 KB    99.2%      documents as 256 KB for train/validation split grain
+                   ctx 256   ctx 512   ctx 1024
+    unpacked         82.9%     69.8%      51.9%   (82.4% of documents yield
+    packed 128 KB    99.6%     99.2%      98.3%    no window at all at 1024)
 
-The residue is the per-document tail, which is why a bigger target is always
-slightly better and why chasing the last percent is not worth making documents
-so large that the 90/10 split (a hash of document position) becomes coarse.
+At context 1024 that is the difference between ~3.6B and ~7B usable tokens on
+this corpus.  Beware measuring it on the head of a file: Wikipedia is
+article-ordered with a stub tail, so the first documents run 2.2x larger than
+the corpus mean and a head sample understates the loss by half.
 
-Reads JSONL {"id","text"} on stdin, writes JSONL {"id","text"} on stdout, and
-streams: memory is one packed document, never the corpus.  Intended to feed
-deploy/plan-corpus.sh directly so a 35 GB packed copy never has to exist.
-
-Two invariants the corpus pipeline depends on:
-
-  * ids are unique and non-empty.  FormalTransformer.Artifact rejects a
-    duplicate id, and it rejects it at shard-write time -- possibly thousands
-    of shards into a build.
-  * no source document is ever split.  A document longer than the target is
-    emitted alone rather than cut, so packing can only ever join, never lose.
+The residue after packing is the per-document tail, which is why a bigger
+target is always slightly better and why chasing the last percent is not worth
+making documents so large that the 90/10 split (a hash of document position)
+becomes coarse.  128 KB clears 98% while keeping twice as many documents as
+256 KB.
 
 Pair the target with plan-corpus.sh's PER so a shard stays near the ~272 MB of
 text the 32,000-document shards of the v2 run proved safe to plan in RAM: at a
