@@ -264,3 +264,47 @@ on** — a weaker claim, and one to state whenever those two numbers are quoted.
 A flat 2% produced a holdout that was 100% Haskell: 2% of Hackage's 19,418
 packages is a healthy eval, while 2% of the eight repositories the other four
 languages share rounds to zero.
+
+
+## The code-aware tokenizer
+
+`run/code32k.bpe`, learned under the v2 pretokenization rule from a 514 MB
+sample: 293 MB English, 124 Haskell, 59 Lean, 42 Nix, 10 Agda, 6 Idris. Agda
+and Idris are taken whole because that is all that remains in training after
+the holdout -- the plan assumed 100 MB of Agda, Lean and Idris together would
+be available and there is only 75. Agda still lands at roughly twice its corpus
+share, Lean at 1.4x. 4,184,043 distinct words, 944,411 clearing frequency 3,
+32,510 merges, 15 minutes.
+
+Bytes per token on held-out sets, against the tokenizer v2 and v3 trained on:
+
+| held-out | old 32k | code32k | change |
+|---|---|---|---|
+| Haskell | 2.260 | **4.058** | +79.5% |
+| Nix | 2.001 | **3.801** | +89.9% |
+| Agda | 1.772 | **3.155** | +78.0% |
+| Lean | 2.274 | **3.590** | +57.9% |
+| Idris | 1.994 | **2.964** | +48.7% |
+| Wikipedia prose | 4.721 | 4.550 | **-3.6%** |
+| enwik8 | 3.190 | **3.516** | +10.2% |
+
+**Two changes are folded together here**, and the §0.3 gate separates them. That
+gate held the corpus fixed and varied only the rule: +39.5% on code, -0.04% on
+prose. So of the +79.5% on Haskell, roughly half is the pretokenization rule and
+half is having code in the tokenizer's training sample -- and the entire -3.6%
+prose cost belongs to the corpus mix, not the rule.
+
+That -3.6% is the shared-vocabulary tension the plan predicted, and it is real:
+prose now needs 3.8% more tokens for the same bytes. It is priced against code
+improving by half to nearly double.
+
+**Agda was the risk and it cleared.** Its notation is 3-byte UTF-8, and at 1% of
+the corpus there was a real chance those glyphs never earned single pieces and
+stayed as three byte-tokens each. At 1.772 bytes/token the old tokenizer was
+close to exactly that failure; 3.155 says the oversample worked.
+
+**enwik8 improved 10.2%, which was not an aim.** It is raw MediaWiki markup, and
+a tokenizer that has seen indentation and punctuation-dense text handles markup
+better than one trained on extracted prose. This bears directly on the
+GPT-2-small comparison: the same model now spends 10% fewer tokens per byte on
+the benchmark corpus.
