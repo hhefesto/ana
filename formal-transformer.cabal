@@ -21,6 +21,7 @@ library
       FormalTransformer.Bigram
       FormalTransformer.Config
       FormalTransformer.Data
+      FormalTransformer.Diloco
       FormalTransformer.Language
       FormalTransformer.Language.Autoregressive
       FormalTransformer.Layout

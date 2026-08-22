@@ -9,6 +9,7 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy as LBS
 import Data.List (transpose)
+import Data.Maybe (isNothing)
 import Data.Monoid (Sum (..))
 import qualified Data.Vector.Unboxed as VU
 import FormalTransformer.AD
@@ -16,6 +17,7 @@ import FormalTransformer.Artifact
 import FormalTransformer.Bigram
 import FormalTransformer.Config
 import FormalTransformer.Data
+import FormalTransformer.Diloco
 import FormalTransformer.Attention.Gla
 import FormalTransformer.Language
 import FormalTransformer.Language.Autoregressive
@@ -73,7 +75,13 @@ tests =
   , ("bigram with no evidence is uniform", testBigramUniform)
   , ("trainer window split is shared and deterministic", testTrainerWindowSplit)
   , ("learned BPE is parseable, deterministic and lossless", testLearnBpe)
+  , ("pretokenization v2 folds indentation and leaves prose alone", testPretokenV2)
+  , ("DiLoCo outer step is the identity at lr=1 without momentum", testDilocoIdentity)
+  , ("DiLoCo outer step follows the Nesterov recurrence", testDilocoNesterov)
+  , ("DiLoCo ranks partition each global batch exactly once", testDilocoSharding)
+  , ("DiLoCo outer state survives a save/load round trip", testDilocoSidecar)
   , ("100M preset is GPT-2-small scale and tiles 3:1", testBpe100mPreset)
+  , ("460M preset is four times the v3 rung at context 1024", testBpe460mPreset)
   ]
 
 -- The scale-up rung. Pinning the exact count here is the point: vocabulary is
@@ -100,18 +108,175 @@ testBpe100mPreset = do
   assert (paramCount bpe100mV3Preset == 115435428) "100M v3 preset parameter count differs"
   assert (sum (map sliceLength v3Layout) == 115435428) "100M v3 layout does not cover parameters"
 
+-- The v4 rung.  Two numbers are pinned rather than derived because both are
+-- load-bearing for a run that cannot be re-planned once it starts: the
+-- parameter count sets the device memory floor (nine parameter-sized f32
+-- buffers coexist at the Muon step, so 463M means 16.7 GB before any
+-- activation), and the context length sets how many windows the corpus
+-- yields, which fixes the plan's step count and hence the LR schedule.
+testBpe460mPreset :: IO ()
+testBpe460mPreset = do
+  _ <- expectRight (validateConfig bpe460mPreset)
+  layout <- expectRight (namedLayout bpe460mPreset)
+  assert (bpe460mPreset == Config 32768 1024 1280 3456 20 20 GateRgLru True True True)
+    "460M preset dimensions differ"
+  assert (headDim bpe460mPreset == 64) "460M preset head dimension differs"
+  assert (contextSize bpe460mPreset == 1024) "460M preset context differs"
+  -- The 3:1 rule only tiles evenly when the depth is a multiple of four.
+  assert (layerCount bpe460mPreset `mod` 4 == 0) "460M depth does not tile 3:1"
+  assert (glaLayerCount bpe460mPreset == 15) "460M preset should have 15 GLA layers of 20"
+  assert (softmaxLayerCount bpe460mPreset == 5) "460M preset should have 5 softmax layers of 20"
+  assert (paramCount bpe460mPreset == 463084260) "460M preset parameter count differs"
+  assert (sum (map sliceLength layout) == 463084260) "460M layout does not cover parameters"
+  -- Four times the v3 rung is the design target; a preset edit that drifts
+  -- outside 3.9x-4.1x has changed the experiment, not tuned it.
+  let ratio = fromIntegral (paramCount bpe460mPreset)
+        / fromIntegral (paramCount bpe100mV3Preset) :: Double
+  assert (ratio > 3.9 && ratio < 4.1) ("460M preset is not ~4x the v3 rung: " ++ show ratio)
+  -- ffDim is a multiple of 128 so the FFN GEMMs tile without a ragged edge.
+  assert (ffDim bpe460mPreset `mod` 128 == 0) "460M ffDim is not a multiple of 128"
+
 -- A learned tokenizer has to satisfy three things, and all three are checkable
 -- without a reference implementation: the artifact must be readable by the very
 -- parser that validates contiguity and merge ordering, learning must be
 -- deterministic given a word table, and encoding must remain lossless.  The
 -- last is the one that matters most in practice -- a trainer whose merges the
 -- encoder cannot reproduce would corrupt a corpus silently.
+-- The v2 rule exists for exactly one reason -- an indent must be able to
+-- become a single piece -- and it is only safe to adopt if it does that
+-- WITHOUT moving prose, because the English numbers have to stay comparable
+-- across the change.  Both halves are asserted here, on literals, so a later
+-- edit to the rule cannot quietly trade one for the other.
+-- The whole two-process mechanism is validated by one algebraic fact: at
+-- outer lr 1 with no momentum, the outer step returns the averaged parameters
+-- unchanged, so with a single rank it is the identity.  A run with the
+-- machinery switched on that way must therefore produce a byte-identical
+-- checkpoint to a run without it -- which is the cheap regression test for
+-- download, average, outer step and upload all at once.  If this property
+-- ever breaks, that test stops meaning anything, so it is pinned here.
+testDilocoIdentity :: IO ()
+testDilocoIdentity = do
+  let cfg = DilocoConfig 0 1 30 1.0 0.0 "/nonexistent" 1
+      theta = VU.fromList [1.5, -2.25, 0.0, 1e-3, 7.75]
+      state = freshOuterState theta 0
+      (updated, state') = outerStep cfg state 30 theta
+  assert (updated == theta) "outer step at lr=1, mu=0 is not the identity"
+  assert (outerPrev state' == theta) "outer step did not carry theta forward"
+  assert (outerCount state' == 1) "outer step did not advance the outer counter"
+  -- One rank averaging with itself must not touch the values or the files.
+  averaged <- averageWithPeers cfg 0 Nothing theta
+  assert (averaged == theta) "averaging a single rank changed the parameters"
+  -- A rank slice at world 1 is the whole batch, so the sampler is unchanged.
+  assert (rankWindowIndices (Just cfg) 8 100 3 == rankWindowIndices Nothing 8 100 3)
+    "world size one changed the sampled windows"
+
+testDilocoNesterov :: IO ()
+testDilocoNesterov = do
+  let cfg = DilocoConfig 0 2 30 0.5 0.9 "/nonexistent" 1
+      previous = VU.fromList [10, 20]
+      averaged = VU.fromList [8, 17]
+      state = freshOuterState previous 0
+      (updated, state') = outerStep cfg state 30 averaged
+      -- delta = [2, 3]; m' = 0.9*0 + delta = [2, 3];
+      -- theta = prev - 0.5 * (delta + 0.9 * m') = prev - 0.5 * [3.8, 5.7]
+      expected = VU.fromList [10 - 1.9, 20 - 2.85]
+      close a b = VU.length a == VU.length b
+        && VU.and (VU.zipWith (\x y -> abs (x - y) < 1e-12) a b)
+  assert (close updated expected) ("Nesterov outer step differs: " ++ show (VU.toList updated))
+  assert (close (outerMomentum state') (VU.fromList [2, 3])) "outer momentum differs"
+  -- A second step must accumulate momentum rather than restart it:
+  -- prev = [8.1, 17.15], delta = prev - [7, 15] = [1.1, 2.15],
+  -- m' = 0.9 * [2, 3] + delta = [2.9, 4.85].
+  let (_, state'') = outerStep cfg state' 60 (VU.fromList [7, 15])
+  assert (close (outerMomentum state'') (VU.fromList [2.9, 4.85]))
+    ("outer momentum did not accumulate: " ++ show (VU.toList (outerMomentum state'')))
+
+-- Rank sharding is the one place a two-process run could silently train on the
+-- wrong data: overlapping slices would double-count windows and a gap would
+-- skip them, and either would look like a perfectly healthy loss curve.
+testDilocoSharding :: IO ()
+testDilocoSharding = do
+  let count = 1000
+      globalBatch = 8
+      single step = rankWindowIndices Nothing globalBatch count step
+      shard rank step =
+        rankWindowIndices (Just (DilocoConfig rank 2 30 0.7 0.9 "/tmp" 1))
+          globalBatch count step
+  forM_ [1 .. 40] $ \step -> do
+    let combined = shard 0 step ++ shard 1 step
+    assert (combined == single step)
+      ("ranks do not reconstruct the single-process batch at step " ++ show step)
+    assert (length (shard 0 step) == 4 && length (shard 1 step) == 4)
+      "ranks did not split the global batch evenly"
+    assert (null [i | i <- shard 0 step, i `elem` shard 1 step])
+      ("ranks overlap at step " ++ show step)
+  -- The global batch has to divide across ranks, and saying so early beats
+  -- discovering a short batch thousands of steps into a paid run.
+  assert (localBatchSize (Just (DilocoConfig 0 2 30 0.7 0.9 "/tmp" 1)) 64 == Right 32)
+    "local batch size differs"
+  assert (isLeft (localBatchSize (Just (DilocoConfig 0 3 30 0.7 0.9 "/tmp" 1)) 64))
+    "an indivisible global batch was accepted"
+  assert (localBatchSize Nothing 64 == Right 64) "single-process batch size changed"
+
+-- The outer optimizer's momentum is the only run state that is NOT in the
+-- checkpoint, so a restart that silently lost it would quietly change the
+-- optimizer -- hence a round trip test, including the truncation case that a
+-- half-written sidecar would produce.
+testDilocoSidecar :: IO ()
+testDilocoSidecar = do
+  let path = "/tmp/formal-transformer-diloco-test.outer"
+      -- Values chosen to be exact in f32: the sidecar stores what the device
+      -- holds, so a round trip must be lossless, not merely close.
+      theta = VU.fromList [1.5, -2.25, 0.0, 0.125, 1024]
+      state = (freshOuterState theta 4200) { outerMomentum = VU.fromList [0.5, -1, 2, 0.25, -8] }
+  saveOuterState path state
+  loaded <- loadOuterState path (VU.length theta)
+  case loaded of
+    Nothing -> throwIO (TestException "sidecar did not load")
+    Just back -> do
+      assert (outerPrev back == outerPrev state) "sidecar parameters changed"
+      assert (outerMomentum back == outerMomentum state) "sidecar momentum changed"
+      assert (outerStepAt back == 4200) "sidecar step changed"
+  -- A sidecar describing a different model must be refused, not reinterpreted.
+  mismatched <- loadOuterState path (VU.length theta + 1)
+  assert (isNothing mismatched) "sidecar with the wrong length was accepted"
+  removeFile path
+
+testPretokenV2 :: IO ()
+testPretokenV2 = do
+  let v1 = pretokenizeWith PretokenV1
+      v2 = pretokenizeWith PretokenV2
+      w = BSC.pack
+  -- Prose: identical cuts under both rules.
+  forM_ [ "the cat sat", "a\nb", "one two\nthree four", "x  y", "\n", ""
+        , "trailing word" ] $ \sample ->
+    assert (v1 (w sample) == v2 (w sample))
+      ("v2 moved a prose word boundary on " ++ show sample)
+  -- Indentation: v1 shatters it one space per word, v2 makes it one word.
+  assert (v1 (w "    foo") == [w " ", w " ", w " ", w " foo"])
+    "v1 indentation baseline changed"
+  assert (v2 (w "    foo") == [w "   ", w " foo"])
+    "v2 did not fold a four-space indent"
+  assert (v2 (w "\n        foo") == [w "\n       ", w " foo"])
+    "v2 did not fold a newline plus eight-space indent"
+  -- A blank line's trailing run is one word, not one word per space.
+  assert (v2 (w "a   \nb") == [w "a", w "   ", w "\n", w "b"])
+    "v2 did not fold trailing whitespace"
+  -- The point of the exercise, stated as the invariant it has to satisfy:
+  -- indented code costs strictly fewer words, prose costs exactly the same.
+  let haskell = w "module M where\n\nf :: Int -> Int\nf x =\n    let y = x\n    in y + 1\n"
+      prose = w "the theory of language is a theory of structure and meaning"
+  assert (length (v2 haskell) < length (v1 haskell))
+    "v2 did not reduce the word count of indented Haskell"
+  assert (length (v2 prose) == length (v1 prose))
+    "v2 changed the word count of prose"
+
 testLearnBpe :: IO ()
 testLearnBpe = do
   let text = BSC.pack (concat (replicate 40
         ("the theory of language is a theory of structure; "
           ++ "the structure of a language is the language of structures\n")))
-      frequencies = countWords mempty text
+      frequencies = countWords PretokenV1 mempty text
       vocabulary = 320
   merges <- either (throwIO . TestException) pure (learnBpeMerges vocabulary frequencies)
   assert (not (null merges)) "learned no merges at all"
@@ -129,7 +294,7 @@ testLearnBpe = do
         present <- doesFileExist path
         if present then removeFile path else pure ()
   (do
-    BS.writeFile path (renderBpeArtifact merges)
+    BS.writeFile path (renderBpeArtifact PretokenV1 merges)
     loaded <- loadFastBpe path >>= either (throwIO . TestException) pure
     let tokenizer = FastBpeTokenizer loaded
     assert (tokenizerVocabSize tokenizer == byteVocabSize + length merges)
@@ -238,7 +403,18 @@ testWarmStartTransfer = do
   (same, _, sameFresh) <- expectRight (transferParameters src src srcParams
     (VU.map negate srcParams))
   assert (same == srcParams && null sameFresh) "same-architecture transfer is not the identity"
-  -- Only architecture arms may differ; core dimensions may not.
+  -- Context length is NOT a core dimension: no slice in the layout depends on
+  -- it (there is no positional embedding), so a warm start across contexts has
+  -- to transfer every slice.  This is what lets a longer-context run start
+  -- from a shorter-context checkpoint instead of from noise.
+  (longer, longTransferred, longFresh) <- expectRight
+    (transferParameters src src { contextSize = 4 * contextSize src } srcParams
+      (VU.map negate srcParams))
+  assert (longer == srcParams && null longFresh)
+    "a context-only change must transfer every slice"
+  assert (length longTransferred == length srcLayout)
+    "context-only transfer did not report every slice"
+  -- Only architecture arms and the context may differ; core dimensions may not.
   assert (isLeft (transferParameters src (Config 4 5 4 3 4 2 GateSigmoid False False True)
     srcParams freshParams)) "core-dimension mismatch was accepted"
 

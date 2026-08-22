@@ -5,7 +5,7 @@ import Control.Monad (foldM, forM_, unless, when)
 import Control.Parallel.Strategies (parListChunk, rdeepseq, using)
 import qualified Data.ByteString as BS
 import Data.Bits (rotateL, shiftL, shiftR, xor)
-import Data.IORef (modifyIORef', newIORef, readIORef)
+import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Int (Int64)
 import qualified Data.IntMap.Strict as IntMap
 import Data.Char (isSpace)
@@ -21,6 +21,7 @@ import FormalTransformer.Artifact
 import FormalTransformer.Bigram
 import FormalTransformer.Config
 import FormalTransformer.Data
+import FormalTransformer.Diloco
 import FormalTransformer.Layout
 import FormalTransformer.Model (ActStats (..), BlockStats (..), fullSequenceStats)
 import FormalTransformer.Optimizer
@@ -154,6 +155,8 @@ sizePresets =
   -- The v3 production run (docs/V3-DECISIONS.md section 6): bpe100m
   -- dimensions, RG-LRU + qk-norm + sinks, tied head.
   , ("bpe100m-v3", bpe100mV3Preset)
+  -- The v4 production preset: 4x bpe100m-v3 at context 1024.
+  , ("bpe460m", bpe460mPreset)
   -- Pilot arm A5 (docs/V3-DECISIONS.md): a separate unembedding matrix.
   , ("tiny-untied", tinyPreset { tiedHead = False })
   , ("bpe10m-untied", bpe10mPreset { tiedHead = False })
@@ -565,8 +568,15 @@ train corpusPath checkpointPath mode cfg =
 trainInContext :: Context -> FilePath -> FilePath -> TrainingMode -> Config -> IO ()
 trainInContext ctx corpusPath checkpointPath mode cfg = do
   batchSize <- positiveEnv "TRAIN_BATCH" 1
-  microSize <- positiveEnv "MICRO_BATCH" batchSize
-  when (microSize > batchSize) (die "MICRO_BATCH must not exceed TRAIN_BATCH")
+  -- TRAIN_BATCH stays GLOBAL under two-process training: it is in the plan
+  -- identity and it sets the segment's step count, so it must mean the same
+  -- thing whatever the world size.  What changes is how much of each batch a
+  -- rank actually computes.
+  diloco <- dilocoFromEnv >>= either die pure
+  localBatch <- either die pure (localBatchSize diloco batchSize)
+  microSize <- positiveEnv "MICRO_BATCH" localBatch
+  when (microSize > localBatch)
+    (die "MICRO_BATCH must not exceed the per-rank batch (TRAIN_BATCH / DILOCO_WORLD)")
   checkpointEvery <- positiveEnv "CHECKPOINT_EVERY" 500
   validateEvery <- positiveEnv "VALIDATE_EVERY" 500
   validationWindows <- positiveEnv "VALIDATION_WINDOWS" 256
@@ -605,7 +615,7 @@ trainInContext ctx corpusPath checkpointPath mode cfg = do
       ExplicitSteps n -> pure
         (n, n, 0, randomSampler batchSize (training split), corpusDatasetIdentity corpus)
       EpochSteps -> pure
-        (epochSteps, epochSteps, 0, epochSampler batchSize (training split), corpusDatasetIdentity corpus)
+        (epochSteps, epochSteps, 0, epochSampler diloco batchSize (training split), corpusDatasetIdentity corpus)
     Segment total start end _ globalIdentity _ -> do
       when (start < 0 || start >= end || end > total)
         (die "segment requires 0 <= START < END <= GLOBAL_TOTAL_STEPS")
@@ -613,7 +623,7 @@ trainInContext ctx corpusPath checkpointPath mode cfg = do
         ("segment plan step count differs from corpus: planned " ++ show (end - start)
           ++ ", corpus requires " ++ show epochSteps))
       pure (end, total, start,
-        segmentSampler start (epochSampler batchSize (training split)), globalIdentity)
+        segmentSampler start (epochSampler diloco batchSize (training split)), globalIdentity)
   case mode of
     Standalone (ExplicitSteps _) -> pure ()
     _ -> logTraining ("epoch segment: " ++ show windowCount
@@ -689,6 +699,14 @@ trainInContext ctx corpusPath checkpointPath mode cfg = do
     ++ " checkpoint_every=" ++ show checkpointEvery
     ++ " validate_every=" ++ show validateEvery
     ++ " validation_windows=" ++ show (length (validation split)))
+  forM_ diloco $ \dcfg -> logTraining ("diloco: rank " ++ show (dilocoRank dcfg)
+    ++ "/" ++ show (dilocoWorld dcfg)
+    ++ " inner_steps=" ++ show (dilocoInner dcfg)
+    ++ " outer_lr=" ++ show (dilocoOuterLr dcfg)
+    ++ " momentum=" ++ show (dilocoMomentum dcfg)
+    ++ " local_batch=" ++ show localBatch
+    ++ " dir=" ++ dilocoDir dcfg
+    ++ (if dilocoRank dcfg == 0 then " (writes checkpoints)" else " (follows rank 0)"))
   case gate of
     Nothing -> pure ()
     Just g -> logTraining ("bigram gate: sample=" ++ show (gateSampleCrossEntropy g)
@@ -702,7 +720,35 @@ trainInContext ctx corpusPath checkpointPath mode cfg = do
       -- DUMP_CHECKPOINTS=1: keep a step-suffixed copy of every snapshot so
       -- the act-stats diagnostic can walk the trajectory afterwards.
       dumpCheckpoints <- (== Just "1") <$> lookupEnv "DUMP_CHECKPOINTS"
-      let saveSnapshot step rng best deviceParams (deviceM, deviceV, deviceMomentum) = do
+      -- Exactly one rank writes the checkpoint.  Two ranks saving at 463M
+      -- would want ~35 GB of host memory each at the same instant, and the
+      -- parameters are identical across ranks at every synchronization point
+      -- anyway; the follower re-reads rank 0's file at the next shard.
+      let writesCheckpoints = maybe True ((== 0) . dilocoRank) diloco
+      -- The outer optimizer's momentum and the parameters the current inner
+      -- window started from are the only run state outside the checkpoint, so
+      -- they ride along in a sidecar rather than in the artifact format --
+      -- evaluate, check-checkpoint and generate keep reading what they know.
+      outerRef <- case diloco of
+        Nothing -> pure Nothing
+        Just dcfg -> do
+          let resumeStep = adamStep astate0
+          stored <- loadOuterState (checkpointPath ++ ".outer") n
+          state <- case stored of
+            Just previous | outerStepAt previous == resumeStep -> do
+              logTraining ("diloco: resumed outer state at step " ++ show resumeStep
+                ++ " after " ++ show (outerCount previous) ++ " outer steps")
+              pure previous
+            Just previous -> do
+              logTraining ("diloco: outer sidecar is at step "
+                ++ show (outerStepAt previous) ++ " but the checkpoint is at "
+                ++ show resumeStep ++ "; restarting the outer optimizer")
+              pure (freshOuterState params0 resumeStep)
+            Nothing -> pure (freshOuterState params0 resumeStep)
+          reference <- newIORef state
+          pure (Just (dcfg, reference))
+      let saveSnapshot step rng best deviceParams (deviceM, deviceV, deviceMomentum) =
+            if not writesCheckpoints then pure () else do
             hostParams <- downloadF32Vector ctx n deviceParams
             hostM <- downloadF32Vector ctx n deviceM
             hostV <- downloadF32Vector ctx n deviceV
@@ -714,6 +760,12 @@ trainInContext ctx corpusPath checkpointPath mode cfg = do
                   , checkpointBestValidationLoss = best
                   , checkpointPRNG = rng
                   }
+            -- Sidecar first: a checkpoint implies an outer state at least as
+            -- new, and a stale sidecar costs one window of outer momentum
+            -- whereas a checkpoint written without one cannot be recovered.
+            forM_ outerRef $ \(_, reference) -> do
+              outer <- readIORef reference
+              saveOuterState (checkpointPath ++ ".outer") outer { outerStepAt = step }
             saved <- saveCheckpointAtomic checkpointPath snapshot
             either die pure saved
             logTraining ("checkpoint step=" ++ show step ++ " path=" ++ checkpointPath)
@@ -777,6 +829,34 @@ trainInContext ctx corpusPath checkpointPath mode cfg = do
                 uploadF32Vector ctx (U.imap
                   (\i x -> if i < embeddingLength then x else x * realToFrac trunkScale)
                   hostG)
+      -- The outer synchronization.  Shaped exactly like maskGradient above --
+      -- download, transform on the host, free, upload -- because that round
+      -- trip is already known to be affordable on a parameter-length array.
+      -- It runs AFTER the optimizer step and BEFORE validation, so validation
+      -- and checkpoints observe the synchronized model rather than one rank's
+      -- private drift.  The segment's final step always synchronizes, which is
+      -- what lets the follower rank start the next shard from rank 0's file.
+      let outerSync step deviceParams = case outerRef of
+            Nothing -> pure deviceParams
+            Just (dcfg, reference)
+              | step `mod` dilocoInner dcfg /= 0 && step /= target -> pure deviceParams
+              | otherwise -> do
+                  state <- readIORef reference
+                  host <- downloadF32Vector ctx n deviceParams
+                  let retire = if outerCount state == 0
+                        then Nothing
+                        else Just (outerStepAt state)
+                  averaged <- averageWithPeers dcfg step retire host
+                  let (updated, state') = outerStep dcfg state step averaged
+                  writeIORef reference state'
+                  -- Both ranks must print the SAME digest here; a monitor that
+                  -- diffs the two logs is the drift alarm.
+                  logTraining ("diloco: outer_step=" ++ show (outerCount state')
+                    ++ " step=" ++ show step
+                    ++ " rank=" ++ show (dilocoRank dcfg)
+                    ++ " digest=" ++ parameterDigest updated)
+                  freeF32 ctx deviceParams
+                  uploadF32Vector ctx updated
       -- DUMP_GRAD_VECTOR=path: at step 1 write the RAW model gradient
       -- (pre-mask, pre-clip) and the exact batch tokens, so an offline f64
       -- oracle can recompute the same step's gradient and compare.
@@ -827,11 +907,14 @@ trainInContext ctx corpusPath checkpointPath mode cfg = do
         loop ctx gpuCfg n (optAdamW optCfg) split sampler target (adamStep astate0) microSize checkpointEvery
           validateEvery clipNorm bpbScale
           (gateSampleCrossEntropy <$> gate)
-          saveSnapshot dumpSlices dumpVector maskGradient doStep
+          saveSnapshot dumpSlices dumpVector maskGradient outerSync doStep
           params (m, v, momentum0) (checkpointPRNG checkpoint)
           progress0
       saveSnapshot target rngFinal (progressBestValidationLoss progressFinal) paramsFinal optFinal
-      logTraining ("saved checkpoint at completed step " ++ show target ++ ": " ++ checkpointPath)
+      logTraining (if writesCheckpoints
+        then "saved checkpoint at completed step " ++ show target ++ ": " ++ checkpointPath
+        else "finished segment at completed step " ++ show target
+          ++ " (rank 0 owns the checkpoint)")
       freeF32 ctx paramsFinal
       freeDeviceOpt ctx optFinal
 
@@ -897,6 +980,7 @@ trainPlan planPath runDir checkpointPath size cfg = do
   contents <- readFile planPath
   (globalTotal, globalIdentity, segments) <- either die pure (parsePlan contents)
   maxShards <- maybe (0 :: Int) (\raw -> maybe 0 id (readMaybe raw)) <$> lookupEnv "MAX_SHARDS"
+  planDiloco <- dilocoFromEnv >>= either die pure
   completed <- do
     existing <- doesFileExist checkpointPath
     if existing
@@ -927,6 +1011,20 @@ trainPlan planPath runDir checkpointPath size cfg = do
                 (Segment globalTotal (planSegmentStart segment) (planSegmentEnd segment)
                   (planSegmentOffset segment) globalIdentity
                   (planSegmentCorpusIdentity segment)) cfg
+              -- Shard boundary barrier.  trainInContext reloads the
+              -- checkpoint from disk for every shard, so the follower rank
+              -- must not start the next one until the writer has finished
+              -- renaming this one into place.  The segment's last step always
+              -- synchronizes, so the parameters behind that file are already
+              -- the ones both ranks hold; only the write has to be waited on.
+              forM_ planDiloco $ \dcfg -> when (dilocoWorld dcfg > 1) $ do
+                let name = "shard-" ++ show index ++ "-" ++ show (planSegmentEnd segment)
+                if dilocoRank dcfg == 0
+                  then writeMarker dcfg name
+                  else do
+                    logTraining ("diloco: rank " ++ show (dilocoRank dcfg)
+                      ++ " waiting for rank 0 to publish shard " ++ show index)
+                    awaitMarker dcfg name
               writeFile marker ""
               -- The shard's ~3.2 GB of boxed [[Int64]] windows and its corpus
               -- die with the call above; this is what makes the RTS hand the
@@ -1046,11 +1144,13 @@ randomSampler batchSize windows _ rng = sampleBatch batchSize rng windows
 -- Deterministic full-coverage order: windows sorted by a hash of their
 -- index, sliced cyclically by step.  After ceil(count/batch) steps every
 -- training window has been consumed at least once; the final slice wraps.
-epochSampler :: Int -> [[Int64]] -> Sampler
-epochSampler batchSize windows = \step rng ->
-  let start = (step - 1) * batchSize `mod` count
-      batch = [permuted V.! ((start + i) `mod` count) | i <- [0 .. batchSize - 1]]
-  in (batch, rng)
+-- Under two-process training each rank takes a disjoint block of the same
+-- global batch (FormalTransformer.Diloco.rankWindowIndices), so between them
+-- the ranks consume exactly what one process would have, in the same order.
+-- With Nothing the indices are the ones this sampler has always produced.
+epochSampler :: Maybe DilocoConfig -> Int -> [[Int64]] -> Sampler
+epochSampler diloco batchSize windows = \step rng ->
+  ([permuted V.! i | i <- rankWindowIndices diloco batchSize count step], rng)
   where
     count = V.length permuted
     permuted = V.fromList (map snd (sortOn fst (zipWith tag [0 ..] windows)))
@@ -1094,13 +1194,14 @@ loop
   -> (Int -> F32Array -> F32Array -> IO ())
   -> (Int -> [[Int64]] -> F32Array -> IO ())
   -> (F32Array -> IO F32Array)
+  -> (Int -> F32Array -> IO F32Array)
   -> (Int -> Float -> F32Array -> F32Array -> DeviceOpt -> IO (F32Array, DeviceOpt))
   -> F32Array
   -> DeviceOpt
   -> PRNGState
   -> TrainingProgress
   -> IO (F32Array, DeviceOpt, PRNGState, TrainingProgress)
-loop ctx gpuCfg n optCfg split sampler target completed microSize checkpointEvery validateEvery clipNorm bpbScale gate saveSnapshot dumpSlices dumpVector maskGradient doStep params opt rng progress
+loop ctx gpuCfg n optCfg split sampler target completed microSize checkpointEvery validateEvery clipNorm bpbScale gate saveSnapshot dumpSlices dumpVector maskGradient outerSync doStep params opt rng progress
   | completed >= target = pure (params, opt, rng, progress)
   | otherwise = do
       let step = completed + 1
@@ -1140,6 +1241,9 @@ loop ctx gpuCfg n optCfg split sampler target completed microSize checkpointEver
           freeF32 ctx params
           freeDeviceOpt ctx opt
           pure result
+      -- Averaging happens here so that everything downstream -- validation,
+      -- the logged loss, the checkpoint -- describes the synchronized model.
+      params'' <- outerSync step params'
       let emaNext = case progressTrainLossEma progress of
             Nothing -> loss
             Just previous -> trainLossEmaDecay * previous + (1 - trainLossEmaDecay) * loss
@@ -1155,7 +1259,7 @@ loop ctx gpuCfg n optCfg split sampler target completed microSize checkpointEver
         else do
           let val = validation split
           when (null val) (die "internal error: selected an empty validation batch")
-          valLoss <- chunkedMeanLoss ctx gpuCfg microSize val params'
+          valLoss <- chunkedMeanLoss ctx gpuCfg microSize val params''
           let gateText = case gate of
                 Nothing -> ""
                 Just g -> " gate=" ++ show g
@@ -1187,9 +1291,9 @@ loop ctx gpuCfg n optCfg split sampler target completed microSize checkpointEver
         ++ (if finiteNorm then "" else " skipped=true")
         ++ validationText)
       when (step `mod` checkpointEvery == 0 && step /= target) $
-        saveSnapshot step rng' (progressBestValidationLoss progress') params' opt'
-      loop ctx gpuCfg n optCfg split sampler target step microSize checkpointEvery validateEvery clipNorm bpbScale gate saveSnapshot dumpSlices dumpVector maskGradient doStep
-        params' opt' rng' progress'
+        saveSnapshot step rng' (progressBestValidationLoss progress') params'' opt'
+      loop ctx gpuCfg n optCfg split sampler target step microSize checkpointEvery validateEvery clipNorm bpbScale gate saveSnapshot dumpSlices dumpVector maskGradient outerSync doStep
+        params'' opt' rng' progress'
 
 logTraining :: String -> IO ()
 logTraining message = do

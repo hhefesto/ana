@@ -17,8 +17,8 @@ import FormalTransformer.Layout
 import FormalTransformer.Model
 import FormalTransformer.Optimizer
 import FormalTransformer.Tokenizer
-import System.Environment (getArgs)
-import System.Exit (exitFailure)
+import System.Environment (getArgs, lookupEnv)
+import System.Exit (die, exitFailure)
 import System.IO (hPutStrLn, stderr, stdin)
 import Text.Read (readMaybe)
 
@@ -203,7 +203,12 @@ learnBpe output vocabText minText = case (readMaybe vocabText, readMaybe minText
   (Nothing, _) -> putStrLn "learn-bpe: VOCABULARY must be an integer"
   (_, Nothing) -> putStrLn "learn-bpe: MIN_FREQUENCY must be an integer"
   (Just vocab, Just minFrequency) -> do
-    counted <- streamWordCounts
+    -- New tokenizers pretokenize under V2, which lets a run of spaces become
+    -- one piece; BPE_PRETOKEN=v1 reproduces a pre-2026-08 artifact exactly.
+    rule <- either die pure . parsePretokenRule . maybe "v2" id
+      =<< lookupEnv "BPE_PRETOKEN"
+    putStrLn ("learn-bpe: pretokenization " ++ show rule)
+    counted <- streamWordCounts rule
     case counted of
       Left message -> putStrLn ("learn-bpe: " ++ message)
       Right counts -> do
@@ -224,15 +229,15 @@ learnBpe output vocabText minText = case (readMaybe vocabText, readMaybe minText
           Left message -> putStrLn ("learn-bpe: " ++ message)
           Right merges -> do
             let achieved = byteVocabSize + length merges
-            BS.writeFile output (renderBpeArtifact merges)
+            BS.writeFile output (renderBpeArtifact rule merges)
             putStrLn ("wrote tokenizer: " ++ output)
             putStrLn ("merges: " ++ show (length merges) ++ "  vocabulary: " ++ show achieved)
             when (achieved < vocab) (putStrLn
               ("learn-bpe: corpus exhausted its merges before reaching " ++ show vocab))
 
 -- Folds word counts over the stream without holding any document.
-streamWordCounts :: IO (Either String (Map.Map BS.ByteString Int))
-streamWordCounts = readMore BS.empty False Map.empty
+streamWordCounts :: PretokenRule -> IO (Either String (Map.Map BS.ByteString Int))
+streamWordCounts rule = readMore BS.empty False Map.empty
   where
     readMore pending isText acc = do
       chunk <- BS.hGetSome stdin 1048576
@@ -248,7 +253,7 @@ streamWordCounts = readMore BS.empty False Map.empty
       Just index ->
         let field = BS.take index bytes
             remaining = BS.drop (index + 1) bytes
-            acc' = if isText then countWords acc field else acc
+            acc' = if isText then countWords rule acc field else acc
         in acc' `seq` consume remaining (not isText) acc'
 
 writeSources :: Tokenizer -> FilePath -> [(String, BS.ByteString)] -> IO ()
@@ -464,6 +469,7 @@ planSegment path offsetText batchText size = case (readMaybe offsetText, readMay
     configFor "small" = Just smallPreset
     configFor "bpe10m" = Just bpe10mPreset
     configFor "bpe100m" = Just bpe100mPreset
+    configFor "bpe460m" = Just bpe460mPreset
     configFor _ = Nothing
 
 -- Reconstruct the documents a whole-dataset run held out, as one fixed corpus.

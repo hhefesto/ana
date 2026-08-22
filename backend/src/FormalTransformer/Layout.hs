@@ -130,7 +130,14 @@ transferParameters src dst srcParams freshParams = do
        , concat [kept | (_, _, kept) <- picks]
        )
   where
-    core c = (vocabSize c, contextSize c, modelDim c, ffDim c, layerCount c, headCount c)
+    -- Context length is deliberately NOT part of `core`.  No slice in
+    -- namedLayout depends on it -- there is no positional embedding, and the
+    -- softmax layers are NoPE -- so a checkpoint's parameters mean exactly the
+    -- same function at any context, and refusing a warm start across context
+    -- lengths would forbid a transfer that is sound by construction.  It stays
+    -- in Config (and hence in modelId), so the two runs remain distinct
+    -- identities that cannot be resumed into one another by accident.
+    core c = (vocabSize c, modelDim c, ffDim c, layerCount c, headCount c)
     check True _ = Right ()
     check False message = Left message
 

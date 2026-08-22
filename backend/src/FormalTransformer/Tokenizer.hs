@@ -4,6 +4,10 @@ module FormalTransformer.Tokenizer
   , byteVocabSize
   , byteTokenizerIdentity
   , FastBpe
+  , fastBpeRule
+  , PretokenRule (..)
+  , pretokenRuleName
+  , parsePretokenRule
   , Tokenizer (..)
   , loadFastBpe
   , tokenizerIdentityOf
@@ -15,7 +19,7 @@ module FormalTransformer.Tokenizer
   , encodeBytes
   , decodeBytes
   , validateByteTokens
-  , pretokenize
+  , pretokenizeWith
   , countWords
   , learnBpeMerges
   , renderBpeArtifact
@@ -49,7 +53,48 @@ data FastBpe = FastBpe
   , fastBpeMerges :: ![((Int, Int), Int)]
   , fastBpeRanks :: !(Map.Map (Int, Int) Int)
   , fastBpeIdentity :: !String
+  , fastBpeRule :: !PretokenRule
   }
+
+-- How a byte string is cut into words before any merge applies.
+--
+-- This is a property of the ARTIFACT, not of this program.  Merges learned
+-- under one rule are meaningless under another -- the encoder would emit
+-- pieces the merge table was never trained on, and the failure would be
+-- silent -- so the rule travels in the .bpe header and in the identity
+-- string.  An artifact written before that header field existed reads as V1
+-- and encodes exactly as it always did, which is what keeps every corpus and
+-- checkpoint produced so far loadable.
+--
+--   V1  A word is a run of bytes delimited by space and newline, carrying a
+--       single leading space.  Every space beyond the first in a run becomes
+--       its own one-byte word, so a four-space indent is four tokens and no
+--       merge can ever shorten it -- the dominant cost on indented code.
+--   V2  A run of spaces is one word (newline-prefixed when a newline
+--       immediately precedes it), except that the run's last space still goes
+--       on the following word.  Indentation becomes one learnable token.
+--       Prose is left alone: runs of one or two spaces, and a newline not
+--       followed by a space, cut exactly where V1 cuts them.
+data PretokenRule = PretokenV1 | PretokenV2
+  deriving (Eq, Show)
+
+-- The descriptor that goes in the identity string.  V1's spelling is frozen:
+-- changing it would change the identity of every tokenizer ever written and
+-- orphan the corpora that record it.
+pretokenRuleName :: PretokenRule -> String
+pretokenRuleName PretokenV1 = "ascii-space-prefix+lf-boundary"
+pretokenRuleName PretokenV2 = "ascii-space-run+lf-prefix-v2"
+
+-- The tag in the artifact header.  V1 is written by OMITTING the field, so a
+-- v1 artifact is byte-identical to one written before the field existed.
+pretokenRuleTag :: PretokenRule -> String
+pretokenRuleTag PretokenV1 = "v1"
+pretokenRuleTag PretokenV2 = "v2"
+
+parsePretokenRule :: String -> Either String PretokenRule
+parsePretokenRule "v1" = Right PretokenV1
+parsePretokenRule "v2" = Right PretokenV2
+parsePretokenRule other = Left ("unknown pretokenization rule: " ++ other)
 
 data Tokenizer = ByteTokenizer | FastBpeTokenizer !FastBpe
 
@@ -59,9 +104,11 @@ loadFastBpe path = parseFastBpe path . BSC.lines <$> BS.readFile path
 parseFastBpe :: FilePath -> [BS.ByteString] -> Either String FastBpe
 parseFastBpe path rows = case rows of
   header : mergeRows -> do
-    vocab <- case words (BSC.unpack header) of
-      ["BPE", value] -> parseInt "vocabulary" value
-      _ -> Left ("invalid BPE header in " ++ path ++ " (expected: BPE VOCABULARY)")
+    (vocab, rule) <- case words (BSC.unpack header) of
+      ["BPE", value] -> (\v -> (v, PretokenV1)) <$> parseInt "vocabulary" value
+      ["BPE", value, tag] -> (,) <$> parseInt "vocabulary" value <*> parsePretokenRule tag
+      _ -> Left ("invalid BPE header in " ++ path
+        ++ " (expected: BPE VOCABULARY [PRETOKEN])")
     if vocab < mergeBase || vocab > fromIntegral (maxBound :: Word16)
       then Left "BPE vocabulary must be between 258 and 65535"
       else pure ()
@@ -75,10 +122,13 @@ parseFastBpe path rows = case rows of
       then Left "BPE contains a duplicate merge pair"
       else pure ()
     let digest = hex (SHA256.hash (canonicalBytes vocab merges))
+        -- The rule is named in the identity but deliberately NOT folded into
+        -- the digest: the digest is over the merge list alone, and run plans
+        -- already record it by value.
         identity = "fastbpe-word-v1:bos=0:eos=1:bytes=2..257:"
-          ++ "pretoken=ascii-space-prefix+lf-boundary:vocab=" ++ show vocab
+          ++ "pretoken=" ++ pretokenRuleName rule ++ ":vocab=" ++ show vocab
           ++ ":sha256=" ++ digest
-    pure (FastBpe vocab merges (Map.fromList merges) identity)
+    pure (FastBpe vocab merges (Map.fromList merges) identity rule)
   [] -> Left ("empty BPE artifact: " ++ path)
   where
     parseMerge (expected, row) = case words (BSC.unpack row) of
@@ -130,7 +180,7 @@ tokenizerVocabularyFromIdentity identity
 encodeWith :: Tokenizer -> BS.ByteString -> [Int]
 encodeWith ByteTokenizer bytes = encodeBytes bytes
 encodeWith (FastBpeTokenizer bpe) bytes =
-  let words' = filter (not . BS.null) (pretokenize bytes)
+  let words' = filter (not . BS.null) (pretokenizeWith (fastBpeRule bpe) bytes)
       unique = Map.fromList [(word, ()) | word <- words']
       memo = Map.mapWithKey (\word _ -> encodeWord (fastBpeRanks bpe) (wordToIds word)) unique
   in concatMap (memo Map.!) words'
@@ -164,18 +214,61 @@ decodeBytes tokens = do
 validateByteTokens :: [Int] -> Either String ()
 validateByteTokens = validateOrdinaryTokens ByteTokenizer
 
-pretokenize :: BS.ByteString -> [BS.ByteString]
-pretokenize bytes
+pretokenizeWith :: PretokenRule -> BS.ByteString -> [BS.ByteString]
+pretokenizeWith PretokenV1 = pretokenizeV1
+pretokenizeWith PretokenV2 = pretokenizeV2
+
+-- Neither space nor newline: the bytes a word is made of.
+ordinaryByte :: Word8 -> Bool
+ordinaryByte value = value /= 32 && value /= 10
+
+pretokenizeV1 :: BS.ByteString -> [BS.ByteString]
+pretokenizeV1 bytes
   | BS.null bytes = []
-  | byte == 10 = BS.take 1 bytes : pretokenize (BS.drop 1 bytes)
+  | byte == 10 = BS.take 1 bytes : pretokenizeV1 (BS.drop 1 bytes)
   | byte == 32 =
-      let (word, remaining) = BS.span (\value -> value /= 32 && value /= 10) (BS.drop 1 bytes)
-      in BS.cons 32 word : pretokenize remaining
+      let (word, remaining) = BS.span ordinaryByte (BS.drop 1 bytes)
+      in BS.cons 32 word : pretokenizeV1 remaining
   | otherwise =
-      let (word, remaining) = BS.span (\value -> value /= 32 && value /= 10) bytes
-      in word : pretokenize remaining
+      let (word, remaining) = BS.span ordinaryByte bytes
+      in word : pretokenizeV1 remaining
   where
     byte = BS.head bytes
+
+-- V2.  The only structural change from V1 is that a run of spaces is not
+-- shattered into one word per space, so BPE can learn an indent as a single
+-- piece.  The run's LAST space is still handed to the following word, which
+-- is what keeps ordinary prose cutting exactly where V1 cuts it: a single
+-- space between words leaves an empty run and emits nothing extra.
+pretokenizeV2 :: BS.ByteString -> [BS.ByteString]
+pretokenizeV2 bytes
+  | BS.null bytes = []
+  | byte == 10 = whitespace (BS.take 1 bytes) (BS.drop 1 bytes)
+  | byte == 32 = whitespace BS.empty bytes
+  | otherwise = ordinaryWord BS.empty bytes
+  where
+    byte = BS.head bytes
+
+    -- `lead` is a newline already consumed (empty when there is none);
+    -- `rest0` starts at a possibly-empty run of spaces.
+    whitespace lead rest0 =
+      let (spaces, rest) = BS.span (== 32) rest0
+      in if not (BS.null rest) && ordinaryByte (BS.head rest)
+           then
+             -- Indentation before content.  Keep all but the final space as
+             -- one word; the final space prefixes the word that follows.
+             let run = lead <> BS.take (BS.length spaces - 1) spaces
+                 continue = ordinaryWord (BS.take 1 spaces) rest
+             in if BS.null run then continue else run : continue
+           else
+             -- Trailing whitespace, a blank line, or end of input: the whole
+             -- run is a word of its own.  `lead <> spaces` is never empty --
+             -- this branch is reached only with a newline or a space in hand.
+             (lead <> spaces) : pretokenizeV2 rest
+
+    ordinaryWord prefix rest0 =
+      let (word, rest) = BS.span ordinaryByte rest0
+      in (prefix <> word) : pretokenizeV2 rest
 
 wordToIds :: BS.ByteString -> [Int]
 wordToIds = map (\byte -> byteBase + fromIntegral (byte :: Word8)) . BS.unpack
@@ -207,9 +300,10 @@ applyMerge (a, b) new = go
 -- agreement is the correctness-critical part: an external trainer with its own
 -- pretokenization would produce merges the encoder can never apply, and the
 -- failure would be silent.
-countWords :: Map.Map BS.ByteString Int -> BS.ByteString -> Map.Map BS.ByteString Int
-countWords acc text =
-  foldl' bump acc (filter (not . BS.null) (pretokenize text))
+countWords :: PretokenRule -> Map.Map BS.ByteString Int -> BS.ByteString
+  -> Map.Map BS.ByteString Int
+countWords rule acc text =
+  foldl' bump acc (filter (not . BS.null) (pretokenizeWith rule text))
   where bump m word = Map.insertWith (+) word 1 m
 
 -- Learn BPE merges from a word-frequency table.
@@ -286,7 +380,12 @@ adjacent tokens = zip tokens (drop 1 tokens)
 
 -- Render the artifact `parseFastBpe` reads back: a header naming the total
 -- vocabulary, then one `left right id` row per merge with contiguous ids.
-renderBpeArtifact :: [((Int, Int), Int)] -> BS.ByteString
-renderBpeArtifact merges = BSC.pack (unlines
-  (("BPE " ++ show (mergeBase + length merges))
-    : [unwords [show a, show b, show new] | ((a, b), new) <- merges]))
+renderBpeArtifact :: PretokenRule -> [((Int, Int), Int)] -> BS.ByteString
+renderBpeArtifact rule merges = BSC.pack (unlines
+  (header : [unwords [show a, show b, show new] | ((a, b), new) <- merges]))
+  where
+    -- V1 omits the field, so a v1 artifact is byte-identical to one written
+    -- before the field existed and its sha256 -- which live run plans record
+    -- by value -- does not move.
+    header = unwords (["BPE", show (mergeBase + length merges)]
+      ++ [pretokenRuleTag rule | rule /= PretokenV1])

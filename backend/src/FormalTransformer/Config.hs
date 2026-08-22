@@ -20,6 +20,7 @@ module FormalTransformer.Config
   , bpe10mV3Preset
   , bpe100mPreset
   , bpe100mV3Preset
+  , bpe460mPreset
   , glaSmallPreset
   , glaPreset
   ) where
@@ -73,7 +74,7 @@ instance Binary Config
 -- The trainer presets live here so every host and gate shares one value.
 -- The v2-era presets keep v2 semantics (sigmoid gate, no qk-norm, no
 -- sinks) so smoke paths and recorded conformance references stay valid.
-tinyPreset, smallPreset, small4Preset, bpe10mPreset, bpe10mV3Preset, bpe100mPreset, bpe100mV3Preset, glaSmallPreset, glaPreset :: Config
+tinyPreset, smallPreset, small4Preset, bpe10mPreset, bpe10mV3Preset, bpe100mPreset, bpe100mV3Preset, bpe460mPreset, glaSmallPreset, glaPreset :: Config
 tinyPreset = Config 258 16 16 48 1 2 GateSigmoid False False True
 smallPreset = Config 258 64 64 192 2 4 GateSigmoid False False True
 -- Depth-matched softmax control for the hybrid A/B (gla-small is 4-layer).
@@ -101,6 +102,24 @@ bpe100mPreset = Config 32768 256 768 2048 12 12 GateSigmoid False False True
 -- (docs/V3-DECISIONS.md section 6) for the warm-started successor to the v2
 -- master run, skipping the section-4 pilot matrix.
 bpe100mV3Preset = Config 32768 256 768 2048 12 12 GateRgLru True True True
+
+-- The v4 scale-up rung: four times bpe100m-v3 at 463,084,260 parameters,
+-- and the first preset with a context longer than 256.
+--
+-- The multiplier is what two GPUs buy.  Data parallelism replicates the model
+-- per device rather than pooling memory, so this has to fit on ONE card: nine
+-- parameter-sized f32 buffers live at once under the Muon step (parameters,
+-- gradient, m, v, momentum, and the four the entry allocates), which is
+-- 16.7 GB before a single activation.
+--
+-- ff/d stays at the repo's 2.67 and head dim at 64; 20 layers give 15 GLA and
+-- 5 softmax, holding the 3:1 rule.  ffDim is 3456 rather than the 3413 that
+-- would hit exactly 4.00x because 3456 = 27*128, and a GEMM K dimension with
+-- a 128-byte-aligned tile costs nothing to prefer.  The vocabulary stays at
+-- 32,768: corpus tokens are Word16, so 65,535 is the hard cap, and a wider
+-- vocabulary would grow the logits activation (rows*vocab*4, twice) which at
+-- context 1024 is already the largest per-sample term.
+bpe460mPreset = Config 32768 1024 1280 3456 20 20 GateRgLru True True True
 
 -- Hybrid presets sized for the 3:1 rule below: four layers give three GLA
 -- and one softmax layer; eight give six and two.
