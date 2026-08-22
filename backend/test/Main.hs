@@ -8,7 +8,7 @@ import Data.Word (Word32)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy as LBS
-import Data.List (transpose)
+import Data.List (nub, transpose)
 import Data.Maybe (isNothing)
 import Data.Monoid (Sum (..))
 import qualified Data.Vector.Unboxed as VU
@@ -24,6 +24,7 @@ import FormalTransformer.Language.Autoregressive
 import FormalTransformer.Layout
 import FormalTransformer.Model
 import FormalTransformer.Optimizer
+import FormalTransformer.Pack
 import FormalTransformer.Semiring
 import FormalTransformer.Tokenizer
 import System.Directory (doesFileExist, getTemporaryDirectory, removeFile)
@@ -82,6 +83,10 @@ tests =
   , ("DiLoCo outer state survives a save/load round trip", testDilocoSidecar)
   , ("100M preset is GPT-2-small scale and tiles 3:1", testBpe100mPreset)
   , ("460M preset is four times the v3 rung at context 1024", testBpe460mPreset)
+  , ("NUL parsing is invariant under chunk boundaries", testNulChunkInvariance)
+  , ("packing loses no document and keeps ids unique", testPackPreservesDocuments)
+  , ("packing respects the target and never splits a document", testPackTarget)
+  , ("grouped packing never mixes two groups", testPackGrouping)
   ]
 
 -- The scale-up rung. Pinning the exact count here is the point: vocabulary is
@@ -1122,3 +1127,96 @@ assertVectorsNear :: Double -> [Double] -> [Double] -> String -> IO ()
 assertVectorsNear tolerance expected actual message = do
   assert (length expected == length actual) (message ++ ": lengths differ")
   forM_ (zip expected actual) $ \(a, b) -> assertNear tolerance a b message
+
+
+-- A streaming parser is only correct if where the reads happen cannot be
+-- observed in the output. Feeding the same bytes split at every single
+-- position must give the same documents, which is the property the 1 MB
+-- hGetSome loop in pack-stdin silently depends on.
+testNulChunkInvariance :: IO ()
+testNulChunkInvariance = do
+  let stream = BS.concat
+        [ BSC.pack "a", BS.singleton 0, BSC.pack "alpha", BS.singleton 0
+        , BSC.pack "b", BS.singleton 0, BSC.pack "", BS.singleton 0
+        , BSC.pack "c", BS.singleton 0, BSC.pack "gamma text", BS.singleton 0 ]
+      (whole, leftover) = nulDocuments stream
+  assert (BS.null leftover) "a complete stream must leave no remainder"
+  assert (length whole == 3) "three id/text pairs expected"
+  forM_ [0 .. BS.length stream] $ \cut -> do
+    let (front, back) = BS.splitAt cut stream
+        (firstDocuments, pending) = nulDocuments front
+        (restDocuments, tail') = nulDocuments (pending <> back)
+    assert (BS.null tail') ("remainder at cut " ++ show cut)
+    assert (firstDocuments ++ restDocuments == whole)
+      ("chunk boundary at " ++ show cut ++ " changed the parse")
+
+-- The packer's whole job is to lose nothing. Concatenating the packed texts
+-- must reproduce the input texts in order, and ids must stay unique because
+-- Artifact rejects a duplicate id and kills the entire shard.
+testPackPreservesDocuments :: IO ()
+testPackPreservesDocuments = do
+  let documents =
+        [ (BSC.pack ("doc-" ++ show i), BSC.pack (replicate (1 + i * 7) 'x'))
+        | i <- [0 .. 60 :: Int] ]
+      cfg = defaultPackConfig { packTarget = 100 }
+      packed = packAll cfg documents
+      separator = packSeparator cfg
+      recovered = concatMap (splitOn separator . snd) packed
+  assert (recovered == map snd documents)
+    "packing must preserve every document and its order"
+  assert (length (nub (map fst packed)) == length packed)
+    "packed ids must be unique"
+  assert (all (\(name, _) -> take 5 name == "pack-") packed)
+    "packed ids must carry the configured prefix"
+
+-- A pack closes at or above the target, never below, and a single document
+-- larger than the target is emitted alone rather than split -- splitting is
+-- what the trainer already does badly.
+testPackTarget :: IO ()
+testPackTarget = do
+  let big = BSC.pack (replicate 500 'y')
+      small = BSC.pack (replicate 10 'z')
+      documents = [(BSC.pack "a", small), (BSC.pack "b", big), (BSC.pack "c", small)]
+      cfg = defaultPackConfig { packTarget = 100 }
+      packed = packAll cfg documents
+  assert (any (\(_, text) -> BS.isInfixOf big text) packed)
+    "an oversized document must survive whole"
+  forM_ (init packed) $ \(name, text) ->
+    assert (BS.length text >= packTarget cfg)
+      ("pack " ++ name ++ " closed below the target at " ++ show (BS.length text))
+
+-- The regression that motivated returning a list rather than a Maybe: a group
+-- change closes the held pack AND the arriving document can fill one by
+-- itself, so two documents are emitted from one step. Collapsing that to a
+-- single emission silently drops a document.
+testPackGrouping :: IO ()
+testPackGrouping = do
+  let documents =
+        [ (BSC.pack "repoA/one", BSC.pack "aaa")
+        , (BSC.pack "repoA/two", BSC.pack "bbb")
+        , (BSC.pack "repoB/one", BSC.pack (replicate 400 'c'))
+        , (BSC.pack "repoB/two", BSC.pack "ddd") ]
+      cfg = defaultPackConfig { packTarget = 100, packGrouped = True }
+      packed = packAll cfg documents
+      recovered = concatMap (splitOn (packSeparator cfg) . snd) packed
+  assert (recovered == map snd documents)
+    "grouped packing must still lose no document"
+  forM_ packed $ \(name, text) -> do
+    let mixes = BS.isInfixOf (BSC.pack "aaa") text && BS.isInfixOf (BSC.pack "ccc") text
+    assert (not mixes) ("pack " ++ name ++ " mixed two groups")
+  assert (length packed >= 3)
+    "each group boundary must close a pack"
+
+splitOn :: BS.ByteString -> BS.ByteString -> [BS.ByteString]
+splitOn separator = go
+  where
+    go bytes = case breakOn separator bytes of
+      (before, Nothing) -> [before]
+      (before, Just rest) -> before : go rest
+    breakOn needle haystack = search 0
+      where
+        search i
+          | i + BS.length needle > BS.length haystack = (haystack, Nothing)
+          | needle `BS.isPrefixOf` BS.drop i haystack =
+              (BS.take i haystack, Just (BS.drop (i + BS.length needle) haystack))
+          | otherwise = search (i + 1)

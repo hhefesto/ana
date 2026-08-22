@@ -16,10 +16,11 @@ import FormalTransformer.Data
 import FormalTransformer.Layout
 import FormalTransformer.Model
 import FormalTransformer.Optimizer
+import FormalTransformer.Pack
 import FormalTransformer.Tokenizer
 import System.Environment (getArgs, lookupEnv)
 import System.Exit (die, exitFailure)
-import System.IO (hPutStrLn, stderr, stdin)
+import System.IO (hPutStrLn, hFlush, stderr, stdin, stdout)
 import Text.Read (readMaybe)
 
 main :: IO ()
@@ -46,6 +47,8 @@ main = do
       planSegment path offsetText batchText size
     ["build-eval", output, planPath, runDir, perShardText, strideText] ->
       buildEval output planPath runDir perShardText strideText
+    ["pack-stdin"] -> packStdin []
+    ("pack-stdin" : options) -> packStdin options
     ["learn-bpe", output, vocabText] -> learnBpe output vocabText "2"
     ["learn-bpe", output, vocabText, minText] -> learnBpe output vocabText minText
     ["bigram-gate", path] -> bigramGateCommand path tinyPreset
@@ -596,3 +599,67 @@ adjust index delta values =
 
 printResult :: Show a => Either String a -> IO ()
 printResult = either putStrLn print
+
+-- | Concatenate short documents so they survive windowing.
+--
+-- Reads and writes the same NUL-delimited id/text stream that
+-- prepare-bpe-stdin consumes, so it drops into plan-corpus.sh between jq and
+-- prepare-bpe-stdin without anything having to parse JSON twice -- and without
+-- this package needing a JSON parser at all.  See "FormalTransformer.Pack" for
+-- why packing is required rather than merely helpful at context 1024.
+--
+-- Nothing larger than one pack is ever retained, so a 35 GB corpus streams
+-- through in constant memory and never has to be materialized on disk.
+packStdin :: [String] -> IO ()
+packStdin options = do
+  cfg <- either die pure (parsePackOptions defaultPackConfig options)
+  wantStats <- pure (elem "--stats" options)
+  (consumed, produced) <- stream cfg BS.empty freshPack (0 :: Int)
+  hFlush stdout
+  when wantStats (hPutStrLn stderr
+    ("pack-stdin: " ++ show consumed ++ " documents in, "
+      ++ show produced ++ " packed documents out"))
+  where
+    emit (documentId, text) = do
+      BS.hPut stdout (BSC.pack documentId)
+      BS.hPut stdout (BS.singleton 0)
+      BS.hPut stdout text
+      BS.hPut stdout (BS.singleton 0)
+
+    stream cfg pending state consumed = do
+      chunk <- BS.hGetSome stdin 1048576
+      if BS.null chunk
+        then do
+          when (not (BS.null pending))
+            (die "pack-stdin: incomplete final NUL-delimited id/text pair")
+          case packFlush cfg state of
+            (state', Nothing) -> pure (consumed, packedCount state')
+            (state', Just packed) -> do
+              emit packed
+              pure (consumed, packedCount state')
+        else do
+          let (documents, leftover) = nulDocuments (pending <> chunk)
+          state' <- foldM (feed cfg) state documents
+          stream cfg leftover state' (consumed + length documents)
+
+    feed cfg state document = do
+      let (state', packed) = packStep cfg state document
+      mapM_ emit packed
+      pure state'
+
+-- | Options are deliberately few.  --target and --group are the two that
+-- change what the model sees; everything else has one sensible value.
+parsePackOptions :: PackConfig -> [String] -> Either String PackConfig
+parsePackOptions cfg [] = Right cfg
+parsePackOptions cfg ("--stats" : rest) = parsePackOptions cfg rest
+parsePackOptions cfg ("--group" : rest) = parsePackOptions cfg { packGrouped = True } rest
+parsePackOptions cfg ("--target" : value : rest) = case readMaybe value of
+  Just target | target > 0 -> parsePackOptions cfg { packTarget = target } rest
+  _ -> Left "pack-stdin: --target must be a positive integer"
+parsePackOptions cfg ("--prefix" : value : rest)
+  | null value = Left "pack-stdin: --prefix must not be empty"
+  | elem '/' value = Left "pack-stdin: --prefix must not contain '/' (it delimits the group)"
+  | otherwise = parsePackOptions cfg { packPrefix = value } rest
+parsePackOptions cfg ("--separator" : value : rest) =
+  parsePackOptions cfg { packSeparator = BSC.pack value } rest
+parsePackOptions _ (unknown : _) = Left ("pack-stdin: unrecognized option " ++ unknown)

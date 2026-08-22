@@ -14,7 +14,7 @@
 # usage: ./deploy/push-bench.sh [user@]host [port]
 #
 # Env:
-#   SHARD     corpus shard to send (default run/mixed-bpe100m/shard-0-bpe100m.corpus)
+#   SHARD     corpus shard to send (default run/mixed-bpe100m-s32000/shard-150-bpe100m.corpus)
 #   TOKENIZER .bpe artifact        (default run/enwiki-fineweb-32k.bpe)
 #   REMOTE_DIR                     (default formalTransformer)
 #   DATA_DIR                       (default bench-data)

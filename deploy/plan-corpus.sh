@@ -15,6 +15,14 @@
 # Usage:
 #   TOKENIZER=weights/enwiki-c4-32k.bpe \
 #   deploy/plan-corpus.sh DATA.jsonl RUN_DIR SIZE BATCH [ARTICLES_PER_SHARD]
+#
+# Env:
+#   PACK_TARGET  pack documents up to this many bytes before tokenizing, so
+#                short documents survive windowing (128 KB clears 98% of bytes
+#                at context 1024, against 52% unpacked). Pair it with a smaller
+#                PER: at a 128 KB target, PER=2000 keeps a shard near the
+#                ~272 MB of text the v2 run proved safe to plan in RAM.
+#   PACK_GROUP   pack only within a repository (ids must be repo/path).
 set -euo pipefail
 
 DATA="${1:?usage: plan-corpus.sh DATA.jsonl RUN_DIR SIZE BATCH [PER]}"
@@ -85,8 +93,28 @@ for (( k = 0; k < shards; k++ )); do
     else
       filter='.id, .text'
     fi
-    prepared="$(jq --raw-output0 "$filter" < "$part" \
-      | "$CLI" prepare-bpe-stdin "$TOKENIZER" "$corpus")"
+    # PACK_TARGET concatenates short documents so they survive windowing.
+    # The trainer cuts documents into non-overlapping windows and discards the
+    # remainder, so at context 1024 a document under ~4.4 KB contributes
+    # nothing at all -- see FormalTransformer.Pack. Packing happens here, inside
+    # the per-shard pipeline, so it costs no extra pass over the source and the
+    # packed corpus never has to exist on disk. The prefix carries the shard
+    # index because ids restart per shard and must stay globally distinct.
+    if [ -n "${PACK_TARGET:-}" ]; then
+      packed_in=0
+      packed_out=0
+      prepared="$(jq --raw-output0 "$filter" < "$part" \
+        | "$CLI" pack-stdin --target "$PACK_TARGET" --prefix "pack$k" \
+            ${PACK_GROUP:+--group} --stats 2> "$PLAN.pack.tmp" \
+        | "$CLI" prepare-bpe-stdin "$TOKENIZER" "$corpus")"
+      read -r packed_in packed_out < <(sed -n \
+        's/^pack-stdin: \([0-9]*\) documents in, \([0-9]*\) packed.*/\1 \2/p' \
+        "$PLAN.pack.tmp")
+      rm -f "$PLAN.pack.tmp"
+    else
+      prepared="$(jq --raw-output0 "$filter" < "$part" \
+        | "$CLI" prepare-bpe-stdin "$TOKENIZER" "$corpus")"
+    fi
     if [ ! -f "$corpus" ]; then
       echo "plan-corpus: shard $k failed to prepare from $part" >&2
       echo "  $prepared" >&2
@@ -109,7 +137,22 @@ for (( k = 0; k < shards; k++ )); do
   # nothing downstream would notice -- the plan would simply describe a corpus
   # missing documents, and the run would train on it. This caught shard 83
   # holding 1,625 of 4,000 documents.
-  if [ "$documents" != "$PER" ] && [ "$k" != "$(( shards - 1 ))" ]; then
+  #
+  # Packing changes what to count: the corpus now holds packed documents, far
+  # fewer than PER, so the check moves upstream to what the packer was fed --
+  # which is the same intent stated more directly. The second half asserts that
+  # everything the packer emitted reached the corpus.
+  if [ -n "${PACK_TARGET:-}" ]; then
+    if [ "$packed_in" != "$PER" ] && [ "$k" != "$(( shards - 1 ))" ]; then
+      echo "plan-corpus: shard $k is short: packed $packed_in of $PER documents" >&2
+      exit 1
+    fi
+    if [ "$documents" != "$packed_out" ]; then
+      echo "plan-corpus: shard $k lost documents: packer emitted $packed_out, corpus holds $documents" >&2
+      exit 1
+    fi
+  fi
+  if [ -z "${PACK_TARGET:-}" ] && [ "$documents" != "$PER" ] && [ "$k" != "$(( shards - 1 ))" ]; then
     echo "plan-corpus: shard $k is short: $documents of $PER documents" >&2
     echo "  delete $corpus and re-run" >&2
     exit 1

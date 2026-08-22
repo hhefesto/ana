@@ -27,6 +27,7 @@ library
       FormalTransformer.Layout
       FormalTransformer.Model
       FormalTransformer.Optimizer
+      FormalTransformer.Pack
       FormalTransformer.Semiring
       FormalTransformer.Tokenizer
   build-depends:
