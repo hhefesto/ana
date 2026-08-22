@@ -89,6 +89,34 @@ project notes belongs to the 8k era. Rebuilt against the training tokenizer:
 bpb is bits per *byte*, so these numbers stay comparable across tokenizer
 changes and against GPT-2-small. That is what makes the whole comparison valid.
 
+## The baseline v4 has to beat
+
+Measured 2026-08-21 on the CPU `multicore` backend -- `evaluate` is the same
+`backend/gpu/Main.hs` that backend compiles, so it needs no GPU, running at
+~7.8 s/window. Population: 32 slices of 8 KB spread evenly across the last
+5,000,000 bytes of enwik8, 305 windows, 77,775 predictions, both models scored
+on identical windows.
+
+| model | trained | enwik8 bpb |
+|---|---|---|
+| v2 final (step 336,872) | 94% of its schedule | **1.337 ± 0.043** |
+| v3 final (step 8,000) | 2.2% of its schedule | 1.450 ± 0.043 |
+| GPT-2-small | — | 1.16 |
+| v1 (10.6M, 8k vocab) | — | 1.994 |
+
+**The gap to the objective is 0.18 bpb, not the 0.83 the project notes carried.**
+Retiring the 8k tokenizer for 32k pieces did almost all of the work; the 1.994
+figure belongs to the 8k era and should not be quoted for anything after it.
+
+That v3 reached 1.450 at 2.2% of its schedule, against v2's 1.337 at 94%, says
+the v3 architecture was on a much better trajectory when the run was stopped by
+decision.
+
+This is a spread sample rather than the full test split, so it carries a
+±0.043 standard error; the exact figure costs about a minute on a GPU and
+should be taken at the next rental. The paired v2-vs-v3 difference is much
+tighter than the absolute numbers, because both ran the identical windows.
+
 ## The two-process protocol
 
 Each rank trains normally on a disjoint half of every global batch for H inner
@@ -153,6 +181,23 @@ and its sha256 — which live run plans record by value — do not move.
 
 `BPE_PRETOKEN=v1` reproduces a pre-2026-08 tokenizer exactly; new ones default
 to v2.
+
+**Measured 2026-08-21, and it clears its gate by a wide margin.** Two 32,768-piece
+tokenizers were learned from one identical 200 MB sample (91 MB of Wikipedia and
+FineWeb prose sampled at stride 401, 109 MB of Haskell, Nix and Agda from local
+repositories), differing only in `BPE_PRETOKEN`. Held-out sets are disjoint from
+both: 2,500 unseen documents of prose, and every 16th source file of code.
+
+| held-out set | bytes/token v1 | bytes/token v2 | change | gate |
+|---|---|---|---|---|
+| code (Haskell/Nix/Agda) | 2.750 | **3.835** | **+39.5%** | >= 30% |
+| Wikipedia prose | 4.4873 | 4.4856 | **-0.04%** | <= 1% regression |
+
+Code costs 28% fewer tokens for the same bytes, and prose is unchanged to
+within a twentieth of a percent -- the shared 32,768-piece budget did not have
+to be bought from English after all. The effect is visible before any merge is
+learned: the same sample yields 40.6M pretokenized words under v1 and 30.2M
+under v2, because a run of spaces stops being one word per space.
 
 ## Sequencing constraints
 
