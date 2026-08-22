@@ -19,7 +19,9 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 SOURCES="${2:-run/code-sources}"
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+# Extracted packages can contain mode-555 directories, so make the tree
+# writable before removing it or the trap itself fails.
+trap 'chmod -R u+w "$WORK" 2>/dev/null || true; rm -rf "$WORK" 2>/dev/null || true' EXIT
 
 # Source extensions. Everything else in a package -- READMEs, changelogs,
 # generated C, test fixtures -- stays out.
@@ -38,6 +40,7 @@ permissive() {
 }
 
 emitted=0; skipped_license=0; skipped_binary=0; considered=0; held=0
+processed=0; unreadable=0; tarball_count=0
 
 # Held-out evaluation sources are chosen WHOLE, by a hash of the package or
 # repository name, and never by document position. The trainer's own
@@ -105,13 +108,22 @@ emit_file() {
 
 echo "extract-code: Hackage tarballs" >&2
 if [ -d "$SOURCES/tarballs" ]; then
+  tarball_count=$(ls -1 "$SOURCES"/tarballs/*.tar.gz 2>/dev/null | wc -l)
   for tarball in "$SOURCES"/tarballs/*.tar.gz; do
     [ -e "$tarball" ] || continue
     considered=$((considered+1))
     pv="$(basename "$tarball" .tar.gz)"
     package="${pv%-*}"
-    rm -rf "$WORK/pkg"; mkdir -p "$WORK/pkg"
-    tar xzf "$tarball" -C "$WORK/pkg" 2>/dev/null || continue
+    # Some Hackage tarballs carry directories with mode 555, and rm then fails.
+    # Under `set -e` that killed the whole loop at the first such package
+    # (bgzf, alphabetically early) and the script still exited 0 with a corpus
+    # holding a* through bg* -- silent truncation of exactly the kind the
+    # completeness check at the bottom now refuses to allow.
+    chmod -R u+w "$WORK/pkg" 2>/dev/null || true
+    rm -rf "$WORK/pkg" || true
+    mkdir -p "$WORK/pkg"
+    tar xzf "$tarball" -C "$WORK/pkg" 2>/dev/null || { unreadable=$((unreadable+1)); continue; }
+    processed=$((processed+1))
     cabal="$(find "$WORK/pkg" -maxdepth 2 -name '*.cabal' -print -quit 2>/dev/null || true)"
     [ -n "$cabal" ] || { skipped_license=$((skipped_license+1)); continue; }
     license="$(sed -n 's/^[Ll]icense:[[:space:]]*//p' "$cabal" | head -1 | tr -d '\r')"
@@ -171,6 +183,13 @@ for tree in "$SOURCES"/repos/*/ "$SOURCES"/own/*/; do
 done
 
 echo "extract-code: $considered sources considered, $skipped_license dropped on license, $skipped_binary files skipped by size, $emitted train / $held held-out files" >&2
+  # Refuse to hand back a partial corpus quietly. Every tarball must have been
+  # opened, whatever its license said afterwards; a shortfall here means the
+  # loop died early and the result is a prefix of the alphabet.
+  if [ "$tarball_count" -gt 0 ] && [ "$(( processed + unreadable ))" -lt "$tarball_count" ]; then
+    echo "extract-code: INCOMPLETE -- opened $processed of $tarball_count tarballs ($unreadable unreadable). The loop died early; the corpus is a prefix." >&2
+    exit 1
+  fi
 }
 
 generate | awk -F'\t' -v out="$OUT" -v hout="${HOLDOUT_OUT:-/dev/null}" '
