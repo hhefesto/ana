@@ -21,7 +21,7 @@ SOURCES="${2:-run/code-sources}"
 WORK="$(mktemp -d)"
 # Extracted packages can contain mode-555 directories, so make the tree
 # writable before removing it or the trap itself fails.
-trap 'chmod -R u+w "$WORK" 2>/dev/null || true; rm -rf "$WORK" 2>/dev/null || true' EXIT
+trap 'chmod -R u+rwX "$WORK" 2>/dev/null || true; rm -rf "$WORK" 2>/dev/null || true' EXIT
 
 # Source extensions. Everything else in a package -- READMEs, changelogs,
 # generated C, test fixtures -- stays out.
@@ -119,7 +119,7 @@ if [ -d "$SOURCES/tarballs" ]; then
     # (bgzf, alphabetically early) and the script still exited 0 with a corpus
     # holding a* through bg* -- silent truncation of exactly the kind the
     # completeness check at the bottom now refuses to allow.
-    chmod -R u+w "$WORK/pkg" 2>/dev/null || true
+    chmod -R u+rwX "$WORK/pkg" 2>/dev/null || true
     rm -rf "$WORK/pkg" || true
     mkdir -p "$WORK/pkg"
     tar xzf "$tarball" -C "$WORK/pkg" 2>/dev/null || { unreadable=$((unreadable+1)); continue; }

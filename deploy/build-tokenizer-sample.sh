@@ -45,8 +45,10 @@ for spec in "$@"; do
     ln -sf "$(readlink -f "$path")" "$work"
   fi
 
-  available=$(wc -c < "$work")
-  lines=$(wc -l < "$work")
+  # stat, not `wc -c`: wc reads the whole file, and the English source is
+  # 36 GB. The line count is only ever printed, so it is not worth a second
+  # full pass either -- the stride below is chosen from bytes.
+  available=$(stat -Lc %s "$work")
   if [ "$available" -le "$budget" ]; then
     stride=1
   else
@@ -66,8 +68,8 @@ for spec in "$@"; do
     < "$work" \
     | jq --raw-output0 '.id, (.text | explode | map(select(. != 0)) | implode)' \
     | tee -a "$OUT" | wc -c)
-  printf 'build-tokenizer-sample: %-28s %5d MB requested, %5d MB taken (stride %d of %d lines)\n' \
-    "$(basename "$path")${pattern:+ [$pattern]}" "$mb" "$(( taken / 1000000 ))" "$stride" "$lines" >&2
+  printf 'build-tokenizer-sample: %-34s %4d MB requested, %4d MB taken (stride %d over %d MB)\n' \
+    "$(basename "$path")${pattern:+ [$pattern]}" "$mb" "$(( taken / 1000000 ))" "$stride" "$(( available / 1000000 ))" >&2
   rm -f "$work"
 done
 
