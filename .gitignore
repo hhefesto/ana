@@ -17,3 +17,4 @@ backend/futhark/bench
 *.tmp
 /data/
 /run/
+run/code-sources/
