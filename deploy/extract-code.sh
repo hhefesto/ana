@@ -55,21 +55,48 @@ processed=0; unreadable=0; tarball_count=0
 HOLDOUT_OUT="${HOLDOUT_OUT:-}"
 HOLDOUT_PERCENT="${HOLDOUT_PERCENT:-2}"
 
+# A percentage alone cannot hold out the non-Haskell languages. Hackage has
+# 19,418 packages, so 2% of it is a healthy Haskell eval; but Lean, Agda, Nix
+# and Idris live in about eight repositories between them, and 2% of eight is
+# zero. The first version of this produced a held-out set that was 100% Haskell
+# and would have silently yielded four empty evaluation corpora.
+#
+# So those languages name their holdout explicitly. Entries are id prefixes, so
+# a whole repository (cubical) or a subtree of one (nixpkgs/nixos) both work.
+# Whole repositories are preferred where a language has more than one, because
+# holding out cubical while training on agda-stdlib tests generalization across
+# projects; holding out a subtree of a single repository is a weaker claim, and
+# is used only where the language has just one source.
+HOLDOUT_GROUPS="${HOLDOUT_GROUPS:-cubical batteries nixpkgs/nixos idris2/tests}"
+
 # Decided once per source, not once per file: hashing the group name for each
 # of ~200,000 files would cost more than the extraction itself.
 current_holdout=0
 set_holdout() {
-  local group="$1" spare="$2" bucket
-  if [ -z "$HOLDOUT_OUT" ] || [ "$spare" = spare ]; then
-    current_holdout=0
-    return 0
-  fi
+  local group="$1" spare="$2" bucket named
+  current_holdout=0
+  { [ -z "$HOLDOUT_OUT" ] || [ "$spare" = spare ]; } && return 0
+  for named in $HOLDOUT_GROUPS; do
+    case "$named" in
+      */*) : ;;                                  # a subtree; decided per file
+      "$group") current_holdout=1; return 0 ;;   # a whole repository
+    esac
+  done
   bucket=$(printf '%s' "$group" | sha256sum | cut -c1-6)
-  if [ $(( 0x$bucket % 100 )) -lt "$HOLDOUT_PERCENT" ]; then
-    current_holdout=1
-  else
-    current_holdout=0
-  fi
+  [ $(( 0x$bucket % 100 )) -lt "$HOLDOUT_PERCENT" ] && current_holdout=1
+  return 0
+}
+
+# For a named subtree (nixpkgs/nixos) the decision is per file, not per source,
+# so it is applied where the relative path is known.
+holdout_path() {
+  local group="$1" rel="$2" named
+  for named in $HOLDOUT_GROUPS; do
+    case "$named" in
+      */*) [ "$group/${rel%%/*}" = "$named" ] && return 0 ;;
+    esac
+  done
+  return 1
 }
 
 # Everything below writes `hash<TAB>jsonline` to stdout; the tail of the script
@@ -96,7 +123,7 @@ emit_file() {
   # Held-out records carry the same hash prefix so the dedup pass sees both
   # streams and a file present in a training package cannot reappear in the
   # eval set under another name.
-  if [ "$current_holdout" = 1 ]; then
+  if [ "$current_holdout" = 1 ] || holdout_path "$group" "$rel"; then
     printf 'H\t%s\t' "$hash"
     held=$((held+1))
   else
