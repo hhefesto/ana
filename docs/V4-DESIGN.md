@@ -208,3 +208,59 @@ under v2, because a run of spaces stops being one word per space.
   there is no positional embedding — so refusing a warm start across contexts
   forbade a transfer that is sound by construction. It stays in `Config`, and
   hence in `modelId`, so the runs remain distinct identities.
+
+
+## The code corpus
+
+The Stack was dropped in favour of the canonical sources directly. Its
+snapshots are from 2022 and pre-date the Lean 4 ecosystem entirely; its Haskell
+is a subset of Hackage and its Nix a subset of nixpkgs; and the two things it
+pre-computes for us, permissive-license filtering and near-duplicate removal,
+are cheap to do explicitly. Nothing in this pipeline needs an account or a
+token.
+
+Acquired: 19,418 of 19,426 Hackage packages at their latest version (the 8
+absent are spam Hackage has pulled), mathlib4 / lean4 / batteries,
+agda-stdlib / cubical / agda, idris2, nixpkgs, and 23 of the user's own
+repositories. After the license gate and content-hash deduplication:
+
+| | files | MB | share |
+|---|---|---|---|
+| Haskell (`.hs`, `.lhs`) | 222,708 | 1,579 | 88% |
+| Lean | 16,238 | 143 | 8% |
+| Nix | 25,605 | 59 | 3% |
+| Agda | 7,856 | 19 | 1% |
+| Idris | 2,637 | 7 | 0.4% |
+
+299,966 files became 279,452 unique (6.8% duplicates), of which 270,054 train
+and 9,398 are held out. 2,641 of 19,450 sources were dropped on license.
+
+**Haskell dominates at 88%, far more than the plan assumed.** Phase B's
+per-language balance is therefore a job for `mix-corpus.sh`'s repeat counts
+rather than something the corpus provides for free.
+
+**1lab is excluded and that is correct** — it is AGPL-3.0. It would have been a
+large, high-quality Agda source, and losing it is why Agda is only 1%.
+
+### Evaluation holdout
+
+Held out whole, never by document position: the trainer's split is a hash of
+position, and code vendors heavily enough that the same file lands on both
+sides of one.
+
+| language | held out | MB | ~windows at ctx 1024 |
+|---|---|---|---|
+| Haskell | 2% of Hackage packages | 28.5 | 7,300 |
+| Nix | `nixpkgs/nixos` | 9.1 | 2,340 |
+| Agda | `cubical` | 8.5 | 2,195 |
+| Lean | `batteries` | 1.35 | 347 |
+| Idris | `idris2/tests` | 0.90 | 231 |
+
+Haskell, Agda and Lean are held out as **whole projects**, which tests
+generalization across projects. Nix and Idris each come from a single
+repository, so their holdout is a **subtree of the project the model trained
+on** — a weaker claim, and one to state whenever those two numbers are quoted.
+
+A flat 2% produced a holdout that was 100% Haskell: 2% of Hackage's 19,418
+packages is a healthy eval, while 2% of the eight repositories the other four
+languages share rounds to zero.
