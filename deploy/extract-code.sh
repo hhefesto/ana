@@ -37,7 +37,37 @@ permissive() {
   esac
 }
 
-emitted=0; skipped_license=0; skipped_binary=0; considered=0
+emitted=0; skipped_license=0; skipped_binary=0; considered=0; held=0
+
+# Held-out evaluation sources are chosen WHOLE, by a hash of the package or
+# repository name, and never by document position. The trainer's own
+# train/validation split is a hash of position (FormalTransformer.Data), so a
+# position-based holdout of code would put files from the same package -- often
+# the same file, vendored -- on both sides of it. Holding out entire projects
+# is the only split that means anything for code.
+#
+# The user's own repositories are never held out: they are the point of the
+# corpus, there are only a few MB of them, and 2% of that is too little to
+# measure anything with anyway.
+HOLDOUT_OUT="${HOLDOUT_OUT:-}"
+HOLDOUT_PERCENT="${HOLDOUT_PERCENT:-2}"
+
+# Decided once per source, not once per file: hashing the group name for each
+# of ~200,000 files would cost more than the extraction itself.
+current_holdout=0
+set_holdout() {
+  local group="$1" spare="$2" bucket
+  if [ -z "$HOLDOUT_OUT" ] || [ "$spare" = spare ]; then
+    current_holdout=0
+    return 0
+  fi
+  bucket=$(printf '%s' "$group" | sha256sum | cut -c1-6)
+  if [ $(( 0x$bucket % 100 )) -lt "$HOLDOUT_PERCENT" ]; then
+    current_holdout=1
+  else
+    current_holdout=0
+  fi
+}
 
 # Everything below writes `hash<TAB>jsonline` to stdout; the tail of the script
 # drops duplicate content in one pass. Vendored copies are rampant in this
@@ -60,9 +90,17 @@ emit_file() {
   [ -s "$clean" ] || return 0
   local hash
   hash=$(sha256sum < "$clean" | cut -d' ' -f1)
-  printf '%s\t' "$hash"
+  # Held-out records carry the same hash prefix so the dedup pass sees both
+  # streams and a file present in a training package cannot reappear in the
+  # eval set under another name.
+  if [ "$current_holdout" = 1 ]; then
+    printf 'H\t%s\t' "$hash"
+    held=$((held+1))
+  else
+    printf 'T\t%s\t' "$hash"
+    emitted=$((emitted+1))
+  fi
   jq -c -Rs --arg id "$group/$rel" '{id:$id, text:.}' < "$clean"
-  emitted=$((emitted+1))
 }
 
 echo "extract-code: Hackage tarballs" >&2
@@ -78,6 +116,7 @@ if [ -d "$SOURCES/tarballs" ]; then
     [ -n "$cabal" ] || { skipped_license=$((skipped_license+1)); continue; }
     license="$(sed -n 's/^[Ll]icense:[[:space:]]*//p' "$cabal" | head -1 | tr -d '\r')"
     permissive "$license" || { skipped_license=$((skipped_license+1)); continue; }
+    set_holdout "$package" keep
     while IFS= read -r file; do
       emit_file "$package" "$file" "${file#$WORK/pkg/$pv/}"
     done < <(find "$WORK/pkg" -type f 2>/dev/null | grep -Ei "$EXTENSIONS" || true)
@@ -119,20 +158,36 @@ for tree in "$SOURCES"/repos/*/ "$SOURCES"/own/*/; do
       skipped_license=$((skipped_license+1)); continue
     fi
   fi
+  # The user's own repositories are spared the holdout: they are the point of
+  # the corpus and there is far too little of them to measure with.
+  if [ "$(dirname "${tree%/}")" = "$SOURCES/own" ]; then
+    set_holdout "$name" spare
+  else
+    set_holdout "$name" keep
+  fi
   while IFS= read -r file; do
     emit_file "$name" "$file" "${file#$tree}"
   done < <(find "$tree" -type f -not -path '*/.git/*' 2>/dev/null | grep -Ei "$EXTENSIONS" || true)
 done
 
-echo "extract-code: $considered sources considered, $skipped_license dropped on license, $skipped_binary files skipped by size, $emitted files emitted" >&2
+echo "extract-code: $considered sources considered, $skipped_license dropped on license, $skipped_binary files skipped by size, $emitted train / $held held-out files" >&2
 }
 
-generate | awk -F'\t' -v out="$OUT" '
+generate | awk -F'\t' -v out="$OUT" -v hout="${HOLDOUT_OUT:-/dev/null}" '
+  # Field 1 routes (T train, H held out), field 2 is the content hash, and the
+  # JSON is everything after. Deduplication keys on the hash across BOTH
+  # streams, so a file vendored into a held-out package cannot reappear there
+  # after being seen in training.
   { total++ }
-  !seen[$1]++ { sub(/^[^\t]*\t/, ""); print > out; kept++ }
+  !seen[$2]++ {
+    line = $0
+    sub(/^[^\t]*\t[^\t]*\t/, "", line)
+    if ($1 == "H") { print line > hout; heldkept++ } else { print line > out; kept++ }
+  }
   END {
-    printf "extract-code: %d files, %d unique, %d duplicates dropped (%.1f%%)\n",
-      total, kept, total - kept, total ? 100 * (total - kept) / total : 0 > "/dev/stderr"
+    printf "extract-code: %d files, %d unique (%d train, %d held out), %d duplicates dropped (%.1f%%)\n",
+      total, kept + heldkept, kept, heldkept, total - kept - heldkept,
+      total ? 100 * (total - kept - heldkept) / total : 0 > "/dev/stderr"
   }'
 test -s "$OUT" || { echo "extract-code: produced nothing" >&2; exit 1; }
 echo "extract-code: wrote $OUT ($(wc -l < "$OUT") documents, $(du -h "$OUT" | cut -f1))" >&2
