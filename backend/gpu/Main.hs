@@ -1636,16 +1636,21 @@ generate checkpointPath text budget = do
     ++ " top_k=" ++ show topK
     ++ " top_p=" ++ show topP
     ++ " seed=" ++ maybe "checkpoint-prng" id seedText)
-  -- Trailing whitespace cannot survive encoding: this tokenizer attaches a
-  -- space to the word that FOLLOWS it, so a dangling space becomes a
-  -- standalone token that never occurs in encoded training text.
-  -- Conditioning there is off-manifold and degenerates harder as the model
-  -- sharpens (measured: step 56,789 recovers, 92,000 emits byte soup).  The
-  -- continuation's first token carries its own leading space, so stripping
-  -- preserves the prompt's meaning.
-  let stripped = dropWhileEnd isSpace text
+  -- Trailing whitespace is stripped only under the V1 rule, where it cannot
+  -- survive encoding: v1 attaches a space to the word that FOLLOWS it, so a
+  -- dangling space becomes a standalone token that never occurs in encoded
+  -- training text, and conditioning there is off-manifold (measured: step
+  -- 56,789 recovers, 92,000 emits byte soup).  Under V2 trailing runs and
+  -- "\n<indent>" words are ordinary in-distribution tokens -- stripping
+  -- them (isSpace also eats \n and \t) would truncate exactly the
+  -- indentation prompts the v2 rule exists to serve.  The byte tokenizer has
+  -- no word boundaries at all, so it keeps its whitespace too.
+  let stripsTrailing = case tokenizer of
+        FastBpeTokenizer bpe -> fastBpeRule bpe == PretokenV1
+        ByteTokenizer -> False
+      stripped = if stripsTrailing then dropWhileEnd isSpace text else text
   when (stripped /= text)
-    (hPutStrLn stderr "generate: trailing whitespace stripped from prompt before encoding")
+    (hPutStrLn stderr "generate: trailing whitespace stripped from prompt before encoding (v1 tokenizer)")
   let promptBytes = Text.encodeUtf8 (Text.pack stripped)
       prompt = bosToken : encodeWith tokenizer promptBytes
       n = paramCount cfg
