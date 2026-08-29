@@ -10,6 +10,12 @@
 #
 # Ids are `group/path`, so `plan-corpus.sh`'s PACK_GROUP packs within a package
 # or repository and a training window never straddles two unrelated projects.
+# The group carries its source as a namespace -- hackage:foo, repo:foo, own:foo
+# -- because the three pools share bare names: the Hackage PACKAGE cubical and
+# the Agda REPOSITORY cubical are different projects, and a bare name in
+# HOLDOUT_GROUPS once matched both, putting seven Haskell files into the Agda
+# repo's holdout.  (The percent bucket still hashes the BARE name, so the
+# sampled 2% is the same population it was before the namespacing.)
 #
 # Usage: deploy/extract-code.sh OUT.jsonl [SOURCES_DIR]
 set -euo pipefail
@@ -40,7 +46,7 @@ permissive() {
 }
 
 emitted=0; skipped_license=0; skipped_binary=0; considered=0; held=0
-processed=0; unreadable=0; tarball_count=0
+processed=0; unreadable=0; tarball_count=0; undecodable=0
 
 # Held-out evaluation sources are chosen WHOLE, by a hash of the package or
 # repository name, and never by document position. The trainer's own
@@ -67,13 +73,13 @@ HOLDOUT_PERCENT="${HOLDOUT_PERCENT:-2}"
 # holding out cubical while training on agda-stdlib tests generalization across
 # projects; holding out a subtree of a single repository is a weaker claim, and
 # is used only where the language has just one source.
-HOLDOUT_GROUPS="${HOLDOUT_GROUPS:-cubical batteries nixpkgs/nixos idris2/tests}"
+HOLDOUT_GROUPS="${HOLDOUT_GROUPS:-repo:cubical repo:batteries repo:nixpkgs/nixos repo:idris2/tests}"
 
 # Decided once per source, not once per file: hashing the group name for each
 # of ~200,000 files would cost more than the extraction itself.
 current_holdout=0
 set_holdout() {
-  local group="$1" spare="$2" bucket named
+  local group="$1" spare="$2" bucket named bare
   current_holdout=0
   { [ -z "$HOLDOUT_OUT" ] || [ "$spare" = spare ]; } && return 0
   for named in $HOLDOUT_GROUPS; do
@@ -82,7 +88,10 @@ set_holdout() {
       "$group") current_holdout=1; return 0 ;;   # a whole repository
     esac
   done
-  bucket=$(printf '%s' "$group" | sha256sum | cut -c1-6)
+  # The bucket hashes the bare name, not the namespaced group, so the sampled
+  # holdout population is unchanged by the namespacing of the ids.
+  bare="${group#*:}"
+  bucket=$(printf '%s' "$bare" | sha256sum | cut -c1-6)
   [ $(( 0x$bucket % 100 )) -lt "$HOLDOUT_PERCENT" ] && current_holdout=1
   return 0
 }
@@ -91,6 +100,10 @@ set_holdout() {
 # so it is applied where the relative path is known.
 holdout_path() {
   local group="$1" rel="$2" named
+  # Without a holdout destination there is no holdout: the H stream lands in
+  # /dev/null, so routing anything there would silently DELETE those files
+  # from the corpus rather than hold them out.
+  [ -z "$HOLDOUT_OUT" ] && return 1
   for named in $HOLDOUT_GROUPS; do
     case "$named" in
       */*) [ "$group/${rel%%/*}" = "$named" ] && return 0 ;;
@@ -100,10 +113,11 @@ holdout_path() {
 }
 
 # Everything below writes `hash<TAB>jsonline` to stdout; the tail of the script
-# drops duplicate content in one pass. Vendored copies are rampant in this
-# ecosystem -- every vendored Setup.hs, every re-released package version -- so
-# a collision rate in the tens of percent is expected, and a rate near zero
-# means the hashing is broken rather than the corpus being clean.
+# drops duplicate content in one pass.  Measured on the full 2026-08 pull: 6.8%
+# duplicates (299,966 files, 279,452 unique).  The "tens of percent" the plan
+# predicted assumed sdists vendor heavily; they do not -- Hackage tarballs ship
+# their own source, and the vendoring lives in build products this extraction
+# never sees.  A rate NEAR ZERO would still mean broken hashing.
 generate() {
 
 # One record per file: id, then the text, hashed so duplicates can be dropped
@@ -116,8 +130,9 @@ emit_file() {
   # code or a vendored blob rather than something a person wrote.
   [ "$size" -gt 0 ] && [ "$size" -le 1000000 ] || { skipped_binary=$((skipped_binary+1)); return 0; }
   local clean="$WORK/clean"
-  tr -d '\000' < "$path" | iconv -f UTF-8 -t UTF-8 -c > "$clean" 2>/dev/null || return 0
-  [ -s "$clean" ] || return 0
+  tr -d '\000' < "$path" | iconv -f UTF-8 -t UTF-8 -c > "$clean" 2>/dev/null \
+    || { undecodable=$((undecodable+1)); return 0; }
+  [ -s "$clean" ] || { undecodable=$((undecodable+1)); return 0; }
   local hash
   hash=$(sha256sum < "$clean" | cut -d' ' -f1)
   # Held-out records carry the same hash prefix so the dedup pass sees both
@@ -135,7 +150,9 @@ emit_file() {
 
 echo "extract-code: Hackage tarballs" >&2
 if [ -d "$SOURCES/tarballs" ]; then
-  tarball_count=$(ls -1 "$SOURCES"/tarballs/*.tar.gz 2>/dev/null | wc -l)
+  # find, not `ls | wc`: on an empty directory ls exits 2 and pipefail turns
+  # the count itself into a script death with no message.
+  tarball_count=$(find "$SOURCES/tarballs" -maxdepth 1 -name '*.tar.gz' | wc -l)
   for tarball in "$SOURCES"/tarballs/*.tar.gz; do
     [ -e "$tarball" ] || continue
     considered=$((considered+1))
@@ -153,11 +170,13 @@ if [ -d "$SOURCES/tarballs" ]; then
     processed=$((processed+1))
     cabal="$(find "$WORK/pkg" -maxdepth 2 -name '*.cabal' -print -quit 2>/dev/null || true)"
     [ -n "$cabal" ] || { skipped_license=$((skipped_license+1)); continue; }
-    license="$(sed -n 's/^[Ll]icense:[[:space:]]*//p' "$cabal" | head -1 | tr -d '\r')"
+    # awk with an early exit, not `sed | head`: head closing the pipe can
+    # SIGPIPE sed, and pipefail then kills the whole extraction mid-corpus.
+    license="$(awk 'sub(/^[Ll]icense:[[:space:]]*/, "") { print; exit }' "$cabal" | tr -d '\r')"
     permissive "$license" || { skipped_license=$((skipped_license+1)); continue; }
-    set_holdout "$package" keep
+    set_holdout "hackage:$package" keep
     while IFS= read -r file; do
-      emit_file "$package" "$file" "${file#$WORK/pkg/$pv/}"
+      emit_file "hackage:$package" "$file" "${file#$WORK/pkg/$pv/}"
     done < <(find "$WORK/pkg" -type f 2>/dev/null | grep -Ei "$EXTENSIONS" || true)
   done
 fi
@@ -189,7 +208,7 @@ for tree in "$SOURCES"/repos/*/ "$SOURCES"/own/*/; do
     done
     # Copyleft is checked first and wins: a file can name MIT in passing while
     # actually being AGPL, and the safe direction of a wrong guess is exclusion.
-    if printf '%s' "$licensetext" | grep -qEi 'GNU (GENERAL|LESSER|AFFERO) PUBLIC LICENSE'; then
+    if printf '%s' "$licensetext" | grep -qEi 'GNU (GENERAL|(LESSER|AFFERO) GENERAL) PUBLIC LICENSE|GNU (L|A)?GPL|SPDX-License-Identifier:.*(GPL|AGPL|LGPL)'; then
       skipped_license=$((skipped_license+1)); continue
     fi
     if ! printf '%s' "$licensetext" | grep -qEi \
@@ -200,16 +219,18 @@ for tree in "$SOURCES"/repos/*/ "$SOURCES"/own/*/; do
   # The user's own repositories are spared the holdout: they are the point of
   # the corpus and there is far too little of them to measure with.
   if [ "$(dirname "${tree%/}")" = "$SOURCES/own" ]; then
-    set_holdout "$name" spare
+    group="own:$name"
+    set_holdout "$group" spare
   else
-    set_holdout "$name" keep
+    group="repo:$name"
+    set_holdout "$group" keep
   fi
   while IFS= read -r file; do
-    emit_file "$name" "$file" "${file#$tree}"
+    emit_file "$group" "$file" "${file#$tree}"
   done < <(find "$tree" -type f -not -path '*/.git/*' 2>/dev/null | grep -Ei "$EXTENSIONS" || true)
 done
 
-echo "extract-code: $considered sources considered, $skipped_license dropped on license, $skipped_binary files skipped by size, $emitted train / $held held-out files" >&2
+echo "extract-code: $considered sources considered, $skipped_license dropped on license, $skipped_binary files skipped by size, $undecodable undecodable, $emitted train / $held held-out files" >&2
   # Refuse to hand back a partial corpus quietly. Every tarball must have been
   # opened, whatever its license said afterwards; a shortfall here means the
   # loop died early and the result is a prefix of the alphabet.
@@ -219,7 +240,13 @@ echo "extract-code: $considered sources considered, $skipped_license dropped on 
   fi
 }
 
-generate | awk -F'\t' -v out="$OUT" -v hout="${HOLDOUT_OUT:-/dev/null}" '
+# Write to temporaries and rename on success: the completeness check inside
+# generate fires only after every surviving record has already been written,
+# so a detected truncation must not leave a partial corpus under the name
+# downstream tooling trusts.
+out_tmp="$OUT.tmp"
+if [ -n "$HOLDOUT_OUT" ]; then hout_tmp="$HOLDOUT_OUT.tmp"; else hout_tmp=/dev/null; fi
+generate | awk -F'\t' -v out="$out_tmp" -v hout="$hout_tmp" '
   # Field 1 routes (T train, H held out), field 2 is the content hash, and the
   # JSON is everything after. Deduplication keys on the hash across BOTH
   # streams, so a file vendored into a held-out package cannot reappear there
@@ -235,5 +262,7 @@ generate | awk -F'\t' -v out="$OUT" -v hout="${HOLDOUT_OUT:-/dev/null}" '
       total, kept + heldkept, kept, heldkept, total - kept - heldkept,
       total ? 100 * (total - kept - heldkept) / total : 0 > "/dev/stderr"
   }'
-test -s "$OUT" || { echo "extract-code: produced nothing" >&2; exit 1; }
+test -s "$out_tmp" || { echo "extract-code: produced nothing" >&2; exit 1; }
+mv "$out_tmp" "$OUT"
+[ -n "$HOLDOUT_OUT" ] && mv "$hout_tmp" "$HOLDOUT_OUT"
 echo "extract-code: wrote $OUT ($(wc -l < "$OUT") documents, $(du -h "$OUT" | cut -f1))" >&2
