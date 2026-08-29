@@ -199,6 +199,26 @@ to be bought from English after all. The effect is visible before any merge is
 learned: the same sample yields 40.6M pretokenized words under v1 and 30.2M
 under v2, because a run of spaces stops being one word per space.
 
+One claim from the plan is corrected here: "prose is unchanged" holds for
+MID-LINE prose only.  V2 deliberately folds trailing whitespace ("x  \n" is
+four v1 words but three v2 words), and real Wikipedia text contains trailing
+spaces and whitespace-only lines, so the plan's word-stream-equality gate is
+unsatisfiable as written and the bytes/token gate above is the measurement
+that stands.  The divergence cases are pinned by tests
+(`testPretokenV2Edges`); `decode . encode = id` holds under both rules
+(`testFastBpeV2RoundTrip`).
+
+### A generation-time caveat the qualitative suite must fix first
+
+`generate` strips trailing whitespace from the prompt (`gpu/Main.hs`,
+`dropWhileEnd isSpace`) under a comment that was true under v1 -- "a dangling
+space becomes a standalone token that never occurs in encoded training text"
+-- and is false under v2, where trailing runs and `"\n<indent>"` words are
+ordinary in-distribution tokens.  Worse, `isSpace` also strips `\n` and
+`\t`, so a code prompt ending `"f x =\n    "` -- exactly the shape the v2
+tokenizer exists to serve -- is silently truncated to `"f x ="`.  Not a
+training-path issue; fix before running the Milestone 4 coding-prompt suite.
+
 ## Sequencing constraints
 
 - **Measure the v2/v3 baselines before adding any `Config` field.** `modelId` is
@@ -235,6 +255,18 @@ repositories. After the license gate and content-hash deduplication:
 299,966 files became 279,452 unique (6.8% duplicates), of which 270,054 train
 and 9,398 are held out. 2,641 of 19,450 sources were dropped on license.
 
+**The 6.8% dedup rate contradicts the plan's "tens of percent" expectation,
+and the verdict is that the expectation was wrong, not the hashing**: Hackage
+sdists ship their own source, and the heavy vendoring lives in build products
+(`dist-newstyle`, generated C) that the extension filter never admits.  A rate
+near zero would still mean broken hashing.
+
+**Known license-gate limitation, accepted:** the gate is per package or
+repository -- a permissively-licensed package's verdict is applied to every
+source file in its tree, so a file individually under a different license
+inside a permissive package is not caught.  Dual-licensed repos shipping only
+`LICENSE-MIT`/`LICENSE-APACHE` (no bare `LICENSE`) are dropped conservatively.
+
 **Haskell dominates at 88%, far more than the plan assumed.** Phase B's
 per-language balance is therefore a job for `mix-corpus.sh`'s repeat counts
 rather than something the corpus provides for free.
@@ -264,6 +296,25 @@ on** — a weaker claim, and one to state whenever those two numbers are quoted.
 A flat 2% produced a holdout that was 100% Haskell: 2% of Hackage's 19,418
 packages is a healthy eval, while 2% of the eight repositories the other four
 languages share rounds to zero.
+
+**2026-08-28 re-extraction (`run/code-train-v2.jsonl` / `run/code-eval-v2.jsonl`):**
+ids gained a source namespace (`hackage:`/`repo:`/`own:`) because the original
+pull's bare names collided -- the Hackage PACKAGE `cubical` matched the
+HOLDOUT_GROUPS entry meant for the Agda REPOSITORY `cubical`, putting 7
+Haskell and 2 Nix files of an unrelated package into the Agda repo's holdout
+(and hence into `code-haskell`/`code-nix` eval populations built before this
+date).  The percent bucket still hashes the bare name, so the sampled Haskell
+holdout is the same population; the per-language eval corpora are rebuilt from
+the -v2 holdout.  The tokenizer is unaffected (it never sees ids).
+
+A sixth eval population exists for Milestone 4: the Claude-Code transcript
+holdout (`run/eval/transcript-code32k.corpus`, 273 scrubbed documents from 4
+whole sessions, packed to 128 KB; source `~/src/llm-transcript/`).
+
+One correction to note beside the Idris row: by BYTES the holdout is the
+0.90 MB shown, but by DOCUMENTS it is two thirds of the language (664 train
+vs 1,311 held-out files) -- the training-side Idris population is the smaller
+one, and per-document Idris claims should say so.
 
 
 ## The code-aware tokenizer

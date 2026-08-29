@@ -34,9 +34,17 @@ Already measured on CPU to +/- 0.043 over a 32-slice spread sample: **v2 1.337,
 v3 1.450**. This step replaces the spread sample with the full test split,
 which is about a minute of GPU time per model.
 
+`push-corpus.sh` cannot do this -- its signature is `[user@]host [port]` and
+it ships sharded training corpora derived from RUN_DIR, not arbitrary files.
+Plain rsync of the named files is the right tool (never `--files-from`, which
+silently drops `-r`):
+
 ```
-deploy/push-corpus.sh <host> run/eval/enwik8-test-fw32k.corpus
-deploy/push-corpus.sh <host> run/eval/wiki-heldout-fw32k.corpus
+rsync -av run/eval/enwik8-test-fw32k.corpus run/eval/wiki-heldout-fw32k.corpus \
+  run/enwiki-fineweb-32k.bpe \
+  run/pulled-root-65.95.12.163-44704-checkpoints/wiki-bpe100m-step336872.checkpoint \
+  run/pulled-root-65.95.12.163-44704-checkpoints/wiki-bpe100m-v3-step8000.checkpoint \
+  root@<host>:formalTransformer/run/
 # on the box, for each of the two checkpoints:
 TOKENIZER_FILE=run/enwiki-fineweb-32k.bpe MICRO_BATCH=32 \
   result-gemm/bin/formal-transformer-gemm-cuda evaluate CKPT CORPUS
@@ -59,14 +67,25 @@ Compare **bpb**, which is per byte and therefore comparable across contexts.
 > at least **0.02**, NoPE is not using the extra context and RoPE gets ported to
 > the softmax layers.
 
-The sequencing constraint that used to sit here is gone: the baselines above no
-longer depend on preset identity staying stable, so a RoPE `Config` field can be
-added whenever the ablation calls for it.
+Sequencing: the CPU baselines removed the *urgency* of the old constraint, but
+the constraint itself stands within this session -- step 1's exact GPU
+baselines still load the v2/v3 checkpoints, and a RoPE `Config` field changes
+`show cfg` and with it every preset's identity.  Run step 1 before any RoPE
+work begins; after that the field can be added whenever the ablation calls
+for it.  (`docs/V4-DESIGN.md` states the same rule.)
 
 ## 3. 463M memory and throughput sweep — chooses an irreversible value (~1 hour)
 
+`sweep-cuda.sh` runs ON the box (its first argument is a corpus file, not a
+host), its default micro-batch list is not the one this sweep wants, and it
+needs a context-1024 corpus under the code32k tokenizer -- use the Haskell
+eval corpus (7.09M tokens, already packed to 128 KB):
+
 ```
-deploy/sweep-cuda.sh <host> bpe460m    # micro in {2,4,8,16,24}
+rsync -av run/eval/code-haskell.corpus run/code32k.bpe root@<host>:formalTransformer/run/
+# on the box:
+MICRO_BATCHES="2 4 8 16 24" TOKENIZER_FILE=run/code32k.bpe \
+  deploy/sweep-cuda.sh run/code-haskell.corpus bpe460m
 ```
 
 Record peak MiB and tok/s for each. Fixed device cost is ~17.4 GB (nine
