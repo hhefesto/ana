@@ -300,10 +300,11 @@ languages share rounds to zero.
 **2026-08-28 re-extraction (`run/code-train-v2.jsonl` / `run/code-eval-v2.jsonl`):**
 ids gained a source namespace (`hackage:`/`repo:`/`own:`) because the original
 pull's bare names collided -- the Hackage PACKAGE `cubical` matched the
-HOLDOUT_GROUPS entry meant for the Agda REPOSITORY `cubical`, putting 7
-Haskell and 2 Nix files of an unrelated package into the Agda repo's holdout
-(and hence into `code-haskell`/`code-nix` eval populations built before this
-date).  The percent bucket still hashes the bare name, so the sampled Haskell
+HOLDOUT_GROUPS entry meant for the Agda REPOSITORY `cubical`, putting the 7
+Haskell files of an unrelated package into the holdout (and hence into the
+`code-haskell` eval population built before this date; the 2 Nix files that
+looked misplaced turn out to genuinely belong to the Agda repo, which ships
+nix tooling, so `code-nix` was never contaminated).  The percent bucket still hashes the bare name, so the sampled Haskell
 holdout is the same population; the per-language eval corpora are rebuilt from
 the -v2 holdout.  The tokenizer is unaffected (it never sees ids).
 
