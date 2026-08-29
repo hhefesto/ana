@@ -28,6 +28,17 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+# Source the run's env file BEFORE computing any DiLoCo default.  The launcher
+# exports its settings into the ranks' environment, and train-cloud.sh's later
+# sourcing of the same file assigns with := and therefore yields to exported
+# values -- so anything decided here wins.  Without this, a DILOCO_* line in
+# the env file (the documented place to set H, or to fall back to H=1 on
+# drift) would be silently ignored in favor of the defaults below.
+if [ -f "${TRAIN_ENV_FILE:-run/train-cloud.env}" ]; then
+  # shellcheck disable=SC1090
+  . "${TRAIN_ENV_FILE:-run/train-cloud.env}"
+fi
+
 WORLD="${DILOCO_WORLD:-2}"
 GPUS="${GPUS:-$(seq -s' ' 0 $((WORLD - 1)))}"
 DILOCO_DIR="${DILOCO_DIR:-/dev/shm/ana-diloco}"
@@ -47,6 +58,11 @@ mkdir -p "$DILOCO_DIR"
 # PERSISTENT=1 is required, not merely faster: the shard-boundary barrier lives
 # in train-plan's loop, which is the code path PERSISTENT=1 selects.
 export PERSISTENT=1
+# DILOCO_WORLD must be ASSIGNED, not just marked for export: `export VAR` on an
+# unset variable does not place it in the children's environment, and a rank
+# that never sees DILOCO_WORLD trains with DiLoCo off -- both ranks would then
+# run the full global batch and write the same checkpoint concurrently.
+DILOCO_WORLD="$WORLD"
 export DILOCO_WORLD DILOCO_DIR
 export DILOCO_H="${DILOCO_H:-30}"
 export DILOCO_OUTER_LR="${DILOCO_OUTER_LR:-0.7}"

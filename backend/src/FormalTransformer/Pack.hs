@@ -89,8 +89,13 @@ freshPack = PackState [] 0 Nothing 0
 packedCount :: PackState -> Int
 packedCount = emitted
 
--- | A document's group: its id up to the first @/@.  Ids without one are all
--- one group, which is why 'packGrouped' is off unless the caller asks for it.
+-- | A document's group: its id up to the first @/@.  An id WITHOUT a slash is
+-- its whole own group, so grouped packing over slash-free ids degenerates to
+-- one document per pack -- packing silently off.  @pack-stdin --group@
+-- therefore refuses slash-free ids rather than producing a plausible-looking,
+-- unpacked corpus.  Grouping also requires groups to arrive CONTIGUOUS: every
+-- group change closes the held pack, so an interleaved stream (mix-corpus.sh
+-- output, say) degenerates the same way.  Pack each source before mixing.
 groupOf :: BS.ByteString -> BS.ByteString
 groupOf = BSC.takeWhile (/= '/')
 

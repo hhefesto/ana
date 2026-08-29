@@ -10,6 +10,9 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+temps=()
+trap '[ "${#temps[@]}" -gt 0 ] && rm -f "${temps[@]}"' EXIT
+
 logs=(run/train-rank*.log)
 if [ ! -e "${logs[0]}" ]; then
   echo "diloco-check: no run/train-rank*.log yet" >&2
@@ -21,7 +24,10 @@ status=0
 for log in "${logs[@]}"; do
   rank="${log##*rank}"; rank="${rank%%.log}"
   extracted="$(mktemp)"
-  grep -o 'outer_step=[0-9]* step=[0-9]* rank=[0-9]* digest=[0-9a-f]*' "$log" \
+  temps+=("$extracted")
+  # The line also carries sumabs/sumsq magnitudes; keep everything after
+  # rank= so a magnitude disagreement alarms exactly like a hash one.
+  grep -o 'outer_step=[0-9]* step=[0-9]* rank=[0-9]* digest=[0-9a-f]* sumabs=[^ ]* sumsq=[^ ]*' "$log" \
     | sed 's/ rank=[0-9]*//' > "$extracted"
   count="$(wc -l < "$extracted")"
   echo "rank $rank: $count outer steps, last $(tail -n1 "$extracted" 2>/dev/null || echo none)"

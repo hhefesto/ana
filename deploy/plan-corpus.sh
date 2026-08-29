@@ -62,7 +62,12 @@ total="$(wc -l < "$DATA")"
 # from the plan, producing a plan that trains on only part of the corpus.
 shards=$(( (total + PER - 1) / PER ))
 echo "plan-corpus: $shards shards" >&2
-global_id="mixed-global-v1:sha256=$data_hash:documents=$total:shard=$PER:batch=$BATCH:size=$SIZE:tokenizer=$tokenizer_hash"
+# Packing changes the corpus bytes, so it is identity-bearing exactly like the
+# batch and the tokenizer: two runs over the same JSONL with different
+# PACK_TARGET must never share a plan identity. Unpacked plans keep the
+# historical id unchanged.
+pack_id="${PACK_TARGET:+:pack=$PACK_TARGET${PACK_GROUP:+-grouped}}"
+global_id="mixed-global-v1:sha256=$data_hash:documents=$total:shard=$PER:batch=$BATCH:size=$SIZE:tokenizer=$tokenizer_hash$pack_id"
 
 segments="$PLAN.segments.tmp"
 pending="$PLAN.tmp"
@@ -101,16 +106,32 @@ for (( k = 0; k < shards; k++ )); do
     # packed corpus never has to exist on disk. The prefix carries the shard
     # index because ids restart per shard and must stay globally distinct.
     if [ -n "${PACK_TARGET:-}" ]; then
-      packed_in=0
-      packed_out=0
-      prepared="$(jq --raw-output0 "$filter" < "$part" \
+      # pack-stdin's stderr is captured to a file so its stats line can be
+      # parsed -- but on failure that file holds the actual diagnostic, so it
+      # must be shown, not deleted; under `set -e` an unguarded failure here
+      # would exit with the cause still sitting in a temp file nobody reads.
+      if ! prepared="$(jq --raw-output0 "$filter" < "$part" \
         | "$CLI" pack-stdin --target "$PACK_TARGET" --prefix "pack$k" \
             ${PACK_GROUP:+--group} --stats 2> "$PLAN.pack.tmp" \
-        | "$CLI" prepare-bpe-stdin "$TOKENIZER" "$corpus")"
-      read -r packed_in packed_out < <(sed -n \
+        | "$CLI" prepare-bpe-stdin "$TOKENIZER" "$corpus")"; then
+        echo "plan-corpus: shard $k pipeline failed; pack-stdin reported:" >&2
+        cat "$PLAN.pack.tmp" >&2
+        exit 1
+      fi
+      packed_counts="$(sed -n \
         's/^pack-stdin: \([0-9]*\) documents in, \([0-9]*\) packed.*/\1 \2/p' \
-        "$PLAN.pack.tmp")
+        "$PLAN.pack.tmp")"
+      if [ -z "$packed_counts" ]; then
+        echo "plan-corpus: shard $k produced no pack-stdin stats line:" >&2
+        cat "$PLAN.pack.tmp" >&2
+        exit 1
+      fi
       rm -f "$PLAN.pack.tmp"
+      # Persist the counts beside the corpus: the completeness assertions below
+      # run on EVERY iteration, including shards prepared by an earlier,
+      # interrupted invocation, so they cannot depend on shell variables that
+      # died with that process.
+      echo "$packed_counts" > "$corpus.pack"
     else
       prepared="$(jq --raw-output0 "$filter" < "$part" \
         | "$CLI" prepare-bpe-stdin "$TOKENIZER" "$corpus")"
@@ -125,6 +146,15 @@ for (( k = 0; k < shards; k++ )); do
     # interrupted run re-splits from the source and skips shards already
     # prepared, so this costs a rescan rather than correctness.
     [ "${PRUNE_PARTS:-1}" = 1 ] && rm -f "$part"
+  fi
+  if [ -n "${PACK_TARGET:-}" ]; then
+    if [ ! -f "$corpus.pack" ]; then
+      echo "plan-corpus: shard $k has no pack-count sidecar ($corpus.pack)" >&2
+      echo "  The corpus predates packing or was prepared by an older script," >&2
+      echo "  so its completeness cannot be asserted. Delete $corpus and re-run." >&2
+      exit 1
+    fi
+    read -r packed_in packed_out < "$corpus.pack"
   fi
   record="$("$CLI" plan-segment "$corpus" "$offset" "$BATCH" "$SIZE")"
   read -r tag planned_offset documents corpus_id train_windows validation_windows steps <<< "$record"

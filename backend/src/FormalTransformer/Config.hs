@@ -21,6 +21,7 @@ module FormalTransformer.Config
   , bpe100mPreset
   , bpe100mV3Preset
   , bpe460mPreset
+  , sizePresets
   , glaSmallPreset
   , glaPreset
   ) where
@@ -125,6 +126,39 @@ bpe460mPreset = Config 32768 1024 1280 3456 20 20 GateRgLru True True True
 -- and one softmax layer; eight give six and two.
 glaSmallPreset = Config 258 64 64 192 4 4 GateSigmoid False False True
 glaPreset = Config 8192 256 320 864 8 5 GateSigmoid False False True
+
+-- | Every runnable preset by name.  This is the ONE size table: the trainer
+-- and the planner both consume it, because the two drifting apart is exactly
+-- how bpe100m-v3 came to need a symlink workaround -- the planner's private
+-- copy of this list was missing it.
+sizePresets :: [(String, Config)]
+sizePresets =
+  [ ("tiny", tinyPreset)
+  , ("small", smallPreset)
+  , ("small4", small4Preset)
+  , ("bpe10m", bpe10mPreset)
+  , ("bpe100m", bpe100mPreset)
+  , ("gla-small", glaSmallPreset)
+  , ("gla", glaPreset)
+  -- v3 pilot arms (docs/V3-DECISIONS.md).
+  , ("tiny-rglru", tinyPreset { gateKind = GateRgLru })
+  -- tiny has ONE layer, hence no softmax block: tiny-v3 only exercises the
+  -- gate arm.  small4-v3 (4 layers, one softmax) is the smallest smoke that
+  -- actually runs qk-norm and sinks in training.
+  , ("tiny-v3", tinyPreset { gateKind = GateRgLru, qkNorm = True, headSinks = True })
+  , ("small4-v3", small4Preset { gateKind = GateRgLru, qkNorm = True, headSinks = True })
+  , ("bpe10m-rglru", bpe10mPreset { gateKind = GateRgLru })
+  , ("bpe10m-qk-sink", bpe10mPreset { qkNorm = True, headSinks = True })
+  , ("bpe10m-v3", bpe10mV3Preset)
+  -- The v3 production run (docs/V3-DECISIONS.md section 6): bpe100m
+  -- dimensions, RG-LRU + qk-norm + sinks, tied head.
+  , ("bpe100m-v3", bpe100mV3Preset)
+  -- The v4 production preset: 4x bpe100m-v3 at context 1024.
+  , ("bpe460m", bpe460mPreset)
+  -- Pilot arm A5 (docs/V3-DECISIONS.md): a separate unembedding matrix.
+  , ("tiny-untied", tinyPreset { tiedHead = False })
+  , ("bpe10m-untied", bpe10mPreset { tiedHead = False })
+  ]
 
 -- The model identity a checkpoint is stamped with and resumed against.
 -- Version 3 puts the whole architecture in Config, so `show cfg` IS the

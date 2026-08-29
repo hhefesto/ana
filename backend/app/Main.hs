@@ -450,7 +450,8 @@ planSegment path offsetText batchText size = case (readMaybe offsetText, readMay
     case result of
       Left message -> putStrLn message
       Right corpus -> case configFor size of
-        Nothing -> putStrLn "unknown model size (expected tiny, small, bpe10m, or bpe100m)"
+        Nothing -> putStrLn ("unknown model size (expected one of: "
+          ++ unwords (map fst sizePresets) ++ ")")
         Just cfg -> case trainerWindowSplitFrom offset (contextSize cfg) (corpusDocuments corpus) of
           Left message -> putStrLn message
           Right split -> do
@@ -468,12 +469,7 @@ planSegment path offsetText batchText size = case (readMaybe offsetText, readMay
               ])
   _ -> putStrLn "DOCUMENT_OFFSET must be nonnegative and TRAIN_BATCH must be positive"
   where
-    configFor "tiny" = Just tinyPreset
-    configFor "small" = Just smallPreset
-    configFor "bpe10m" = Just bpe10mPreset
-    configFor "bpe100m" = Just bpe100mPreset
-    configFor "bpe460m" = Just bpe460mPreset
-    configFor _ = Nothing
+    configFor size' = lookup size' sizePresets
 
 -- Reconstruct the documents a whole-dataset run held out, as one fixed corpus.
 --
@@ -614,11 +610,12 @@ packStdin :: [String] -> IO ()
 packStdin options = do
   cfg <- either die pure (parsePackOptions defaultPackConfig options)
   wantStats <- pure (elem "--stats" options)
-  (consumed, produced) <- stream cfg BS.empty freshPack (0 :: Int)
+  (consumed, produced, dropped) <- stream cfg BS.empty freshPack (0 :: Int) (0 :: Int)
   hFlush stdout
   when wantStats (hPutStrLn stderr
     ("pack-stdin: " ++ show consumed ++ " documents in, "
-      ++ show produced ++ " packed documents out"))
+      ++ show produced ++ " packed documents out, "
+      ++ show dropped ++ " empty documents dropped"))
   where
     emit (documentId, text) = do
       BS.hPut stdout (BSC.pack documentId)
@@ -626,26 +623,37 @@ packStdin options = do
       BS.hPut stdout text
       BS.hPut stdout (BS.singleton 0)
 
-    stream cfg pending state consumed = do
+    stream cfg pending state consumed dropped = do
       chunk <- BS.hGetSome stdin 1048576
       if BS.null chunk
         then do
           when (not (BS.null pending))
             (die "pack-stdin: incomplete final NUL-delimited id/text pair")
           case packFlush cfg state of
-            (state', Nothing) -> pure (consumed, packedCount state')
+            (state', Nothing) -> pure (consumed, packedCount state', dropped)
             (state', Just packed) -> do
               emit packed
-              pure (consumed, packedCount state')
+              pure (consumed, packedCount state', dropped)
         else do
           let (documents, leftover) = nulDocuments (pending <> chunk)
-          state' <- foldM (feed cfg) state documents
-          stream cfg leftover state' (consumed + length documents)
+          (state', dropped') <- foldM (feed cfg) (state, dropped) documents
+          stream cfg leftover state' (consumed + length documents) dropped'
 
-    feed cfg state document = do
+    feed cfg (state, dropped) document@(documentId, text) = do
+      -- A slash-free id under --group is its own singleton group, so every
+      -- document would close the pack behind it and packing would silently
+      -- turn itself off (see FormalTransformer.Pack.groupOf).  That is always
+      -- a mis-wired pipeline, never an intent, so it dies rather than warns.
+      when (packGrouped cfg && not (BSC.elem '/' documentId)) (die
+        ("pack-stdin: --group requires ids of the form group/path, got "
+          ++ show documentId
+          ++ " -- grouping a slash-free stream disables packing entirely"))
       let (state', packed) = packStep cfg state document
       mapM_ emit packed
-      pure state'
+      -- packStep drops an empty document (it would contribute only a bare
+      -- separator); the stats line must own up to that rather than let
+      -- "documents in" quietly disagree with what the packs contain.
+      pure (state', if BS.null text then dropped + 1 else dropped)
 
 -- | Options are deliberately few.  --target and --group are the two that
 -- change what the model sees; everything else has one sensible value.

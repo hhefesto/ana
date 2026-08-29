@@ -17,8 +17,10 @@
 --
 -- The invariant everything else leans on: __both ranks compute bit-identical
 -- outer state__.  They sum the per-rank vectors in a fixed rank order (never
--- "mine then theirs"), from inputs that are exactly representable as f32, so
--- the average, the momentum and the new parameters agree to the bit on every
+-- "mine then theirs"), and the whole outer path is f32 end to end -- the same
+-- precision the device buffer and the exchange files hold, so there is no
+-- widening round trip whose exactness has to be assumed -- which makes the
+-- average, the momentum and the new parameters agree to the bit on every
 -- rank forever.  That is why the momentum is never exchanged, and why
 -- 'parameterDigest' comparing equal across ranks is a real check rather than a
 -- coincidence.
@@ -35,11 +37,13 @@ module FormalTransformer.Diloco
   , exchangePath
   , writeMarker
   , awaitMarker
+  , touchHeartbeat
   , saveOuterState
   , loadOuterState
   ) where
 
 import Control.Concurrent (threadDelay)
+import Control.Exception (bracketOnError)
 import Control.Monad (foldM, forM_, unless, when)
 import Data.Bits (xor, (.&.))
 import qualified Data.ByteString.Char8 as BSC
@@ -58,15 +62,19 @@ import System.Directory
   )
 import System.Environment (lookupEnv)
 import System.Exit (die)
-import System.FilePath ((</>))
+import System.FilePath (takeDirectory, (</>))
+import FormalTransformer.Artifact (synchronizeDirectory, synchronizeHandle)
 import System.IO
   ( BufferMode (..)
   , Handle
   , IOMode (..)
+  , hClose
+  , hFlush
   , hGetBuf
   , hPutBuf
   , hSetBinaryMode
   , hSetBuffering
+  , openBinaryFile
   , withBinaryFile
   )
 import Text.Read (readMaybe)
@@ -112,6 +120,11 @@ dilocoFromEnv = do
         unless (inner >= 1) (Left "DILOCO_H must be at least 1")
         unless (momentum >= 0 && momentum < 1)
           (Left "DILOCO_MOMENTUM must lie in [0, 1)")
+        -- lr = 0 freezes the parameters at theta_outer_prev forever while the
+        -- inner loop keeps logging a healthy-looking loss; timeout <= 0 kills
+        -- the run at the first barrier.  Both are typos, not configurations.
+        unless (lr > 0) (Left "DILOCO_OUTER_LR must be positive")
+        unless (timeout > 0) (Left "DILOCO_TIMEOUT must be positive")
         Right (Just (DilocoConfig rank worldSize inner lr momentum dir timeout))
   where
     readNumber name text = maybe (Left (name ++ " must be an integer")) Right
@@ -158,13 +171,13 @@ rankWindowIndices diloco globalBatch count step =
 -- Both are per-rank copies of values that are equal across ranks by
 -- construction, so neither is ever sent over the wire.
 data OuterState = OuterState
-  { outerPrev :: !(VU.Vector Double)
-  , outerMomentum :: !(VU.Vector Double)
+  { outerPrev :: !(VU.Vector Float)
+  , outerMomentum :: !(VU.Vector Float)
   , outerCount :: !Int
   , outerStepAt :: !Int   -- ^ inner step the state was last written at.
   }
 
-freshOuterState :: VU.Vector Double -> Int -> OuterState
+freshOuterState :: VU.Vector Float -> Int -> OuterState
 freshOuterState parameters step =
   OuterState parameters (VU.replicate (VU.length parameters) 0) 0 step
 
@@ -179,11 +192,11 @@ freshOuterState parameters step =
 -- At @lr = 1@ and @mu = 0@ this is @theta = theta_averaged@ exactly, which
 -- with one rank is the identity -- the property the byte-identity regression
 -- test relies on.
-outerStep :: DilocoConfig -> OuterState -> Int -> VU.Vector Double
-  -> (VU.Vector Double, OuterState)
+outerStep :: DilocoConfig -> OuterState -> Int -> VU.Vector Float
+  -> (VU.Vector Float, OuterState)
 outerStep cfg state step averaged =
-  let mu = dilocoMomentum cfg
-      lr = dilocoOuterLr cfg
+  let mu = realToFrac (dilocoMomentum cfg) :: Float
+      lr = realToFrac (dilocoOuterLr cfg) :: Float
       previous = outerPrev state
       delta = VU.zipWith (-) previous averaged
       momentum' = VU.zipWith (\m d -> mu * m + d) (outerMomentum state) delta
@@ -197,8 +210,8 @@ outerStep cfg state step averaged =
 -- name sees the whole payload.  A rank deletes its own file for step @t@ only
 -- once it reaches @t+1@: no peer can have advanced that far without having
 -- read it, which is what makes cleanup race-free without acknowledgements.
-averageWithPeers :: DilocoConfig -> Int -> Maybe Int -> VU.Vector Double
-  -> IO (VU.Vector Double)
+averageWithPeers :: DilocoConfig -> Int -> Maybe Int -> VU.Vector Float
+  -> IO (VU.Vector Float)
 averageWithPeers cfg step retire values
   | dilocoWorld cfg <= 1 = pure values
   | otherwise = do
@@ -253,6 +266,42 @@ writeMarker cfg name = do
 awaitMarker :: DilocoConfig -> String -> IO ()
 awaitMarker cfg name = awaitFile cfg (dilocoDir cfg </> (name ++ ".marker"))
 
+-- | Touched once per inner step, so a waiting rank can tell a peer that is
+-- merely slow (heartbeat seconds old) from one that is gone (heartbeat
+-- minutes old, or absent) -- which is also what lets DILOCO_TIMEOUT be chosen
+-- against real step time rather than padded for the worst legitimate stall.
+-- The content is the system-wide monotonic clock, comparable across the
+-- ranks' processes on one box, plus the step for the human reading the report.
+touchHeartbeat :: DilocoConfig -> Int -> IO ()
+touchHeartbeat cfg step = do
+  createDirectoryIfMissing True (dilocoDir cfg)
+  let path = heartbeatPath cfg (dilocoRank cfg)
+  now <- getMonotonicTime
+  writeFile (path ++ ".partial") (show now ++ " " ++ show step ++ "\n")
+  renameFile (path ++ ".partial") path
+
+heartbeatPath :: DilocoConfig -> Int -> FilePath
+heartbeatPath cfg rank = dilocoDir cfg </> ("heartbeat-rank" ++ show rank)
+
+-- | One line per rank: how long ago it last completed an inner step.
+heartbeatReport :: DilocoConfig -> IO String
+heartbeatReport cfg = do
+  now <- getMonotonicTime
+  descriptions <- mapM (describe now) [0 .. dilocoWorld cfg - 1]
+  pure (unwords descriptions)
+  where
+    describe now rank = do
+      let path = heartbeatPath cfg rank
+      there <- doesFileExist path
+      if not there then pure ("rank" ++ show rank ++ ": no heartbeat") else do
+        content <- readFile path
+        pure $ case words content of
+          (timeText : stepText : _)
+            | Just written <- readMaybe timeText ->
+                "rank" ++ show rank ++ ": step " ++ stepText ++ ", "
+                  ++ show (round (now - written) :: Int) ++ "s ago"
+          _ -> "rank" ++ show rank ++ ": unreadable heartbeat"
+
 -- | Wait for a peer's file, and __die__ rather than continue if it never
 -- arrives.  Silently proceeding as a lone rank would halve the effective batch
 -- and quietly change the experiment, which is worse than stopping.
@@ -263,29 +312,38 @@ awaitFile cfg path = do
         there <- doesFileExist path
         unless there $ do
           now <- getMonotonicTime
-          when (now - start > dilocoTimeout cfg) $
+          when (now - start > dilocoTimeout cfg) $ do
+            beats <- heartbeatReport cfg
             die ("diloco: waited " ++ show (round (now - start) :: Int)
               ++ "s for " ++ path
               ++ " -- the peer rank is not making progress; stopping rather"
-              ++ " than training on a different batch than the run assumes")
+              ++ " than training on a different batch than the run assumes."
+              ++ " Last heartbeats: " ++ beats)
           threadDelay 50000
           poll
   poll
 
--- | A cheap value that must be equal on every rank immediately after an outer
--- step.  Strided so the cost does not scale with the model: ~65k samples is
--- ample to catch divergence, and full sums would add real time at 463M
--- parameters for no extra discrimination.
-parameterDigest :: VU.Vector Double -> String
+-- | A composite that must be equal on every rank immediately after an outer
+-- step.  Three fields: an FNV-1a hash over a prime-strided sample (a prime
+-- stride cannot phase-lock with any layout period, which a stride sharing a
+-- factor with a slice length could), and full-vector sum-of-absolutes and
+-- sum-of-squares -- the hash says WHETHER the ranks diverged, the magnitudes
+-- say whether the parameters are blowing up, and both are deterministic
+-- sequential folds so equal inputs give equal text.
+parameterDigest :: VU.Vector Float -> String
 parameterDigest values =
   let n = VU.length values
-      stride = max 1 (n `div` 65536)
+      stride = if n <= 65536 then 1 else 1021
       indices = [0, stride .. n - 1]
       step h i =
-        let bits = fromIntegral (castFloatToWord32 (realToFrac (values VU.! i))) :: Word64
+        let bits = fromIntegral (castFloatToWord32 (values VU.! i)) :: Word64
         in (h `xor` bits) * 0x100000001b3
       hashed = foldl' step 0xcbf29ce484222325 indices
-  in pad (showHex (hashed .&. 0xffffffffffffffff) "")
+      sumAbs = VU.foldl' (\a x -> a + abs (realToFrac x :: Double)) 0 values
+      sumSq = VU.foldl'
+        (\q x -> let d = realToFrac x :: Double in q + d * d) 0 values
+  in "digest=" ++ pad (showHex (hashed .&. 0xffffffffffffffff) "")
+    ++ " sumabs=" ++ show sumAbs ++ " sumsq=" ++ show sumSq
   where
     pad text = replicate (16 - length text) '0' ++ text
 
@@ -300,12 +358,27 @@ saveOuterState path state = do
   let header = "diloco-outer-v1 " ++ show (outerStepAt state) ++ " "
         ++ show (outerCount state) ++ " "
         ++ show (VU.length (outerPrev state)) ++ "\n"
-  withBinaryFile (path ++ ".partial") WriteMode $ \handle -> do
-    hSetBuffering handle (BlockBuffering Nothing)
-    BSC.hPutStr handle (BSC.pack header)
-    putFloats handle (outerPrev state)
-    putFloats handle (outerMomentum state)
-  renameFile (path ++ ".partial") path
+      partial = path ++ ".partial"
+  -- Same discipline as saveCheckpointAtomic, for the same reason: a rented
+  -- box dies by vanishing, and a rename can survive a crash that the 3.7 GB
+  -- payload behind it did not -- leaving a sidecar whose header matches the
+  -- checkpoint but whose vectors are garbage, which the step guard on load
+  -- cannot catch.  fdatasync the payload, then sync the directory.
+  -- synchronizeHandle takes ownership of the descriptor and leaves the Handle
+  -- closed; the bracketOnError cleanup stays correct because hClose on a
+  -- closed Handle is a no-op.
+  bracketOnError
+    (openBinaryFile partial WriteMode)
+    (\handle -> hClose handle >> removeFile partial)
+    (\handle -> do
+      hSetBuffering handle (BlockBuffering Nothing)
+      BSC.hPutStr handle (BSC.pack header)
+      putFloats handle (outerPrev state)
+      putFloats handle (outerMomentum state)
+      hFlush handle
+      synchronizeHandle handle
+      renameFile partial path
+      synchronizeDirectory (takeDirectory path))
 
 -- | 'Nothing' when the sidecar is absent or does not describe this run; the
 -- caller then restarts the outer optimizer from the current parameters, which
@@ -329,27 +402,26 @@ loadOuterState path expectedLength = do
 
 -- Raw native-endian f32.  These are same-host IPC and restart files, never
 -- artifacts that move between machines, so there is no portable encoding to
--- pay for -- and f32 is exactly the precision the device buffer holds, so
--- nothing is lost by narrowing.
-writeFloatVector :: FilePath -> VU.Vector Double -> IO ()
+-- pay for -- and the vectors are f32 in memory too, so nothing is converted
+-- in either direction.
+writeFloatVector :: FilePath -> VU.Vector Float -> IO ()
 writeFloatVector path values =
   withBinaryFile path WriteMode $ \handle -> do
     hSetBuffering handle (BlockBuffering Nothing)
     putFloats handle values
 
-readFloatVector :: FilePath -> Int -> IO (VU.Vector Double)
+readFloatVector :: FilePath -> Int -> IO (VU.Vector Float)
 readFloatVector path expected =
   withBinaryFile path ReadMode $ \handle -> do
     hSetBinaryMode handle True
     getFloats handle expected
 
-putFloats :: Handle -> VU.Vector Double -> IO ()
+putFloats :: Handle -> VU.Vector Float -> IO ()
 putFloats handle values = do
-  let floats = VS.generate (VU.length values)
-        (\i -> realToFrac (values VU.! i) :: Float)
+  let floats = VS.convert values :: VS.Vector Float
   VS.unsafeWith floats $ \ptr -> hPutBuf handle ptr (VS.length floats * 4)
 
-getFloats :: Handle -> Int -> IO (VU.Vector Double)
+getFloats :: Handle -> Int -> IO (VU.Vector Float)
 getFloats handle count = do
   buffer <- VSM.new count :: IO (VSM.IOVector Float)
   got <- VSM.unsafeWith buffer $ \ptr -> hGetBuf handle ptr (count * 4)
@@ -357,4 +429,4 @@ getFloats handle count = do
     die ("diloco: expected " ++ show (count * 4) ++ " bytes of f32, read "
       ++ show got ++ " -- a truncated exchange or sidecar file")
   frozen <- VS.unsafeFreeze buffer
-  pure (VU.generate count (\i -> realToFrac (frozen VS.! i)))
+  pure (VU.convert frozen)

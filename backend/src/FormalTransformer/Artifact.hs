@@ -20,6 +20,8 @@ module FormalTransformer.Artifact
   , saveCorpusAtomic
   , loadCorpus
   , loadCorpusWithTokenizer
+  , synchronizeHandle
+  , synchronizeDirectory
   ) where
 
 import Control.Exception (IOException, bracket, bracketOnError, try)

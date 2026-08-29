@@ -106,6 +106,15 @@ main = do
       train corpus checkpoint (Standalone spec) cfg
     ["train-segment", corpus, checkpoint, totalText, startText, endText,
       offsetText, globalIdentity, expectedCorpusIdentity, size] -> do
+      -- The shard-boundary barrier (rank 1 waiting for rank 0's checkpoint)
+      -- lives in train-plan's loop; a bare train-segment per shard has no
+      -- barrier, so a follower could load a stale checkpoint and train a whole
+      -- shard from the wrong parameters -- undetectably, because the outer
+      -- states would still agree.  PERSISTENT=1 (train-plan) is the only
+      -- supported multi-rank path.
+      segmentDiloco <- dilocoFromEnv >>= either die pure
+      forM_ segmentDiloco $ \dcfg -> when (dilocoWorld dcfg > 1) (die
+        "train-segment cannot run with DILOCO_WORLD > 1: use train-plan (PERSISTENT=1), which carries the shard-boundary barrier")
       total <- parsePositive "GLOBAL_TOTAL_STEPS" totalText
       start <- parseNonnegative "SEGMENT_START_STEP" startText
       end <- parsePositive "SEGMENT_END_STEP" endText
@@ -132,35 +141,6 @@ main = do
     ["head-path-probe"] -> headPathProbe bpe10mPreset
     ["head-path-probe", size] -> chooseConfig size >>= headPathProbe
     _ -> die "usage: formal-transformer-gpu inspect [tiny|small|bpe10m|bpe100m|gla-small|gla] | warm-context [tiny|small|bpe10m|bpe100m|gla-small|gla] | train CORPUS CHECKPOINT (STEPS|epoch) [tiny|small|bpe10m|bpe100m|gla-small|gla] | train-segment CORPUS CHECKPOINT GLOBAL_TOTAL START END DOCUMENT_OFFSET GLOBAL_ID EXPECTED_CORPUS_ID SIZE | train-plan PLAN RUN_DIR CHECKPOINT SIZE | generate CHECKPOINT TEXT [MAXTOKENS] | check-checkpoint CHECKPOINT | checkpoint-info CHECKPOINT | evaluate CHECKPOINT CORPUS | bench CORPUS [tiny|small|bpe10m|bpe100m|gla-small|gla]"
-
-sizePresets :: [(String, Config)]
-sizePresets =
-  [ ("tiny", tinyPreset)
-  , ("small", smallPreset)
-  , ("small4", small4Preset)
-  , ("bpe10m", bpe10mPreset)
-  , ("bpe100m", bpe100mPreset)
-  , ("gla-small", glaSmallPreset)
-  , ("gla", glaPreset)
-  -- v3 pilot arms (docs/V3-DECISIONS.md).
-  , ("tiny-rglru", tinyPreset { gateKind = GateRgLru })
-  -- tiny has ONE layer, hence no softmax block: tiny-v3 only exercises the
-  -- gate arm.  small4-v3 (4 layers, one softmax) is the smallest smoke that
-  -- actually runs qk-norm and sinks in training.
-  , ("tiny-v3", tinyPreset { gateKind = GateRgLru, qkNorm = True, headSinks = True })
-  , ("small4-v3", small4Preset { gateKind = GateRgLru, qkNorm = True, headSinks = True })
-  , ("bpe10m-rglru", bpe10mPreset { gateKind = GateRgLru })
-  , ("bpe10m-qk-sink", bpe10mPreset { qkNorm = True, headSinks = True })
-  , ("bpe10m-v3", bpe10mV3Preset)
-  -- The v3 production run (docs/V3-DECISIONS.md section 6): bpe100m
-  -- dimensions, RG-LRU + qk-norm + sinks, tied head.
-  , ("bpe100m-v3", bpe100mV3Preset)
-  -- The v4 production preset: 4x bpe100m-v3 at context 1024.
-  , ("bpe460m", bpe460mPreset)
-  -- Pilot arm A5 (docs/V3-DECISIONS.md): a separate unembedding matrix.
-  , ("tiny-untied", tinyPreset { tiedHead = False })
-  , ("bpe10m-untied", bpe10mPreset { tiedHead = False })
-  ]
 
 chooseConfig :: String -> IO Config
 chooseConfig value = case lookup value sizePresets of
@@ -579,6 +559,19 @@ trainInContext ctx corpusPath checkpointPath mode cfg = do
     (die "MICRO_BATCH must not exceed the per-rank batch (TRAIN_BATCH / DILOCO_WORLD)")
   checkpointEvery <- positiveEnv "CHECKPOINT_EVERY" 500
   validateEvery <- positiveEnv "VALIDATE_EVERY" 500
+  -- Under two-process training a checkpoint or validation between outer
+  -- synchronizations observes one rank's PRIVATE parameters: checkpoints
+  -- silently discard the peer's last partial window, and the two ranks log
+  -- validation losses that legitimately disagree -- indistinguishable in the
+  -- logs from the drift the digests exist to catch.  So both cadences must
+  -- land on synchronization steps.
+  forM_ diloco $ \dcfg -> when (dilocoWorld dcfg > 1) $ do
+    let syncMultiple name value = when (value `mod` dilocoInner dcfg /= 0) (die
+          (name ++ "=" ++ show value ++ " is not a multiple of DILOCO_H="
+            ++ show (dilocoInner dcfg)
+            ++ "; it would checkpoint or validate an unsynchronized model"))
+    syncMultiple "CHECKPOINT_EVERY" checkpointEvery
+    syncMultiple "VALIDATE_EVERY" validateEvery
   validationWindows <- positiveEnv "VALIDATION_WINDOWS" 256
   clipNorm <- positiveDoubleEnv "GRAD_CLIP" 1
   numerics <- backendNumerics
@@ -743,8 +736,8 @@ trainInContext ctx corpusPath checkpointPath mode cfg = do
               logTraining ("diloco: outer sidecar is at step "
                 ++ show (outerStepAt previous) ++ " but the checkpoint is at "
                 ++ show resumeStep ++ "; restarting the outer optimizer")
-              pure (freshOuterState params0 resumeStep)
-            Nothing -> pure (freshOuterState params0 resumeStep)
+              pure (freshOuterState (U.map realToFrac params0) resumeStep)
+            Nothing -> pure (freshOuterState (U.map realToFrac params0) resumeStep)
           reference <- newIORef state
           pure (Just (dcfg, reference))
       let saveSnapshot step rng best deviceParams (deviceM, deviceV, deviceMomentum) =
@@ -839,14 +832,24 @@ trainInContext ctx corpusPath checkpointPath mode cfg = do
       let outerSync step deviceParams = case outerRef of
             Nothing -> pure deviceParams
             Just (dcfg, reference)
-              | step `mod` dilocoInner dcfg /= 0 && step /= target -> pure deviceParams
+              | step `mod` dilocoInner dcfg /= 0 && step /= target -> do
+                  -- Liveness, not data: lets a waiting peer distinguish a slow
+                  -- rank from a dead one, and its age names the culprit in the
+                  -- timeout message.
+                  touchHeartbeat dcfg step
+                  pure deviceParams
               | otherwise -> do
+                  touchHeartbeat dcfg step
                   state <- readIORef reference
                   host <- downloadF32Vector ctx n deviceParams
-                  let retire = if outerCount state == 0
+                  -- The outer path is f32 end to end (the device precision);
+                  -- the narrowing here is exact because the download widened
+                  -- these same f32 values.
+                  let hostF = U.map realToFrac host :: U.Vector Float
+                      retire = if outerCount state == 0
                         then Nothing
                         else Just (outerStepAt state)
-                  averaged <- averageWithPeers dcfg step retire host
+                  averaged <- averageWithPeers dcfg step retire hostF
                   let (updated, state') = outerStep dcfg state step averaged
                   writeIORef reference state'
                   -- Both ranks must print the SAME digest here; a monitor that
@@ -854,9 +857,9 @@ trainInContext ctx corpusPath checkpointPath mode cfg = do
                   logTraining ("diloco: outer_step=" ++ show (outerCount state')
                     ++ " step=" ++ show step
                     ++ " rank=" ++ show (dilocoRank dcfg)
-                    ++ " digest=" ++ parameterDigest updated)
+                    ++ " " ++ parameterDigest updated)
                   freeF32 ctx deviceParams
-                  uploadF32Vector ctx updated
+                  uploadF32Vector ctx (U.map realToFrac updated)
       -- DUMP_GRAD_VECTOR=path: at step 1 write the RAW model gradient
       -- (pre-mask, pre-clip) and the exact batch tokens, so an offline f64
       -- oracle can recompute the same step's gradient and compare.

@@ -73,8 +73,12 @@ data FastBpe = FastBpe
 --   V2  A run of spaces is one word (newline-prefixed when a newline
 --       immediately precedes it), except that the run's last space still goes
 --       on the following word.  Indentation becomes one learnable token.
---       Prose is left alone: runs of one or two spaces, and a newline not
---       followed by a space, cut exactly where V1 cuts them.
+--       Mid-line prose is left alone: single spaces between words, and a
+--       newline not followed by a space, cut exactly where V1 cuts them.
+--       TRAILING whitespace is not: "x  \\n" is four V1 words but three V2
+--       words, so the two rules' word streams differ on any real text with
+--       trailing spaces or whitespace-only lines.  Byte-identity of
+--       decode.encode is preserved either way; only the token boundaries move.
 data PretokenRule = PretokenV1 | PretokenV2
   deriving (Eq, Show)
 

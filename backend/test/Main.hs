@@ -8,7 +8,7 @@ import Data.Word (Word32)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy as LBS
-import Data.List (nub, transpose)
+import Data.List (isInfixOf, nub, transpose)
 import Data.Maybe (isNothing)
 import Data.Monoid (Sum (..))
 import qualified Data.Vector.Unboxed as VU
@@ -77,6 +77,8 @@ tests =
   , ("trainer window split is shared and deterministic", testTrainerWindowSplit)
   , ("learned BPE is parseable, deterministic and lossless", testLearnBpe)
   , ("pretokenization v2 folds indentation and leaves prose alone", testPretokenV2)
+  , ("pretokenization v2 diverges from v1 only at trailing whitespace", testPretokenV2Edges)
+  , ("v2-rule artifact round-trips bytes and UTF-8 losslessly", testFastBpeV2RoundTrip)
   , ("DiLoCo outer step is the identity at lr=1 without momentum", testDilocoIdentity)
   , ("DiLoCo outer step follows the Nesterov recurrence", testDilocoNesterov)
   , ("DiLoCo ranks partition each global batch exactly once", testDilocoSharding)
@@ -87,6 +89,7 @@ tests =
   , ("packing loses no document and keeps ids unique", testPackPreservesDocuments)
   , ("packing respects the target and never splits a document", testPackTarget)
   , ("grouped packing never mixes two groups", testPackGrouping)
+  , ("packing edges: exact target, empty document, slash-free group", testPackEdges)
   ]
 
 -- The scale-up rung. Pinning the exact count here is the point: vocabulary is
@@ -185,8 +188,10 @@ testDilocoNesterov = do
       -- delta = [2, 3]; m' = 0.9*0 + delta = [2, 3];
       -- theta = prev - 0.5 * (delta + 0.9 * m') = prev - 0.5 * [3.8, 5.7]
       expected = VU.fromList [10 - 1.9, 20 - 2.85]
+      -- The outer state is f32 end to end, so the hand-computed Double
+      -- literals land within a float ulp of the computed values, not on them.
       close a b = VU.length a == VU.length b
-        && VU.and (VU.zipWith (\x y -> abs (x - y) < 1e-12) a b)
+        && VU.and (VU.zipWith (\x y -> abs (x - y) < 1e-6) a b)
   assert (close updated expected) ("Nesterov outer step differs: " ++ show (VU.toList updated))
   assert (close (outerMomentum state') (VU.fromList [2, 3])) "outer momentum differs"
   -- A second step must accumulate momentum rather than restart it:
@@ -275,6 +280,77 @@ testPretokenV2 = do
     "v2 did not reduce the word count of indented Haskell"
   assert (length (v2 prose) == length (v1 prose))
     "v2 changed the word count of prose"
+
+-- V2 deliberately moves word boundaries relative to V1 exactly at trailing
+-- whitespace, and nowhere else.  These are the divergence cases and the
+-- must-not-diverge cases, each pinned; and under BOTH rules the word stream
+-- must concatenate back to the input, which is the property decode . encode
+-- rests on whatever the boundaries do.
+testPretokenV2Edges :: IO ()
+testPretokenV2Edges = do
+  let v1 = pretokenizeWith PretokenV1
+      v2 = pretokenizeWith PretokenV2
+      w = BSC.pack
+  -- Divergent: trailing whitespace folds into one word under v2.
+  assert (v2 (w "x  \n") == [w "x", w "  ", w "\n"])
+    "v2 must fold a trailing run before a newline"
+  assert (v1 (w "x  \n") == [w "x", w " ", w " ", w "\n"])
+    "v1 trailing baseline changed"
+  assert (v2 (w "\n \n") == [w "\n ", w "\n"])
+    "v2 must fold a whitespace-only line into one word"
+  assert (v2 (w "foo  ") == [w "foo", w "  "])
+    "v2 must fold trailing spaces at end of input"
+  -- Identical: newline runs stay one word each, tabs and CR stay ordinary
+  -- bytes, and leading indentation cuts the same under both rules.
+  forM_ ["\n\n\n", "a\tb", "\n\tfoo", "a\r\nb", " lead", "  lead"] $ \sample ->
+    assert (v1 (w sample) == v2 (w sample))
+      ("v2 moved a boundary it must not move on " ++ show sample)
+  -- Concatenation invariance, on every shape above plus the divergent ones.
+  forM_ [ "x  \n", "\n \n", "foo  ", "\n\n\n", "a\tb", "a\r\nb"
+        , "   ", "", "\n        foo   \n\n" ] $ \sample -> do
+    assert (BS.concat (v1 (w sample)) == w sample)
+      ("v1 words do not concatenate back on " ++ show sample)
+    assert (BS.concat (v2 (w sample)) == w sample)
+      ("v2 words do not concatenate back on " ++ show sample)
+
+-- The first test anywhere that ENCODES under the v2 rule: a learned v2
+-- artifact must record its rule, name it in the identity string, and
+-- round-trip arbitrary bytes -- including every byte value, multi-byte UTF-8,
+-- and the trailing-whitespace shapes v2 moves boundaries on.
+testFastBpeV2RoundTrip :: IO ()
+testFastBpeV2RoundTrip = do
+  let indented = BSC.pack (concat (replicate 30
+        "module M where\n    frob :: Int -> Int\n    frob x =\n        x + 1   \n\n"))
+      -- Real multi-byte UTF-8, written as explicit bytes: BSC.pack would
+      -- truncate a Char above 255 to its low byte and quietly test nothing.
+      -- The glyphs are the Agda staples: forall, lambda, arrow, equivalence.
+      agda = BSC.pack (concat (replicate 30
+        ("\226\136\128-elim : \226\136\128 {A : Set} (\206\187 x \226\134\146 x)"
+          ++ " \226\137\161 id\n  \226\136\128-elim = refl  \n")))
+      sample = indented <> agda
+      frequencies = countWords PretokenV2 mempty sample
+  merges <- either (throwIO . TestException) pure (learnBpeMerges 400 frequencies)
+  directory <- getTemporaryDirectory
+  let path = directory </> "formal-transformer-v2-roundtrip.bpe"
+  BS.writeFile path (renderBpeArtifact PretokenV2 merges)
+  loaded <- loadFastBpe path >>= either (throwIO . TestException) pure
+  removeFile path
+  assert (fastBpeRule loaded == PretokenV2) "artifact did not record the v2 rule"
+  let tokenizer = FastBpeTokenizer loaded
+  assert (isInfixOf "pretoken=ascii-space-run+lf-prefix-v2"
+      (tokenizerIdentityOf tokenizer))
+    "identity string does not name the v2 rule"
+  let lcg = iterate (\s -> (s * 1103515245 + 12345) `mod` 2147483648) (20260828 :: Integer)
+      noise = BS.pack (map (fromIntegral . (`mod` 256)) (take 8192 lcg))
+      cases = [sample, noise, BS.pack [0 .. 255], BSC.pack "x  \n\n \n\t "]
+  forM_ cases $ \input -> do
+    let tokens = encodeWith tokenizer input
+    either (throwIO . TestException)
+      (\back -> assert (back == input)
+        "decode . encode is not the identity under the v2 rule")
+      (decodeWith tokenizer tokens)
+  assert (any (>= byteVocabSize) (encodeWith tokenizer indented))
+    "no learned merge was applied to the indented sample"
 
 testLearnBpe :: IO ()
 testLearnBpe = do
@@ -1206,6 +1282,35 @@ testPackGrouping = do
     assert (not mixes) ("pack " ++ name ++ " mixed two groups")
   assert (length packed >= 3)
     "each group boundary must close a pack"
+
+-- The edges around the target and around degenerate documents.
+testPackEdges :: IO ()
+testPackEdges = do
+  let cfg = defaultPackConfig { packTarget = 5 }
+  assert (null (packAll cfg [])) "packing nothing must emit nothing"
+  -- Exactly at the target counts as full (>=), so the document closes its
+  -- own pack rather than waiting for a neighbor.
+  let exact = packAll cfg
+        [(BSC.pack "g/a", BSC.pack "12345"), (BSC.pack "g/b", BSC.pack "x")]
+  assert (map snd exact == [BSC.pack "12345", BSC.pack "x"])
+    "a document exactly at the target must close its own pack"
+  -- Oversized on an empty pack: emitted alone, no neighbor mixed in.
+  let alone = packAll cfg [(BSC.pack "g/a", BSC.pack "123456789")]
+  assert (map snd alone == [BSC.pack "123456789"])
+    "an oversized document on an empty pack must be emitted alone"
+  -- An empty document vanishes without leaving a bare separator behind; the
+  -- pack-stdin --stats line reports the drop.
+  let withEmpty = packAll cfg
+        [(BSC.pack "g/a", BS.empty), (BSC.pack "g/b", BSC.pack "hello")]
+  assert (map snd withEmpty == [BSC.pack "hello"])
+    "an empty document must vanish without leaving a separator"
+  -- A slash-free id is its whole own group -- which is why pack-stdin
+  -- refuses such ids under --group instead of quietly not packing.
+  assert (groupOf (BSC.pack "repo/path/file") == BSC.pack "repo")
+    "group is the id's first segment"
+  assert (groupOf (BSC.pack "noslash") == BSC.pack "noslash")
+    "a slash-free id must be its own group"
+  assert (groupOf BS.empty == BS.empty) "the empty id is its own empty group"
 
 splitOn :: BS.ByteString -> BS.ByteString -> [BS.ByteString]
 splitOn separator = go
