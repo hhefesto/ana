@@ -10,7 +10,6 @@ import ./Train/Init.bend as I
 import ./Train/Opt.bend as O
 import ./Train/Data.bend as D
 import ./Train/Ckpt.bend as K
-
 # train: master's trainer (backend/gpu/Main.hs train) on the Bend2 port.
 #
 #   CORPUS          a text file; documents are cut at blank lines
@@ -135,6 +134,29 @@ def batch.grad(ws: List<&2, List<&2, U32>>, +dm: Md.Dims, +w: Md.Weights) -> Acc
 def batch.at(+ws: List<&2, List<&2, U32>>, +n: Nat, +step: Nat, +b: Nat) -> List<&2, List<&2, U32>>:
   List.take(&2, List<&2, U32>, List.append(&2, List<&2, U32>, List.drop(&2, List<&2, U32>, ws, Nat.mod(Nat.mul(step, b), n)), ws), b)
 
+def few(+ws: List<&2, List<&2, U32>>) -> Bool:
+  Nat.is_le(List.length(&2, List<&2, U32>, ws), 1n)
+
+def Acc.merge(a: Acc, b: Acc) -> Acc:
+  match a b:
+    case Acc{l1, w1} Acc{l2, w2}:
+      Acc{F32.add(l1, l2), O.W.add(w1, w2)}
+
+# the batch gradient as a balanced fork over windows: the halves are
+# independent (Spec/Batch.bend: the mean gradient is the sum of the
+# windows' gradients, scaled), so each runs as its own task -- on CPU
+# threads, or on GPU lanes under `!`
+def batch.fork(k: Nat, one: Bool, +ws: List<&2, List<&2, U32>>, +dm: Md.Dims, +w: Md.Weights) -> Acc:
+  match k one:
+    case 1n+(+p) False{}:
+      +h = Nat.div(List.length(&2, List<&2, U32>, ws), 2n)
+      +l = List.take(&2, List<&2, U32>, ws, h)
+      +r = List.drop(&2, List<&2, U32>, ws, h)
+      a b = batch.fork(p, few(l), l, dm, w) batch.fork(p, few(r), r, dm, w)
+      Acc.merge(a, b)
+    case _ _:
+      batch.grad(ws, dm, w)
+
 def eval.loss(ws: List<&2, List<&2, U32>>, +dm: Md.Dims, +w: Md.Weights) -> F32:
   match ws:
     case Nil{}:
@@ -163,24 +185,79 @@ def report.eval(on: Bool, +dm: Md.Dims, +w: Md.Weights, +valid: List<&2, List<&2
     case False{}:
       IO.pure(Unit, Unit{})
 
-def loop(n: Nat, +hp: Hp, +dm: Md.Dims, +c: C.Config, +ws: List<&2, List<&2, U32>>, +nw: Nat,
-         +valid: List<&2, List<&2, U32>>, +w: Md.Weights, +st: O.State, +step: Nat) -> IO(Md.Weights):
-  match n hp:
-    case 0n _:
-      IO.pure(Md.Weights, w)
-    case 1n+p Hp{+lr, +wd, +warm, +total, +muon, +mu, +clip, +b, +every}:
-      +acc = batch.grad(batch.at(ws, nw, step, b), dm, w)
+type SOut is Data:
+  SOut{loss: F32, norm: F32, w: Md.Weights, st: O.State}
+
+# one whole optimizer step, pure: the batch gradient, the mean, the clip and
+# the AdamW / Muon update.  The loop runs it with `!`, so under --gpu the
+# step executes on the device.
+def step.pure(+hp: Hp, +c: C.Config, +dm: Md.Dims, +bw: List<&2, List<&2, U32>>, +w: Md.Weights, +st: O.State) -> SOut:
+  match hp:
+    case Hp{+lr, +wd, +warm, +total, +muon, +mu, +clip, +b, +every}:
+      +acc = batch.fork(b, few(bw), bw, dm, w)
       +inv = F32.div(1.0, F32.from_nat(b))
       +g = O.W.scale(inv, Acc.grad(acc))
       +norm = F32.sqrt(O.W.sumsq(g))
       +sc = O.clip.scale(norm, clip)
       +s = O.W.step(muon, lr, 0.9, 0.999, 1.0e-8, wd, mu, warm, total, C.Config.d(c), C.Config.f(c), w, O.W.scale(sc, g), st)
+      SOut{F32.mul(Acc.loss(acc), inv), norm, O.Stepped.w(s), O.Stepped.st(s)}
+
+def Hp.total(+hp: Hp) -> Nat:
+  match hp:
+    case Hp{lr, wd, warm, total, muon, mu, clip, b, every}:
+      total
+
+def Hp.every(+hp: Hp) -> Nat:
+  match hp:
+    case Hp{lr, wd, warm, total, muon, mu, clip, b, every}:
+      every
+
+def Hp.lr_at(+hp: Hp, +step: Nat) -> F32:
+  match hp:
+    case Hp{lr, wd, warm, total, muon, mu, clip, b, every}:
+      O.lr.at(lr, step, warm, total)
+
+def Hp.batch(+hp: Hp) -> Nat:
+  match hp:
+    case Hp{lr, wd, warm, total, muon, mu, clip, b, every}:
+      b
+
+def SOut.loss(+o: SOut) -> F32:
+  match o:
+    case SOut{l, n, w, s}:
+      l
+
+def SOut.norm(+o: SOut) -> F32:
+  match o:
+    case SOut{l, n, w, s}:
+      n
+
+def SOut.w(+o: SOut) -> Md.Weights:
+  match o:
+    case SOut{l, n, w, s}:
+      w
+
+def SOut.st(+o: SOut) -> O.State:
+  match o:
+    case SOut{l, n, w, s}:
+      s
+
+def loop(n: Nat, +hp: Hp, +dm: Md.Dims, +c: C.Config, +ws: List<&2, List<&2, U32>>, +nw: Nat,
+         +valid: List<&2, List<&2, U32>>, +w: Md.Weights, +st: O.State, +step: Nat) -> IO(Md.Weights):
+  match n:
+    case 0n:
+      IO.pure(Md.Weights, w)
+    case 1n+p:
       +step2 = {1n+step : Nat}
+      +every = Hp.every(hp)
       do IO<Md.Weights>:
-        IO.print("step " ++ Nat.show(step2) ++ " loss " ++ F32.show(F32.mul(Acc.loss(acc), inv)) ++ " grad_norm " ++ F32.show(norm)
-          ++ " lr " ++ F32.show(O.lr.at(lr, step2, warm, total)))
-        report.eval(Bool.or(Nat.is_eq(step2, total), Bool.and(Nat.is_lt(0n, every), Nat.is_eq(Nat.mod(step2, Nat.max(every, 1n)), 0n))), dm, O.Stepped.w(s), valid, step2)
-        loop(p, hp, dm, c, ws, nw, valid, O.Stepped.w(s), O.Stepped.st(s), step2)
+        +t0 : Nat <- IO.now()
+        +so : SOut <- IO.pure(SOut, step.pure!(hp, c, dm, batch.at(ws, nw, step, Hp.batch(hp)), w, st))
+        +t1 : Nat <- IO.now()
+        IO.print("step " ++ Nat.show(step2) ++ " loss " ++ F32.show(SOut.loss(so)) ++ " grad_norm " ++ F32.show(SOut.norm(so))
+          ++ " lr " ++ F32.show(Hp.lr_at(hp, step2)) ++ " ms " ++ Nat.show(Nat.sub(t1, t0)))
+        report.eval(Bool.or(Nat.is_eq(step2, Hp.total(hp)), Bool.and(Nat.is_lt(0n, every), Nat.is_eq(Nat.mod(step2, Nat.max(every, 1n)), 0n))), dm, SOut.w(so), valid, step2)
+        loop(p, hp, dm, c, ws, nw, valid, SOut.w(so), SOut.st(so), step2)
 
 def split.train(+s: D.Split) -> List<&2, List<&2, U32>>:
   match s:

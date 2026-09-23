@@ -111,7 +111,7 @@ out of scope. What it does have:
 | `learn-bpe`, `prepare-*`, `pack-stdin`, `plan-segment`, `build-eval`, `train-plan`/`train-segment` shards | Not ported. The port reads the artifacts these tools write (`.bpe`, FTCC). `Train.bend` tokenizes a text corpus in memory instead of reading packed shards. |
 | writing FTC2, `compact-checkpoint`, resuming from FTC2 optimizer state | `File.write` takes only UTF-8 Strings, so pure Bend2 cannot write binary. The trainer writes BTC1 instead: a hex text format with the same layout order. Resuming training from a checkpoint is not implemented. |
 | DiLoCo (`Diloco.hs`), multi-GPU | Not ported. |
-| GPU execution | Bend2 has a CUDA path, but this machine has no GPU. The port has only been run on the C backend (`--threads`). |
+| GPU execution | The trainer runs each optimizer step under `!` and has been measured on an RTX 3060 (see below). Generate and evaluate still run on the CPU only. |
 | diagnostics: `act-stats`, `head-probe`, `head-path-probe`, `grad-compare`, `logits`, `inspect-*`, `bigram-gate` | Not ported. The closest equivalent is `SAMPLE_STATS=1` in generate. |
 
 ## Performance notes
@@ -128,3 +128,45 @@ out of scope. What it does have:
 - The obvious next step, not done, is leaves holding blocks of floats (for
   example 16 or 64 per leaf). That would cut node count and refcount traffic
   by the block size.
+
+## Training on a GPU (measured 2026-09-23)
+
+`Train.bend` runs each optimizer step as one pure call, `step.pure!(…)`,
+covering the batch gradient, clip, and AdamW/Muon update. The batch gradient
+forks across windows (`batch.fork`). Bend2 builds a CUDA version when
+`/usr/local/cuda` and clang ≥ 19 are present. The `!` then runs as one
+persistent kernel over a heap in CUDA managed memory. A CUDA build uses the GPU
+by default: pass `--gpu off --threads N` for CPU. The device program is
+compiled by NVRTC at `--gpu-build`, and that took 15 min 26 s on the box.
+
+The box was a vast.ai RTX 3060 12 GB with 16 vCPUs of an EPYC 7452. The
+config was small4-v3 (242,596 parameters, ctx 64) on `README.md`, with the
+byte tokenizer. CPU and GPU produce the same losses.
+
+| run | 16 CPU threads | RTX 3060 | GPU telemetry |
+|---|---|---|---|
+| tiny-v3, batch 8 | 71–150 ms/step | 5.6–7.5 s/step | SM 97%, mem 0% |
+| small4-v3, batch 16 | 32–43 s/step | 63.5–63.9 s/step | SM 88%, mem 2.5% |
+| small4-v3, batch 64 | 113–191 s/step | 88.2–88.9 s/step | SM 88%, mem 6.5%, 60 W of 170 W, 6.4 GB |
+
+The work per step is about 6 × 242,596 × 4,032 ≈ 5.9 GFLOP at batch 64. The
+GPU sustains about 66 MFLOP/s, which is **~5×10⁻⁶ of the 3060's 12.7 TFLOPS
+FP32 peak (0.0005% MFU)**. The CPU sustains about 39 MFLOP/s. Master's
+Futhark/cuBLAS trainer measured 13.5% MFU on a 5090. The gap is about four
+orders of magnitude.
+
+`nvidia-smi`'s ~90% "utilization" is not work. The persistent kernel keeps
+the SMs resident while they chase one-float tree nodes: the card drew 60 W of
+170 W, and memory-controller activity stayed at 2–6%. The GPU only overtakes
+16 CPU threads once the batch supplies enough independent windows (batch 64),
+and then by 1.3–2×.
+
+To use the GPU efficiently, the data must stop being one heap node per float.
+The two directions are:
+
+- leaves that hold packed float blocks, with the leaf ops written as loops
+  (Bend2 `Array`s);
+- restructuring the per-position recurrence into batched matrix products.
+
+Neither is done. Until then, training in this port is a correctness artifact,
+not a performance one.
