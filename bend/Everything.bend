@@ -2,7 +2,8 @@ import Base
 
 # The gate: `bend Everything.bend` checks every specification module and the
 # implementation modules they are stated over, and prints "All terms
-# check." only when every law in them is proven.  Master's
+# check." only when every law in them is proven (the trainer included:
+# its pullbacks, optimizers, init, data and checkpoint modules).  Master's
 # `agda -i . Everything.agda` is its counterpart.
 
 import ./Spec/Nat.bend as SNat
@@ -27,3 +28,4 @@ import ./Spec/TiedHead.bend as STiedHead
 import ./Spec/ResidualStream.bend as SResidual
 import ./Spec/Refinement.bend as SRefinement
 import ./Generate.bend as Generate
+import ./Train.bend as Train

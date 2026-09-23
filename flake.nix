@@ -164,6 +164,9 @@
           bend = bendFor pkgs;
           bend-generate = bendBinary pkgs "bend-generate" "Generate.bend";
           bend-bench = bendBinary pkgs "bend-bench" "Bench.bend";
+          # the Bend2 trainer: CORPUS, TOKENIZER_FILE, PRESET, TRAIN_* as in
+          # master; writes a BTC1 text checkpoint that bend-generate reads
+          bend-train = bendBinary pkgs "bend-train" "Train.bend";
           # `ana` on the Bend2 port: the same flags, the same environment
           # (TEMPERATURE, TOP_K, TOP_P, SAMPLE_SEED, SAMPLE_STATS,
           # TOKENIZER_FILE), run from the repository root so the tokenizer
@@ -622,6 +625,29 @@
               248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1 | diff - sha.out
             bend num.bend > num.out
             printf '%s\n' 236d88fe5618cf00 9bde02468acf1357 0000000048d159e2 0000000000000001 ffffffffffffffff 1.5 | diff - num.out
+            touch $out
+          '';
+          # the training stack: the hand-written pullbacks agree with central
+          # finite differences (f32: 5% relative plus 3e-5 absolute, the
+          # difference quotient's resolution at eps 0.01), the training
+          # forward's loss is the decode path's, and a short byte-level run
+          # lowers the validation loss
+          bend-train = pkgs.runCommand "bend-train" { nativeBuildInputs = [ (bendFor pkgs) pkgs.gawk ]; } ''
+            export HOME=$TMPDIR
+            cp -r ${bendSrc}/bend src
+            chmod -R u+w src
+            (cd src/tests && bend train.bend) | tee grad.out
+            awk '/^train loss/ { t = $3 } /^decode loss/ { d = $3 }
+                 / analytic=/ { split($2, a, "="); split($3, n, "="); x = a[2]; y = n[2]; e = x - y; if (e < 0) e = -e;
+                   m = (x < 0 ? -x : x); if ((y < 0 ? -y : y) > m) m = (y < 0 ? -y : y);
+                   k++; if (e > 0.05 * m + 3e-5) { print "gradcheck FAIL: " $0; bad = 1 } }
+                 END { e = t - d; if (e < 0) e = -e; if (e > 1e-5) { print "train/decode loss differ"; bad = 1 }
+                       if (k != 16) { print "expected 16 probes, got " k; bad = 1 } exit bad }' grad.out
+            cat src/*.bend src/Spec/*.bend > corpus.txt
+            CORPUS=corpus.txt PRESET=tiny-v3 TRAIN_STEPS=30 TRAIN_BATCH=8 TRAIN_LR=3e-3 TRAIN_WARMUP=5 \
+              OUT=tiny.btc ${self.packages.${system}.bend-train}/bin/bend-train --threads 4 | tee run.out
+            awk '/validation loss/ { v[++n] = $5 } END { if (n < 2 || !(v[n] < v[1] - 0.3)) { print "loss did not fall"; exit 1 } }' run.out
+            head -1 tiny.btc | grep -qx BTC1
             touch $out
           '';
           haskell = self.packages.${system}.formal-transformer;
@@ -1361,6 +1387,11 @@ USAGE
             type = "app";
             program = "${self.packages.${system}.ana-bend}/bin/ana-bend";
             meta.description = "Generate with the Bend2 port of the decoder";
+          };
+          ana-bend-train = {
+            type = "app";
+            program = "${self.packages.${system}.bend-train}/bin/bend-train";
+            meta.description = "Train with the Bend2 port (BTC1 checkpoints)";
           };
           bend = {
             type = "app";

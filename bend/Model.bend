@@ -684,3 +684,57 @@ def Weights.emb(+w: Weights) -> T.M:
   match w:
     case Weights{e, b, f, u}:
       e
+
+# Per-head matrix algebra for the GLA pullback -----------------------------
+
+# dS + q do^T per head
+def HM.outer_add(+k: Nat, +s: HM, +q: T.V, +d: T.V) -> HM:
+  match k s q d:
+    case 0n HL{m} _ _:
+      HL{T.M.add(m, T.M.outer(q, d))}
+    case 0n HZ{} _ _:
+      HL{T.M.outer(q, d)}
+    case 1n+p HN{sl, sr} T.VN{ql, qr} T.VN{dl, dr}:
+      HN{HM.outer_add(p, sl, ql, dl), HM.outer_add(p, sr, qr, dr)}
+    case 1n+p HZ{} T.VN{ql, qr} T.VN{dl, dr}:
+      HN{HM.outer_add(p, HZ{}, ql, dl), HM.outer_add(p, HZ{}, qr, dr)}
+    case _ _ _ _:
+      HZ{}
+
+# S x per head (rows of S against the head slice of x)
+def HM.matvec(+k: Nat, +s: HM, +x: T.V) -> T.V:
+  match k s x:
+    case 0n HL{m} _:
+      T.M.matvec(m, x)
+    case 1n+p HN{sl, sr} T.VN{xl, xr}:
+      T.VN{HM.matvec(p, sl, xl), HM.matvec(p, sr, xr)}
+    case _ _ _:
+      T.VZ{}
+
+# x^T S per head
+def HM.vecmat(+k: Nat, +x: T.V, +s: HM) -> T.V:
+  match k x s:
+    case 0n _ HL{m}:
+      T.M.vecmat(x, m)
+    case 1n+p T.VN{xl, xr} HN{sl, sr}:
+      T.VN{HM.vecmat(p, xl, sl), HM.vecmat(p, xr, sr)}
+    case _ _ _:
+      T.VZ{}
+
+def HM.rowdots(+k: Nat, +a: HM, +b: HM) -> T.V:
+  match k a b:
+    case 0n HL{x} HL{y}:
+      T.M.rowdots(x, y)
+    case 1n+p HN{al, ar} HN{bl, br}:
+      T.VN{HM.rowdots(p, al, bl), HM.rowdots(p, ar, br)}
+    case _ _ _:
+      T.VZ{}
+
+def HM.scale_rows(+k: Nat, +s: T.V, +a: HM) -> HM:
+  match k s a:
+    case 0n _ HL{m}:
+      HL{T.M.scale_rows(s, m)}
+    case 1n+p T.VN{sl, sr} HN{al, ar}:
+      HN{HM.scale_rows(p, sl, al), HM.scale_rows(p, sr, ar)}
+    case _ _ _:
+      HZ{}

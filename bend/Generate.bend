@@ -3,6 +3,7 @@ import ./Num.bend as N
 import ./Bytes.bend as B
 import ./Config.bend as C
 import ./Checkpoint.bend as K
+import ./Train/Ckpt.bend as TC
 import ./Model.bend as Md
 import ./Sample.bend as S
 import ./Tensor.bend as T
@@ -15,7 +16,6 @@ import ./Tokenizer.bend as Tk
 # The prompt is BOS then its encoding, fed one token at a time through the
 # incremental decoder (the cache-run law executed); every sampled token is
 # fed back until EOS or the budget.  Output streams as it is decoded.
-
 # Environment ------------------------------------------------------------
 def env.or(r: Result<&1, &1, U32 & String, String>, d: String) -> String:
   match r:
@@ -232,8 +232,15 @@ def strip.if(v1: Bool, s: String) -> String:
     case False{}:
       s
 
+# printf "%.3f" of 100 * done / total, in exact integer arithmetic
+def pad3(+n: Nat) -> String:
+  String.drop(Nat.show(Nat.add(U32.to_nat(1000), n)), 1n)
+
+def pct.milli(+m: Nat) -> String:
+  Nat.show(Nat.div(m, U32.to_nat(1000))) ++ "." ++ pad3(Nat.mod(m, U32.to_nat(1000)))
+
 def pct(+done: Nat, +total: Nat) -> String:
-  F32.show(F32.div(F32.mul(100.0, F32.from_nat(done)), F32.from_nat(total)))
+  pct.milli(Nat.div(Nat.add(Nat.mul(U32.to_nat(200000), done), total), Nat.mul(2n, total)))
 
 type Run is Data:
   Run{w: Md.Weights, step: Nat}
@@ -267,12 +274,9 @@ def rng.of(s: String) -> S.Rng:
 def ms(+t0: Nat, +t1: Nat) -> String:
   Nat.show(Nat.sub(t1, t0))
 
-def go(+m: K.Manifest, +b: Tk.Bpe, rw: B.Cur & Run, +prompt: String, +budget: Nat,
+def go(+c: C.Config, +total: Nat, +b: Tk.Bpe, +w: Md.Weights, +step: Nat, +prompt: String, +budget: Nat,
        +st: Settings, +seed: String, +t0: Nat, +stats: Bool) -> IO(Unit):
-  (cur, +run) = rw
-  +c = K.Manifest.cfg(m)
   +dm = Md.Dims.of(c)
-  +w = Run.w(run)
   +vocab = C.Config.vocab(c)
   +text = strip.if(Bool.not(Tk.Bpe.v2(b)), prompt)
   +bytes = Tk.utf8.bytes(text)
@@ -281,11 +285,10 @@ def go(+m: K.Manifest, +b: Tk.Bpe, rw: B.Cur & Run, +prompt: String, +budget: Na
   +o = prefill(ids, dm, w, start, 0n)
   +pk = pick(dm, st, vocab, Out.logits(o), rng.of(seed))
   do IO<Unit>:
-    B.Bytes.close(cur)
     +t1 : Nat <- IO.now()
     IO.print_err("generate: loaded in " ++ ms(t0, t1) ++ " ms; prompt_tokens=" ++ Nat.show(List.length(&2, U32, ids)))
-    IO.print("=== Wikipedia corpus training: " ++ pct(Run.step(run), K.Manifest.total_steps(m)) ++ "% complete ("
-      ++ Nat.show(Run.step(run)) ++ "/" ++ Nat.show(K.Manifest.total_steps(m)) ++ " updates) ===")
+    IO.print("=== Wikipedia corpus training: " ++ pct(step, Nat.max(total, 1n)) ++ "% complete ("
+      ++ Nat.show(step) ++ "/" ++ Nat.show(total) ++ " updates) ===")
     IO.write(bytes.str(Nil{}) ++ text)
     +t2 : Nat <- IO.now()
     n : Nat <- gen(budget, U32.is_eq(Pick.token(pk), Tk.eos()), pk, dm, w, b, st, vocab, Out.sts(o), List.length(&2, U32, ids), Nil{}, 0n, stats, Out.logits(o))
@@ -300,28 +303,64 @@ def problem(p: String) -> IO(Unit):
     case SCon{c, t}:
       IO.die(Unit, 1, "generate: " ++ SCon{c, t})
 
+def after.run(+m: K.Manifest, +b: Tk.Bpe, rw: B.Cur & Run, +prompt: String, +budget: Nat,
+              +st: Settings, +seed: String, +t0: Nat, +stats: Bool) -> IO(Unit):
+  (cur, +run) = rw
+  do IO<Unit>:
+    B.Bytes.close(cur)
+    go(K.Manifest.cfg(m), K.Manifest.total_steps(m), b, Run.w(run), Run.step(run), prompt, budget, st, seed, t0, stats)
+
 def after(r: B.Cur & K.Manifest, +prompt: String, +budget: Nat, +st: Settings, +seed: String, +pinned: String, +t0: Nat, +stats: Bool) -> IO(Unit):
   (cur, +m) = r
   do IO<Unit>:
     problem(K.Manifest.problem(m))
     b : Tk.Bpe <- tok.of(pinned, K.Manifest.tokenizer_id(m))
     rw : B.Cur & Run <- Load.run(K.Manifest.cfg(m))(cur)
-    go(m, b, rw, prompt, budget, st, seed, t0, stats)
+    after.run(m, b, rw, prompt, budget, st, seed, t0, stats)
+
+def byte.identity() -> String:
+  "lossless-byte-v1:bos=0:eos=1:bytes=2..257"
+
+# the byte tokenizer is a BPE with no merges (V1 whitespace off)
+def tok.btc(bytes: Bool, +pinned: String, +want: String) -> IO(Tk.Bpe):
+  match bytes:
+    case True{}:
+      IO.pure(Tk.Bpe, Tk.Bpe{258, True{}, Nil{}, Tk.LZ{}, Tk.LZ{}})
+    case False{}:
+      tok.of(pinned, want)
+
+# a BTC1 checkpoint (the Bend trainer's): parsed whole, trained to 100%
+def after.btc(+l: TC.Loaded, +prompt: String, +budget: Nat, +st: Settings, +seed: String, +pinned: String, +t0: Nat, +stats: Bool) -> IO(Unit):
+  match l:
+    case TC.Loaded{+c, +tok, +step, +w}:
+      do IO<Unit>:
+        b : Tk.Bpe <- tok.btc(String.eq(tok, byte.identity()), pinned, tok)
+        go(c, step, b, w, step, prompt, budget, st, seed, t0, stats)
+
+def open.fmt(btc: Bool, +path: String, +prompt: String, +budget: Nat, +st: Settings, +seed: String, +pinned: String, +t0: Nat, +stats: Bool) -> IO(Unit):
+  match btc:
+    case True{}:
+      do IO<Unit>:
+        +xs : List<&2, U32> <- B.Bytes.read_all(path)
+        after.btc(TC.parse(xs), prompt, budget, st, seed, pinned, t0, stats)
+    case False{}:
+      do IO<Unit>:
+        c : B.Cur <- B.Bytes.open(path)
+        r : B.Cur & K.Manifest <- K.Load.header()(c)
+        after(r, prompt, budget, st, seed, pinned, t0, stats)
 
 def main() -> IO(Unit):
   do IO<Unit>:
     +t0 : Nat <- IO.now()
-    path : String <- env("CKPT", "run/last-checkpoint")
-    prompt : String <- env("PROMPT", "The")
+    +path : String <- env("CKPT", "run/last-checkpoint")
+    +prompt : String <- env("PROMPT", "The")
     +tokens : String <- env("TOKENS", "128")
     +temp : String <- env("TEMPERATURE", "0.8")
     +topk : String <- env("TOP_K", "")
     +topp : String <- env("TOP_P", "0.95")
     +seed : String <- env("SAMPLE_SEED", "0")
-    pinned : String <- env("TOKENIZER_FILE", "")
+    +pinned : String <- env("TOKENIZER_FILE", "")
     sflag : String <- env("SAMPLE_STATS", "")
     +st : Settings = Settings{f32.or(F32.read(temp), 0.8), nat.or(U32.read(topk), U32.to_nat(4294967295)), f32.or(F32.read(topp), 0.95)}
     IO.print_err("generate: temperature=" ++ temp ++ " top_k=" ++ topk ++ " top_p=" ++ topp ++ " seed=" ++ seed)
-    c : B.Cur <- B.Bytes.open(path)
-    r : B.Cur & K.Manifest <- K.Load.header()(c)
-    after(r, prompt, nat.or(U32.read(tokens), 128n), st, seed, pinned, t0, String.eq(sflag, "1"))
+    open.fmt(String.ends_with(path, ".btc"), path, prompt, nat.or(U32.read(tokens), 128n), st, seed, pinned, t0, String.eq(sflag, "1"))
