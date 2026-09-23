@@ -167,6 +167,8 @@
           # the Bend2 trainer: CORPUS, TOKENIZER_FILE, PRESET, TRAIN_* as in
           # master; writes a BTC1 text checkpoint that bend-generate reads
           bend-train = bendBinary pkgs "bend-train" "Train.bend";
+          # master's `evaluate CKPT CORPUS` (CKPT, CORPUS, EVAL_WINDOWS)
+          bend-evaluate = bendBinary pkgs "bend-evaluate" "Evaluate.bend";
           # `ana` on the Bend2 port: the same flags, the same environment
           # (TEMPERATURE, TOP_K, TOP_P, SAMPLE_SEED, SAMPLE_STATS,
           # TOKENIZER_FILE), run from the repository root so the tokenizer

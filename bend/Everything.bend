@@ -29,3 +29,4 @@ import ./Spec/ResidualStream.bend as SResidual
 import ./Spec/Refinement.bend as SRefinement
 import ./Generate.bend as Generate
 import ./Train.bend as Train
+import ./Evaluate.bend as Evaluate
