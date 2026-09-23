@@ -247,6 +247,22 @@ law Bool.or_false_l:
 def Bool.or_false_l(x):
   {==}
 
+law Bool.and_comm:
+  for +x: Bool
+  for +y: Bool
+  {Bool.and(x, y) == Bool.and(y, x) : Bool}
+
+def Bool.and_comm(x, y):
+  match x y:
+    case True{} True{}:
+      {==}
+    case True{} False{}:
+      {==}
+    case False{} True{}:
+      {==}
+    case False{} False{}:
+      {==}
+
 law Bool.and_assoc:
   for +x: Bool
   for +y: Bool
