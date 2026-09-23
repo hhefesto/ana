@@ -196,3 +196,17 @@ def Load.f32s(+n: Nat) -> Load(List<&2, F32>):
   do Load<List<&2, F32>>:
     xs : List<&2, U32> <- Load.bytes(Nat.mul(4n, n))
     return Bytes.f32s(xs)
+
+def Bytes.all.fin(fr: Chunk()) -> IO(List<&2, U32>):
+  (f, r) = fr
+  do IO<List<&2, U32>>:
+    xs : List<&2, U32> <- IO.pass(List<&2, U32>, r)
+    File.close(f)
+    return xs
+
+# a whole (small) file's bytes
+def Bytes.read_all(path: String) -> IO(List<&2, U32>):
+  do IO<List<&2, U32>>:
+    f : File <- IO.try(File, File.open(path, "r"))
+    fr : Chunk() <- File.read_bytes(f, 268435456)
+    Bytes.all.fin(fr)
