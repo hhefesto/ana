@@ -132,22 +132,125 @@ def Dims.sinks(+dm: Dims) -> Bool:
 def Load.vec(+n: Nat) -> B.Load(T.V):
   do B.Load<T.V>:
     xs : List<&2, F32> <- B.Load.f32s(n)
-    return T.V.of_list(T.depth(n), xs)
+    return T.V.build(T.depth(n), xs)
 
-def Load.rows(r: Nat, +cols: Nat) -> B.Load(List<&2, T.V>):
+# Rows are read a chunk at a time (up to 64 rows), split into per-row byte
+# lists, arranged as a tree, and decoded to vectors in parallel -- the file
+# read is sequential, the decode is fork-join.
+
+type RowSplit is Data:
+  RowSplit{head: List<&2, U32>, rest: List<&2, U32>}
+
+def RowSplit.put(h: U32, r: RowSplit) -> RowSplit:
+  match r:
+    case RowSplit{a, b}:
+      RowSplit{h <> a, b}
+
+def RowSplit.of(+k: Nat, xs: List<&2, U32>) -> RowSplit:
+  match k xs:
+    case 0n _:
+      RowSplit{Nil{}, xs}
+    case 1n+p h <> t:
+      RowSplit.put(h, RowSplit.of(p, t))
+    case 1n+p Nil{}:
+      RowSplit{Nil{}, Nil{}}
+
+def RowSplit.head(r: RowSplit) -> List<&2, U32>:
+  match r:
+    case RowSplit{a, b}:
+      a
+
+def RowSplit.rest(r: RowSplit) -> List<&2, U32>:
+  match r:
+    case RowSplit{a, b}:
+      b
+
+def rows.split(k: Nat, +w: Nat, xs: List<&2, U32>) -> List<&2, List<&2, U32>>:
+  match k:
+    case 0n:
+      Nil{}
+    case 1n+p:
+      +sp = RowSplit.of(w, xs)
+      RowSplit.head(sp) <> rows.split(p, w, RowSplit.rest(sp))
+
+# a tree of row byte lists, the shape of the matrix chunk
+type BT is Data:
+  BZ{}
+  BL{xs: List<&2, U32>}
+  BN{l: BT, r: BT}
+
+def BT.leaves(rs: List<&2, List<&2, U32>>) -> List<&2, BT>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case h <> t:
+      BL{h} <> BT.leaves(t)
+
+def BT.pairs(bs: List<&2, BT>) -> List<&2, BT>:
+  match bs:
+    case a <> b <> t:
+      BN{a, b} <> BT.pairs(t)
+    case a <> Nil{}:
+      [BN{a, BZ{}}]
+    case Nil{}:
+      Nil{}
+
+def BT.first(bs: List<&2, BT>) -> BT:
+  match bs:
+    case h <> t:
+      h
+    case Nil{}:
+      BZ{}
+
+def BT.rounds(d: Nat, bs: List<&2, BT>) -> BT:
+  match d:
+    case 0n:
+      BT.first(bs)
+    case 1n+p:
+      BT.rounds(p, BT.pairs(bs))
+
+# decode every row of the chunk in parallel
+def BT.decode(+dc: Nat, t: BT) -> T.M:
+  match t:
+    case BL{xs}:
+      T.ML{T.V.build(dc, B.Bytes.f32s(xs))}
+    case BN{l, r}:
+      a b = BT.decode(dc, l) BT.decode(dc, r)
+      T.MN{a, b}
+    case BZ{}:
+      T.MZ{}
+
+def Load.chunks(n: Nat, +left: Nat, +k: Nat, +kc: Nat, +c: Nat) -> B.Load(List<&2, T.M>):
+  match n:
+    case 0n:
+      B.Load.pure(List<&2, T.M>, Nil{})
+    case 1n+p:
+      +here = Nat.min(k, left)
+      do B.Load<List<&2, T.M>>:
+        bytes : List<&2, U32> <- B.Load.bytes(Nat.mul(here, Nat.mul(4n, c)))
+        +m : T.M = BT.decode(T.depth(c), BT.rounds(kc, BT.leaves(rows.split(here, Nat.mul(4n, c), bytes))))
+        rest : List<&2, T.M> <- Load.chunks(p, Nat.sub(left, here), k, kc, c)
+        return m <> rest
+
+def Load.row(+cols: Nat, +dc: Nat) -> B.Load(T.V):
+  do B.Load<T.V>:
+    xs : List<&2, F32> <- B.Load.f32s(cols)
+    return T.V.build(dc, xs)
+
+def Load.rows(r: Nat, +cols: Nat, +dc: Nat) -> B.Load(List<&2, T.V>):
   match r:
     case 0n:
       B.Load.pure(List<&2, T.V>, Nil{})
     case 1n+p:
       do B.Load<List<&2, T.V>>:
-        row : T.V <- Load.vec(cols)
-        rest : List<&2, T.V> <- Load.rows(p, cols)
+        row : T.V <- Load.row(cols, dc)
+        rest : List<&2, T.V> <- Load.rows(p, cols, dc)
         return row <> rest
 
 def Load.mat(+r: Nat, +c: Nat) -> B.Load(T.M):
   do B.Load<T.M>:
-    rows : List<&2, T.V> <- Load.rows(r, c)
-    return T.M.of_list(T.depth(r), rows)
+    rows : List<&2, T.V> <- Load.rows(r, c, T.depth(c))
+    return T.M.build(T.depth(r), rows)
 
 def Load.maybe_vec(b: Bool, +n: Nat) -> B.Load(T.V):
   match b:
@@ -576,3 +679,8 @@ def decode(+dm: Dims, +w: Weights, sts: List<&2, LState>, +position: Nat, +token
     case Weights{+emb, +bs, fin, un}:
       +x0 = T.M.row(Dims.dv(dm), emb, token)
       decode.fin(dm, Weights{emb, bs, fin, un}, stack(bs, sts, dm, x0, U32.from_nat(Nat.mod(position, Dims.ctx(dm)))))
+
+def Weights.emb(+w: Weights) -> T.M:
+  match w:
+    case Weights{e, b, f, u}:
+      e

@@ -102,8 +102,7 @@ def V.fill(+d: Nat, +n: Nat, +c: F32) -> V:
       VL{c}
     case 1n+p 1n+q:
       +half = Nat.pow(2n, p)
-      l r = V.fill(p, Nat.min(1n+q, half), c) V.fill(p, Nat.sub(1n+q, half), c)
-      VN{l, r}
+      VN{V.fill(p, Nat.min(1n+q, half), c), V.fill(p, Nat.sub(1n+q, half), c)}
 
 # Elementwise ------------------------------------------------------------
 
@@ -112,8 +111,7 @@ def V.map(~f: F32 -> F32, +a: V) -> V:
     case VL{x}:
       VL{f(x)}
     case VN{l, r}:
-      p q = V.map(~f, l) V.map(~f, r)
-      VN{p, q}
+      VN{V.map(~f, l), V.map(~f, r)}
     case VZ{}:
       VZ{}
 
@@ -123,8 +121,7 @@ def V.map1(~f: F32 -> F32 -> F32, +s: F32, +a: V) -> V:
     case VL{x}:
       VL{f(s, x)}
     case VN{l, r}:
-      p q = V.map1(~f, s, l) V.map1(~f, s, r)
-      VN{p, q}
+      VN{V.map1(~f, s, l), V.map1(~f, s, r)}
     case VZ{}:
       VZ{}
 
@@ -136,8 +133,7 @@ def V.zip(~f: F32 -> F32 -> F32, +a: V, +b: V) -> V:
     case VL{x} VL{y}:
       VL{f(x, y)}
     case VN{al, ar} VN{bl, br}:
-      l r = V.zip(~f, al, bl) V.zip(~f, ar, br)
-      VN{l, r}
+      VN{V.zip(~f, al, bl), V.zip(~f, ar, br)}
     case _ _:
       VZ{}
 
@@ -157,8 +153,7 @@ def V.sum(+a: V) -> F32:
     case VL{x}:
       x
     case VN{l, r}:
-      p q = V.sum(l) V.sum(r)
-      F32.add(p, q)
+      F32.add(V.sum(l), V.sum(r))
     case VZ{}:
       0.0
 
@@ -167,8 +162,7 @@ def V.sumsq(+a: V) -> F32:
     case VL{x}:
       F32.mul(x, x)
     case VN{l, r}:
-      p q = V.sumsq(l) V.sumsq(r)
-      F32.add(p, q)
+      F32.add(V.sumsq(l), V.sumsq(r))
     case VZ{}:
       0.0
 
@@ -178,8 +172,7 @@ def V.max(+a: V) -> F32:
     case VL{x}:
       x
     case VN{l, r}:
-      p q = V.max(l) V.max(r)
-      F32.max(p, q)
+      F32.max(V.max(l), V.max(r))
     case VZ{}:
       F32.neg(3.0e38)
 
@@ -188,8 +181,7 @@ def V.dot(+a: V, +b: V) -> F32:
     case VL{x} VL{y}:
       F32.mul(x, y)
     case VN{al, ar} VN{bl, br}:
-      l r = V.dot(al, bl) V.dot(ar, br)
-      F32.add(l, r)
+      F32.add(V.dot(al, bl), V.dot(ar, br))
     case _ _:
       0.0
 
@@ -215,8 +207,7 @@ def V.add.pad(+a: V, +b: V) -> V:
     case VL{x} VL{y}:
       VL{F32.add(x, y)}
     case VN{al, ar} VN{bl, br}:
-      l r = V.add.pad(al, bl) V.add.pad(ar, br)
-      VN{l, r}
+      VN{V.add.pad(al, bl), V.add.pad(ar, br)}
     case _ _:
       VZ{}
 
@@ -279,3 +270,102 @@ def V.is_z(+a: V) -> Bool:
       True{}
     case _:
       False{}
+
+def V.pick(l: V, r: V, right: Bool) -> V:
+  match right:
+    case True{}:
+      r
+    case False{}:
+      l
+
+# component i of a depth-d vector (0 where absent)
+def V.at(+d: Nat, +a: V, +i: U32) -> F32:
+  match d a:
+    case 0n VL{x}:
+      x
+    case 1n+p VN{l, r}:
+      V.at(p, V.pick(l, r, bit(i, p)), i)
+    case _ _:
+      0.0
+
+# sum of exp(x - m) over present components
+def V.sum_exp(+m: F32, +a: V) -> F32:
+  match a:
+    case VL{x}:
+      F32.exp(F32.sub(x, m))
+    case VN{l, r}:
+      F32.add(V.sum_exp(m, l), V.sum_exp(m, r))
+    case VZ{}:
+      0.0
+
+# Building by pairing rounds ---------------------------------------------
+#
+# The left-packed depth-d tree of a list, built bottom-up: leaves, then d
+# rounds pairing neighbours (a lone last element pairs with VZ).  The same
+# canonical shape as V.from, with no closures and linear work per round.
+
+def V.leaves(xs: List<&2, F32>) -> List<&2, V>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case h <> t:
+      VL{h} <> V.leaves(t)
+
+def V.pairs(vs: List<&2, V>) -> List<&2, V>:
+  match vs:
+    case a <> b <> t:
+      VN{a, b} <> V.pairs(t)
+    case a <> Nil{}:
+      [VN{a, VZ{}}]
+    case Nil{}:
+      Nil{}
+
+def V.first(vs: List<&2, V>) -> V:
+  match vs:
+    case h <> t:
+      h
+    case Nil{}:
+      VZ{}
+
+def V.rounds(d: Nat, vs: List<&2, V>) -> V:
+  match d:
+    case 0n:
+      V.first(vs)
+    case 1n+p:
+      V.rounds(p, V.pairs(vs))
+
+def V.build(d: Nat, xs: List<&2, F32>) -> V:
+  V.rounds(d, V.leaves(xs))
+
+def M.pairs(ms: List<&2, M>) -> List<&2, M>:
+  match ms:
+    case a <> b <> t:
+      MN{a, b} <> M.pairs(t)
+    case a <> Nil{}:
+      [MN{a, MZ{}}]
+    case Nil{}:
+      Nil{}
+
+def M.first(ms: List<&2, M>) -> M:
+  match ms:
+    case h <> t:
+      h
+    case Nil{}:
+      MZ{}
+
+def M.rounds(d: Nat, ms: List<&2, M>) -> M:
+  match d:
+    case 0n:
+      M.first(ms)
+    case 1n+p:
+      M.rounds(p, M.pairs(ms))
+
+def M.leaves(rs: List<&2, V>) -> List<&2, M>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case h <> t:
+      ML{h} <> M.leaves(t)
+
+def M.build(d: Nat, rs: List<&2, V>) -> M:
+  M.rounds(d, M.leaves(rs))

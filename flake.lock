@@ -1,5 +1,22 @@
 {
   "nodes": {
+    "bend2": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1789677457,
+        "narHash": "sha256-E+4jA5jKzbyEqHblShBbIeqyV7BQEvgBzVdM3/vVEPc=",
+        "owner": "bendlang",
+        "repo": "bend",
+        "rev": "8008146ab90abb98b496fa2a6ffe555da7fb0dd5",
+        "type": "github"
+      },
+      "original": {
+        "owner": "bendlang",
+        "repo": "bend",
+        "rev": "8008146ab90abb98b496fa2a6ffe555da7fb0dd5",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1783522502,
@@ -18,6 +35,7 @@
     },
     "root": {
       "inputs": {
+        "bend2": "bend2",
         "nixpkgs": "nixpkgs"
       }
     }

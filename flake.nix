@@ -2,9 +2,16 @@
   description = "A denotationally specified autoregressive transformer with Agda, Haskell, and Futhark interpretations";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  # Bend 2 (TypeScript, run by Bun; no build step), pinned to the revision
+  # ~/src/refl uses.  Source only: calling bend2/main.ts directly skips the
+  # upstream launcher, which phones home and self-updates.
+  inputs.bend2 = {
+    url = "github:bendlang/bend/8008146ab90abb98b496fa2a6ffe555da7fb0dd5";
+    flake = false;
+  };
 
   outputs =
-    { self, nixpkgs }:
+    { self, nixpkgs, bend2 }:
     let
       systems = [
         "x86_64-linux"
@@ -81,6 +88,32 @@
         ./backend/src
         futharkFiles
       ];
+      # The Bend2 port: every .bend source, nothing else.
+      bendSrc = sourceOf [ (nixpkgs.lib.fileset.fileFilter (f: f.hasExt "bend") ./bend) ];
+      bendFor =
+        pkgs:
+        pkgs.writeShellApplication {
+          name = "bend";
+          runtimeInputs = [
+            pkgs.bun
+            pkgs.clang
+          ];
+          text = ''
+            export BEND_NO_TELEMETRY=1
+            unset CC
+            exec bun ${bend2}/bend2/main.ts "$@"
+          '';
+        };
+      # A Bend2 program compiled to a native binary (C via clang).
+      bendBinary =
+        pkgs: name: entry:
+        pkgs.runCommand name { nativeBuildInputs = [ (bendFor pkgs) ]; } ''
+          export HOME=$TMPDIR
+          cp -r ${bendSrc}/bend src
+          chmod -R u+w src
+          mkdir -p $out/bin
+          bend src/${entry} -o $out/bin/${name}
+        '';
       agdaSrc = sourceOf [
         ./FormalTransformer
         ./Everything.agda
@@ -128,6 +161,50 @@
           gemmGhc = pkgs.haskellPackages.ghcWithPackages (p: [ p.vector ]);
         in
         {
+          bend = bendFor pkgs;
+          bend-generate = bendBinary pkgs "bend-generate" "Generate.bend";
+          bend-bench = bendBinary pkgs "bend-bench" "Bench.bend";
+          # `ana` on the Bend2 port: the same flags, the same environment
+          # (TEMPERATURE, TOP_K, TOP_P, SAMPLE_SEED, SAMPLE_STATS,
+          # TOKENIZER_FILE), run from the repository root so the tokenizer
+          # candidates under weights/ and run/ resolve.
+          ana-bend = pkgs.writeShellApplication {
+            name = "ana-bend";
+            runtimeInputs = [ pkgs.coreutils ];
+            text = ''
+              usage() {
+                cat <<'USAGE'
+            Usage: ana-bend [--checkpoint PATH] [--tokens N] [--threads N] [--prompt TEXT | TEXT...]
+
+            Generate from an FTC2 checkpoint with the Bend2 decoder.  Without
+            --checkpoint, the path recorded in run/last-checkpoint is used.
+            USAGE
+              }
+              checkpoint=""
+              tokens="''${WIKI_TOKENS:-128}"
+              threads="$(nproc)"
+              prompt="''${WIKI_PROMPT:-The}"
+              rest=()
+              while [ $# -gt 0 ]; do
+                case "$1" in
+                  --checkpoint) checkpoint="$2"; shift ;;
+                  --tokens) tokens="$2"; shift ;;
+                  --threads) threads="$2"; shift ;;
+                  --prompt) prompt="$2"; shift ;;
+                  -h|--help) usage; exit 0 ;;
+                  *) rest+=("$1") ;;
+                esac
+                shift
+              done
+              if [ ''${#rest[@]} -gt 0 ]; then prompt="''${rest[*]}"; fi
+              if [ -z "$checkpoint" ]; then
+                if [ -f run/last-checkpoint ]; then checkpoint="$(cat run/last-checkpoint)"
+                else echo "ana-bend: pass --checkpoint PATH (no run/last-checkpoint here)" >&2; exit 1; fi
+              fi
+              CKPT="$checkpoint" PROMPT="$prompt" TOKENS="$tokens" \
+                exec ${self.packages.${system}.bend-generate}/bin/bend-generate --threads "$threads"
+            '';
+          };
           default = haskellPackage;
           formal-transformer = haskellPackage;
           futhark-kernels = pkgs.stdenv.mkDerivation {
@@ -523,6 +600,30 @@
           agda = pkgs.agda.withPackages (p: [ p.standard-library ]);
         in
         {
+          # every specification law and every implementation module it is
+          # stated over type-checks and is proven
+          bend-spec = pkgs.runCommand "bend-spec" { nativeBuildInputs = [ (bendFor pkgs) ]; } ''
+            export HOME=$TMPDIR
+            cp -r ${bendSrc}/bend src
+            chmod -R u+w src
+            bend src/Everything.bend | tee result
+            grep -qx "All terms check." result
+            touch $out
+          '';
+          # the self-contained unit tests, against known answers
+          bend-tests = pkgs.runCommand "bend-tests" { nativeBuildInputs = [ (bendFor pkgs) ]; } ''
+            export HOME=$TMPDIR
+            cp -r ${bendSrc}/bend src
+            chmod -R u+w src
+            cd src/tests
+            bend sha.bend > sha.out
+            printf '%s\n' e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 \
+              ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad \
+              248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1 | diff - sha.out
+            bend num.bend > num.out
+            printf '%s\n' 236d88fe5618cf00 9bde02468acf1357 0000000048d159e2 0000000000000001 ffffffffffffffff 1.5 | diff - num.out
+            touch $out
+          '';
           haskell = self.packages.${system}.formal-transformer;
           agda =
             pkgs.runCommand "formal-transformer-agda-check"
@@ -1256,6 +1357,16 @@ USAGE
           };
         in
         {
+          ana-bend = {
+            type = "app";
+            program = "${self.packages.${system}.ana-bend}/bin/ana-bend";
+            meta.description = "Generate with the Bend2 port of the decoder";
+          };
+          bend = {
+            type = "app";
+            program = "${self.packages.${system}.bend}/bin/bend";
+            meta.description = "The pinned Bend2 compiler and checker";
+          };
         default = {
           type = "app";
           program = "${self.packages.${system}.formal-transformer}/bin/formal-transformer";

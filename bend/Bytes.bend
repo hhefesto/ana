@@ -5,7 +5,6 @@ import ./Num.bend as N
 # byte and has no seek, so the cursor keeps a buffer of bytes already read
 # and its length, refilled in chunks of at least a mebibyte.  Every parser
 # downstream is pure over List<&2, U32>; only `take` touches the file.
-
 type Cur is Type:
   Cur{f: File, buf: List<&2, U32>, n: Nat}
 
@@ -101,11 +100,41 @@ def Bytes.split(+k: Nat, c: Cur) -> Cur & List<&2, U32>:
 def Bytes.fuel() -> Nat:
   3n
 
-# the next k bytes
-def Bytes.take(+k: Nat, c: Cur) -> IO(Cur & List<&2, U32>):
+def Bytes.buffered(+k: Nat, c: Cur) -> IO(Cur & List<&2, U32>):
   do IO<Cur & List<&2, U32>>:
     d : Cur <- Bytes.fill(Bytes.fuel(), k, c)
     return Bytes.split(k, d)
+
+# a short read (possible at end of file) falls back to the buffered path
+def Bytes.direct.check(+k: Nat, f: File, +xs: List<&2, U32>, full: Bool) -> IO(Cur & List<&2, U32>):
+  match full:
+    case True{}:
+      IO.pure(Cur & List<&2, U32>, (Cur{f, Nil{}, 0n}, xs))
+    case False{}:
+      Bytes.buffered(k, Cur{f, xs, List.length(&2, U32, xs)})
+
+# An exact read straight from the file, used once the buffer is drained:
+# the list read_bytes answers is the result, with no split or append.
+def Bytes.direct.fin(+k: Nat, fr: Chunk()) -> IO(Cur & List<&2, U32>):
+  (f, r) = fr
+  do IO<Cur & List<&2, U32>>:
+    +xs : List<&2, U32> <- IO.pass(List<&2, U32>, r)
+    Bytes.direct.check(k, f, xs, Nat.is_eq(List.length(&2, U32, xs), k))
+
+def Bytes.take.if(empty: Bool, +k: Nat, f: File, buf: List<&2, U32>, +n: Nat) -> IO(Cur & List<&2, U32>):
+  match empty:
+    case True{}:
+      do IO<Cur & List<&2, U32>>:
+        fr : Chunk() <- File.read_bytes(f, U32.from_nat(k))
+        Bytes.direct.fin(k, fr)
+    case False{}:
+      Bytes.buffered(k, Cur{f, buf, n})
+
+# the next k bytes
+def Bytes.take(+k: Nat, c: Cur) -> IO(Cur & List<&2, U32>):
+  match c:
+    case Cur{f, buf, +n}:
+      Bytes.take.if(Nat.is_eq(n, 0n), k, f, buf, n)
 
 # Pure decoders over a byte list.  Each answers the value beside the rest.
 

@@ -86,16 +86,18 @@ def first.some(a: Maybe<&2, Tk.Bpe>, b: Maybe<&2, Tk.Bpe>) -> Maybe<&2, Tk.Bpe>:
     case None{}:
       b
 
-# every candidate is read and checked; the first match wins
-def tok.search(cs: List<&2, String>, +want: String) -> IO(Maybe<&2, Tk.Bpe>):
-  match cs:
-    case Nil{}:
-      IO.pure(Maybe<&2, Tk.Bpe>, None{})
-    case +p <> t:
+# candidates are read in order until one matches (the flag carries the
+# answer, so the recursion stops reading once it has one)
+def tok.search(cs: List<&2, String>, +want: String, found: Maybe<&2, Tk.Bpe>) -> IO(Maybe<&2, Tk.Bpe>):
+  match cs found:
+    case _ Some{b}:
+      IO.pure(Maybe<&2, Tk.Bpe>, Some{b})
+    case +p <> t None{}:
       do IO<Maybe<&2, Tk.Bpe>>:
         xs : List<&2, U32> <- read.maybe(p)
-        rest : Maybe<&2, Tk.Bpe> <- tok.search(t, want)
-        return first.some(tok.check(want, p, Tk.Bpe.parse(xs)), rest)
+        tok.search(t, want, tok.check(want, p, Tk.Bpe.parse(xs)))
+    case Nil{} None{}:
+      IO.pure(Maybe<&2, Tk.Bpe>, None{})
 
 def tok.found(m: Maybe<&2, Tk.Bpe>, +want: String) -> IO(Tk.Bpe):
   match m:
@@ -115,7 +117,7 @@ def tok.of.if(empty: Bool, +pinned: String, +want: String) -> IO(Tk.Bpe):
   match empty:
     case True{}:
       do IO<Tk.Bpe>:
-        m : Maybe<&2, Tk.Bpe> <- tok.search(candidates(), want)
+        m : Maybe<&2, Tk.Bpe> <- tok.search(candidates(), want, None{})
         tok.found(m, want)
     case False{}:
       do IO<Tk.Bpe>:
@@ -192,8 +194,22 @@ def emit(+b: Tk.Bpe, +pending: List<&2, U32>, +t: U32) -> Tk.Dec:
   +xs = List.append(&2, U32, pending, emit.bytes(U32.is_eq(t, Tk.bos()), b, t))
   Tk.utf8.decode(Nat.add(List.length(&2, U32, xs), 1n), xs, Tk.utf8.mode(xs))
 
+# The model's own probability of the chosen token (temperature 1, no
+# truncation), the quantity master's SAMPLE_STATS reports as prob=.
+def prob.of(+dv: Nat, +logits: T.V, +t: U32) -> F32:
+  +m = T.V.max(logits)
+  F32.div(F32.exp(F32.sub(T.V.at(dv, logits, t), m)), T.V.sum_exp(m, logits))
+
+def stats.line(on: Bool, +pos: Nat, +t: U32, +p: F32) -> IO(Unit):
+  match on:
+    case True{}:
+      IO.print_err("sample pos=" ++ Nat.show(pos) ++ " token=" ++ U32.show(t) ++ " prob=" ++ F32.show(p))
+    case False{}:
+      IO.pure(Unit, Unit{})
+
 def gen(n: Nat, stop: Bool, +pk: S.Pick, +dm: Md.Dims, +w: Md.Weights, +b: Tk.Bpe, +st: Settings,
-        +vocab: Nat, +sts: List<&2, Md.LState>, +pos: Nat, +pending: List<&2, U32>, +count: Nat) -> IO(Nat):
+        +vocab: Nat, +sts: List<&2, Md.LState>, +pos: Nat, +pending: List<&2, U32>, +count: Nat,
+        +stats: Bool, +lg: T.V) -> IO(Nat):
   match n stop:
     case 1n+p False{}:
       +t = Pick.token(pk)
@@ -201,8 +217,9 @@ def gen(n: Nat, stop: Bool, +pk: S.Pick, +dm: Md.Dims, +w: Md.Weights, +b: Tk.Bp
       +o = Md.decode(dm, w, sts, pos, t)
       +pk2 = pick(dm, st, vocab, Out.logits(o), Pick.rng(pk))
       do IO<Nat>:
+        stats.line(stats, pos, t, prob.of(Md.Dims.dv(dm), lg, t))
         IO.write(Dec.text(d))
-        gen(p, U32.is_eq(Pick.token(pk2), Tk.eos()), pk2, dm, w, b, st, vocab, Out.sts(o), 1n+pos, Dec.pending(d), 1n+count)
+        gen(p, U32.is_eq(Pick.token(pk2), Tk.eos()), pk2, dm, w, b, st, vocab, Out.sts(o), 1n+pos, Dec.pending(d), 1n+count, stats, Out.logits(o))
     case _ _:
       IO.pure(Nat, count)
 
@@ -251,7 +268,7 @@ def ms(+t0: Nat, +t1: Nat) -> String:
   Nat.show(Nat.sub(t1, t0))
 
 def go(+m: K.Manifest, +b: Tk.Bpe, rw: B.Cur & Run, +prompt: String, +budget: Nat,
-       +st: Settings, +seed: String, +t0: Nat) -> IO(Unit):
+       +st: Settings, +seed: String, +t0: Nat, +stats: Bool) -> IO(Unit):
   (cur, +run) = rw
   +c = K.Manifest.cfg(m)
   +dm = Md.Dims.of(c)
@@ -271,7 +288,7 @@ def go(+m: K.Manifest, +b: Tk.Bpe, rw: B.Cur & Run, +prompt: String, +budget: Na
       ++ Nat.show(Run.step(run)) ++ "/" ++ Nat.show(K.Manifest.total_steps(m)) ++ " updates) ===")
     IO.write(bytes.str(Nil{}) ++ text)
     +t2 : Nat <- IO.now()
-    n : Nat <- gen(budget, U32.is_eq(Pick.token(pk), Tk.eos()), pk, dm, w, b, st, vocab, Out.sts(o), List.length(&2, U32, ids), Nil{}, 0n)
+    n : Nat <- gen(budget, U32.is_eq(Pick.token(pk), Tk.eos()), pk, dm, w, b, st, vocab, Out.sts(o), List.length(&2, U32, ids), Nil{}, 0n, stats, Out.logits(o))
     +t3 : Nat <- IO.now()
     IO.print("")
     IO.print_err("generate: prefill " ++ ms(t1, t2) ++ " ms; " ++ Nat.show(n) ++ " tokens in " ++ ms(t2, t3) ++ " ms")
@@ -283,13 +300,13 @@ def problem(p: String) -> IO(Unit):
     case SCon{c, t}:
       IO.die(Unit, 1, "generate: " ++ SCon{c, t})
 
-def after(r: B.Cur & K.Manifest, +prompt: String, +budget: Nat, +st: Settings, +seed: String, +pinned: String, +t0: Nat) -> IO(Unit):
+def after(r: B.Cur & K.Manifest, +prompt: String, +budget: Nat, +st: Settings, +seed: String, +pinned: String, +t0: Nat, +stats: Bool) -> IO(Unit):
   (cur, +m) = r
   do IO<Unit>:
     problem(K.Manifest.problem(m))
     b : Tk.Bpe <- tok.of(pinned, K.Manifest.tokenizer_id(m))
     rw : B.Cur & Run <- Load.run(K.Manifest.cfg(m))(cur)
-    go(m, b, rw, prompt, budget, st, seed, t0)
+    go(m, b, rw, prompt, budget, st, seed, t0, stats)
 
 def main() -> IO(Unit):
   do IO<Unit>:
@@ -302,8 +319,9 @@ def main() -> IO(Unit):
     +topp : String <- env("TOP_P", "0.95")
     +seed : String <- env("SAMPLE_SEED", "0")
     pinned : String <- env("TOKENIZER_FILE", "")
+    sflag : String <- env("SAMPLE_STATS", "")
     +st : Settings = Settings{f32.or(F32.read(temp), 0.8), nat.or(U32.read(topk), U32.to_nat(4294967295)), f32.or(F32.read(topp), 0.95)}
     IO.print_err("generate: temperature=" ++ temp ++ " top_k=" ++ topk ++ " top_p=" ++ topp ++ " seed=" ++ seed)
     c : B.Cur <- B.Bytes.open(path)
     r : B.Cur & K.Manifest <- K.Load.header()(c)
-    after(r, prompt, nat.or(U32.read(tokens), 128n), st, seed, pinned, t0)
+    after(r, prompt, nat.or(U32.read(tokens), 128n), st, seed, pinned, t0, String.eq(sflag, "1"))
