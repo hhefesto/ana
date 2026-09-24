@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Gates G1-G3 on a GPU box, for the dense Bend trainer built with the
 # ft-kernels fork. Expects in the working directory: einsum.c, dense.c,
-# traind.c (bend X.bend -o X.c), corpus.txt and tok.bpe. Needs clang-19
-# and /usr/local/cuda.
+# traind.c (bend X.bend -o X.c), corpus.txt and tok.bpe. Needs clang
+# (any version) and /usr/local/cuda.
 #   STEPS  training steps to time (default 12)
 set -u
 CU=/usr/local/cuda
-CC="clang-19 -DBEND_CUDA=1 -I$CU/include -L$CU/lib64 -std=c11 -O2"
+# any clang: a program with no bang needs no #embed (-DBEND_NO_SRC)
+CLANG=$(for c in clang-19 clang-18 clang-17 clang-16 clang-15 clang-14 clang; do command -v $c && break; done | head -1)
+CC="$CLANG -DBEND_CUDA=1 -DBEND_NO_SRC -I$CU/include -L$CU/lib64 -std=c11 -O2"
 export LD_LIBRARY_PATH=$CU/lib64:${LD_LIBRARY_PATH:-}
 for p in einsum dense traind; do
   [ -x $p ] || $CC $p.c -lpthread -lm -o $p -lcuda -lnvrtc || exit 1

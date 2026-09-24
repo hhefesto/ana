@@ -1,0 +1,35 @@
+train (dense): formal-transformer-futhark-hybrid-gla-v3:Config {vocabSize = 32768, contextSize = 256, modelDim = 768, ffDim = 2048, layerCount = 12, headCount = 12, gateKind = GateRgLru, qkNorm = True, headSinks = True, tiedHead = True}
+tokenizer fastbpe-word-v1:bos=0:eos=1:bytes=2..257:pretoken=ascii-space-prefix+lf-boundary:vocab=32768:sha256=60b05337f411b76da37b6cb3cba2d8626001a4eae3a1c52e3c13ed809ad04c26; 632 training windows, 64 validation windows; micro-batch 32, store 1459617792 floats
+step 0 validation loss 10.350075
+step 1 loss 10.3745365 grad_norm 12.9092 lr 0.000030000001 ms 2809
+step 2 loss 10.114649 grad_norm 11.184849 lr 0.000060000002 ms 2381
+step 3 loss 9.984304 grad_norm 7.9881663 lr 0.00009 ms 2389
+step 4 loss 9.208276 grad_norm 7.3248553 lr 0.000120000004 ms 2394
+step 5 loss 9.4189415 grad_norm 5.1443872 lr 0.00015 ms 2399
+step 6 loss 9.186438 grad_norm 5.8577466 lr 0.00018 ms 2401
+step 7 loss 7.408738 grad_norm 8.394896 lr 0.00021000001 ms 2403
+step 8 loss 8.271116 grad_norm 4.570766 lr 0.00024000001 ms 2407
+step 9 loss 8.015968 grad_norm 5.041874 lr 0.00027000002 ms 2405
+step 10 loss 8.554474 grad_norm 2.833749 lr 0.0003 ms 2406
+step 11 loss 8.303757 grad_norm 4.2250276 lr 0.00029815326 ms 2408
+step 12 loss 7.3316174 grad_norm 3.1807182 lr 0.0002926585 ms 2406
+step 13 loss 7.5659018 grad_norm 3.0122592 lr 0.000283651 ms 2407
+step 14 loss 6.8667235 grad_norm 3.6225448 lr 0.00027135256 ms 2406
+step 15 loss 7.349402 grad_norm 2.7029638 lr 0.00025606604 ms 2407
+step 15 validation loss 6.4542894
+step 16 loss 6.6689234 grad_norm 2.7384725 lr 0.00023816779 ms 2403
+step 17 loss 5.6135235 grad_norm 2.2584908 lr 0.00021809858 ms 2407
+step 18 loss 6.557843 grad_norm 1.5303442 lr 0.00019635256 ms 2406
+step 19 loss 6.3257375 grad_norm 1.6973732 lr 0.00017346519 ms 2405
+step 20 loss 6.963089 grad_norm 1.3074983 lr 0.00014999999 ms 2407
+step 21 loss 6.7598567 grad_norm 1.4798899 lr 0.00012653483 ms 2406
+step 22 loss 5.8815823 grad_norm 1.5130864 lr 0.00010364743 ms 2407
+step 23 loss 6.1968646 grad_norm 2.3230507 lr 0.000081901446 ms 2407
+step 24 loss 5.725293 grad_norm 2.098111 lr 0.00006183222 ms 2408
+step 25 loss 6.4841566 grad_norm 27.651064 lr 0.000043933986 ms 2408
+step 26 loss 5.771014 grad_norm 1.7182084 lr 0.000028647442 ms 2407
+step 27 loss 4.885971 grad_norm 1.4770089 lr 0.000016349013 ms 2408
+step 28 loss 6.092281 grad_norm 1.0898525 lr 0.000007341528 ms 2407
+step 29 loss 6.0241714 grad_norm 1.0310997 lr 0.0000018467457 ms 2408
+step 30 loss 6.7957234 grad_norm 1.0613812 lr 0 ms 2408
+step 30 validation loss 5.590001

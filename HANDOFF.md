@@ -2,71 +2,50 @@
 
 This document holds everything needed to continue this work from another machine and account.
 
-## ▶ CONTINUE HERE (2026-09-23): the Bend2 port at master's GPU efficiency
+## ▶ CONTINUE HERE (2026-09-24): Bend2 training at GPU speed, all phases done
 
-**Goal.** Bend2 training should run as fast as master and use the GPU as fully and efficiently. The target is bpe100m-v3 tok/s at least master's on the same GPU, measured by MFU (master's formula), power draw, and gaps between kernels.
+**Goal.** Bend2 training at least as fast as master, using the GPU fully.
+- **Result:** bpe100m-v3 on a vast RTX 3090 runs at **9,626 tok/s (1,702 ms/step)**. Master's logged v3 run on a 3090 did **3,985 tok/s**, so this is **2.4×**.
+- **MFU** by master's formula: 27.6%.
+- **Power:** median 304 W of 315 W.
+- Details, the method, and the table of each speed-up are in `docs/BEND-PORT.md`, section "Training on a GPU: the dense trainer". Logs are in `bend/gpu/g3-rtx3090-2026-09-24/`.
 
-**Branch.** `bend`, at `f6a4cff` when this was written. The port is complete and verified:
-- greedy generation is byte-identical to master;
-- evaluate agrees with master to 1e-4;
-- the gradcheck passes.
+**Where the code is**
+- **The fork** `~/src/bend2`, branch `ft-kernels`, which the flake uses via `git+file`, adds these ops to `base.bend` (each op's meaning is its Bend definition):
+  - `Array.gemm` and `Array.mm`: products, run on cuBLAS via dlopen, or on a C loop without a GPU;
+  - `Array.einsum`: an `Ex` expression summed over up to six indices, with indirect views for gather and scatter. It runs as NVRTC-generated kernels with self-tuned strategies, or as the reference-order loop on the CPU.
+- **How ops run:** bulk ops queue on one stream (lazy sync). A program that has bulk ops but no `!` builds with any clang, using `-DBEND_NO_SRC`.
+- **Runtime knobs:** `BEND_GEMM_NUMERICS`, `BEND_GEMM=loop` (the oracle), `BEND_PROFILE=1|2`, `BEND_FT_STRAT`, `BEND_FT_CACHE`, `BEND_FT_DUMP`.
+- **The port** (`bend` branch):
+  - `bend/Dense/{Ex,Op,Layout,Model,Step,Io}.bend`: the step as data, with reverse mode derived as a program transformation;
+  - `bend/TrainDense.bend`: the trainer (`bend-train-dense`). It takes the same environment as `Train.bend`, plus `TRAIN_MICRO` and `TRAIN_CHUNK` (default 16);
+  - `bend/Spec/Dense.bend`: the structural laws;
+  - `bend/tests/dense.bend`: the oracle against the tree trainer.
 
-See `docs/BEND-PORT.md`.
+**Gates**
 
-**Where it stands.** A trainer step runs under `!`, which is Bend2's GPU call. On a vast RTX 3060 (2026-09-23, about $0.06):
-- small4-v3 at batch 64 takes 88 s/step on the GPU and 113–191 s on 16 CPU threads;
-- that is about 66 MFLOP/s, **roughly 0.0005% MFU**;
-- `nvidia-smi` showed about 90% "utilization", but the card drew only 60 of its 170 W.
-
-The cause is that every F32 is its own heap node.
-
-**Master's bar, on bpe100m, which has 115M parameters:**
-
-| GPU | model | tok/s |
+| gate | what | result |
 |---|---|---|
-| 3090 | v2 | ~8,400 |
-| 3090 | v3 | ~3,985 |
-| 5090 | v2 | 14,576 |
+| G0 | GEMM from Bend against direct cuBLAS | matches |
+| G1 | generated kernels against the loop | identical output |
+| G2 | dense against tree trainer: every gradient on CPU and GPU; 6-step AdamW/Muon trajectories | within 5e-7; match to about 1e-7 |
+| G3 | tok/s against master | 2.4× master |
+| checks | `bend-spec`, `bend-dense`, `bend-tests`, `bend-train` | pass |
 
-That comes from cuBLAS TF32 GEMMs plus Futhark pieces, all stored in f32. Master computes MFU as cuBLAS FLOPs ÷ the TF32 dense peak (`CudaDeviceBlas.hs:166-170`, `deploy/sweep-cuda.sh:75-95`).
+**Open items, in order of value**
+1. **Publish the fork.** This needs the user's OK. Then point `inputs.bend2` at the published fork instead of the local path.
+2. **Same-box A/B against master.** Master's number is from a different 3090. Building master's gemm-cuda trainer on a box needs nix, which is slow. The 2.4× margin is large, but it is not a controlled comparison.
+3. **Warm start** from an FTC2 checkpoint in the dense trainer.
+4. **Dense evaluate:** master evaluates with its batch forward. Generate stays on the tree decoder, which is byte-identical to master.
+5. **More speed.** The remaining time is mostly the GLA einsums that have `exp(B_τ − B_σ)` inside, and their transposes: about 60% of the step.
+   - Candidates: shared-memory tiled einsum kernels, or the cumulative decay as a product (needs per-op fp32 numerics).
+   - Chunk 8 is about 3.5% faster than 16.
+   - The micro-batch is 32, capped by the 2³¹-float array limit; two stores would allow 64.
 
-**Why stock Bend2 cannot reach that bar.** This is the pinned 8008146a.
-- `Array<F32>` is packed and has O(1) get/set.
-- The GPU runs one scalar interpreter per CUDA thread, with 2k–16k lanes.
-- There is no shared memory, no tensor cores and no f16/bf16, and NVRTC is called with `--fmad=false`.
-- Arrays are affine: they cannot be shared across forks, and joining halves copies.
-
-**Decision (the user, 2026-09-23).** Extend a fork of Bend2 at `~/src/bend2` (branch `ft-kernels`, from 8008146a) with bulk GPU primitives over dense `Array<F32>`:
-- GEMMs go through **cuBLAS**, reusing master's `backend/gemm/cublas_shim.c`;
-- elementwise, row-reduction, GLA-chunk and gather/scatter kernels are generated by the fork.
-
-Each primitive keeps a pure-Bend reference definition in `base.bend` (the spec); the compiler swaps in the runtime (`ft_*` C functions) via the name→intrinsic mechanism. The model is rewritten as dense, shape-indexed arrays in master's decomposed step order. The full plan, with diagrams and gates G0–G3, is in `~/.claude/plans/we-ll-be-working-here-luminous-sunset.md`.
-
-**Design rule (the user, 2026-09-23).** Denotational design, as Conal Elliott would: denotations are written in Bend, not Agda. `Vec n` means `Fin n → F32`, and `Mat m n` means a linear map. The model uses the algebra of linear maps (compose, transpose, scale, add, batch). `Array.gemm` is the representation of α·(f∘g)+β·h underneath it. The parameter arena is the isomorphism Vec n × Vec m ≅ Vec (n+m). Reverse-mode AD is derived as the dual (Phase 2); the hand pullbacks become its oracle. See the plan's "Denotational design" section.
-
-**Phase 0 status.**
-- Done in the fork (`~/src/bend2` `ft-kernels` 4b87d645): `Array.gemm`.
-  - Its meaning is its `base.bend` definition, and the JS lane runs that definition.
-  - The C lane runs `ft_gemm`. `ft_gemm_loop` is bit-identical to the definition on the 13 cases of `bend/gpu/GemmConf.bend`.
-  - A CUDA build of a program using it maps the heap to managed memory (`FTOPS`) and calls cuBLAS by dlopen when the views fit.
-  - Knobs: `BEND_GEMM_NUMERICS=fp32|tf32|bf16`, `BEND_GEMM=loop`, `BEND_PROFILE=1|2`.
-- Checked locally: CPU runs; the CUDA host C compiles; the NVRTC device compile passes (sm_86); on a sample of 158 fork tests, the fork and the pin fail exactly the same ones.
-- **G0 passed (2026-09-23, vast RTX 3090, EPYC 7452, driver 595.84, about $0.07).** The log is `bend/gpu/g0-rtx3090-2026-09-23.log`.
-  - Conformance: cuBLAS against the loop is within 4e-7 at fp32 and 2.6e-4 at tf32. The 4 cases that wrap, overlap, have a short ld, or have k=0 stayed on the loop.
-  - Timing, Bend against direct cuBLAS (median ms per call, sync per call):
-
-    | shape | fp32 bend / direct | tf32 bend / direct |
-    |---|---|---|
-    | [16384×768]·[768×2048] | 1.826 / 1.826 | 1.409 / 1.408 |
-    | [16384×768]·[768×32768]ᵀ | 36.07 / 35.97 | 21.22 / 21.31 |
-    | 64³ ×3072 batched | 0.303 / 0.304 | 0.188 / 0.188 |
-
-  - At tf32 that is 36.6–38.9 TFLOP/s. Per-call overhead is about 1 µs: at 64³ single, 13 µs against 12 µs.
-  - The first g0.sh pass showed fp32 at the first shape as 1.076×. It was the cold GPU clock: three alternating reruns gave 1.83 against 1.83.
-  - Managed memory costs nothing after the first call migrates the arrays: dmon showed rxpci/txpci at 0.
-- **Next: Phase 1** (generated kernels), then Phase 2. Per the design rule, start by writing `bend/Linear.bend`: the shape-indexed `Vec`/`Mat` types, the meaning function, and the linear-map algebra over `Array.gemm`, with its laws. Build the Phase 1 kernels to what that API needs.
-- Moved to Phase 1: `Array.fill` and `hash_init` run as device kernels, because they need the generated-kernel module. G0 fills arrays on the host and discards the first call, which migrates the arrays.
-- To run the fork locally: `bun ~/src/bend2/bend2/main.ts` with the bun and clang-21 from the pinned wrapper on PATH, and `CC` unset.
+**Box lessons (2026-09-24)**
+- A vast box in Korea downloaded at about 140 KB/s, so apt's clang-19 would have taken hours. Test the network before staging.
+- Ubuntu's clang-15 builds a bulk-op program in 44 s.
+- Pick boxes with at least 64 GB RAM, and run with `--gpu 48GB`: the managed heap also holds the host's lists and trees.
 
 ## Rules that bit before
 

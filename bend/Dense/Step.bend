@@ -72,13 +72,21 @@ def bwd.chunks(cs: List<&2, List<&2, P.Op>>, +ly: L.Lay, +hd: L.Hd, live: Bool) 
       cat([Bool.pick(List<&2, P.Op>, live, Nil{}, c), [tz(ly, L.Hd.lg(hd), L.Hd.loss(hd))],
            P.back(L.Lay.g(ly), c, Nil{}), bwd.chunks(t, ly, hd, False{})])
 
-def bwd.layers(ls: List<&2, List<&2, P.Op>>, +ly: L.Lay, live: Bool) -> List<&2, P.Op>:
-  match ls:
-    case Nil{}:
+# the end of the workspace a layer of this kind uses
+def ws.end(g: Bool, +m: L.Dm, +ly: L.Lay) -> U32:
+  match g:
+    case True{}:
+      L.Wg.end(L.Wg.at(m, L.Lay.ws(ly)))
+    case False{}:
+      L.Ws.end(L.Ws.at(m, L.Lay.ws(ly)))
+
+def bwd.layers(ls: List<&2, List<&2, P.Op>>, bs: List<&2, L.BP>, +m: L.Dm, +ly: L.Lay, live: Bool) -> List<&2, P.Op>:
+  match ls bs:
+    case +l <> t bp <> bt:
+      cat([Bool.pick(List<&2, P.Op>, live, Nil{}, l), [tz(ly, L.Lay.ws(ly), ws.end(L.BP.gla(bp), m, ly))],
+           P.back(L.Lay.g(ly), l, Nil{}), bwd.layers(t, bt, m, ly, False{})])
+    case _ _:
       Nil{}
-    case +l <> t:
-      cat([Bool.pick(List<&2, P.Op>, live, Nil{}, l), [tz(ly, L.Lay.ws(ly), L.Lay.hd(ly))],
-           P.back(L.Lay.g(ly), l, Nil{}), bwd.layers(t, ly, False{})])
 
 # the backward of a micro-batch whose loss carries weight `seed` (1/k for
 # k micro-batches a step): the parameters' tangents accumulate
@@ -89,7 +97,8 @@ def bwd(+m: L.Dm, +ly: L.Lay, +seed: F32) -> List<&2, P.Op>:
        P.back(g, M.head.loss(m, ly, hd), Nil{}),
        bwd.chunks(List.reverse(&2, List<&2, P.Op>, M.head.chunks(nchunks(m), m, ly, hd, 0)), ly, hd, True{}),
        P.back(g, M.head.fin(m, ly, hd), Nil{}),
-       bwd.layers(List.reverse(&2, List<&2, P.Op>, M.layers(L.Lay.blocks(ly), m, ly, 0)), ly, True{}),
+       bwd.layers(List.reverse(&2, List<&2, P.Op>, M.layers(L.Lay.blocks(ly), m, ly, 0)),
+         List.reverse(&2, L.BP, L.Lay.blocks(ly)), m, ly, True{}),
        P.back(g, M.embed(m, ly), Nil{})])
 
 # the parameters' tangents to zero (a step's start)

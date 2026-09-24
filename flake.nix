@@ -2,11 +2,15 @@
   description = "A denotationally specified autoregressive transformer with Agda, Haskell, and Futhark interpretations";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  # Bend 2 (TypeScript, run by Bun; no build step), pinned to the revision
-  # ~/src/refl uses.  Source only: calling bend2/main.ts directly skips the
-  # upstream launcher, which phones home and self-updates.
+  # Bend 2 (TypeScript, run by Bun; no build step): the ft-kernels fork of
+  # bendlang/bend 8008146a (the revision ~/src/refl uses) that adds the bulk
+  # GPU ops the dense trainer runs on (Array.gemm/mm on cuBLAS,
+  # Array.einsum as generated CUDA kernels; each op's meaning is its
+  # base.bend definition). Local until the fork is published.  Source only:
+  # calling bend2/main.ts directly skips the upstream launcher, which phones
+  # home and self-updates.
   inputs.bend2 = {
-    url = "github:bendlang/bend/8008146ab90abb98b496fa2a6ffe555da7fb0dd5";
+    url = "git+file:///home/hhefesto/src/bend2?ref=ft-kernels";
     flake = false;
   };
 
@@ -167,6 +171,10 @@
           # the Bend2 trainer: CORPUS, TOKENIZER_FILE, PRESET, TRAIN_* as in
           # master; writes a BTC1 text checkpoint that bend-generate reads
           bend-train = bendBinary pkgs "bend-train" "Train.bend";
+          # the dense trainer: the same environment (plus TRAIN_MICRO,
+          # TRAIN_CHUNK), the step as programs over one store; a CUDA build
+          # (clang and /usr/local/cuda present) runs it on the GPU
+          bend-train-dense = bendBinary pkgs "bend-train-dense" "TrainDense.bend";
           # master's `evaluate CKPT CORPUS` (CKPT, CORPUS, EVAL_WINDOWS)
           bend-evaluate = bendBinary pkgs "bend-evaluate" "Evaluate.bend";
           # `ana` on the Bend2 port: the same flags, the same environment
@@ -648,6 +656,24 @@
             cat src/*.bend src/Spec/*.bend > corpus.txt
             CORPUS=corpus.txt PRESET=tiny-v3 TRAIN_STEPS=30 TRAIN_BATCH=8 TRAIN_LR=3e-3 TRAIN_WARMUP=5 \
               OUT=tiny.btc ${self.packages.${system}.bend-train}/bin/bend-train --threads 4 | tee run.out
+            awk '/validation loss/ { v[++n] = $5 } END { if (n < 2 || !(v[n] < v[1] - 0.3)) { print "loss did not fall"; exit 1 } }' run.out
+            head -1 tiny.btc | grep -qx BTC1
+            touch $out
+          '';
+          # the dense program against the tree trainer: same weights and
+          # windows, the loss and every gradient within 1e-5 relative
+          # (reverse mode derived from the ops, chunked GLA, both gate kinds);
+          # then a short dense run lowers the validation loss
+          bend-dense = pkgs.runCommand "bend-dense" { nativeBuildInputs = [ (bendFor pkgs) pkgs.gawk ]; } ''
+            export HOME=$TMPDIR
+            cp -r ${bendSrc}/bend src
+            chmod -R u+w src
+            (cd src && bend tests/dense.bend -o $TMPDIR/dense) && $TMPDIR/dense --threads 4 | tee dense.out
+            awk '/gradient max/ { r = $(NF); gsub(/[()]/, "", r); k++; if (r + 0 > 1e-5) { print "gradient differs: " $0; bad = 1 } }
+                 END { if (k != 3) { print "expected 3 gradient checks, got " k; bad = 1 } exit bad }' dense.out
+            cat src/*.bend src/Spec/*.bend > corpus.txt
+            CORPUS=corpus.txt PRESET=tiny-v3 TRAIN_STEPS=30 TRAIN_BATCH=8 TRAIN_LR=3e-3 TRAIN_WARMUP=5 \
+              OUT=tiny.btc ${self.packages.${system}.bend-train-dense}/bin/bend-train-dense --threads 4 | tee run.out
             awk '/validation loss/ { v[++n] = $5 } END { if (n < 2 || !(v[n] < v[1] - 0.3)) { print "loss did not fall"; exit 1 } }' run.out
             head -1 tiny.btc | grep -qx BTC1
             touch $out

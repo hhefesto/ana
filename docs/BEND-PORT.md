@@ -129,44 +129,79 @@ out of scope. What it does have:
   example 16 or 64 per leaf). That would cut node count and refcount traffic
   by the block size.
 
-## Training on a GPU (measured 2026-09-23)
+## Training on a GPU: the dense trainer (2026-09-24)
 
-`Train.bend` runs each optimizer step as one pure call, `step.pure!(…)`,
-covering the batch gradient, clip, and AdamW/Muon update. The batch gradient
-forks across windows (`batch.fork`). Bend2 builds a CUDA version when
-`/usr/local/cuda` and clang ≥ 19 are present. The `!` then runs as one
-persistent kernel over a heap in CUDA managed memory. A CUDA build uses the GPU
-by default: pass `--gpu off --threads N` for CPU. The device program is
-compiled by NVRTC at `--gpu-build`, and that took 15 min 26 s on the box.
+### Where the tree trainer stood
 
-The box was a vast.ai RTX 3060 12 GB with 16 vCPUs of an EPYC 7452. The
-config was small4-v3 (242,596 parameters, ctx 64) on `README.md`, with the
-byte tokenizer. CPU and GPU produce the same losses.
+`Train.bend` keeps its tensors as trees, one F32 per heap node, and runs a step under `!`. On an RTX 3060 (2026-09-23) that reached about 66 MFLOP/s, 0.0005% of peak. It remains the reference implementation.
 
-| run | 16 CPU threads | RTX 3060 | GPU telemetry |
-|---|---|---|---|
-| tiny-v3, batch 8 | 71–150 ms/step | 5.6–7.5 s/step | SM 97%, mem 0% |
-| small4-v3, batch 16 | 32–43 s/step | 63.5–63.9 s/step | SM 88%, mem 2.5% |
-| small4-v3, batch 64 | 113–191 s/step | 88.2–88.9 s/step | SM 88%, mem 6.5%, 60 W of 170 W, 6.4 GB |
+### The dense trainer
 
-The work per step is about 6 × 242,596 × 4,032 ≈ 5.9 GFLOP at batch 64. The
-GPU sustains about 66 MFLOP/s, which is **~5×10⁻⁶ of the 3060's 12.7 TFLOPS
-FP32 peak (0.0005% MFU)**. The CPU sustains about 39 MFLOP/s. Master's
-Futhark/cuBLAS trainer measured 13.5% MFU on a 5090. The gap is about four
-orders of magnitude.
+`TrainDense.bend` (flake app `bend-train-dense`) runs master's step at GPU speed. It needs a CUDA build made with the Bend2 fork `~/src/bend2`, branch `ft-kernels`, which the flake now uses.
 
-`nvidia-smi`'s ~90% "utilization" is not work. The persistent kernel keeps
-the SMs resident while they chase one-float tree nodes: the card drew 60 W of
-170 W, and memory-controller activity stayed at 2–6%. The GPU only overtakes
-16 CPU threads once the batch supplies enough independent windows (batch 64),
-and then by 1.3–2×.
+**Bulk ops in Base.** The fork adds three bulk ops to `base.bend`:
+- `Array.gemm` and `Array.mm`, matrix products;
+- `Array.einsum`, which sums a scalar expression `Ex` over up to six loop indices.
 
-To use the GPU efficiently, the data must stop being one heap node per float.
-The two directions are:
+`einsum`'s views can be indirect, so the same op expresses a gather and, with accumulation, a scatter-add.
 
-- leaves that hold packed float blocks, with the leaf ops written as loops
-  (Bend2 `Array`s);
-- restructuring the per-position recurrence into batched matrix products.
+**Meaning and runtime.** Each op's `base.bend` definition is its meaning, and the JS lane runs that definition directly. Compiled code runs a runtime implementation instead:
+- On the CPU, a C loop computes the same sums in the same order. It is bit-identical to the definition on the conformance programs in `bend/gpu`.
+- On a CUDA build, products go to cuBLAS (loaded with dlopen).
+- Each distinct expression becomes a CUDA kernel, compiled by NVRTC and cached next to the binary. Its reduction strategy is chosen by timing the candidates on first use.
+- Ops queue on one stream. The host waits only before it touches array cells itself.
 
-Neither is done. Until then, training in this port is a correctness artifact,
-not a performance one.
+**The step as data.** The step is a list of ops over one store: parameters, activations, tangents and optimizer state. The pieces live in `bend/Dense/`:
+- `Layout`: parameters in namedLayout order.
+- `Model`: master's decomposed order.
+  - Chunked GLA with a default chunk of 16. `Spec/Linear.bend` proves the chunked form equal to the recurrent one at any chunk length.
+  - Softmax attention with qk-norm and sinks.
+  - The tied head, computed in row chunks.
+- `Step`: the forward pass, then the backward with per-layer recompute, then clip, AdamW and Muon.
+
+**Reverse mode is derived** (`Dense/Op.bend`: Elliott's "simple essence"):
+- a product's transpose is two products;
+- an einsum's transpose multiplies the output tangent by the symbolic derivative of `Ex`;
+- gather's transpose is scatter-add.
+
+`Spec/Dense.bend` proves the transform's structural law: the transpose of `xs ++ ys` is `ys`'s transpose followed by `xs`'s.
+
+### Correctness (`checks.bend-dense`, `tests/dense.bend`)
+
+**Against the tree trainer's gradchecked pullbacks.** Same weights and windows through both:
+
+| config | loss | gradients |
+|---|---|---|
+| small4-v3 | agrees to 1e-7 | every gradient within 5.2e-7 relative |
+| small4-v3, four GLA chunks per window | agrees to 1e-7 | within 5.2e-7 relative |
+| small4 (sigmoid gates, plain softmax) | agrees to 1e-7 | within 5.1e-7 relative |
+
+**Training trajectories.** Six steps each of AdamW and Muon on small4-v3 match `Train.bend` to about 1e-7 in the loss, the gradient norm and the validation loss.
+
+**On the GPU (RTX 3090):**
+- the einsum kernels print the same bytes as the loop;
+- the dense program on the GPU matches the tree trainer on the CPU within 4.3e-7.
+
+### Speed: bpe100m-v3 on a vast RTX 3090 (logs in `bend/gpu/g3-rtx3090-2026-09-24/`)
+
+Settings: batch 64 windows × 256 tokens, two micro-batches of 32, Muon, tf32. A single Bend array holds at most 2³¹ floats, so micro-batch 64 does not fit in one store.
+
+| | ms/step | tok/s |
+|---|---|---|
+| master (`formal-transformer-gemm-cuda`, v3 run, a vast 3090, micro 64, 2026-08-21) | 4,110 | 3,985 |
+| dense Bend, first cut (generic kernels, a warp per output, sync per op, profiled) | 3,895 | 4,207 |
+| + per-kernel strategy tuning, lazy sync | 2,477 | 6,615 |
+| + attention's pure products on cuBLAS | 1,998 | 8,200 |
+| + GLA chunk 16 (the default) | **1,702** | **9,626** |
+
+**Utilization.** cuBLAS work is 16.8 TFLOP a step at 26 TFLOP/s. That is 27.6% MFU by master's formula (cuBLAS FLOPs ÷ 35.6 TFLOPS TF32 peak). The card drew a median 304 W of its 315 W limit.
+
+**Loss check.** A 30-step AdamW run (lr 3e-4) takes the validation loss from 10.35 to 5.59.
+
+**Caveat: not a same-box A/B.** Master's figure is its logged production run, on a different vast 3090.
+
+### What the dense path does not do yet
+
+- **Generate and evaluate** still run the tree decoder on the CPU. That decoder is byte-identical to master and evaluates within 1e-4.
+- **Warm starts:** the dense trainer initializes from `Train/Init.bend` and cannot yet start from an FTC2 checkpoint. It writes BTC1.
+- **Precision:** `BEND_GEMM_NUMERICS=tf32` also applies to the attention products.

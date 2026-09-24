@@ -58,7 +58,53 @@ def tail(+m: L.Dm, +bp: L.BP, +x: U32, +xo: U32, +att: U32, +y1: U32, +xa: U32,
        X.mul(X.silu(X.x(0)), X.x(1))}),
      P.linear(n, ff, d, hh, ff, L.BP.wd(bp), y2, d), add2(nd, xo, xa, y2)]])
 
-# GLA ----------------------------------------------------------------------
+# Per-head products: cuBLAS batches over one index with one stride, so the
+# other batch index (the head) unrolls, one batched product per head.
+
+# GLA within the chunk: oi[g,τ,h,:] = Σ_σ A[g,h,τ,σ] v[g,σ,h,:]
+def gla.mix(n: Nat, +hh: U32, +m: L.Dm, +w: L.Wg) -> List<&2, P.Op>:
+  match n:
+    case 0n:
+      Nil{}
+    case 1n+p:
+      +cc = L.Dm.cc(m)
+      +hd = L.Dm.hd(m)
+      +d = L.Dm.d(m)
+      +d3 = U32.mul(3, d)
+      +c2 = U32.mul(cc, cc)
+      P.Mm{0, 0, cc, hd, cc, L.Dm.nc(m), 1.0,
+        U32.add(L.Wg.a(w), U32.mul(hh, c2)), cc, U32.mul(L.Dm.h(m), c2),
+        U32.add(L.Wg.qkv(w), U32.add(U32.mul(2, d), U32.mul(hh, hd))), d3, U32.mul(cc, d3), 0.0,
+        U32.add(L.Wg.oi(w), U32.mul(hh, hd)), d, U32.mul(cc, d)} <> gla.mix(p, U32.inc(hh), m, w)
+
+# softmax scores s[w,h,t,t'] = q[w,t,h,:]·k[w,t',h,:]
+def sm.scores(n: Nat, +hh: U32, +m: L.Dm, +w: L.Ws, +qo: U32, +ko: U32, +ld: U32) -> List<&2, P.Op>:
+  match n:
+    case 0n:
+      Nil{}
+    case 1n+p:
+      +t = L.Dm.t(m)
+      +hd = L.Dm.hd(m)
+      +tt = U32.mul(t, t)
+      P.Mm{0, 1, t, t, hd, L.Dm.b(m), 1.0,
+        U32.add(qo, U32.mul(hh, hd)), ld, U32.mul(t, ld), U32.add(ko, U32.mul(hh, hd)), ld, U32.mul(t, ld), 0.0,
+        U32.add(L.Ws.s(w), U32.mul(hh, tt)), t, U32.mul(L.Dm.h(m), tt)} <> sm.scores(p, U32.inc(hh), m, w, qo, ko, ld)
+
+# softmax values mix[w,t,h,:] = Σ_t' e[w,h,t,t'] v[w,t',h,:]
+def sm.mix(n: Nat, +hh: U32, +m: L.Dm, +w: L.Ws) -> List<&2, P.Op>:
+  match n:
+    case 0n:
+      Nil{}
+    case 1n+p:
+      +t = L.Dm.t(m)
+      +hd = L.Dm.hd(m)
+      +d = L.Dm.d(m)
+      +d3 = U32.mul(3, d)
+      +tt = U32.mul(t, t)
+      P.Mm{0, 0, t, hd, t, L.Dm.b(m), 1.0,
+        U32.add(L.Ws.e(w), U32.mul(hh, tt)), t, U32.mul(L.Dm.h(m), tt),
+        U32.add(L.Ws.qkv(w), U32.add(U32.mul(2, d), U32.mul(hh, hd))), d3, U32.mul(t, d3), 0.0,
+        U32.add(L.Ws.mix(w), U32.mul(hh, hd)), d, U32.mul(t, d)} <> sm.mix(p, U32.inc(hh), m, w)
 
 def gla.gate(g: Bool, +m: L.Dm, +bp: L.BP, +w: L.Wg) -> List<&2, P.Op>:
   match g:
@@ -128,10 +174,6 @@ def gla(+m: L.Dm, +bp: L.BP, +x: U32, +xo: U32, +w: L.Wg) -> List<&2, P.Op>:
        [v(L.Wg.qh(w), [ccd, hd, d, 0, 1]), v(kh, [ccd, hd, 0, d, 1]),
         v(L.Wg.bc(w), [ccd, hd, d, 0, 1]), v(L.Wg.bc(w), [ccd, hd, 0, d, 1])],
        X.sel(X.le(X.ix(3), X.ix(2)), X.mul(X.mul(X.x(0), X.x(1)), X.exp(X.sub(X.x(2), X.x(3)))), X.k(0.0))}),
-     # within the chunk: Σ_σ A v_σ
-     op(Es{[L.Dm.nc(m), h, cc, hd, cc], 16, 0, 0, v(L.Wg.oi(w), [ccd, hd, d, 1, 0]),
-       [v(L.Wg.a(w), [U32.mul(h, U32.mul(cc, cc)), U32.mul(cc, cc), cc, 0, 1]), v(vv, [U32.mul(cc, d3), hd, 0, 1, d3])],
-       X.mul(X.x(0), X.x(1))}),
      # each chunk's own state: Σ_σ k_σ exp(B_last − B_σ) v_σ^T
      op(Es{[L.Dm.b(m), L.Dm.j(m), h, hd, hd, cc], 32, 0, 0,
        v(L.Wg.u(w), [x2, U32.mul(L.Dm.b(m), x2), hh2, hd, 1, 0]),
@@ -139,6 +181,8 @@ def gla(+m: L.Dm, +bp: L.BP, +x: U32, +xo: U32, +w: L.Wg) -> List<&2, P.Op>:
         v(L.Wg.bc(w), [td, ccd, hd, 1, 0, d]), v(vv, [U32.mul(t, d3), U32.mul(cc, d3), hd, 0, 1, d3])],
        X.mul(X.mul(X.x(0), X.exp(X.sub(X.x(1), X.x(2)))), X.x(3))}),
      P.zero(U32.mul(L.Dm.b(m), x2), L.Wg.sin(w))],
+    # within the chunk: Σ_σ A v_σ, a product per head batched over chunks
+    gla.mix(U32.to_nat(h), 0, m, w),
     gla.scan(U32.to_nat(U32.sub(L.Dm.j(m), 1)), m, w, 1),
     # across chunks: q_τ exp(B_τ) · S (the state entering the chunk)
     [op(Es{[L.Dm.b(m), L.Dm.j(m), cc, h, hd, hd], 32, 0, 0, v(L.Wg.oe(w), [td, ccd, d, hd, 1, 0]),
@@ -201,11 +245,11 @@ def sm(+m: L.Dm, +bp: L.BP, +x: U32, +xo: U32, +w: L.Ws) -> List<&2, P.Op>:
     [P.linear(n, d, d3, L.Ws.nrm(w), d, L.BP.wq(bp), L.Ws.qkv(w), d3)],
     sm.qk(q, n, h, hd, L.Ws.qkv(w), d3, L.BP.gq(bp), L.Ws.sq(w), L.Ws.qa(w)),
     sm.qk(q, n, h, hd, U32.add(L.Ws.qkv(w), d), d3, L.BP.gk(bp), L.Ws.sk(w), L.Ws.ka(w)),
-    # q·k per head, t' ≤ t (scaled by 1/sqrt(hd) where it is used)
-    [op(Es{[b, h, t, t, hd], 16, 0, 0, v(L.Ws.s(w), [htt, tt, t, 1, 0]),
-       [v(qo, [U32.mul(t, ld), hd, ld, 0, 1]), v(ko, [U32.mul(t, ld), hd, 0, ld, 1])],
-       X.sel(causal, X.mul(X.x(0), X.x(1)), X.k(0.0))}),
-     # the row maximum: a constant of the softmax, so no gradient flows
+    # q·k per head, every (t, t'), scaled by 1/sqrt(hd) where it is used:
+    # every use selects t' ≤ t (and its derivative is 0 elsewhere), so the
+    # entries above the diagonal carry no meaning
+    sm.scores(U32.to_nat(h), 0, m, w, qo, ko, ld),
+    [# the row maximum: a constant of the softmax, so no gradient flows
      P.ein(Es{[b, h, t, t], 8, 1, 0, v(L.Ws.m1(w), [ht, t, 1, 0]), [v(L.Ws.s(w), [htt, tt, t, 1])],
        X.sel(causal, X.mul(X.k(sc), X.x(0)), X.k(F32.neg(X.inf())))}, False{})],
     sm.max(sk, m, bp, w),
@@ -213,10 +257,8 @@ def sm(+m: L.Dm, +bp: L.BP, +x: U32, +xo: U32, +w: L.Ws) -> List<&2, P.Op>:
        X.sel(causal, X.exp(X.sub(X.mul(X.k(sc), X.x(0)), X.x(1))), X.k(0.0))}),
      op(Es{[b, h, t, t], 8, 0, 0, v(L.Ws.se(w), [ht, t, 1, 0]), [v(L.Ws.e(w), [htt, tt, t, 1])], X.x(0)})],
     sm.den(sk, m, bp, w, mo),
-    [op(Es{[b, h, t, hd, t], 16, 0, 0, v(L.Ws.mix(w), [U32.mul(t, d), hd, d, 1, 0]),
-       [v(L.Ws.e(w), [htt, tt, t, 0, 1]), v(U32.add(L.Ws.qkv(w), U32.mul(2, d)), [U32.mul(t, d3), hd, 0, 1, d3])],
-       X.mul(X.x(0), X.x(1))}),
-     op(Es{[b, h, t, hd], 0, 0, 0, v(L.Ws.att(w), [U32.mul(t, d), hd, d, 1]),
+    sm.mix(U32.to_nat(h), 0, m, w),
+    [op(Es{[b, h, t, hd], 0, 0, 0, v(L.Ws.att(w), [U32.mul(t, d), hd, d, 1]),
        [v(L.Ws.mix(w), [U32.mul(t, d), hd, d, 1]), v(deno, [ht, t, 1, 0])],
        X.mul(X.div(X.k(1.0), X.x(1)), X.x(0))})],
     tail(m, bp, x, xo, L.Ws.att(w), L.Ws.y1(w), L.Ws.xa(w), L.Ws.ss2(w), L.Ws.nrm2(w), L.Ws.gu(w), L.Ws.hh(w), L.Ws.y2(w))])

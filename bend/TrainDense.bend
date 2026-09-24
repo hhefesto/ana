@@ -17,6 +17,8 @@ import ./Dense/Io.bend as Io
 # reference), plus
 #   TRAIN_MICRO  windows per micro-batch (default: the batch, at most 32);
 #                the batch's micro-batches accumulate one gradient
+#   TRAIN_CHUNK  GLA chunk length (default 16; master used 64): the chunked form equals
+#                the recurrent one at any length (Spec/Linear.bend)
 # The step is a program over one store (bend/Dense): on a CUDA build of the
 # Bend2 fork its products run on cuBLAS and its einsums as generated
 # kernels; elsewhere every op runs its reference loop.
@@ -237,12 +239,12 @@ def finish(+c: C.Config, +tok: Tr.Tok, +steps: Nat, +out: String, +rn: Run, s: A
   finish.if(String.is_empty(out), c, tok, steps, out, rn, s)
 
 def run(+c: C.Config, +tok: Tr.Tok, +text: List<&2, U32>, +hp: Hp, +muon: Bool, +mu: F32, +wd: F32, +clip: F32,
-        +steps: Nat, +out: String, +evals: Nat) -> IO(Unit):
+        +steps: Nat, +out: String, +evals: Nat, +chunk: Nat) -> IO(Unit):
   +sp = D.split(D.encode.all(Tr.Tok.b(tok), D.documents(text)))
   +train = D.all.windows(C.Config.ctx(c), Tr.split.train(sp))
   +vw = List.take(&2, List<&2, U32>, D.all.windows(C.Config.ctx(c), Tr.split.valid(sp)), evals)
   +nw = List.length(&2, List<&2, U32>, train)
-  +m = L.Dm.of(c, Hp.mb(hp))
+  +m = L.Dm.of.cc(c, Hp.mb(hp), U32.from_nat(chunk))
   +ly = L.Lay.of(c, m)
   +rn = {Run{m, ly, S.fwd(m, ly), S.bwd(m, ly, F32.div(1.0, F32.from_nat(Nat.div(Hp.batch(hp), Hp.mb(hp))))),
             S.update(muon, ly, S.Hy{0.9, 0.999, 1.0e-8, wd, mu}, m, clip)} : Run}
@@ -256,14 +258,14 @@ def run(+c: C.Config, +tok: Tr.Tok, +text: List<&2, U32>, +hp: Hp, +muon: Bool, 
 
 def start(+tokf: String, +pre: String, +steps_s: String, +batch_s: String, +micro_s: String, +lr_s: String, +wd_s: String,
           +warm_s: String, +opt: String, +mu_s: String, +clip_s: String, +every_s: String, +evals_s: String, +out: String,
-          +text: List<&2, U32>, +tb: List<&2, U32>) -> IO(Unit):
+          +chunk_s: String, +text: List<&2, U32>, +tb: List<&2, U32>) -> IO(Unit):
   +steps = Tr.nat.or(steps_s, 100n)
   +batch = Tr.nat.or(batch_s, 4n)
   +mb = Tr.nat.or(micro_s, Nat.min(batch, 32n))
   run(Tr.preset(pre), Tr.tok.of(tokf, tb), text,
       Hp{Tr.f32.or(lr_s, 3.0e-4), Nat.min(Tr.nat.or(warm_s, 100n), steps), steps, batch, Tr.nat.or(every_s, 0n), mb},
       String.eq(opt, "muon"), Tr.f32.or(mu_s, 0.95), Tr.f32.or(wd_s, 0.01), Tr.f32.or(clip_s, 1.0),
-      steps, out, Tr.nat.or(evals_s, 16n))
+      steps, out, Tr.nat.or(evals_s, 16n), Tr.nat.or(chunk_s, 16n))
 
 def main() -> IO(Unit):
   do IO<Unit>:
@@ -282,6 +284,7 @@ def main() -> IO(Unit):
     +every_s : String <- Tr.env("EVAL_EVERY", "0")
     +evals_s : String <- Tr.env("EVAL_WINDOWS", "16")
     +out : String <- Tr.env("OUT", "run/bend-train.btc")
+    +chunk_s : String <- Tr.env("TRAIN_CHUNK", "16")
     +text : List<&2, U32> <- B.Bytes.read_all(corpus)
     +tb : List<&2, U32> <- Tr.tok.read(tokf)
-    start(tokf, pre, steps_s, batch_s, micro_s, lr_s, wd_s, warm_s, opt, mu_s, clip_s, every_s, evals_s, out, text, tb)
+    start(tokf, pre, steps_s, batch_s, micro_s, lr_s, wd_s, warm_s, opt, mu_s, clip_s, every_s, evals_s, out, chunk_s, text, tb)

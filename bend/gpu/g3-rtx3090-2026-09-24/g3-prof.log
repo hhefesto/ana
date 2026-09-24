@@ -1,0 +1,12 @@
+train (dense): formal-transformer-futhark-hybrid-gla-v3:Config {vocabSize = 32768, contextSize = 256, modelDim = 768, ffDim = 2048, layerCount = 12, headCount = 12, gateKind = GateRgLru, qkNorm = True, headSinks = True, tiedHead = True}
+tokenizer fastbpe-word-v1:bos=0:eos=1:bytes=2..257:pretoken=ascii-space-prefix+lf-boundary:vocab=32768:sha256=60b05337f411b76da37b6cb3cba2d8626001a4eae3a1c52e3c13ed809ad04c26; 632 training windows, 0 validation windows; micro-batch 32, store 1524629504 floats
+step 0 validation loss 0
+step 1 loss 10.3745365 grad_norm 12.90931 lr 0.0033333332 ms 2418
+step 2 loss 9.742435 grad_norm 14.588974 lr 0.0066666664 ms 1741
+step 3 loss 7.679679 grad_norm 14.279579 lr 0.01 ms 1740
+step 4 loss 6.1281805 grad_norm 23.593164 lr 0.013333333 ms 1739
+step 5 loss 7.1873617 grad_norm 8.044651 lr 0.016666666 ms 1743
+step 6 loss 7.41621 grad_norm 49.405125 lr 0.02 ms 1746
+step 6 validation loss 0
+bend profile: gemm 19782 calls (0 as loops), 3811.169 ms, 100533.038 GFLOP, 26378.5 GFLOP/s
+bend profile: einsum 29148 calls, 7145.805 ms

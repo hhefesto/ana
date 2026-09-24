@@ -1,0 +1,43 @@
+NVIDIA GeForce RTX 3090, 595.84, 315.00 W, 24576 MiB
+               total        used        free      shared  buff/cache   available
+Mem:              62           1          46           0          14          60
+== G1: einsum kernels against the loop
+identical (6 calls on kernels)
+== G2: the dense program on the GPU against the tree trainer on the CPU
+tree loss  5.5636816
+chunk 64 (one per window): dense loss 5.563681
+chunk 64 (one per window): gradient max |diff| 2.6309863e-8 of max |g| 0.06403036 (relative 4.1089672e-7)
+chunk 16 (four per window): dense loss 5.563681
+chunk 16 (four per window): gradient max |diff| 2.7241185e-8 of max |g| 0.06403036 (relative 4.2544173e-7)
+small4 tree loss 5.570061
+small4, chunk 16: dense loss 5.5700607
+small4, chunk 16: gradient max |diff| 1.8626451e-8 of max |g| 0.06248855 (relative 2.9807785e-7)
+bend profile: gemm 225 calls (0 as loops), 66.147 ms, 0.689 GFLOP, 10.4 GFLOP/s
+bend profile: einsum 1030 calls, 10051.744 ms
+== G3: bpe100m-v3 training, batch 64 (2 micro-batches of 32), muon, tf32
+train (dense): formal-transformer-futhark-hybrid-gla-v3:Config {vocabSize = 32768, contextSize = 256, modelDim = 768, ffDim = 2048, layerCount = 12, headCount = 12, gateKind = GateRgLru, qkNorm = True, headSinks = True, tiedHead = True}
+tokenizer fastbpe-word-v1:bos=0:eos=1:bytes=2..257:pretoken=ascii-space-prefix+lf-boundary:vocab=32768:sha256=60b05337f411b76da37b6cb3cba2d8626001a4eae3a1c52e3c13ed809ad04c26; 632 training windows, 0 validation windows; micro-batch 32, store 1459617792 floats
+step 0 validation loss 0
+step 1 loss 10.3745365 grad_norm 12.909236 lr 0.0016666666 ms 16010
+step 2 loss 9.879892 grad_norm 12.377558 lr 0.0033333332 ms 3878
+step 3 loss 8.550552 grad_norm 10.968471 lr 0.005 ms 3885
+step 4 loss 6.4051394 grad_norm 10.830282 lr 0.0066666664 ms 3886
+step 5 loss 5.9867363 grad_norm 5.0784473 lr 0.008333333 ms 3889
+step 6 loss 6.4197607 grad_norm 25.525444 lr 0.01 ms 3890
+step 7 loss 6.5151005 grad_norm 15.183579 lr 0.011666667 ms 3893
+step 8 loss 7.7719836 grad_norm 32.482048 lr 0.013333333 ms 3900
+step 9 loss 7.8351326 grad_norm 12.563181 lr 0.015 ms 3899
+step 10 loss 10.00305 grad_norm 35.223167 lr 0.016666666 ms 3899
+step 11 loss 10.250632 grad_norm 15.944828 lr 0.018333333 ms 3902
+step 12 loss 7.5524864 grad_norm 7.823322 lr 0.02 ms 3903
+step 12 validation loss 0
+bend profile: gemm 22860 calls (0 as loops), 7132.346 ms, 199191.322 GFLOP, 27927.9 GFLOP/s
+bend profile: einsum 46728 calls, 51393.514 ms
+steady state: 3895 ms/step over 10 steps = 4207 tok/s (64 x 256 tokens a step)
+== dmon
+# gpu    pwr  gtemp  mtemp     sm    mem    enc    dec    jpg    ofa   mclk   pclk     fb   bar1   ccpm 
+# Idx      W      C      C      %      %      %      %      %      %    MHz    MHz     MB     MB     MB 
+    0    312     63      -    100     10      0      0      0      0   9501   1815   5015      4      0 
+    0    313     58      -    100     10      0      0      0      0   9501   1800   4503      4      0 
+    0    313     60      -     99     11      0      0      0      0   9501   1770   5015      4      0 
+    0    313     63      -     99     12      0      0      0      0   9501   1785   5015      4      0 

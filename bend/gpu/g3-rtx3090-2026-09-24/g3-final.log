@@ -1,0 +1,24 @@
+train (dense): formal-transformer-futhark-hybrid-gla-v3:Config {vocabSize = 32768, contextSize = 256, modelDim = 768, ffDim = 2048, layerCount = 12, headCount = 12, gateKind = GateRgLru, qkNorm = True, headSinks = True, tiedHead = True}
+tokenizer fastbpe-word-v1:bos=0:eos=1:bytes=2..257:pretoken=ascii-space-prefix+lf-boundary:vocab=32768:sha256=60b05337f411b76da37b6cb3cba2d8626001a4eae3a1c52e3c13ed809ad04c26; 632 training windows, 0 validation windows; micro-batch 32, store 1524629504 floats
+step 0 validation loss 0
+step 1 loss 10.3745365 grad_norm 12.90931 lr 0.0009999999 ms 2368
+step 2 loss 9.975742 grad_norm 11.3808365 lr 0.0019999999 ms 1690
+step 3 loss 9.168356 grad_norm 8.691388 lr 0.003 ms 1692
+step 4 loss 7.3605776 grad_norm 14.80993 lr 0.0039999997 ms 1693
+step 5 loss 6.628763 grad_norm 10.199904 lr 0.005 ms 1698
+step 6 loss 6.080704 grad_norm 7.459624 lr 0.006 ms 1698
+step 7 loss 5.7612095 grad_norm 28.766384 lr 0.007 ms 1700
+step 8 loss 6.756402 grad_norm 11.362765 lr 0.007999999 ms 1701
+step 9 loss 8.818497 grad_norm 39.617252 lr 0.009 ms 1703
+step 10 loss 7.8912134 grad_norm 10.387797 lr 0.01 ms 1704
+step 11 loss 7.7285376 grad_norm 17.389587 lr 0.011 ms 1704
+step 12 loss 6.600051 grad_norm 7.1360726 lr 0.012 ms 1704
+step 13 loss 6.5942807 grad_norm 10.121003 lr 0.012999999 ms 1704
+step 14 loss 5.288171 grad_norm 5.7425656 lr 0.014 ms 1705
+step 15 loss 7.637559 grad_norm 21.340528 lr 0.014999999 ms 1706
+step 16 loss 6.8064966 grad_norm 10.906548 lr 0.015999999 ms 1705
+step 17 loss 5.6246595 grad_norm 7.0062857 lr 0.017 ms 1703
+step 18 loss 7.3028326 grad_norm 5.5528007 lr 0.018 ms 1707
+step 19 loss 7.377872 grad_norm 6.049385 lr 0.019 ms 1706
+step 20 loss 8.135385 grad_norm 6.2024703 lr 0.02 ms 1704
+step 20 validation loss 0
