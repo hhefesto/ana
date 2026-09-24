@@ -11,6 +11,10 @@ import ./Dense/Layout.bend as L
 import ./Dense/Op.bend as P
 import ./Dense/Step.bend as S
 import ./Dense/Io.bend as Io
+import ./Dense/Ckpt.bend as Dk
+import ./Dense/Plan.bend as Pl
+import ./Corpus.bend as Cc
+import ./Checkpoint.bend as Km
 
 # train, dense: master's trainer on the Bend2 port at GPU speed. The same
 # environment and log as Train.bend (the tree trainer, kept as the
@@ -19,6 +23,20 @@ import ./Dense/Io.bend as Io
 #                the batch's micro-batches accumulate one gradient
 #   TRAIN_CHUNK  GLA chunk length (default 16; master used 64): the chunked form equals
 #                the recurrent one at any length (Spec/Linear.bend)
+# Hot start (TRAIN_INIT set): continue master's run from its FTC2 checkpoint
+# on master's own data and schedule.
+#   TRAIN_INIT   the checkpoint (parameters, Adam moments, Muon momentum, step)
+#   PLAN         master's run plan (plan-*.tsv); RUN_DIR its shards,
+#                shard-<k>-<SHARD_SIZE>.corpus (default bpe100m)
+#   TRAIN_STEPS  steps to run from the checkpoint's step
+#   SAVE_EVERY   save every n global steps (default 1000) and at the end, to
+#                OUT-step<N>.checkpoint (FTC2: the same run at a later step)
+#   TRAIN_LR, TRAIN_WARMUP, TRAIN_WD, GRAD_CLIP default to the checkpoint's
+#   manifest (the schedule's total is always the manifest's)
+# EVAL_EVERY / EVAL_WINDOWS validate on each shard's first validation
+# windows (master's VALIDATE_EVERY / VALIDATION_WINDOWS), and once before
+# the first step.
+#
 # The step is a program over one store (bend/Dense): on a CUDA build of the
 # Bend2 fork its products run on cuBLAS and its einsums as generated
 # kernels; elsewhere every op runs its reference loop.
@@ -267,24 +285,277 @@ def start(+tokf: String, +pre: String, +steps_s: String, +batch_s: String, +micr
       String.eq(opt, "muon"), Tr.f32.or(mu_s, 0.95), Tr.f32.or(wd_s, 0.01), Tr.f32.or(clip_s, 1.0),
       steps, out, Tr.nat.or(evals_s, 16n), Tr.nat.or(chunk_s, 16n))
 
+# Hot start ----------------------------------------------------------------
+
+type Hs is Data:
+  Hs{src: Dk.Src, out: String, every: Nat, stop: Nat, dir: String, size: String, evals: Nat, tok: String, ctx: Nat}
+
+def Hs.src(+h: Hs) -> Dk.Src:
+  match h:
+    case Hs{a, b, c, d, e, f, g, t, x}:
+      a
+
+def Hs.out(+h: Hs) -> String:
+  match h:
+    case Hs{a, b, c, d, e, f, g, t, x}:
+      b
+
+def Hs.every(+h: Hs) -> Nat:
+  match h:
+    case Hs{a, b, c, d, e, f, g, t, x}:
+      c
+
+def Hs.stop(+h: Hs) -> Nat:
+  match h:
+    case Hs{a, b, c, d, e, f, g, t, x}:
+      d
+
+def Hs.dir(+h: Hs) -> String:
+  match h:
+    case Hs{a, b, c, d, e, f, g, t, x}:
+      e
+
+def Hs.size(+h: Hs) -> String:
+  match h:
+    case Hs{a, b, c, d, e, f, g, t, x}:
+      f
+
+def Hs.evals(+h: Hs) -> Nat:
+  match h:
+    case Hs{a, b, c, d, e, f, g, t, x}:
+      g
+
+def Hs.tok(+h: Hs) -> String:
+  match h:
+    case Hs{a, b, c, d, e, f, g, t, x}:
+      t
+
+def Hs.ctx(+h: Hs) -> Nat:
+  match h:
+    case Hs{a, b, c, d, e, f, g, t, x}:
+      x
+
+def hot.path(+hs: Hs, +step: Nat) -> String:
+  Hs.out(hs) ++ "-step" ++ Nat.show(step) ++ ".checkpoint"
+
+def hot.save(+hs: Hs, +rn: Run, +muon: Bool, +step: Nat, s: Array<F32>) -> IO(Array<F32>):
+  +path = hot.path(hs, step)
+  do IO<Array<F32>>:
+    +t0 : Nat <- IO.now()
+    s2 : Array<F32> <- Dk.save(path, Hs.src(hs), step, Run.ly(rn), Run.m(rn), muon, s)
+    +t1 : Nat <- IO.now()
+    IO.print("saved " ++ path ++ " (" ++ Nat.show(Nat.sub(t1, t0)) ++ " ms)")
+    return s2
+
+def hot.save.if(on: Bool, +hs: Hs, +rn: Run, +muon: Bool, +step: Nat, s: Array<F32>) -> IO(Array<F32>):
+  match on:
+    case True{}:
+      hot.save(hs, rn, muon, step, s)
+    case False{}:
+      IO.pure(Array<F32>, s)
+
+def every.at(+every: Nat, +step: Nat) -> Bool:
+  Bool.and(Nat.is_lt(0n, every), Nat.is_eq(Nat.mod(step, Nat.max(every, 1n)), 0n))
+
+# n steps of one segment: its windows ws (nw of them, in epoch order) are
+# sliced from the segment's start `base`
+def loop.hot(n: Nat, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, +ws: List<&2, List<&2, U32>>, +nw: Nat, +base: Nat,
+             +vw: List<&2, List<&2, U32>>, +step: Nat, s: Array<F32>) -> IO(Array<F32>):
+  match n:
+    case 0n:
+      IO.pure(Array<F32>, s)
+    case 1n+p:
+      +step2 = {1n+step : Nat}
+      +lr = O.lr.at(Hp.lr(hp), step2, Hp.warm(hp), Hp.total(hp))
+      do IO<Array<F32>>:
+        +t0 : Nat <- IO.now()
+        s2 : Array<F32> <- loop.print(step2, lr, t0,
+          train.step(rn, Hp.mb(hp), Tr.batch.at(ws, nw, Nat.sub(step, base), Hp.batch(hp)), lr, step2, s))
+        s3 : Array<F32> <- report.valid(every.at(Hp.every(hp), step2), rn, hp, vw, step2, s2)
+        s4 : Array<F32> <- hot.save.if(Bool.or(every.at(Hs.every(hs), step2), Nat.is_eq(step2, Hs.stop(hs))), hs, rn, muon, step2, s3)
+        loop.hot(p, rn, hp, hs, muon, ws, nw, base, vw, step2, s4)
+
+def seg.check(ok: Bool, +why: String) -> IO(Unit):
+  match ok:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      Dk.fail.if(why)
+
+# one segment's shard: its epoch windows, checked against the plan's count
+# as master checks it, then the segment's steps up to the stop
+def seg.train(+seg: Pl.Seg, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, +first: Bool, +co: Cc.Corpus, +step: Nat,
+              s: Array<F32>) -> IO(Array<F32> & Nat):
+  +ctx = Hs.ctx(hs)
+  +docs = Cc.Corpus.docs(co)
+  +ws = Pl.epoch(ctx, Pl.Seg.offset(seg), docs)
+  +nw = List.length(&2, List<&2, U32>, ws)
+  +vw = Pl.valid(ctx, Pl.Seg.offset(seg), Hs.evals(hs), docs)
+  +n = Nat.sub(Nat.min(Pl.Seg.end(seg), Hs.stop(hs)), step)
+  do IO<Array<F32> & Nat>:
+    u0 : Unit <- Dk.fail.if(Cc.Corpus.problem(co, Hs.tok(hs)))
+    u1 : Unit <- seg.check(String.eq(Cc.Corpus.dataset(co), Pl.Seg.id(seg)), "segment corpus identity does not match the run plan")
+    u2 : Unit <- seg.check(Nat.is_eq(nw, Pl.Seg.tw(seg)), "segment training windows (" ++ Nat.show(nw) ++ ") differ from the plan's")
+    IO.print("shard " ++ Nat.show(Pl.Seg.index(seg)) ++ ": " ++ Nat.show(nw) ++ " training windows, global "
+      ++ Nat.show(Pl.Seg.start(seg)) ++ ".." ++ Nat.show(Pl.Seg.end(seg)) ++ "; running " ++ Nat.show(step) ++ ".." ++ Nat.show(Nat.add(step, n)))
+    s1 : Array<F32> <- report.valid(first, rn, hp, vw, step, s)
+    s2 : Array<F32> <- loop.hot(n, rn, hp, hs, muon, ws, nw, Pl.Seg.start(seg), vw, step, s1)
+    return (s2, Nat.add(step, n))
+
+def shard.path(+hs: Hs, +seg: Pl.Seg) -> String:
+  Hs.dir(hs) ++ "/shard-" ++ Nat.show(Pl.Seg.index(seg)) ++ "-" ++ Hs.size(hs) ++ ".corpus"
+
+def seg.read(+seg: Pl.Seg, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, +first: Bool, +t0: Nat, +co: Cc.Corpus, +step: Nat,
+             s: Array<F32>) -> IO(Array<F32> & Nat):
+  do IO<Array<F32> & Nat>:
+    +t1 : Nat <- IO.now()
+    IO.print("parsed (" ++ Nat.show(Nat.sub(t1, t0)) ++ " ms)")
+    seg.train(seg, rn, hp, hs, muon, first, co, step, s)
+
+def seg.run.if(go: Bool, +seg: Pl.Seg, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, +first: Bool, +step: Nat,
+               s: Array<F32>) -> IO(Array<F32> & Nat):
+  match go:
+    case False{}:
+      IO.pure(Array<F32> & Nat, (s, step))
+    case True{}:
+      do IO<Array<F32> & Nat>:
+        +t0 : Nat <- IO.now()
+        IO.print("reading " ++ shard.path(hs, seg))
+        +xs : List<&2, U32> <- B.Bytes.read_all(shard.path(hs, seg))
+        seg.read(seg, rn, hp, hs, muon, first, t0, Cc.corpus(xs), step, s)
+
+def seg.run(+seg: Pl.Seg, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, +first: Bool, r: Array<F32> & Nat) -> IO(Array<F32> & Nat):
+  (s, +step) = r
+  seg.run.if(Nat.is_lt(step, Hs.stop(hs)), seg, rn, hp, hs, muon, first, step, s)
+
+def segs.go(ss: List<&2, Pl.Seg>, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, +first: Bool, r: Array<F32> & Nat) -> IO(Array<F32> & Nat):
+  match ss:
+    case Nil{}:
+      IO.pure(Array<F32> & Nat, r)
+    case +seg <> t:
+      do IO<Array<F32> & Nat>:
+        r2 : Array<F32> & Nat <- seg.run(seg, rn, hp, hs, muon, first, r)
+        segs.go(t, rn, hp, hs, muon, False{}, r2)
+
+def hot.fin(r: Array<F32> & Nat) -> IO(Unit):
+  (s, +step) = r
+  IO.print("done at step " ++ Nat.show(step))
+
+def run.hot(+c: C.Config, +tok: Tr.Tok, +plan: List<&2, U32>, +hp: Hp, +muon: Bool, +mu: F32, +clip: F32, +wd: F32,
+            +hs: Hs, +chunk: Nat, s: Array<F32>) -> IO(Unit):
+  +m = L.Dm.of.cc(c, Hp.mb(hp), U32.from_nat(chunk))
+  +ly = L.Lay.of(c, m)
+  +rn = {Run{m, ly, S.fwd(m, ly), S.bwd(m, ly, F32.div(1.0, F32.from_nat(Nat.div(Hp.batch(hp), Hp.mb(hp))))),
+            S.update(muon, ly, S.Hy{0.9, 0.999, 1.0e-8, wd, mu}, m, clip)} : Run}
+  +step0 = Dk.Src.step(Hs.src(hs))
+  +ss = Pl.remaining(Pl.parse(plan), step0)
+  do IO<Unit>:
+    IO.print("train (dense, hot start): " ++ C.Config.model_id(c) ++ " from step " ++ Nat.show(step0) ++ " to " ++ Nat.show(Hs.stop(hs))
+      ++ " of " ++ Nat.show(Hp.total(hp)) ++ "; lr " ++ F32.show(Hp.lr(hp)) ++ ", warmup " ++ Nat.show(Hp.warm(hp))
+      ++ ", micro-batch " ++ Nat.show(Hp.mb(hp)) ++ ", " ++ Nat.show(List.length(&2, Pl.Seg, ss)) ++ " segments left")
+    r : Array<F32> & Nat <- segs.go(ss, rn, hp, hs, muon, True{}, (s, step0))
+    hot.fin(r)
+
+# TRAIN_OPT unset: the checkpoint's optimizer (Muon when it carries momentum)
+def start.hot.go(+c: C.Config, +tok: Tr.Tok, +plan: List<&2, U32>, +steps: Nat, +batch: Nat, +mb: Nat, +lr_s: String,
+                 +wd_s: String, +warm_s: String, +opt: String, +mu_s: String, +clip_s: String, +every: Nat, +evals: Nat,
+                 +out: String, +save: Nat, +dir: String, +size: String, +chunk: Nat, r: Array<F32> & Dk.Src) -> IO(Unit):
+  (s, +src) = r
+  +stop = Nat.min(Nat.add(Dk.Src.step(src), steps), Dk.Src.total(src))
+  run.hot(c, tok, plan,
+    Hp{Tr.f32.or(lr_s, Dk.Src.lr(src)), Tr.nat.or(warm_s, Dk.Src.warm(src)), Dk.Src.total(src), batch, every, mb},
+    Bool.or(String.eq(opt, "muon"), Bool.and(String.is_empty(opt), Dk.Src.mom(src))),
+    Tr.f32.or(mu_s, Dk.Src.mu(src)), Tr.f32.or(clip_s, Dk.Src.clip(src)), Tr.f32.or(wd_s, Dk.Src.wd(src)),
+    Hs{src, out, save, stop, dir, size, evals, Tr.Tok.id(tok), C.Config.ctx(c)}, chunk, s)
+
+def start.hot.man(+init: String, +tokf: String, +steps_s: String, +batch_s: String, +micro_s: String,
+                  +lr_s: String, +wd_s: String, +warm_s: String, +opt: String, +mu_s: String, +clip_s: String,
+                  +every_s: String, +evals_s: String, +out: String, +save_s: String, +dir: String, +size: String,
+                  +chunk_s: String, +plan: List<&2, U32>, +tb: List<&2, U32>, +t0: Nat, mh: Km.Manifest & Nat) -> IO(Unit):
+  (+man, +h) = mh
+  +c = Km.Manifest.cfg(man)
+  +tok = Tr.tok.of(tokf, tb)
+  +batch = Tr.nat.or(batch_s, 64n)
+  +mb = Tr.nat.or(micro_s, Nat.min(batch, 32n))
+  +chunk = Tr.nat.or(chunk_s, 16n)
+  +m = L.Dm.of.cc(c, mb, U32.from_nat(chunk))
+  +ly = L.Lay.of(c, m)
+  do IO<Unit>:
+    r : Array<F32> & Dk.Src <- Dk.load(init, man, h, Tr.Tok.id(tok), ly, m, Array.new(F32, L.Lay.depth(ly), 0.0))
+    +t1 : Nat <- IO.now()
+    IO.print("loaded " ++ init ++ " (" ++ Nat.show(Nat.sub(t1, t0)) ++ " ms)")
+    start.hot.go(c, tok, plan, Tr.nat.or(steps_s, 100n), batch, mb, lr_s, wd_s, warm_s, opt,
+      mu_s, clip_s, Tr.nat.or(every_s, 0n), Tr.nat.or(evals_s, 256n), out, Tr.nat.or(save_s, 1000n),
+      dir, size, chunk, r)
+
+# the model is the checkpoint's (its manifest's Config; PRESET is not read)
+def start.hot(+init: String, +tokf: String, +steps_s: String, +batch_s: String, +micro_s: String,
+              +lr_s: String, +wd_s: String, +warm_s: String, +opt: String, +mu_s: String, +clip_s: String,
+              +every_s: String, +evals_s: String, +out: String, +save_s: String, +dir: String, +size: String,
+              +chunk_s: String, +plan: List<&2, U32>, +tb: List<&2, U32>) -> IO(Unit):
+  do IO<Unit>:
+    +t0 : Nat <- IO.now()
+    mh : Km.Manifest & Nat <- Dk.header(init)
+    start.hot.man(init, tokf, steps_s, batch_s, micro_s, lr_s, wd_s, warm_s, opt, mu_s, clip_s, every_s, evals_s,
+      out, save_s, dir, size, chunk_s, plan, tb, t0, mh)
+
+def or.str(empty: Bool, +s: String, +d: String) -> String:
+  match empty:
+    case True{}:
+      d
+    case False{}:
+      s
+
+def main.hot(+init: String, +tokf: String, +pre: String, +steps_s: String, +batch_s: String, +micro_s: String,
+             +lr_s: String, +wd_s: String, +warm_s: String, +opt: String, +mu_s: String, +clip_s: String,
+             +every_s: String, +evals_s: String, +out: String, +chunk_s: String) -> IO(Unit):
+  do IO<Unit>:
+    +plan_p : String <- Tr.env("PLAN", "run/mixed-bpe100m-s32000/plan-bpe100m-b64-s32000.tsv")
+    +dir : String <- Tr.env("RUN_DIR", "run/mixed-bpe100m-s32000")
+    +size : String <- Tr.env("SHARD_SIZE", "bpe100m")
+    +save_s : String <- Tr.env("SAVE_EVERY", "1000")
+    +plan : List<&2, U32> <- B.Bytes.read_all(plan_p)
+    +tb : List<&2, U32> <- Tr.tok.read(tokf)
+    start.hot(init, tokf, steps_s, batch_s, micro_s, lr_s, wd_s, warm_s, opt, mu_s, clip_s, every_s, evals_s,
+      out, save_s, dir, size, chunk_s, plan, tb)
+
+def main.cold(+corpus: String, +tokf: String, +pre: String, +steps_s: String, +batch_s: String, +micro_s: String,
+              +lr_s: String, +wd_s: String, +warm_s: String, +opt: String, +mu_s: String, +clip_s: String,
+              +every_s: String, +evals_s: String, +out: String, +chunk_s: String) -> IO(Unit):
+  do IO<Unit>:
+    +text : List<&2, U32> <- B.Bytes.read_all(corpus)
+    +tb : List<&2, U32> <- Tr.tok.read(tokf)
+    start(tokf, pre, steps_s, batch_s, micro_s, lr_s, wd_s, warm_s, opt, mu_s, clip_s, every_s, evals_s, out, chunk_s, text, tb)
+
+def main.pick(hot: Bool, +init: String, +corpus: String, +tokf: String, +pre: String, +steps_s: String, +batch_s: String,
+              +micro_s: String, +lr_s: String, +wd_s: String, +warm_s: String, +opt: String, +mu_s: String,
+              +clip_s: String, +every_s: String, +evals_s: String, +out: String, +chunk_s: String) -> IO(Unit):
+  match hot:
+    case True{}:
+      main.hot(init, tokf, pre, steps_s, batch_s, micro_s, lr_s, wd_s, warm_s, opt, mu_s, clip_s, every_s, evals_s,
+        or.str(String.is_empty(out), out, "run/bend-hot"), chunk_s)
+    case False{}:
+      main.cold(corpus, tokf, pre, steps_s, batch_s, micro_s, lr_s, wd_s, warm_s, opt, mu_s, clip_s, every_s, evals_s,
+        or.str(String.is_empty(out), out, "run/bend-train.btc"), chunk_s)
+
 def main() -> IO(Unit):
   do IO<Unit>:
+    +init : String <- Tr.env("TRAIN_INIT", "")
     +corpus : String <- Tr.env("CORPUS", "README.md")
     +tokf : String <- Tr.env("TOKENIZER_FILE", "")
     +pre : String <- Tr.env("PRESET", "small4-v3")
     +steps_s : String <- Tr.env("TRAIN_STEPS", "100")
-    +batch_s : String <- Tr.env("TRAIN_BATCH", "4")
+    +batch_s : String <- Tr.env("TRAIN_BATCH", "")
     +micro_s : String <- Tr.env("TRAIN_MICRO", "")
-    +lr_s : String <- Tr.env("TRAIN_LR", "3e-4")
-    +wd_s : String <- Tr.env("TRAIN_WD", "0.01")
-    +warm_s : String <- Tr.env("TRAIN_WARMUP", "100")
-    +opt : String <- Tr.env("TRAIN_OPT", "adamw")
-    +mu_s : String <- Tr.env("TRAIN_MUON_BETA", "0.95")
-    +clip_s : String <- Tr.env("GRAD_CLIP", "1")
-    +every_s : String <- Tr.env("EVAL_EVERY", "0")
-    +evals_s : String <- Tr.env("EVAL_WINDOWS", "16")
-    +out : String <- Tr.env("OUT", "run/bend-train.btc")
-    +chunk_s : String <- Tr.env("TRAIN_CHUNK", "16")
-    +text : List<&2, U32> <- B.Bytes.read_all(corpus)
-    +tb : List<&2, U32> <- Tr.tok.read(tokf)
-    start(tokf, pre, steps_s, batch_s, micro_s, lr_s, wd_s, warm_s, opt, mu_s, clip_s, every_s, evals_s, out, chunk_s, text, tb)
+    +lr_s : String <- Tr.env("TRAIN_LR", "")
+    +wd_s : String <- Tr.env("TRAIN_WD", "")
+    +warm_s : String <- Tr.env("TRAIN_WARMUP", "")
+    +opt : String <- Tr.env("TRAIN_OPT", "")
+    +mu_s : String <- Tr.env("TRAIN_MUON_BETA", "")
+    +clip_s : String <- Tr.env("GRAD_CLIP", "")
+    +every_s : String <- Tr.env("EVAL_EVERY", "")
+    +evals_s : String <- Tr.env("EVAL_WINDOWS", "")
+    +out : String <- Tr.env("OUT", "")
+    +chunk_s : String <- Tr.env("TRAIN_CHUNK", "")
+    main.pick(Bool.not(String.is_empty(init)), init, corpus, tokf, pre, steps_s, batch_s, micro_s, lr_s, wd_s, warm_s, opt,
+      mu_s, clip_s, every_s, evals_s, out, chunk_s)

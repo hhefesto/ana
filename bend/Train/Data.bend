@@ -12,8 +12,9 @@ import ../Tokenizer.bend as Tk
 #
 # A text corpus is cut into documents at blank lines (an article or
 # paragraph each), and each document is encoded with the run's tokenizer.
+# trainerSplitSeed = 0x46544f50454e434c ("FTOPENCL")
 def seed() -> N.U64:
-  N.U64{1179930448, 1162757964}
+  N.U64{1179930448, 1162756940}
 
 # splitmix64's finalizer (Data.mix)
 def mix(+x0: N.U64) -> N.U64:
@@ -26,8 +27,11 @@ def mod.million(+x: N.U64) -> U32:
   match x:
     case N.U64{+h, +l}:
       +hm = U32.mod(h, 1000000)
-      # (hm * 2^32 + l) mod 10^6, with 2^32 mod 10^6 = 967296
-      U32.mod(U32.add(U32.mod(U32.mul(hm, 967296), 1000000), U32.mod(l, 1000000)), 1000000)
+      # (hm * 2^32 + l) mod 10^6, with 2^32 mod 10^6 = 967296 = 967·1000 + 296;
+      # hm·967296 overflows 32 bits, so it is reduced in two parts that fit
+      +a = U32.mul(U32.mod(U32.mul(hm, 967), 1000), 1000)
+      +b = U32.mod(U32.mul(hm, 296), 1000000)
+      U32.mod(U32.add(U32.add(a, b), U32.mod(l, 1000000)), 1000000)
 
 def is_validation(+i: Nat) -> Bool:
   U32.is_lt(mod.million(mix(N.U64.add(seed(), N.U64.of(U32.from_nat(i))))), 100000)

@@ -10,6 +10,7 @@ import ./Tokenizer.bend as Tk
 import ./Generate.bend as Gen
 import ./Train/Grad.bend as G
 import ./Train/Data.bend as D
+import ./Corpus.bend as Cc
 
 # evaluate: master's `formal-transformer evaluate CKPT CORPUS` (Main.hs
 # evaluate) on the Bend2 decoder.
@@ -25,74 +26,7 @@ import ./Train/Data.bend as D
 # The standard error is over per-window means (master's is over chunks of
 # MICRO_BATCH windows, so the two agree in the mean, not in the error).
 
-# FTCC ---------------------------------------------------------------------
-type Corpus is Data:
-  Corpus{magic: U32, version: U32, tok: String, dataset: String, docs: List<&2, List<&2, U32>>}
-
-type Toks is Data:
-  Toks{xs: List<&2, U32>, rest: List<&2, U32>}
-
-# n big-endian 16-bit tokens, accumulated newest first
-def toks.go(n: Nat, xs: List<&2, U32>, +acc: List<&2, U32>) -> Toks:
-  match n xs:
-    case 1n+p a <> b <> t:
-      toks.go(p, t, U32.or(U32.mul(a, 256), b) <> acc)
-    case _ rest:
-      Toks{List.reverse(&2, U32, acc), rest}
-
-def Toks.rest(+t: Toks) -> List<&2, U32>:
-  match t:
-    case Toks{a, r}:
-      r
-
-def Toks.xs(+t: Toks) -> List<&2, U32>:
-  match t:
-    case Toks{a, r}:
-      a
-
-def doc.toks(r: Nat & List<&2, U32>) -> Toks:
-  (n, rest) = r
-  toks.go(n, rest, Nil{})
-
-def doc.fin(r: String & List<&2, U32>) -> Toks:
-  (s, rest) = r
-  doc.toks(P.Parse.run(Nat, P.Parse.nat(), rest))
-
-# the documents' token lists, newest first (the ids are not needed)
-def docs.go(n: Nat, +xs: List<&2, U32>, +acc: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>> & List<&2, U32>:
-  match n:
-    case 0n:
-      (acc, xs)
-    case 1n+p:
-      +t = doc.fin(P.Parse.run(String, P.Parse.string(), xs))
-      docs.go(p, Toks.rest(t), Toks.xs(t) <> acc)
-
-def corpus.head() -> P.Parse(Corpus):
-  do P.Parse<Corpus>:
-    m : U32 <- P.Parse.u32be()
-    v : U32 <- P.Parse.u32be()
-    t : String <- P.Parse.string()
-    d : String <- P.Parse.string()
-    return Corpus{m, v, t, d, Nil{}}
-
-def corpus.all.fin(r: List<&2, List<&2, U32>> & List<&2, U32>) -> List<&2, List<&2, U32>>:
-  (ds, rest) = r
-  D.lrev(ds, Nil{})
-
 # Scoring ------------------------------------------------------------------
-
-def corpus.all(r: Nat & List<&2, U32>) -> List<&2, List<&2, U32>>:
-  (n, rest) = r
-  corpus.all.fin(docs.go(n, rest, Nil{}))
-
-def corpus.fin(r: Corpus & List<&2, U32>) -> Corpus:
-  (c, rest) = r
-  match c:
-    case Corpus{m, v, t, d, x}:
-      Corpus{m, v, t, d, corpus.all(P.Parse.run(Nat, P.Parse.nat(), rest))}
-
-def corpus(+xs: List<&2, U32>) -> Corpus:
-  corpus.fin(P.Parse.run(Corpus, corpus.head(), xs))
 
 # the summed CE of one window, predicting token i+1 from tokens 0..i
 def window.go(xs: List<&2, U32>, ys: List<&2, U32>, +dm: Md.Dims, +w: Md.Weights, +sts: List<&2, Md.LState>, +pos: Nat, +acc: F32) -> F32:
@@ -180,36 +114,12 @@ def limit.if(all: Bool, +n: Nat, +ws: List<&2, List<&2, U32>>) -> List<&2, List<
     case False{}:
       List.take(&2, List<&2, U32>, ws, n)
 
-def Corpus.problem.if(magic: Bool, same: Bool, +got: String, +want: String) -> String:
-  match magic same:
-    case False{} _:
-      "not a compact corpus (magic is not FTCC)"
-    case True{} False{}:
-      "corpus tokenizer identity does not match the checkpoint\n  corpus:     " ++ got ++ "\n  checkpoint: " ++ want
-    case True{} True{}:
-      ""
-
-def Corpus.problem(+c: Corpus, +want: String) -> String:
-  match c:
-    case Corpus{m, v, t, d, x}:
-      Corpus.problem.if(U32.is_eq(m, 1179927363), String.eq(t, want), t, want)
-
-def Corpus.docs(+c: Corpus) -> List<&2, List<&2, U32>>:
-  match c:
-    case Corpus{m, v, t, d, x}:
-      x
-
-def Corpus.dataset(+c: Corpus) -> String:
-  match c:
-    case Corpus{m, v, t, d, x}:
-      d
-
-def go(+m: K.Manifest, +b: Tk.Bpe, rw: B.Cur & Gen.Run, +cp: String, +cpath: String, +co: Corpus, +limit: String) -> IO(Unit):
+def go(+m: K.Manifest, +b: Tk.Bpe, rw: B.Cur & Gen.Run, +cp: String, +cpath: String, +co: Cc.Corpus, +limit: String) -> IO(Unit):
   (cur, +run) = rw
   +c = K.Manifest.cfg(m)
   +dm = Md.Dims.of(c)
   +w = Gen.Run.w(run)
-  +ds = Corpus.docs(co)
+  +ds = Cc.Corpus.docs(co)
   +all = D.all.windows(C.Config.ctx(c), ds)
   +ws = limit.if(String.is_empty(limit), Gen.nat.or(U32.read(limit), 0n), all)
   +preds = all.predictions(ws)
@@ -222,15 +132,15 @@ def go(+m: K.Manifest, +b: Tk.Bpe, rw: B.Cur & Gen.Run, +cp: String, +cpath: Str
     IO.print("checkpoint step: " ++ Nat.show(Gen.Run.step(run)) ++ "/" ++ Nat.show(K.Manifest.total_steps(m))
       ++ " (" ++ Gen.pct(Gen.Run.step(run), K.Manifest.total_steps(m)) ++ "% of the scheduled run)")
     IO.print("config: " ++ C.Config.show(c))
-    IO.print("dataset fingerprint: " ++ Corpus.dataset(co))
+    IO.print("dataset fingerprint: " ++ Cc.Corpus.dataset(co))
     IO.print("documents: " ++ Nat.show(List.length(&2, List<&2, U32>, ds)) ++ "  windows: " ++ Nat.show(Acc.n(a)) ++ "  predictions: " ++ Nat.show(preds))
     report(a, scale)
 
-def after(r: B.Cur & K.Manifest, +cp: String, +cpath: String, +co: Corpus, +limit: String) -> IO(Unit):
+def after(r: B.Cur & K.Manifest, +cp: String, +cpath: String, +co: Cc.Corpus, +limit: String) -> IO(Unit):
   (cur, +m) = r
   do IO<Unit>:
     Gen.problem(K.Manifest.problem(m))
-    Gen.problem(Corpus.problem(co, K.Manifest.tokenizer_id(m)))
+    Gen.problem(Cc.Corpus.problem(co, K.Manifest.tokenizer_id(m)))
     b : Tk.Bpe <- Gen.tok.of("", K.Manifest.tokenizer_id(m))
     rw : B.Cur & Gen.Run <- Gen.Load.run(K.Manifest.cfg(m))(cur)
     go(m, b, rw, cp, cpath, co, limit)
@@ -243,4 +153,4 @@ def main() -> IO(Unit):
     +xs : List<&2, U32> <- B.Bytes.read_all(cpath)
     c : B.Cur <- B.Bytes.open(cp)
     r : B.Cur & K.Manifest <- K.Load.header()(c)
-    after(r, cp, cpath, corpus(xs), limit)
+    after(r, cp, cpath, Cc.corpus(xs), limit)

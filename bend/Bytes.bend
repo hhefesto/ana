@@ -3,10 +3,11 @@ import ./Num.bend as N
 
 # A byte cursor over a file.  File.read_bytes hands back one List cell per
 # byte and has no seek, so the cursor keeps a buffer of bytes already read
-# and its length, refilled in chunks of at least a mebibyte.  Every parser
+# and its length, refilled in chunks of at least a mebibyte, and `at`, the
+# bytes handed out so far (the parse position in the file).  Every parser
 # downstream is pure over List<&2, U32>; only `take` touches the file.
 type Cur is Type:
-  Cur{f: File, buf: List<&2, U32>, n: Nat}
+  Cur{f: File, buf: List<&2, U32>, n: Nat, at: Nat}
 
 law Chunk:
   Type
@@ -17,11 +18,11 @@ def Chunk():
 def Bytes.open(path: String) -> IO(Cur):
   do IO<Cur>:
     f : File <- IO.try(File, File.open(path, "r"))
-    return Cur{f, Nil{}, 0n}
+    return Cur{f, Nil{}, 0n, 0n}
 
 def Bytes.close(c: Cur) -> IO(Unit):
   match c:
-    case Cur{f, b, n}:
+    case Cur{f, b, n, a}:
       File.close(f)
 
 def List.split.put(h: U32, r: List<&2, U32> & List<&2, U32>) -> List<&2, U32> & List<&2, U32>:
@@ -42,15 +43,15 @@ def Bytes.chunk() -> U32:
   1048576
 
 # the buffer extended by a fresh chunk, beside the chunk's length
-def Bytes.extend(f: File, buf: List<&2, U32>, n: Nat, +xs: List<&2, U32>) -> Cur & Nat:
+def Bytes.extend(f: File, buf: List<&2, U32>, n: Nat, at: Nat, +xs: List<&2, U32>) -> Cur & Nat:
   +m = List.length(&2, U32, xs)
-  (Cur{f, List.append(&2, U32, buf, xs), Nat.add(n, m)}, m)
+  (Cur{f, List.append(&2, U32, buf, xs), Nat.add(n, m), at}, m)
 
-def Bytes.appended(buf: List<&2, U32>, n: Nat, fr: Chunk()) -> IO(Cur & Nat):
+def Bytes.appended(buf: List<&2, U32>, n: Nat, at: Nat, fr: Chunk()) -> IO(Cur & Nat):
   (f, r) = fr
   do IO<Cur & Nat>:
     xs : List<&2, U32> <- IO.pass(List<&2, U32>, r)
-    return Bytes.extend(f, buf, n, xs)
+    return Bytes.extend(f, buf, n, at, xs)
 
 def Bytes.fill.got(cm: Cur & Nat) -> IO(Cur):
   (c, m) = cm
@@ -60,21 +61,21 @@ def Bytes.fill.got(cm: Cur & Nat) -> IO(Cur):
     case 1n+q:
       IO.pure(Cur, c)
 
-def Bytes.step.if(+k: Nat, f: File, buf: List<&2, U32>, +n: Nat, short: Bool) -> IO(Cur):
+def Bytes.step.if(+k: Nat, f: File, buf: List<&2, U32>, +n: Nat, at: Nat, short: Bool) -> IO(Cur):
   match short:
     case False{}:
-      IO.pure(Cur, Cur{f, buf, n})
+      IO.pure(Cur, Cur{f, buf, n, at})
     case True{}:
       do IO<Cur>:
         fr : Chunk() <- File.read_bytes(f, U32.max(Bytes.chunk(), U32.from_nat(Nat.sub(k, n))))
-        cm : Cur & Nat <- Bytes.appended(buf, n, fr)
+        cm : Cur & Nat <- Bytes.appended(buf, n, at, fr)
         Bytes.fill.got(cm)
 
 # one read if fewer than k bytes are buffered; an empty read is end of file
 def Bytes.step(+k: Nat, c: Cur) -> IO(Cur):
   match c:
-    case Cur{f, buf, +n}:
-      Bytes.step.if(k, f, buf, n, Nat.is_lt(n, k))
+    case Cur{f, buf, +n, at}:
+      Bytes.step.if(k, f, buf, n, at, Nat.is_lt(n, k))
 
 # Read until at least k bytes are buffered.  Termination is structural in
 # `fuel`; a regular file answers a full read, so one step normally suffices
@@ -88,14 +89,14 @@ def Bytes.fill(fuel: Nat, +k: Nat, c: Cur) -> IO(Cur):
         d : Cur <- Bytes.step(k, c)
         Bytes.fill(p, k, d)
 
-def Bytes.split.fin(f: File, n: Nat, r: List<&2, U32> & List<&2, U32>) -> Cur & List<&2, U32>:
+def Bytes.split.fin(f: File, n: Nat, at: Nat, r: List<&2, U32> & List<&2, U32>) -> Cur & List<&2, U32>:
   (a, b) = r
-  (Cur{f, b, n}, a)
+  (Cur{f, b, n, at}, a)
 
 def Bytes.split(+k: Nat, c: Cur) -> Cur & List<&2, U32>:
   match c:
-    case Cur{f, buf, n}:
-      Bytes.split.fin(f, Nat.sub(n, k), List.split(k, buf))
+    case Cur{f, buf, n, at}:
+      Bytes.split.fin(f, Nat.sub(n, k), Nat.add(at, k), List.split(k, buf))
 
 def Bytes.fuel() -> Nat:
   3n
@@ -106,35 +107,41 @@ def Bytes.buffered(+k: Nat, c: Cur) -> IO(Cur & List<&2, U32>):
     return Bytes.split(k, d)
 
 # a short read (possible at end of file) falls back to the buffered path
-def Bytes.direct.check(+k: Nat, f: File, +xs: List<&2, U32>, full: Bool) -> IO(Cur & List<&2, U32>):
+def Bytes.direct.check(+k: Nat, f: File, at: Nat, +xs: List<&2, U32>, full: Bool) -> IO(Cur & List<&2, U32>):
   match full:
     case True{}:
-      IO.pure(Cur & List<&2, U32>, (Cur{f, Nil{}, 0n}, xs))
+      IO.pure(Cur & List<&2, U32>, (Cur{f, Nil{}, 0n, Nat.add(at, k)}, xs))
     case False{}:
-      Bytes.buffered(k, Cur{f, xs, List.length(&2, U32, xs)})
+      Bytes.buffered(k, Cur{f, xs, List.length(&2, U32, xs), at})
 
 # An exact read straight from the file, used once the buffer is drained:
 # the list read_bytes answers is the result, with no split or append.
-def Bytes.direct.fin(+k: Nat, fr: Chunk()) -> IO(Cur & List<&2, U32>):
+def Bytes.direct.fin(+k: Nat, at: Nat, fr: Chunk()) -> IO(Cur & List<&2, U32>):
   (f, r) = fr
   do IO<Cur & List<&2, U32>>:
     +xs : List<&2, U32> <- IO.pass(List<&2, U32>, r)
-    Bytes.direct.check(k, f, xs, Nat.is_eq(List.length(&2, U32, xs), k))
+    Bytes.direct.check(k, f, at, xs, Nat.is_eq(List.length(&2, U32, xs), k))
 
-def Bytes.take.if(empty: Bool, +k: Nat, f: File, buf: List<&2, U32>, +n: Nat) -> IO(Cur & List<&2, U32>):
+def Bytes.take.if(empty: Bool, +k: Nat, f: File, buf: List<&2, U32>, +n: Nat, at: Nat) -> IO(Cur & List<&2, U32>):
   match empty:
     case True{}:
       do IO<Cur & List<&2, U32>>:
         fr : Chunk() <- File.read_bytes(f, U32.from_nat(k))
-        Bytes.direct.fin(k, fr)
+        Bytes.direct.fin(k, at, fr)
     case False{}:
-      Bytes.buffered(k, Cur{f, buf, n})
+      Bytes.buffered(k, Cur{f, buf, n, at})
 
 # the next k bytes
 def Bytes.take(+k: Nat, c: Cur) -> IO(Cur & List<&2, U32>):
   match c:
-    case Cur{f, buf, +n}:
-      Bytes.take.if(Nat.is_eq(n, 0n), k, f, buf, n)
+    case Cur{f, buf, +n, at}:
+      Bytes.take.if(Nat.is_eq(n, 0n), k, f, buf, n, at)
+
+# the cursor's position: the bytes handed out so far
+def Bytes.pos(c: Cur) -> Cur & Nat:
+  match c:
+    case Cur{f, buf, n, +at}:
+      (Cur{f, buf, n, at}, at)
 
 # Pure decoders over a byte list.  Each answers the value beside the rest.
 
@@ -187,6 +194,9 @@ def Load.go(-A: Type, -B: Type, r: Cur & A, f: A -> Load(B)) -> IO(Cur & B):
 
 def Load.bind(-A: Type, -B: Type, m: Load(A), f: A -> Load(B)) -> Load(B):
   c => IO.bind(Cur & A, Cur & B, m(c), r => Load.go(A, B, r, f))
+
+def Load.pos() -> Load(Nat):
+  c => IO.pure(Cur & Nat, Bytes.pos(c))
 
 def Load.io(-A: Type, m: IO(A)) -> Load(A):
   c => IO.bind(A, Cur & A, m, x => IO.pure(Cur & A, (c, x)))
