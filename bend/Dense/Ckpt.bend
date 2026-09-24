@@ -32,6 +32,11 @@ import ./Layout.bend as L
 type Rg is Data:
   Rg{off: U32, n: U32}
 
+def Manifest.version(+m: K.Manifest) -> U32:
+  match m:
+    case K.Manifest{v, c, n, l, lv, a, mu, mi, ti, di, cl, nu}:
+      v
+
 # the matrices Muon owns, in store order (Step.bend mat)
 def owned.gla(+bp: L.BP, +d: U32, +ff: U32) -> List<&2, Rg>:
   +dd = U32.mul(d, d)
@@ -312,7 +317,7 @@ def load.small(xss: List<&2, List<&2, U32>>, +path: String, +ly: L.Lay, +m: L.Dm
                f: File, s: Array<F32>) -> IO(Array<F32> & Src):
   match xss:
     case +fl <> +vc <> +mid <> +hd <> t:
-      +mo = U32.is_eq(byte0(fl), 1)
+      +mo = Bool.and(U32.is_eq(Manifest.version(man), 4), U32.is_eq(byte0(fl), 1))
       +cs = List.append(&2, U32, [lo.of(List.drop(&2, U32, hd, Nat.sub(List.length(&2, U32, hd), 8n))),
              lo.of(List.drop(&2, U32, mid, 8n)), lo.of(vc)],
              Bool.pick(List<&2, U32>, mo, [lo.of(List.drop(&2, U32, fl, 1n))], Nil{}))
@@ -344,7 +349,7 @@ def load(+path: String, +man: K.Manifest, +h: Nat, +tok: String, +ly: L.Lay, +m:
   +hu = U32.from_nat(h)
   +o = Off.of(hu, p)
   do IO<Array<F32> & Src>:
-    u1 : Unit <- fail.if(K.Manifest.problem(man))
+    u1 : Unit <- fail.if(Bool.pick(String, U32.is_eq(Manifest.version(man), 4), K.Manifest.problem(man), ""))
     u2 : Unit <- fail.if(K.check(Nat.is_eq(C.Config.params(K.Manifest.cfg(man)), U32.to_nat(p)),
       "checkpoint parameter count is not the store's", ""))
     u3 : Unit <- fail.if(tok.problem(String.is_empty(tok), K.Manifest.tokenizer_id(man), tok))
@@ -352,6 +357,71 @@ def load(+path: String, +man: K.Manifest, +h: Nat, +tok: String, +ly: L.Lay, +m:
     r : File & List<&2, List<&2, U32>> <- ats([Rg{0, U32.add(hu, 8)}, Rg{Off.stp(o), 16}, Rg{U32.sub(Off.sm(o), 8), 8},
       Rg{Off.flag(o), 9}], (f, Nil{}))
     load.small0(path, ly, m, o, p, man, r, s)
+
+# Headers of both manifest versions. Version 3 (the v2-era runs: master's
+# bpe100m final) has a six-field Config, no Muon field and no momentum flag
+# in the body; master reads it as the arms-off Config (sigmoid gate, no qk
+# norm, no sinks, tied head). Such a checkpoint is evaluated, not trained.
+
+def Load.config6() -> B.Load(C.Config):
+  do B.Load<C.Config>:
+    v : Nat <- B.Load.nat()
+    n : Nat <- B.Load.nat()
+    d : Nat <- B.Load.nat()
+    f : Nat <- B.Load.nat()
+    l : Nat <- B.Load.nat()
+    h : Nat <- B.Load.nat()
+    return C.Config{v, n, d, f, l, h, False{}, False{}, False{}, True{}}
+
+def Load.v3(+version: U32) -> B.Load(K.Manifest):
+  do B.Load<K.Manifest>:
+    cfg : C.Config <- Load.config6()
+    count : Nat <- B.Load.nat()
+    layout : String <- K.Load.string()
+    lv : U32 <- B.Load.u32be()
+    adamw : K.AdamW <- K.Load.adamw()
+    mid : String <- K.Load.string()
+    tid : String <- K.Load.string()
+    did : String <- K.Load.string()
+    clip : F32 <- K.Load.double()
+    numerics : U32 <- B.Load.byte()
+    return K.Manifest{version, cfg, count, layout, lv, adamw, None{}, mid, tid, did, clip, numerics}
+
+def Load.v4(+version: U32) -> B.Load(K.Manifest):
+  do B.Load<K.Manifest>:
+    cfg : C.Config <- K.Load.config()
+    count : Nat <- B.Load.nat()
+    layout : String <- K.Load.string()
+    lv : U32 <- B.Load.u32be()
+    adamw : K.AdamW <- K.Load.adamw()
+    muon : Maybe<&2, F32> <- K.Load.muon()
+    mid : String <- K.Load.string()
+    tid : String <- K.Load.string()
+    did : String <- K.Load.string()
+    clip : F32 <- K.Load.double()
+    numerics : U32 <- B.Load.byte()
+    return K.Manifest{version, cfg, count, layout, lv, adamw, muon, mid, tid, did, clip, numerics}
+
+def Load.pick(v4: Bool, +version: U32) -> B.Load(K.Manifest):
+  match v4:
+    case True{}:
+      Load.v4(version)
+    case False{}:
+      Load.v3(version)
+
+def Load.header.go(magic: Bool) -> B.Load(K.Manifest):
+  match magic:
+    case True{}:
+      do B.Load<K.Manifest>:
+        +version : U32 <- B.Load.u32be()
+        Load.pick(U32.is_eq(version, 4), version)
+    case False{}:
+      c => IO.die(B.Cur & K.Manifest, 1, "not a compact checkpoint (magic is not FTC2)")
+
+def Load.header() -> B.Load(K.Manifest):
+  do B.Load<K.Manifest>:
+    +mg : U32 <- B.Load.u32be()
+    Load.header.go(U32.is_eq(mg, K.magic()))
 
 def header.pos(+man: K.Manifest, cp: B.Cur & Nat) -> IO(K.Manifest & Nat):
   (cur, +h) = cp
@@ -367,7 +437,7 @@ def header.fin(r: B.Cur & K.Manifest) -> IO(K.Manifest & Nat):
 def header(+path: String) -> IO(K.Manifest & Nat):
   do IO<K.Manifest & Nat>:
     cur : B.Cur <- B.Bytes.open(path)
-    r : B.Cur & K.Manifest <- K.Load.header()(cur)
+    r : B.Cur & K.Manifest <- Load.header()(cur)
     header.fin(r)
 
 # Writing ------------------------------------------------------------------

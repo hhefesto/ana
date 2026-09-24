@@ -15,6 +15,7 @@ import ./Dense/Ckpt.bend as Dk
 import ./Dense/Plan.bend as Pl
 import ./Corpus.bend as Cc
 import ./Checkpoint.bend as Km
+import ./Evaluate.bend as Ev
 
 # train, dense: master's trainer on the Bend2 port at GPU speed. The same
 # environment and log as Train.bend (the tree trainer, kept as the
@@ -492,22 +493,107 @@ def run.hot(+c: C.Config, +tok: Tr.Tok, +plan: List<&2, U32>, +hp: Hp, +muon: Bo
     r : Array<F32> & Nat <- segs.go(ss, rn, hp, hs, muon, True{}, (s, step0))
     hot.fin(r)
 
+# Evaluate (EVAL_CORPUS set): master's `evaluate` on the dense forward. Every
+# document's full windows (no split) are scored; the loss is the mean over
+# windows (all full, so the mean over predictions), and bits per byte scale
+# it by predictions / (bytes the ordinary targets decode to · ln 2).
+
+def pad.to(+mb: Nat, +ws: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  +n = List.length(&2, List<&2, U32>, ws)
+  List.append(&2, List<&2, U32>, ws, List.replicate(List<&2, U32>, Nat.mod(Nat.sub(mb, Nat.mod(n, mb)), mb), [0]))
+
+def real(ws: List<&2, List<&2, U32>>) -> Nat:
+  match ws:
+    case Nil{}:
+      0n
+    case +w <> t:
+      Nat.add(Bool.pick(Nat, Nat.is_lt(1n, List.length(&2, U32, w)), 1n, 0n), real(t))
+
+type Ea is Data:
+  Ea{sum: F32, n: Nat}
+
+def Ea.add(+k: Nat, +l: F32, a: Ea) -> Ea:
+  match a:
+    case Ea{+sum, +n}:
+      Ea{F32.add(sum, F32.mul(l, F32.from_nat(k))), Nat.add(n, k)}
+
+def eval.add(+k: Nat, +a: Ea, r: Array<F32> & F32) -> Array<F32> & Ea:
+  (s, +l) = r
+  (s, Ea.add(k, l, a))
+
+def eval.one(+mw: List<&2, List<&2, U32>>, +rn: Run, r: Array<F32> & Ea) -> Array<F32> & Ea:
+  (s, +a) = r
+  +k = real(mw)
+  eval.add(k, a, Io.get1(P.run(Run.fwd(rn), put(mw, rn, s)), L.Lay.lmean(Run.ly(rn))))
+
+def eval.go(ms: List<&2, List<&2, List<&2, U32>>>, +rn: Run, r: Array<F32> & Ea) -> Array<F32> & Ea:
+  match ms:
+    case Nil{}:
+      r
+    case mw <> t:
+      eval.go(t, rn, eval.one(mw, rn, r))
+
+def eval.print(+scale: F32, +preds: Nat, +bytes: Nat, a: Ea) -> IO(Unit):
+  match a:
+    case Ea{+sum, +n}:
+      +loss = F32.div(sum, F32.from_nat(Nat.max(n, 1n)))
+      do IO<Unit>:
+        IO.print("windows: " ++ Nat.show(n) ++ "  predictions: " ++ Nat.show(preds) ++ "  bytes: " ++ Nat.show(bytes))
+        IO.print("loss: " ++ F32.show(loss) ++ " nats/token")
+        IO.print("bits_per_byte: " ++ F32.show(F32.mul(loss, scale)))
+
+def eval.fin(+scale: F32, +nw: Nat, +preds: Nat, +bytes: Nat, r: Array<F32> & Ea) -> IO(Unit):
+  (s, a) = r
+  eval.print(scale, preds, bytes, a)
+
+def eval.run(+c: C.Config, +tok: Tr.Tok, +mb: Nat, +chunk: Nat, +path: String, +limit: Nat, +xs: List<&2, U32>,
+             r: Array<F32> & Dk.Src) -> IO(Unit):
+  (s, +src) = r
+  +m = L.Dm.of.cc(c, mb, U32.from_nat(chunk))
+  +ly = L.Lay.of(c, m)
+  +rn = {Run{m, ly, S.fwd(m, ly), Nil{}, Nil{}} : Run}
+  +co = Cc.corpus(xs)
+  +all = D.all.windows(C.Config.ctx(c), Cc.Corpus.docs(co))
+  +ws = Bool.pick(List<&2, List<&2, U32>>, Nat.is_eq(limit, 0n), all, List.take(&2, List<&2, U32>, all, limit))
+  +preds = Ev.all.predictions(ws)
+  +bytes = Ev.all.bytes(Tr.Tok.b(tok), ws)
+  +scale = F32.div(F32.from_nat(preds), F32.mul(F32.from_nat(bytes), F32.log(2.0)))
+  do IO<Unit>:
+    u : Unit <- Dk.fail.if(Cc.Corpus.problem(co, Tr.Tok.id(tok)))
+    IO.print("evaluate (dense): step " ++ Nat.show(Dk.Src.step(src)) ++ " on " ++ path ++ " (" ++ Cc.Corpus.dataset(co) ++ ")")
+    eval.fin(scale, List.length(&2, List<&2, U32>, ws), preds, bytes, eval.go(micros(mb, pad.to(mb, ws)), rn, (s, Ea{0.0, 0n})))
+
 # TRAIN_OPT unset: the checkpoint's optimizer (Muon when it carries momentum)
 def start.hot.go(+c: C.Config, +tok: Tr.Tok, +plan: List<&2, U32>, +steps: Nat, +batch: Nat, +mb: Nat, +lr_s: String,
                  +wd_s: String, +warm_s: String, +opt: String, +mu_s: String, +clip_s: String, +every: Nat, +evals: Nat,
                  +out: String, +save: Nat, +dir: String, +size: String, +chunk: Nat, r: Array<F32> & Dk.Src) -> IO(Unit):
   (s, +src) = r
   +stop = Nat.min(Nat.add(Dk.Src.step(src), steps), Dk.Src.total(src))
-  run.hot(c, tok, plan,
-    Hp{Tr.f32.or(lr_s, Dk.Src.lr(src)), Tr.nat.or(warm_s, Dk.Src.warm(src)), Dk.Src.total(src), batch, every, mb},
-    Bool.or(String.eq(opt, "muon"), Bool.and(String.is_empty(opt), Dk.Src.mom(src))),
-    Tr.f32.or(mu_s, Dk.Src.mu(src)), Tr.f32.or(clip_s, Dk.Src.clip(src)), Tr.f32.or(wd_s, Dk.Src.wd(src)),
-    Hs{src, out, save, stop, dir, size, evals, Tr.Tok.id(tok), C.Config.ctx(c)}, chunk, s)
+  do IO<Unit>:
+    u : Unit <- Dk.fail.if(Bool.pick(String, U32.is_eq(Dk.Manifest.version(Dk.Src.man(src)), 4), "",
+      "training continues version-4 checkpoints only (this one can be evaluated)"))
+    run.hot(c, tok, plan,
+      Hp{Tr.f32.or(lr_s, Dk.Src.lr(src)), Tr.nat.or(warm_s, Dk.Src.warm(src)), Dk.Src.total(src), batch, every, mb},
+      Bool.or(String.eq(opt, "muon"), Bool.and(String.is_empty(opt), Dk.Src.mom(src))),
+      Tr.f32.or(mu_s, Dk.Src.mu(src)), Tr.f32.or(clip_s, Dk.Src.clip(src)), Tr.f32.or(wd_s, Dk.Src.wd(src)),
+      Hs{src, out, save, stop, dir, size, evals, Tr.Tok.id(tok), C.Config.ctx(c)}, chunk, s)
+
+def start.hot.pick(train: Bool, +c: C.Config, +tok: Tr.Tok, +plan: List<&2, U32>, +steps: Nat, +batch: Nat, +mb: Nat,
+                   +lr_s: String, +wd_s: String, +warm_s: String, +opt: String, +mu_s: String, +clip_s: String,
+                   +every: Nat, +evals_s: String, +out: String, +save: Nat, +dir: String, +size: String, +chunk: Nat,
+                   +evc: String, +xs: List<&2, U32>, r: Array<F32> & Dk.Src) -> IO(Unit):
+  match train:
+    case True{}:
+      start.hot.go(c, tok, plan, steps, batch, mb, lr_s, wd_s, warm_s, opt, mu_s, clip_s, every,
+        Tr.nat.or(evals_s, 256n), out, save, dir, size, chunk, r)
+    case False{}:
+      eval.run(c, tok, mb, chunk, evc, Tr.nat.or(evals_s, 0n), xs, r)
 
 def start.hot.man(+init: String, +tokf: String, +steps_s: String, +batch_s: String, +micro_s: String,
                   +lr_s: String, +wd_s: String, +warm_s: String, +opt: String, +mu_s: String, +clip_s: String,
                   +every_s: String, +evals_s: String, +out: String, +save_s: String, +dir: String, +size: String,
-                  +chunk_s: String, +plan: List<&2, U32>, +tb: List<&2, U32>, +t0: Nat, mh: Km.Manifest & Nat) -> IO(Unit):
+                  +chunk_s: String, +plan: List<&2, U32>, +tb: List<&2, U32>, +evc: String, +xs: List<&2, U32>,
+                  +t0: Nat, mh: Km.Manifest & Nat) -> IO(Unit):
   (+man, +h) = mh
   +c = Km.Manifest.cfg(man)
   +tok = Tr.tok.of(tokf, tb)
@@ -520,20 +606,19 @@ def start.hot.man(+init: String, +tokf: String, +steps_s: String, +batch_s: Stri
     r : Array<F32> & Dk.Src <- Dk.load(init, man, h, Tr.Tok.id(tok), ly, m, Array.new(F32, L.Lay.depth(ly), 0.0))
     +t1 : Nat <- IO.now()
     IO.print("loaded " ++ init ++ " (" ++ Nat.show(Nat.sub(t1, t0)) ++ " ms)")
-    start.hot.go(c, tok, plan, Tr.nat.or(steps_s, 100n), batch, mb, lr_s, wd_s, warm_s, opt,
-      mu_s, clip_s, Tr.nat.or(every_s, 0n), Tr.nat.or(evals_s, 256n), out, Tr.nat.or(save_s, 1000n),
-      dir, size, chunk, r)
+    start.hot.pick(String.is_empty(evc), c, tok, plan, Tr.nat.or(steps_s, 100n), batch, mb, lr_s, wd_s, warm_s, opt,
+      mu_s, clip_s, Tr.nat.or(every_s, 0n), evals_s, out, Tr.nat.or(save_s, 1000n), dir, size, chunk, evc, xs, r)
 
 # the model is the checkpoint's (its manifest's Config; PRESET is not read)
 def start.hot(+init: String, +tokf: String, +steps_s: String, +batch_s: String, +micro_s: String,
               +lr_s: String, +wd_s: String, +warm_s: String, +opt: String, +mu_s: String, +clip_s: String,
               +every_s: String, +evals_s: String, +out: String, +save_s: String, +dir: String, +size: String,
-              +chunk_s: String, +plan: List<&2, U32>, +tb: List<&2, U32>) -> IO(Unit):
+              +chunk_s: String, +plan: List<&2, U32>, +tb: List<&2, U32>, +evc: String, +xs: List<&2, U32>) -> IO(Unit):
   do IO<Unit>:
     +t0 : Nat <- IO.now()
     mh : Km.Manifest & Nat <- Dk.header(init)
     start.hot.man(init, tokf, steps_s, batch_s, micro_s, lr_s, wd_s, warm_s, opt, mu_s, clip_s, every_s, evals_s,
-      out, save_s, dir, size, chunk_s, plan, tb, t0, mh)
+      out, save_s, dir, size, chunk_s, plan, tb, evc, xs, t0, mh)
 
 def or.str(empty: Bool, +s: String, +d: String) -> String:
   match empty:
@@ -541,6 +626,14 @@ def or.str(empty: Bool, +s: String, +d: String) -> String:
       d
     case False{}:
       s
+
+# EVAL_CORPUS set: evaluate the checkpoint on it (no plan is read)
+def main.hot.data(ev: Bool, +plan_p: String, +evc: String) -> IO(List<&2, U32>):
+  match ev:
+    case True{}:
+      B.Bytes.read_all(evc)
+    case False{}:
+      B.Bytes.read_all(plan_p)
 
 def main.hot(+init: String, +tokf: String, +pre: String, +steps_s: String, +batch_s: String, +micro_s: String,
              +lr_s: String, +wd_s: String, +warm_s: String, +opt: String, +mu_s: String, +clip_s: String,
@@ -550,10 +643,11 @@ def main.hot(+init: String, +tokf: String, +pre: String, +steps_s: String, +batc
     +dir : String <- Tr.env("RUN_DIR", "run/mixed-bpe100m-s32000")
     +size : String <- Tr.env("SHARD_SIZE", "bpe100m")
     +save_s : String <- Tr.env("SAVE_EVERY", "1000")
-    +plan : List<&2, U32> <- B.Bytes.read_all(plan_p)
+    +evc : String <- Tr.env("EVAL_CORPUS", "")
+    +data : List<&2, U32> <- main.hot.data(Bool.not(String.is_empty(evc)), plan_p, evc)
     +tb : List<&2, U32> <- Tr.tok.read(tokf)
     start.hot(init, tokf, steps_s, batch_s, micro_s, lr_s, wd_s, warm_s, opt, mu_s, clip_s, every_s, evals_s,
-      out, save_s, dir, size, chunk_s, plan, tb)
+      out, save_s, dir, size, chunk_s, data, tb, evc, data)
 
 def main.cold(+corpus: String, +tokf: String, +pre: String, +steps_s: String, +batch_s: String, +micro_s: String,
               +lr_s: String, +wd_s: String, +warm_s: String, +opt: String, +mu_s: String, +clip_s: String,
