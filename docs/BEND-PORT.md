@@ -210,7 +210,7 @@ With `TRAIN_INIT=<ftc2>` the dense trainer continues master's run instead of sta
 - **Dense evaluate** (`EVAL_CORPUS`) is master's `evaluate` on the dense forward: every full window of every document, bpb = loss · predictions / (bytes · ln 2).
 - **The log** carries master's fields plus `ms=`, `tok/s=`, `remaining=` and `eta=`.
 
-Measured on a vast RTX 3090 (instance 52365970): validation at step 8000 is 3.627147 against master's 3.6271493 on the same windows, and the 19 steps master itself ran after that checkpoint (8001–8019, `run/train-cloud-v3-final.log`) agree with the Bend run's to ~5e-6 in the loss and ~1e-5 in the gradient norm, so the continuation is master's trainer step for step; 2,290 ms/step = 7,155 tok/s, 1.8× master's v3 run on a 3090 (a third card; the 1,702 ms above was another). enwik8 test split (6,184 windows): v3 step 8000 1.4903 bpb → step 18000 1.4636.
+Measured on a vast RTX 3090 (instance 52365970): validation at step 8000 is 3.627147 against master's 3.6271493 on the same windows, and the 19 steps master itself ran after that checkpoint (8001–8019, `run/train-cloud-v3-final.log`) agree with the Bend run's to ~5e-6 in the loss and ~1e-5 in the gradient norm, so the continuation is master's trainer step for step; 2,290 ms/step = 7,155 tok/s, 1.8× master's v3 run on a 3090. The 1,702 ms above was another card: the same cold benchmark on this one ran at 2,180 ms/step, so the hot path costs ~5% over it and the rest is the card (thermally limited; logs in `bend/gpu/hot-rtx3090-2026-09-24/`). The run went 8000 → 28000 in 12.7 h. enwik8 test split (6,184 windows): v3 step 8000 1.4903 bpb → best 1.4462 at step 22000, 1.4516 at 28000.
 
 ### What the dense path does not do yet
 

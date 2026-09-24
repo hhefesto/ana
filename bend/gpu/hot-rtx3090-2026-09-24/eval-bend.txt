@@ -1,0 +1,11 @@
+step 10000 bits_per_byte: 1.5019124
+step 12000 bits_per_byte: 1.5022789
+step 14000 bits_per_byte: 1.485058
+step 16000 bits_per_byte: 1.4669132
+step 18000 bits_per_byte: 1.4635793
+step 20000 bits_per_byte: 1.4605641
+step 22000 bits_per_byte: 1.4461938
+step 24000 bits_per_byte: 1.4533832
+step 26000 bits_per_byte: 1.447769
+step 28000 bits_per_byte: 1.4516134
+finished

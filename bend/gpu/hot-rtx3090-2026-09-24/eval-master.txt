@@ -1,0 +1,10 @@
+== v2.ckpt
+evaluate (dense): step 336872 on enwik8.corpus (fnv1a64-noncryptographic:86e3755bb5a24d98)
+windows: 6184  predictions: 1576920  bytes: 4980108
+loss: 3.0051734 nats/token
+bits_per_byte: 1.3728244
+== ckpt
+evaluate (dense): step 8000 on enwik8.corpus (fnv1a64-noncryptographic:86e3755bb5a24d98)
+windows: 6184  predictions: 1576920  bytes: 4980108
+loss: 3.2622478 nats/token
+bits_per_byte: 1.4902612

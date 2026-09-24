@@ -1,0 +1,6 @@
+== traind (the run binary)
+2180 ms/step over 18 steps
+== traind-ts
+2183 ms/step over 18 steps
+[2026-09-24 13:48:48 CDMX] step=20 validation_loss=0 validation_delta=0 best_validation_loss=0 new_best=False bits_per_byte=0 remaining=0 eta=0h0m
+No such file or directory

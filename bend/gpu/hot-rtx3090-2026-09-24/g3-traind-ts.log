@@ -1,0 +1,25 @@
+[2026-09-24 13:47:17 CDMX] train (dense): formal-transformer-futhark-hybrid-gla-v3:Config {vocabSize = 32768, contextSize = 256, modelDim = 768, ffDim = 2048, layerCount = 12, headCount = 12, gateKind = GateRgLru, qkNorm = True, headSinks = True, tiedHead = True}
+[2026-09-24 13:47:17 CDMX] tokenizer fastbpe-word-v1:bos=0:eos=1:bytes=2..257:pretoken=ascii-space-prefix+lf-boundary:vocab=32768:sha256=60b05337f411b76da37b6cb3cba2d8626001a4eae3a1c52e3c13ed809ad04c26; 179 training windows, 0 validation windows; micro-batch 32, store 1524629504 floats
+[2026-09-24 13:47:41 CDMX] step=0 validation_loss=0 validation_delta=na best_validation_loss=0 new_best=True bits_per_byte=0 remaining=20 eta=na
+[2026-09-24 13:48:06 CDMX] step=1/20 progress=5% lr=0.0000150000005 train_loss=10.361036 train_loss_ema=10.361036 gradient_norm=6.5548854 clipped=True ms=24542 tok/s=667
+[2026-09-24 13:48:08 CDMX] step=2/20 progress=10% lr=0.000030000001 train_loss=10.36215 train_loss_ema=10.361059 gradient_norm=6.498864 clipped=True ms=2228 tok/s=7353
+[2026-09-24 13:48:10 CDMX] step=3/20 progress=15% lr=0.000045 train_loss=10.3352995 train_loss_ema=10.360544 gradient_norm=5.82349 clipped=True ms=2209 tok/s=7416
+[2026-09-24 13:48:13 CDMX] step=4/20 progress=20% lr=0.000060000002 train_loss=10.162214 train_loss_ema=10.356578 gradient_norm=5.500616 clipped=True ms=2178 tok/s=7522
+[2026-09-24 13:48:15 CDMX] step=5/20 progress=25% lr=0.000075 train_loss=10.070084 train_loss_ema=10.350848 gradient_norm=5.660814 clipped=True ms=2178 tok/s=7522
+[2026-09-24 13:48:17 CDMX] step=6/20 progress=30% lr=0.00009 train_loss=9.915846 train_loss_ema=10.342148 gradient_norm=4.820869 clipped=True ms=2179 tok/s=7519
+[2026-09-24 13:48:19 CDMX] step=7/20 progress=35% lr=0.00010500001 train_loss=9.7392645 train_loss_ema=10.3300905 gradient_norm=4.817876 clipped=True ms=2180 tok/s=7515
+[2026-09-24 13:48:21 CDMX] step=8/20 progress=40% lr=0.000120000004 train_loss=9.571884 train_loss_ema=10.314927 gradient_norm=4.9314604 clipped=True ms=2181 tok/s=7512
+[2026-09-24 13:48:24 CDMX] step=9/20 progress=45% lr=0.00013500001 train_loss=9.356785 train_loss_ema=10.295765 gradient_norm=4.466145 clipped=True ms=2180 tok/s=7515
+[2026-09-24 13:48:26 CDMX] step=10/20 progress=50% lr=0.00015 train_loss=9.139511 train_loss_ema=10.272639 gradient_norm=4.6949773 clipped=True ms=2182 tok/s=7508
+[2026-09-24 13:48:28 CDMX] step=11/20 progress=55% lr=0.000165 train_loss=8.994049 train_loss_ema=10.247067 gradient_norm=4.3881364 clipped=True ms=2181 tok/s=7512
+[2026-09-24 13:48:30 CDMX] step=12/20 progress=60% lr=0.00018 train_loss=8.750204 train_loss_ema=10.217131 gradient_norm=4.1660843 clipped=True ms=2182 tok/s=7508
+[2026-09-24 13:48:32 CDMX] step=13/20 progress=65% lr=0.000195 train_loss=8.424396 train_loss_ema=10.181275 gradient_norm=4.5540648 clipped=True ms=2183 tok/s=7505
+[2026-09-24 13:48:34 CDMX] step=14/20 progress=70% lr=0.00021000001 train_loss=8.302477 train_loss_ema=10.1437 gradient_norm=4.089265 clipped=True ms=2182 tok/s=7508
+[2026-09-24 13:48:37 CDMX] step=15/20 progress=75% lr=0.00022500001 train_loss=7.9899225 train_loss_ema=10.100624 gradient_norm=4.248738 clipped=True ms=2183 tok/s=7505
+[2026-09-24 13:48:39 CDMX] step=16/20 progress=80% lr=0.00024000001 train_loss=7.6804504 train_loss_ema=10.052221 gradient_norm=4.345075 clipped=True ms=2183 tok/s=7505
+[2026-09-24 13:48:41 CDMX] step=17/20 progress=85% lr=0.00025500002 train_loss=7.4510756 train_loss_ema=10.000198 gradient_norm=3.8914251 clipped=True ms=2182 tok/s=7508
+[2026-09-24 13:48:43 CDMX] step=18/20 progress=90% lr=0.00027000002 train_loss=7.147518 train_loss_ema=9.943145 gradient_norm=3.9984589 clipped=True ms=2183 tok/s=7505
+[2026-09-24 13:48:45 CDMX] step=19/20 progress=95% lr=0.00028500002 train_loss=6.7358646 train_loss_ema=9.878999 gradient_norm=4.4641943 clipped=True ms=2182 tok/s=7508
+[2026-09-24 13:48:48 CDMX] step=20/20 progress=100% lr=0.0003 train_loss=6.4854546 train_loss_ema=9.811129 gradient_norm=4.036876 clipped=True ms=2183 tok/s=7505
+[2026-09-24 13:48:48 CDMX] step=20 validation_loss=0 validation_delta=0 best_validation_loss=0 new_best=False bits_per_byte=0 remaining=0 eta=0h0m
+No such file or directory

@@ -1,0 +1,66 @@
+loaded ckpt (16415 ms)
+train (dense, hot start): formal-transformer-futhark-hybrid-gla-v3:Config {vocabSize = 32768, contextSize = 256, modelDim = 768, ffDim = 2048, layerCount = 12, headCount = 12, gateKind = GateRgLru, qkNorm = True, headSinks = True, tiedHead = True} from step 8000 to 28000 of 358276; lr 0.0003, warmup 100, micro-batch 32, 303 segments left
+reading shards/shard-1-bpe100m.corpus
+parsed (4958 ms)
+shard 1: 245929 training windows, global 4940..8783; running 8000..8783
+step 8000 validation loss 3.627147
+step 8001 loss 3.4582589 grad_norm 0.34144256 lr 0.00029963997 ms 16800
+step 8002 loss 3.4480796 grad_norm 0.33896995 lr 0.00029963988 ms 2344
+step 8003 loss 3.448505 grad_norm 0.34151846 lr 0.00029963977 ms 2282
+step 8004 loss 3.5327244 grad_norm 0.34312 lr 0.0002996397 ms 2227
+step 8005 loss 3.4806728 grad_norm 0.3339755 lr 0.0002996396 ms 2225
+step 8006 loss 3.3893678 grad_norm 0.3419645 lr 0.00029963953 ms 2226
+...
+reading shards/shard-1-bpe100m.corpus
+parsed (4958 ms)
+shard 1: 245929 training windows, global 4940..8783; running 8000..8783
+step 8000 validation loss 3.627147
+reading shards/shard-2-bpe100m.corpus
+parsed (2973 ms)
+shard 2: 125841 training windows, global 8783..10750; running 8783..10750
+step 10000 validation loss 2.8881922
+saved out/v3-bend-step10000.checkpoint (1280 ms)
+reading shards/shard-3-bpe100m.corpus
+parsed (4531 ms)
+shard 3: 116520 training windows, global 10750..12571; running 10750..12571
+step 12000 validation loss 2.4476023
+saved out/v3-bend-step12000.checkpoint (1281 ms)
+reading shards/shard-4-bpe100m.corpus
+parsed (8185 ms)
+shard 4: 204383 training windows, global 12571..15765; running 12571..15765
+step 14000 validation loss 3.557787
+saved out/v3-bend-step14000.checkpoint (1284 ms)
+reading shards/shard-5-bpe100m.corpus
+parsed (12787 ms)
+shard 5: 187140 training windows, global 15765..18690; running 15765..18690
+step 16000 validation loss 3.4869773
+saved out/v3-bend-step16000.checkpoint (1284 ms)
+step 18000 validation loss 3.4796727
+saved out/v3-bend-step18000.checkpoint (1278 ms)
+reading shards/shard-6-bpe100m.corpus
+parsed (20607 ms)
+shard 6: 181199 training windows, global 18690..21522; running 18690..21522
+step 20000 validation loss 2.8199017
+saved out/v3-bend-step20000.checkpoint (1285 ms)
+reading shards/shard-7-bpe100m.corpus
+parsed (31076 ms)
+shard 7: 170467 training windows, global 21522..24186; running 21522..24186
+step 22000 validation loss 3.5868268
+saved out/v3-bend-step22000.checkpoint (1283 ms)
+step 24000 validation loss 3.5810087
+saved out/v3-bend-step24000.checkpoint (1279 ms)
+reading shards/shard-8-bpe100m.corpus
+parsed (38166 ms)
+shard 8: 153343 training windows, global 24186..26582; running 24186..26582
+step 26000 validation loss 3.5811908
+saved out/v3-bend-step26000.checkpoint (1279 ms)
+reading shards/shard-9-bpe100m.corpus
+parsed (55418 ms)
+shard 9: 145436 training windows, global 26582..28855; running 26582..28000
+step 28000 validation loss 3.4871907
+saved out/v3-bend-step28000.checkpoint (1793 ms)
+done at step 28000
+...
+step 28000 validation loss 3.4871907
+saved out/v3-bend-step28000.checkpoint (1793 ms)
+done at step 28000

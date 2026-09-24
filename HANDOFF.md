@@ -18,15 +18,15 @@ This document holds everything needed to continue this work from another machine
 - Validation at step 8000 on the box: 3.627147; master logged 3.6271493 on the same 256 windows.
 - Schedule (cosine to zero), epoch hash (`splitmix(i + 0x45504f4348)`), split seed and per-shard window counts equal master's.
 
-**The run (vast 52365970, Michigan RTX 3090, `ssh -p 40037 root@74.126.26.42`, `/root/hot`)**
-- v3 step 8000 → 28000 on master's data; checkpoints `out/v3-bend-step<N>.checkpoint` every 2000; `eval-bend.txt` has each one's enwik8 bpb.
-- **Speed: 2,290 ms/step = 7,155 tok/s = 1.8× master's v3 3090 run (4,110 ms)**, below the 1,702 ms G3 measured on another card. Unexplained; this card shows `SW Thermal Slowdown: Active` at 81 °C, 350–380 W of 390 W, 1.7–1.8 GHz. Check `nvidia-smi -q -d PERFORMANCE` on every box (the first Washington box ran at 450 MHz).
-- enwik8 test split, 6,184 windows, one evaluator for all rows: v2 final 1.3728; v3 step 8000 1.4903; Bend 10k 1.5019, 12k 1.5023, 14k 1.4851, 16k 1.4669, 18k 1.4636, 20k 1.4606.
+**The run (vast 52365970, Michigan RTX 3090; DESTROYED 2026-09-24 after the pull; logs in `bend/gpu/hot-rtx3090-2026-09-24/`)**
+- v3 step 8000 → **28000 done** on master's data, 20,000 steps in 12.7 h. Checkpoints 20k–28k are in `run/pulled-vast-52365970/` with `sha256.txt` (each 1,846,967,877 bytes; master's resume reads them).
+- **Speed: 2,290 ms/step = 7,155 tok/s = 1.8× master's v3 3090 run (4,110 ms).** The gap to the 1,702 ms G3 measured on another card is the card: the same cold G3 setting on this box ran at 2,180 ms/step (`timing.txt`), so the hot path costs ~110 ms/step (5%) over the cold benchmark and the rest is the box (`SW Thermal Slowdown: Active` at 81 °C, 350–380 W of 390 W, 1.7–1.8 GHz). Check `nvidia-smi -q -d PERFORMANCE` on every box; the first Washington box ran at 450 MHz.
+- enwik8 test split, 6,184 windows, one evaluator for all rows: v2 final 1.3728; v3 step 8000 1.4903; Bend 10k 1.5019, 12k 1.5023, 14k 1.4851, 16k 1.4669, 18k 1.4636, 20k 1.4606, **22k 1.4462 (best)**, 24k 1.4534, 26k 1.4478, 28k 1.4516. The last 6k steps plateau around 1.45 on shards 7–8 (4.8–5.3 windows per document).
 - **The dip at 10k–12k is the data, not the trainer.** The plan's shards differ in document length: shards 0–1 have 9.9 and 7.7 windows per document, shards 2–3 have 3.9 and 3.6 (mean training loss 2.88 and 2.71 against ~3.47 elsewhere), and 272 of the 304 shards have 1–3. Master's v3 saw only the two long-document shards; the continuation moved into short-document text, enwik8 (long articles) got worse for 4,000 steps, then recovered. Greedy continuations at step 20k do not look better than at 8k for the same reason plus greedy looping, which both checkpoints do.
 
 **Open items**
-1. Finish the run, pull `out/*.checkpoint` with sha256, run `bend/gpu/g3.sh` for 20 steps on the same box (card or code?), then `vastai destroy instance 52365970 -y`.
-2. Compare against master v3 step 8000: the bpb table plus continuations (`bend-generate`, same prompts and seeds). The user decides on merging.
+1. ~~Finish, pull, time, destroy.~~ Done (above).
+2. Compare against master v3 step 8000: the bpb table (above) plus continuations (`bend-generate`, five prompts, greedy and seed 0) for steps 8000, 20000, 22000 and 28000. Greedy loops for every checkpoint at this stage; ranking needs many seeds scored blind or a repetition-aware decode. The user decides on merging.
 3. Speed: the GLA einsum kernels are ~60% of the step (see the previous section's item 5).
 4. `Dense/Ckpt.bend`: offsets are U32 (files under 4 GB; v4 at 463M would not fit) and saves write in place (no rename effect).
 
