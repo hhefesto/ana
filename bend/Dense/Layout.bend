@@ -3,7 +3,9 @@ import ../Config.bend as C
 
 # Where everything lives in the store. One Array<F32> holds, in order: the
 # parameters (namedLayout order, so a checkpoint's parameter vector is the
-# region verbatim), the token ids of a micro-batch, the residual stream
+# region verbatim), the token ids of a micro-batch (inputs, targets, and
+# each position's loss weight: 0 pads a window's last position, since a
+# window of ctx tokens makes ctx - 1 predictions), the residual stream
 # before every layer and after the last, one layer's workspace (every
 # layer reuses it: the backward recomputes a layer's intermediates), the
 # head's, and the scalars the host reads. The tangents mirror all of it at
@@ -171,6 +173,132 @@ def BP.wd(+r: BP) -> U32:
   match r:
     case BP{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14}:
       f14
+
+type Hd is Data:
+  Hd{ssf: U32, fin: U32, lg: U32, hm: U32, hse: U32, loss: U32, ltot: U32, wsum: U32, wl: U32, end: U32}
+
+def Hd.ssf(+r: Hd) -> U32:
+  match r:
+    case Hd{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9}:
+      f0
+
+def Hd.fin(+r: Hd) -> U32:
+  match r:
+    case Hd{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9}:
+      f1
+
+def Hd.lg(+r: Hd) -> U32:
+  match r:
+    case Hd{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9}:
+      f2
+
+def Hd.hm(+r: Hd) -> U32:
+  match r:
+    case Hd{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9}:
+      f3
+
+def Hd.hse(+r: Hd) -> U32:
+  match r:
+    case Hd{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9}:
+      f4
+
+def Hd.loss(+r: Hd) -> U32:
+  match r:
+    case Hd{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9}:
+      f5
+
+def Hd.ltot(+r: Hd) -> U32:
+  match r:
+    case Hd{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9}:
+      f6
+
+def Hd.wsum(+r: Hd) -> U32:
+  match r:
+    case Hd{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9}:
+      f7
+
+def Hd.wl(+r: Hd) -> U32:
+  match r:
+    case Hd{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9}:
+      f8
+
+def Hd.end(+r: Hd) -> U32:
+  match r:
+    case Hd{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9}:
+      f9
+
+type Lay is Data:
+  Lay{tin: U32, ttg: U32, tw: U32, x0: U32, ws: U32, hd: U32, sc: U32, g: U32, m: U32, v: U32, total: U32, blocks: List<&2,BP>, fin: U32, params: U32}
+
+def Lay.tin(+r: Lay) -> U32:
+  match r:
+    case Lay{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13}:
+      f0
+
+def Lay.ttg(+r: Lay) -> U32:
+  match r:
+    case Lay{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13}:
+      f1
+
+def Lay.tw(+r: Lay) -> U32:
+  match r:
+    case Lay{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13}:
+      f2
+
+def Lay.x0(+r: Lay) -> U32:
+  match r:
+    case Lay{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13}:
+      f3
+
+def Lay.ws(+r: Lay) -> U32:
+  match r:
+    case Lay{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13}:
+      f4
+
+def Lay.hd(+r: Lay) -> U32:
+  match r:
+    case Lay{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13}:
+      f5
+
+def Lay.sc(+r: Lay) -> U32:
+  match r:
+    case Lay{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13}:
+      f6
+
+def Lay.g(+r: Lay) -> U32:
+  match r:
+    case Lay{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13}:
+      f7
+
+def Lay.m(+r: Lay) -> U32:
+  match r:
+    case Lay{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13}:
+      f8
+
+def Lay.v(+r: Lay) -> U32:
+  match r:
+    case Lay{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13}:
+      f9
+
+def Lay.total(+r: Lay) -> U32:
+  match r:
+    case Lay{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13}:
+      f10
+
+def Lay.blocks(+r: Lay) -> List<&2,BP>:
+  match r:
+    case Lay{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13}:
+      f11
+
+def Lay.fin(+r: Lay) -> U32:
+  match r:
+    case Lay{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13}:
+      f12
+
+def Lay.params(+r: Lay) -> U32:
+  match r:
+    case Lay{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13}:
+      f13
 
 # Dimensions ---------------------------------------------------------------
 
@@ -423,122 +551,6 @@ def Ws.end(+r: Ws) -> U32:
     case Ws{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22}:
       f22
 
-type Hd is Data:
-  Hd{ssf: U32, fin: U32, lg: U32, hm: U32, hse: U32, loss: U32, ltot: U32, wl: U32, end: U32}
-
-def Hd.ssf(+r: Hd) -> U32:
-  match r:
-    case Hd{f0, f1, f2, f3, f4, f5, f6, f7, f8}:
-      f0
-
-def Hd.fin(+r: Hd) -> U32:
-  match r:
-    case Hd{f0, f1, f2, f3, f4, f5, f6, f7, f8}:
-      f1
-
-def Hd.lg(+r: Hd) -> U32:
-  match r:
-    case Hd{f0, f1, f2, f3, f4, f5, f6, f7, f8}:
-      f2
-
-def Hd.hm(+r: Hd) -> U32:
-  match r:
-    case Hd{f0, f1, f2, f3, f4, f5, f6, f7, f8}:
-      f3
-
-def Hd.hse(+r: Hd) -> U32:
-  match r:
-    case Hd{f0, f1, f2, f3, f4, f5, f6, f7, f8}:
-      f4
-
-def Hd.loss(+r: Hd) -> U32:
-  match r:
-    case Hd{f0, f1, f2, f3, f4, f5, f6, f7, f8}:
-      f5
-
-def Hd.ltot(+r: Hd) -> U32:
-  match r:
-    case Hd{f0, f1, f2, f3, f4, f5, f6, f7, f8}:
-      f6
-
-def Hd.wl(+r: Hd) -> U32:
-  match r:
-    case Hd{f0, f1, f2, f3, f4, f5, f6, f7, f8}:
-      f7
-
-def Hd.end(+r: Hd) -> U32:
-  match r:
-    case Hd{f0, f1, f2, f3, f4, f5, f6, f7, f8}:
-      f8
-
-type Lay is Data:
-  Lay{tin: U32, ttg: U32, x0: U32, ws: U32, hd: U32, sc: U32, g: U32, m: U32, v: U32, total: U32, blocks: List<&2,BP>, fin: U32, params: U32}
-
-def Lay.tin(+r: Lay) -> U32:
-  match r:
-    case Lay{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12}:
-      f0
-
-def Lay.ttg(+r: Lay) -> U32:
-  match r:
-    case Lay{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12}:
-      f1
-
-def Lay.x0(+r: Lay) -> U32:
-  match r:
-    case Lay{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12}:
-      f2
-
-def Lay.ws(+r: Lay) -> U32:
-  match r:
-    case Lay{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12}:
-      f3
-
-def Lay.hd(+r: Lay) -> U32:
-  match r:
-    case Lay{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12}:
-      f4
-
-def Lay.sc(+r: Lay) -> U32:
-  match r:
-    case Lay{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12}:
-      f5
-
-def Lay.g(+r: Lay) -> U32:
-  match r:
-    case Lay{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12}:
-      f6
-
-def Lay.m(+r: Lay) -> U32:
-  match r:
-    case Lay{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12}:
-      f7
-
-def Lay.v(+r: Lay) -> U32:
-  match r:
-    case Lay{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12}:
-      f8
-
-def Lay.total(+r: Lay) -> U32:
-  match r:
-    case Lay{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12}:
-      f9
-
-def Lay.blocks(+r: Lay) -> List<&2,BP>:
-  match r:
-    case Lay{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12}:
-      f10
-
-def Lay.fin(+r: Lay) -> U32:
-  match r:
-    case Lay{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12}:
-      f11
-
-def Lay.params(+r: Lay) -> U32:
-  match r:
-    case Lay{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12}:
-      f12
-
 
 
 # halve r while its logits pass 2^25 cells and it stays even (the head's
@@ -727,8 +739,9 @@ def Hd.at(+m: Dm, +o: U32) -> Hd:
   +hse = U32.add(hm, Dm.r(m))
   +loss = U32.add(hse, Dm.r(m))
   +ltot = U32.add(loss, n)
-  +wl = U32.add(ltot, 1)
-  Hd{ssf, fin, lg, hm, hse, loss, ltot, wl, U32.add(wl, Dm.b(m))}
+  +wsum = U32.add(ltot, 1)
+  +wl = U32.add(wsum, 1)
+  Hd{ssf, fin, lg, hm, hse, loss, ltot, wsum, wl, U32.add(wl, Dm.b(m))}
 
 # The store ----------------------------------------------------------------
 
@@ -742,14 +755,15 @@ def Lay.of(+c: C.Config, +m: Dm) -> Lay:
   +params = U32.add(fin, Dm.d(m))
   +tin = align(params)
   +ttg = U32.add(tin, Dm.n(m))
-  +x0 = align(U32.add(ttg, Dm.n(m)))
+  +tw = U32.add(ttg, Dm.n(m))
+  +x0 = align(U32.add(tw, Dm.n(m)))
   +ws = U32.add(x0, U32.mul(U32.add(Dm.l(m), 1), U32.mul(Dm.n(m), Dm.d(m))))
   +hd = U32.add(ws, U32.max(Wg.end(Wg.at(m, ws)), Ws.end(Ws.at(m, ws))))
   +sc = align(U32.sub(Hd.end(Hd.at(m, hd)), 0))
   +g = align(U32.add(sc, 16))
   +mo = U32.add(g, g)
   +vo = U32.add(mo, align(params))
-  Lay{tin, ttg, x0, ws, hd, sc, g, mo, vo, U32.add(vo, align(params)), bs, fin, params}
+  Lay{tin, ttg, tw, x0, ws, hd, sc, g, mo, vo, U32.add(vo, align(params)), bs, fin, params}
 
 # x_i, the residual stream before layer i (x_L after the last)
 def Lay.x(+ly: Lay, +m: Dm, +i: U32) -> U32:

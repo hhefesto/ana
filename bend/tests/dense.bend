@@ -94,7 +94,7 @@ def dense.back(+ly: L.Lay, +m: L.Dm, r: Array<F32> & F32) -> DOut:
 # the forward, the mean loss, the backward, the gradients
 def dense(+ly: L.Lay, +m: L.Dm, +w: List<&2, F32>, +ws: List<&2, List<&2, U32>>) -> DOut:
   dense.back(ly, m, Io.get1(P.run(S.fwd(m, ly), Io.put.windows(ws, Io.put(w, Array.new(F32, L.Lay.depth(ly), 0.0), 0),
-    L.Lay.tin(ly), L.Lay.ttg(ly), L.Dm.t(m))), L.Lay.lmean(ly)))
+    L.Lay.tin(ly), L.Lay.ttg(ly), L.Lay.tw(ly), L.Dm.t(m))), L.Lay.lmean(ly)))
 
 def report(+name: String, +c: C.Config, +cc: U32, +flat: List<&2, F32>, +ws: List<&2, List<&2, U32>>, +tgrad: List<&2, F32>) -> IO(Unit):
   +m = L.Dm.of.cc(c, 2n, cc)
@@ -118,7 +118,7 @@ def main() -> IO(Unit):
   +c = C.Config.small4_v3()
   +dm = Md.Dims.of(c)
   +w = I.init(c)
-  +ws = {[window(64n, 7), window(64n, 12345)] : List<&2, List<&2, U32>>}
+  +ws = {[window(63n, 7), window(63n, 12345)] : List<&2, List<&2, U32>>}
   +tg = tree.grad(ws, dm, w)
   +tl = F32.mul(LG.loss(tg), 0.5)
   +tgrad = K.Weights.flat(O.W.scale(0.5, LG.w(tg)))

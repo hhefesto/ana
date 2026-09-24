@@ -101,8 +101,12 @@ def zero.grads(+ly: L.Lay) -> List<&2, P.Op>:
 # gnorm = sqrt(Σ g²); clip = clip.scale(gnorm, max) (Train/Opt.bend: a
 # non-finite norm scales to 0)
 def clip(+ly: L.Lay, +max: F32) -> List<&2, P.Op>:
-  +n = L.Lay.params(ly)
-  [P.ein(Es{[n], 1, 0, 0, v(cell.gss(ly), [0]), [v(L.Lay.g(ly), [1])], X.mul(X.x(0), X.x(0))}, False{}),
+  # Σ g² in two levels (1024-wide partial sums, then theirs) over the
+  # tangents up to the 2 MB boundary (zeros past the parameters)
+  +rows = U32.div(L.align(L.Lay.params(ly)), 1024)
+  +part = L.Lay.ws(ly)
+  [P.ein(Es{[rows, 1024], 2, 0, 0, v(part, [1, 0]), [v(L.Lay.g(ly), [1024, 1])], X.mul(X.x(0), X.x(0))}, False{}),
+   P.ein(Es{[rows], 1, 0, 0, v(cell.gss(ly), [0]), [v(part, [1])], X.x(0)}, False{}),
    P.map1(1, L.Lay.gnorm(ly), [cell.gss(ly)], X.sqrt(X.x(0)), False{}),
    P.map1(1, cell.clip(ly), [L.Lay.gnorm(ly)],
      X.sel(X.eq(X.x(0), X.x(0)),

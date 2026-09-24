@@ -50,26 +50,19 @@ def f32.nat(m: Maybe<&2, U32>, d: Nat) -> Nat:
 def nat.or(+s: String, +d: Nat) -> Nat:
   f32.nat(U32.read(s), d)
 
-def preset.go(a: Bool, b: Bool, c: Bool, d: Bool, e: Bool, f: Bool) -> C.Config:
-  match a b c d e f:
-    case True{} _ _ _ _ _:
-      C.Config.tiny()
-    case False{} True{} _ _ _ _:
-      C.Config{U32.to_nat(258), 16n, 16n, 48n, 1n, 2n, True{}, True{}, True{}, True{}}
-    case False{} False{} True{} _ _ _:
-      C.Config{U32.to_nat(258), 64n, 64n, U32.to_nat(192), 2n, 4n, False{}, False{}, False{}, True{}}
-    case False{} False{} False{} True{} _ _:
-      C.Config{U32.to_nat(258), 64n, 64n, U32.to_nat(192), 4n, 4n, False{}, False{}, False{}, True{}}
-    case False{} False{} False{} False{} True{} _:
-      C.Config.bpe10m()
-    case False{} False{} False{} False{} False{} True{}:
-      C.Config{U32.to_nat(8192), U32.to_nat(256), U32.to_nat(320), U32.to_nat(864), 6n, 5n, True{}, True{}, True{}, True{}}
-    case False{} False{} False{} False{} False{} False{}:
-      C.Config.small4_v3()
+def preset.pick(+s: String, +name: String, +c: C.Config, +rest: C.Config) -> C.Config:
+  Bool.pick(C.Config, String.eq(s, name), c, rest)
 
+# master's presets by name (Config.sizePresets); anything else is small4-v3
 def preset(+s: String) -> C.Config:
-  preset.go(String.eq(s, "tiny"), String.eq(s, "tiny-v3"), String.eq(s, "small"), String.eq(s, "small4"),
-            String.eq(s, "bpe10m"), String.eq(s, "bpe10m-v3"))
+  preset.pick(s, "tiny", C.Config.tiny(),
+  preset.pick(s, "tiny-v3", C.Config{U32.to_nat(258), 16n, 16n, 48n, 1n, 2n, True{}, True{}, True{}, True{}},
+  preset.pick(s, "small", C.Config{U32.to_nat(258), 64n, 64n, U32.to_nat(192), 2n, 4n, False{}, False{}, False{}, True{}},
+  preset.pick(s, "small4", C.Config{U32.to_nat(258), 64n, 64n, U32.to_nat(192), 4n, 4n, False{}, False{}, False{}, True{}},
+  preset.pick(s, "bpe10m", C.Config.bpe10m(),
+  preset.pick(s, "bpe10m-v3", C.Config{U32.to_nat(8192), U32.to_nat(256), U32.to_nat(320), U32.to_nat(864), 6n, 5n, True{}, True{}, True{}, True{}},
+  preset.pick(s, "bpe100m", C.Config{U32.to_nat(32768), U32.to_nat(256), U32.to_nat(768), U32.to_nat(2048), 12n, 12n, False{}, False{}, False{}, True{}},
+  preset.pick(s, "bpe100m-v3", C.Config.bpe100m_v3(), C.Config.small4_v3()))))))))
 
 # the byte tokenizer as a BPE with no merges
 def bytes.bpe() -> Tk.Bpe:

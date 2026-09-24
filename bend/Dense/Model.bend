@@ -242,8 +242,9 @@ def head.chunk(+m: L.Dm, +ly: L.Lay, +hd: L.Hd, +r0: U32) -> List<&2, P.Op>:
    op(Es{[r, vo], 2, 0, 0, v(L.Hd.hse(hd), [1, 0]), [v(L.Hd.lg(hd), [vo, 1]), v(L.Hd.hm(hd), [1, 0])],
      X.exp(X.sub(X.x(0), X.x(1)))}),
    op(Es{[r], 0, 0, 0, v(U32.add(L.Hd.loss(hd), r0), [1]),
-     [v(L.Hd.hm(hd), [1]), v(L.Hd.hse(hd), [1]), View{L.Hd.lg(hd), [vo], IxAt{U32.add(L.Lay.ttg(ly), r0), [1], 1}}],
-     X.sub(X.add(X.x(0), X.log(X.x(1))), X.x(2))})]
+     [v(L.Hd.hm(hd), [1]), v(L.Hd.hse(hd), [1]), View{L.Hd.lg(hd), [vo], IxAt{U32.add(L.Lay.ttg(ly), r0), [1], 1}},
+      v(U32.add(L.Lay.tw(ly), r0), [1])],
+     X.mul(X.sub(X.add(X.x(0), X.log(X.x(1))), X.x(2)), X.x(3))})]
 
 def head.chunks(k: Nat, +m: L.Dm, +ly: L.Lay, +hd: L.Hd, +r0: U32) -> List<&2, List<&2, P.Op>>:
   match k:
@@ -252,10 +253,11 @@ def head.chunks(k: Nat, +m: L.Dm, +ly: L.Lay, +hd: L.Hd, +r0: U32) -> List<&2, L
     case 1n+p:
       head.chunk(m, ly, hd, r0) <> head.chunks(p, m, ly, hd, U32.add(r0, L.Dm.r(m)))
 
-# the mean loss over the micro-batch
+# the mean loss over the micro-batch's predictions (its weights' sum)
 def head.loss(+m: L.Dm, +ly: L.Lay, +hd: L.Hd) -> List<&2, P.Op>:
   [op(Es{[L.Dm.n(m)], 1, 0, 0, v(L.Hd.ltot(hd), [0]), [v(L.Hd.loss(hd), [1])], X.x(0)}),
-   P.map1(1, L.Lay.lmean(ly), [L.Hd.ltot(hd)], X.mul(X.x(0), X.k(F32.div(1.0, f(L.Dm.n(m))))), True{})]
+   P.ein(Es{[L.Dm.n(m)], 1, 0, 0, v(L.Hd.wsum(hd), [0]), [v(L.Lay.tw(ly), [1])], X.x(0)}, False{}),
+   P.map1(1, L.Lay.lmean(ly), [L.Hd.ltot(hd), L.Hd.wsum(hd)], X.div(X.x(0), X.x(1)), True{})]
 
 # each window's summed loss (evaluate)
 def head.windows(+m: L.Dm, +hd: L.Hd) -> List<&2, P.Op>:
