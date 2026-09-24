@@ -1,0 +1,41 @@
+NVIDIA GeForce RTX 3090, 595.84, 390.00 W
+== conformance: cuBLAS against the loop (the loop equals the Bend definition bit for bit; checked locally)
+fp32  nn          max err 5e-08 ok
+fp32  tn          max err 6e-08 ok
+fp32  nt          max err 0 ok
+fp32  tt          max err 6e-08 ok
+fp32  offsets-ld  max err 3e-08 ok
+fp32  alpha-beta  max err 9.85e-08 ok
+fp32  batched     max err 7e-08 ok
+fp32  batched-tt  max err 6e-08 ok
+fp32  k-long      max err 3.96e-07 ok
+fp32  wraps-a     max err 0 ok
+fp32  overlap-c   max err 0 ok
+fp32  ld-short    max err 0 ok
+fp32  beta-only   max err 0 ok
+   paths: 9 cublas, 4 loop (wraps/overlaps/short ld/k=0 must be loop: 4)
+tf32  nn          max err 5e-08 ok
+tf32  tn          max err 5e-08 ok
+tf32  nt          max err 0 ok
+tf32  tt          max err 5e-08 ok
+tf32  offsets-ld  max err 3e-08 ok
+tf32  alpha-beta  max err 9.85e-08 ok
+tf32  batched     max err 7e-08 ok
+tf32  batched-tt  max err 0.000259 ok
+tf32  k-long      max err 3.6e-07 ok
+tf32  wraps-a     max err 0 ok
+tf32  overlap-c   max err 0 ok
+tf32  ld-short    max err 0 ok
+tf32  beta-only   max err 0 ok
+   paths: 9 cublas, 4 loop (wraps/overlaps/short ld/k=0 must be loop: 4)
+== timing: median over calls 2..REPS (call 1 migrates the arrays)
+16384x768.768x2048 fp32  bend    1.942 ms  direct    1.805 ms  direct-managed    1.820 ms  bend/direct 1.076    26.5 TFLOP/s  C[last] = 12
+16384x768.768x2048 tf32  bend    1.409 ms  direct    1.408 ms  direct-managed    1.407 ms  bend/direct 1.001    36.6 TFLOP/s  C[last] = 12
+16384x768.768x32768 fp32  bend   36.070 ms  direct   35.968 ms  direct-managed   36.281 ms  bend/direct 1.003    22.9 TFLOP/s  C[last] = 12
+16384x768.768x32768 tf32  bend   21.224 ms  direct   21.310 ms  direct-managed   21.312 ms  bend/direct 0.996    38.9 TFLOP/s  C[last] = 12
+batched 64^3 x3072 fp32  bend    0.303 ms  direct    0.304 ms  direct-managed    0.322 ms  bend/direct 0.997     5.3 TFLOP/s  C[last] = 1
+batched 64^3 x3072 tf32  bend    0.188 ms  direct    0.188 ms  direct-managed    0.188 ms  bend/direct 1.000     8.6 TFLOP/s  C[last] = 1
+== nvidia-smi dmon (power W, sm %, mem %, rxpci/txpci MB/s):
+# gpu    pwr  gtemp  mtemp     sm    mem    enc    dec    jpg    ofa  rxpci  txpci 
+# Idx      W      C      C      %      %      %      %      %      %   MB/s   MB/s 
+G0: MISS

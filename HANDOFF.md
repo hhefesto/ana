@@ -51,7 +51,20 @@ Each primitive keeps a pure-Bend reference definition in `base.bend` (the spec);
   - A CUDA build of a program using it maps the heap to managed memory (`FTOPS`) and calls cuBLAS by dlopen when the views fit.
   - Knobs: `BEND_GEMM_NUMERICS=fp32|tf32|bf16`, `BEND_GEMM=loop`, `BEND_PROFILE=1|2`.
 - Checked locally: CPU runs; the CUDA host C compiles; the NVRTC device compile passes (sm_86); on a sample of 158 fork tests, the fork and the pin fail exactly the same ones.
-- **Next:** gate G0 on a rented 3090, with `bend/gpu/g0.sh` next to `bench.c`, `conf.c` (`bend X.bend -o X.c` with the fork) and `cublas_direct.c`. It checks conformance (fp32 and tf32 against the loop), then times bend against direct cuBLAS against direct cuBLAS on managed memory at master's shapes. Pass means within 5%.
+- **G0 passed (2026-09-23, vast RTX 3090, EPYC 7452, driver 595.84, about $0.07).** The log is `bend/gpu/g0-rtx3090-2026-09-23.log`.
+  - Conformance: cuBLAS against the loop is within 4e-7 at fp32 and 2.6e-4 at tf32. The 4 cases that wrap, overlap, have a short ld, or have k=0 stayed on the loop.
+  - Timing, Bend against direct cuBLAS (median ms per call, sync per call):
+
+    | shape | fp32 bend / direct | tf32 bend / direct |
+    |---|---|---|
+    | [16384×768]·[768×2048] | 1.826 / 1.826 | 1.409 / 1.408 |
+    | [16384×768]·[768×32768]ᵀ | 36.07 / 35.97 | 21.22 / 21.31 |
+    | 64³ ×3072 batched | 0.303 / 0.304 | 0.188 / 0.188 |
+
+  - At tf32 that is 36.6–38.9 TFLOP/s. Per-call overhead is about 1 µs: at 64³ single, 13 µs against 12 µs.
+  - The first g0.sh pass showed fp32 at the first shape as 1.076×. It was the cold GPU clock: three alternating reruns gave 1.83 against 1.83.
+  - Managed memory costs nothing after the first call migrates the arrays: dmon showed rxpci/txpci at 0.
+- **Next: Phase 1** (generated kernels), then Phase 2. Per the design rule, start by writing `bend/Linear.bend`: the shape-indexed `Vec`/`Mat` types, the meaning function, and the linear-map algebra over `Array.gemm`, with its laws. Build the Phase 1 kernels to what that API needs.
 - Moved to Phase 1: `Array.fill` and `hash_init` run as device kernels, because they need the generated-kernel module. G0 fills arrays on the host and discards the first call, which migrates the arrays.
 - To run the fork locally: `bun ~/src/bend2/bend2/main.ts` with the bun and clang-21 from the pinned wrapper on PATH, and `CC` unset.
 
