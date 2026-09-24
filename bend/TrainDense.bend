@@ -357,23 +357,57 @@ def hot.save.if(on: Bool, +hs: Hs, +rn: Run, +muon: Bool, +step: Nat, s: Array<F
 def every.at(+every: Nat, +step: Nat) -> Bool:
   Bool.and(Nat.is_lt(0n, every), Nat.is_eq(Nat.mod(step, Nat.max(every, 1n)), 0n))
 
-# n steps of one segment: its windows ws (nw of them, in epoch order) are
-# sliced from the segment's start `base`
-def loop.hot(n: Nat, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, +ws: List<&2, List<&2, U32>>, +nw: Nat, +base: Nat,
-             +vw: List<&2, List<&2, U32>>, +step: Nat, s: Array<F32>) -> IO(Array<F32>):
+def ws.put(+w: List<&2, U32>, r: List<&2, List<&2, U32>> & List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>> & List<&2, List<&2, U32>>:
+  (a, b) = r
+  (w <> a, b)
+
+# the first k windows and the rest, in one pass
+def ws.split(k: Nat, xs: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>> & List<&2, List<&2, U32>>:
+  match k xs:
+    case 0n _:
+      (Nil{}, xs)
+    case 1n+p Nil{}:
+      (Nil{}, Nil{})
+    case 1n+p +w <> t:
+      ws.put(w, ws.split(p, t))
+
+def batch.fill(short: Bool, +need: Nat, +head: List<&2, List<&2, U32>>, bt: List<&2, List<&2, U32>>,
+               rest: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>> & List<&2, List<&2, U32>>:
+  match short:
+    case False{}:
+      (bt, rest)
+    case True{}:
+      (List.append(&2, List<&2, U32>, bt, List.take(&2, List<&2, U32>, head, need)), Nil{})
+
+def batch.fin(+b: Nat, +head: List<&2, List<&2, U32>>, r: List<&2, List<&2, U32>> & List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>> & List<&2, List<&2, U32>>:
+  (+bt, rest) = r
+  +k = List.length(&2, List<&2, U32>, bt)
+  batch.fill(Nat.is_lt(k, b), Nat.sub(b, k), head, bt, rest)
+
+# The next batch in epoch order: master's positions ((s - start - 1)·b + i)
+# mod n are consecutive, so the windows are consumed in order; only the
+# segment's last batch runs off the end and wraps to the first windows.
+def batch.next(+b: Nat, +head: List<&2, List<&2, U32>>, rest: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>> & List<&2, List<&2, U32>>:
+  batch.fin(b, head, ws.split(b, rest))
+
+# n steps of one segment: br is this step's batch and the segment's windows
+# after it, head the segment's first windows (for the final wrap)
+def loop.hot(n: Nat, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, +head: List<&2, List<&2, U32>>,
+             +vw: List<&2, List<&2, U32>>, +step: Nat, br: List<&2, List<&2, U32>> & List<&2, List<&2, U32>>,
+             s: Array<F32>) -> IO(Array<F32>):
   match n:
     case 0n:
       IO.pure(Array<F32>, s)
     case 1n+p:
+      (bw, rest) = br
       +step2 = {1n+step : Nat}
       +lr = O.lr.at(Hp.lr(hp), step2, Hp.warm(hp), Hp.total(hp))
       do IO<Array<F32>>:
         +t0 : Nat <- IO.now()
-        s2 : Array<F32> <- loop.print(step2, lr, t0,
-          train.step(rn, Hp.mb(hp), Tr.batch.at(ws, nw, Nat.sub(step, base), Hp.batch(hp)), lr, step2, s))
+        s2 : Array<F32> <- loop.print(step2, lr, t0, train.step(rn, Hp.mb(hp), bw, lr, step2, s))
         s3 : Array<F32> <- report.valid(every.at(Hp.every(hp), step2), rn, hp, vw, step2, s2)
         s4 : Array<F32> <- hot.save.if(Bool.or(every.at(Hs.every(hs), step2), Nat.is_eq(step2, Hs.stop(hs))), hs, rn, muon, step2, s3)
-        loop.hot(p, rn, hp, hs, muon, ws, nw, base, vw, step2, s4)
+        loop.hot(p, rn, hp, hs, muon, head, vw, step2, batch.next(Hp.batch(hp), head, rest), s4)
 
 def seg.check(ok: Bool, +why: String) -> IO(Unit):
   match ok:
@@ -399,7 +433,9 @@ def seg.train(+seg: Pl.Seg, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, +first: Boo
     IO.print("shard " ++ Nat.show(Pl.Seg.index(seg)) ++ ": " ++ Nat.show(nw) ++ " training windows, global "
       ++ Nat.show(Pl.Seg.start(seg)) ++ ".." ++ Nat.show(Pl.Seg.end(seg)) ++ "; running " ++ Nat.show(step) ++ ".." ++ Nat.show(Nat.add(step, n)))
     s1 : Array<F32> <- report.valid(first, rn, hp, vw, step, s)
-    s2 : Array<F32> <- loop.hot(n, rn, hp, hs, muon, ws, nw, Pl.Seg.start(seg), vw, step, s1)
+    s2 : Array<F32> <- loop.hot(n, rn, hp, hs, muon, List.take(&2, List<&2, U32>, ws, Hp.batch(hp)), vw, step,
+      batch.next(Hp.batch(hp), List.take(&2, List<&2, U32>, ws, Hp.batch(hp)),
+        List.drop(&2, List<&2, U32>, ws, Nat.mod(Nat.mul(Nat.sub(step, Pl.Seg.start(seg)), Hp.batch(hp)), Nat.max(nw, 1n)))), s1)
     return (s2, Nat.add(step, n))
 
 def shard.path(+hs: Hs, +seg: Pl.Seg) -> String:
