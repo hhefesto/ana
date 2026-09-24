@@ -13,6 +13,7 @@ This document holds everything needed to continue this work from another machine
 - **Log format:** master's fields (`step=/total progress= lr= train_loss= train_loss_ema= gradient_norm= clipped=`, `validation_loss= validation_delta= best_validation_loss= new_best= bits_per_byte=`) plus `ms= tok/s= remaining= eta=`; `hot.sh` runs under `stdbuf -oL` because the runtime's print does not flush.
 
 **Verified**
+- **Step for step against master.** Master's v3 process ran on to step 8019 after saving the 8000 checkpoint; the Bend run started from that checkpoint and its 19 overlapping step lines agree with master's to ~5e-6 in the loss and ~1e-5 in the gradient norm (e.g. 8001: 3.4582634/0.3414476 vs 3.4582589/0.34144256; 8019: 3.4962168/0.3393160 vs 3.4962144/0.33931524). Same windows in the same order, same Muon step, same schedule (`run/train-cloud-v3-final.log` vs the box's `train.log`).
 - Load→save is byte-identical on master's v3 step-8000 and the mkt checkpoints (`bend/tests/hot.bend`, run by hand: it needs a real checkpoint, so it is not a flake check).
 - Validation at step 8000 on the box: 3.627147; master logged 3.6271493 on the same 256 windows.
 - Schedule (cosine to zero), epoch hash (`splitmix(i + 0x45504f4348)`), split seed and per-shard window counts equal master's.
@@ -20,7 +21,8 @@ This document holds everything needed to continue this work from another machine
 **The run (vast 52365970, Michigan RTX 3090, `ssh -p 40037 root@74.126.26.42`, `/root/hot`)**
 - v3 step 8000 → 28000 on master's data; checkpoints `out/v3-bend-step<N>.checkpoint` every 2000; `eval-bend.txt` has each one's enwik8 bpb.
 - **Speed: 2,290 ms/step = 7,155 tok/s = 1.8× master's v3 3090 run (4,110 ms)**, below the 1,702 ms G3 measured on another card. Unexplained; this card shows `SW Thermal Slowdown: Active` at 81 °C, 350–380 W of 390 W, 1.7–1.8 GHz. Check `nvidia-smi -q -d PERFORMANCE` on every box (the first Washington box ran at 450 MHz).
-- enwik8 test split, 6,184 windows, one evaluator for all rows: v2 final 1.3728; v3 step 8000 1.4903; Bend 10k 1.5019, 12k 1.5023, 14k 1.4851, 16k 1.4669, 18k 1.4636.
+- enwik8 test split, 6,184 windows, one evaluator for all rows: v2 final 1.3728; v3 step 8000 1.4903; Bend 10k 1.5019, 12k 1.5023, 14k 1.4851, 16k 1.4669, 18k 1.4636, 20k 1.4606.
+- **The dip at 10k–12k is the data, not the trainer.** The plan's shards differ in document length: shards 0–1 have 9.9 and 7.7 windows per document, shards 2–3 have 3.9 and 3.6 (mean training loss 2.88 and 2.71 against ~3.47 elsewhere), and 272 of the 304 shards have 1–3. Master's v3 saw only the two long-document shards; the continuation moved into short-document text, enwik8 (long articles) got worse for 4,000 steps, then recovered. Greedy continuations at step 20k do not look better than at 8k for the same reason plus greedy looping, which both checkpoints do.
 
 **Open items**
 1. Finish the run, pull `out/*.checkpoint` with sha256, run `bend/gpu/g3.sh` for 20 steps on the same box (card or code?), then `vastai destroy instance 52365970 -y`.
