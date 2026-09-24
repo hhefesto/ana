@@ -109,7 +109,7 @@ out of scope. What it does have:
 | master | status |
 |---|---|
 | `learn-bpe`, `prepare-*`, `pack-stdin`, `plan-segment`, `build-eval`, `train-plan`/`train-segment` shards | Not ported. The port reads the artifacts these tools write (`.bpe`, FTCC). `Train.bend` tokenizes a text corpus in memory instead of reading packed shards. |
-| writing FTC2, `compact-checkpoint`, resuming from FTC2 optimizer state | `File.write` takes only UTF-8 Strings, so pure Bend2 cannot write binary. The trainer writes BTC1 instead: a hex text format with the same layout order. Resuming training from a checkpoint is not implemented. |
+| writing FTC2, `compact-checkpoint`, resuming from FTC2 optimizer state | The dense trainer does both through the fork's byte effects (`Dense/Ckpt.bend`, hot start below). The tree trainer still writes BTC1. |
 | DiLoCo (`Diloco.hs`), multi-GPU | Not ported. |
 | GPU execution | The trainer runs each optimizer step under `!` and has been measured on an RTX 3060 (see below). Generate and evaluate still run on the CPU only. |
 | diagnostics: `act-stats`, `head-probe`, `head-path-probe`, `grad-compare`, `logits`, `inspect-*`, `bigram-gate` | Not ported. The closest equivalent is `SAMPLE_STATS=1` in generate. |
@@ -200,8 +200,20 @@ Settings: batch 64 windows × 256 tokens, two micro-batches of 32, Muon, tf32. A
 
 **Caveat: not a same-box A/B.** Master's figure is its logged production run, on a different vast 3090.
 
+### Hot start: continuing master's run (2026-09-24)
+
+With `TRAIN_INIT=<ftc2>` the dense trainer continues master's run instead of starting from `Train/Init.bend`:
+
+- **`Dense/Ckpt.bend`** reads FTC2 straight into the store. Master's parameter vector is namedLayout order with every matrix `[out][in]`, which is the store's own order, so parameters, the first and the second moment are flat copies (`File.read_f32be`, a fork effect). Muon's momentum lives in the store's `m` cells of the matrices Muon owns, so a load reads it over them and a save splits `m` back into master's two vectors, staging them in the gradient cells. The header and tail are copied verbatim, so a saved file is a checkpoint of the same run that master's resume reads. Load→save is byte-identical on master's v3 step-8000 checkpoint (`tests/hot.bend`, run by hand against a real checkpoint). Offsets are U32: files must stay under 4 GB.
+- **`Dense/Plan.bend`** parses master's plan and reproduces its data order: the shard's documents split by global index (`Train/Data.bend`, seed `FTOPENCL`), full windows, and the epoch permutation `splitmix(index + 0x45504f4348)`, consumed in order.
+- **The schedule** (lr, warmup, total, betas, weight decay, clip, Muon) comes from the manifest; the step counter is global, so bias correction and the cosine continue where master stopped.
+- **Dense evaluate** (`EVAL_CORPUS`) is master's `evaluate` on the dense forward: every full window of every document, bpb = loss · predictions / (bytes · ln 2).
+- **The log** carries master's fields plus `ms=`, `tok/s=`, `remaining=` and `eta=`.
+
+Measured on a vast RTX 3090 (instance 52365970): validation at step 8000 is 3.627147 against master's 3.6271493 on the same windows; 2,290 ms/step = 7,155 tok/s, 1.8× master's v3 run on a 3090 (a third card; the 1,702 ms above was another). enwik8 test split (6,184 windows): v3 step 8000 1.4903 bpb → step 18000 1.4636.
+
 ### What the dense path does not do yet
 
-- **Generate and evaluate** still run the tree decoder on the CPU. That decoder is byte-identical to master and evaluates within 1e-4.
-- **Warm starts:** the dense trainer initializes from `Train/Init.bend` and cannot yet start from an FTC2 checkpoint. It writes BTC1.
+- **Generate** still runs the tree decoder on the CPU. That decoder is byte-identical to master.
+- **Saves write in place** (no rename effect in the runtime), so a crash mid-save leaves a short file under the final name.
 - **Precision:** `BEND_GEMM_NUMERICS=tf32` also applies to the attention products.

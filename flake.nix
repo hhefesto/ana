@@ -674,7 +674,7 @@
             cat src/*.bend src/Spec/*.bend > corpus.txt
             CORPUS=corpus.txt PRESET=tiny-v3 TRAIN_STEPS=30 TRAIN_BATCH=8 TRAIN_LR=3e-3 TRAIN_WARMUP=5 \
               OUT=tiny.btc ${self.packages.${system}.bend-train-dense}/bin/bend-train-dense --threads 4 | tee run.out
-            awk '/validation loss/ { v[++n] = $5 } END { if (n < 2 || !(v[n] < v[1] - 0.3)) { print "loss did not fall"; exit 1 } }' run.out
+            awk '/validation_loss=/ { split($2, a, "="); v[++n] = a[2] } END { if (n < 2 || !(v[n] < v[1] - 0.3)) { print "loss did not fall"; exit 1 } }' run.out
             head -1 tiny.btc | grep -qx BTC1
             touch $out
           '';

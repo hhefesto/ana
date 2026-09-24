@@ -27,7 +27,9 @@ import ./Layout.bend as L
 #
 # The header and the tail are copied verbatim into every save, so a saved
 # file is a checkpoint of the same run (master's resume reads it) at a
-# later step.
+# later step. Offsets are U32, so a file must stay under 4 GB (2^28
+# parameters; v3 at 115M is 1.85 GB). A save writes in place: there is no
+# rename effect, so a crash mid-save leaves a short file under its name.
 
 type Rg is Data:
   Rg{off: U32, n: U32}
@@ -254,6 +256,21 @@ def Src.total(+s: Src) -> Nat:
     case Src{h, t, st, mo, K.Manifest{v, c, n, l, lv, K.AdamW{lr, b1, b2, e, wd, w, tot}, mu, mi, ti, di, cl, nu}}:
       tot
 
+def Src.b1(+s: Src) -> F32:
+  match s:
+    case Src{h, t, st, mo, K.Manifest{v, c, n, l, lv, K.AdamW{lr, b1, b2, e, wd, w, tot}, mu, mi, ti, di, cl, nu}}:
+      b1
+
+def Src.b2(+s: Src) -> F32:
+  match s:
+    case Src{h, t, st, mo, K.Manifest{v, c, n, l, lv, K.AdamW{lr, b1, b2, e, wd, w, tot}, mu, mi, ti, di, cl, nu}}:
+      b2
+
+def Src.eps(+s: Src) -> F32:
+  match s:
+    case Src{h, t, st, mo, K.Manifest{v, c, n, l, lv, K.AdamW{lr, b1, b2, e, wd, w, tot}, mu, mi, ti, di, cl, nu}}:
+      e
+
 def Src.wd(+s: Src) -> F32:
   match s:
     case Src{h, t, st, mo, K.Manifest{v, c, n, l, lv, K.AdamW{lr, b1, b2, e, wd, w, tot}, mu, mi, ti, di, cl, nu}}:
@@ -352,6 +369,7 @@ def load(+path: String, +man: K.Manifest, +h: Nat, +tok: String, +ly: L.Lay, +m:
     u1 : Unit <- fail.if(Bool.pick(String, U32.is_eq(Manifest.version(man), 4), K.Manifest.problem(man), ""))
     u2 : Unit <- fail.if(K.check(Nat.is_eq(C.Config.params(K.Manifest.cfg(man)), U32.to_nat(p)),
       "checkpoint parameter count is not the store's", ""))
+    u4 : Unit <- fail.if(K.check(U32.is_lt(p, 268435456), "the file offsets here are 32-bit: over 2^28 parameters (a 4 GB file) is not supported", ""))
     u3 : Unit <- fail.if(tok.problem(String.is_empty(tok), K.Manifest.tokenizer_id(man), tok))
     f : File <- IO.try(File, File.open(path, "r"))
     r : File & List<&2, List<&2, U32>> <- ats([Rg{0, U32.add(hu, 8)}, Rg{Off.stp(o), 16}, Rg{U32.sub(Off.sm(o), 8), 8},

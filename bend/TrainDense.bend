@@ -16,6 +16,7 @@ import ./Dense/Plan.bend as Pl
 import ./Corpus.bend as Cc
 import ./Checkpoint.bend as Km
 import ./Evaluate.bend as Ev
+import ./Tokenizer.bend as Tk
 
 # train, dense: master's trainer on the Bend2 port at GPU speed. The same
 # environment and log as Train.bend (the tree trainer, kept as the
@@ -36,7 +37,10 @@ import ./Evaluate.bend as Ev
 #   manifest (the schedule's total is always the manifest's)
 # EVAL_EVERY / EVAL_WINDOWS validate on each shard's first validation
 # windows (master's VALIDATE_EVERY / VALIDATION_WINDOWS), and once before
-# the first step.
+# the first step. The log lines carry master's fields (step=, lr=,
+# train_loss=, train_loss_ema=, gradient_norm=, clipped=, validation_loss=,
+# validation_delta=, best_validation_loss=, new_best=, bits_per_byte=)
+# plus ms=, tok/s=, remaining= and eta=.
 #
 # The step is a program over one store (bend/Dense): on a CUDA build of the
 # Bend2 fork its products run on cuBLAS and its einsums as generated
@@ -110,21 +114,82 @@ def Out.fin(+loss: F32, r: Array<F32> & F32) -> Array<F32> & F32 & F32:
   (s, n) = r
   (s, loss, n)
 
-# the step's scalars: learning rate, 1 - b1^t, 1 - b2^t
-def hyper(+ly: L.Lay, +lr: F32, +step: Nat, s: Array<F32>) -> Array<F32>:
-  Io.put([lr, F32.sub(1.0, F32.pow(0.9, F32.from_nat(step))), F32.sub(1.0, F32.pow(0.999, F32.from_nat(step)))], s, S.cell.lr(ly))
+# The run's hyperparameters: the schedule (lr, warmup, total), the batch and
+# micro-batch, the validation period, the clip norm, tokens per step (for
+# throughput) and Adam's betas and epsilon
+type Hp is Data:
+  Hp{lr: F32, warm: Nat, total: Nat, batch: Nat, every: Nat, mb: Nat, clip: F32, toks: Nat, b1: F32, b2: F32, eps: F32}
 
-def step.fin(+rn: Run, +lr: F32, +step: Nat, +k: F32, r: Array<F32> & F32) -> Array<F32> & F32 & F32:
+def Hp.lr(+h: Hp) -> F32:
+  match h:
+    case Hp{a, b, c, d, e, f, g, h, i, j, k}:
+      a
+
+def Hp.warm(+h: Hp) -> Nat:
+  match h:
+    case Hp{a, b, c, d, e, f, g, h, i, j, k}:
+      b
+
+def Hp.total(+h: Hp) -> Nat:
+  match h:
+    case Hp{a, b, c, d, e, f, g, h, i, j, k}:
+      c
+
+def Hp.batch(+h: Hp) -> Nat:
+  match h:
+    case Hp{a, b, c, d, e, f, g, h, i, j, k}:
+      d
+
+def Hp.every(+h: Hp) -> Nat:
+  match h:
+    case Hp{a, b, c, d, e, f, g, h, i, j, k}:
+      e
+
+def Hp.mb(+h: Hp) -> Nat:
+  match h:
+    case Hp{a, b, c, d, e, f, g, h, i, j, k}:
+      f
+
+def Hp.clip(+h: Hp) -> F32:
+  match h:
+    case Hp{a, b, c, d, e, f, g, h, i, j, k}:
+      g
+
+def Hp.toks(+h: Hp) -> Nat:
+  match h:
+    case Hp{a, b, c, d, e, f, g, h, i, j, k}:
+      h
+
+def Hp.b1(+h: Hp) -> F32:
+  match h:
+    case Hp{a, b, c, d, e, f, g, h, i, j, k}:
+      i
+
+def Hp.b2(+h: Hp) -> F32:
+  match h:
+    case Hp{a, b, c, d, e, f, g, h, i, j, k}:
+      j
+
+def Hp.eps(+h: Hp) -> F32:
+  match h:
+    case Hp{a, b, c, d, e, f, g, h, i, j, k}:
+      k
+
+# the step's scalars: learning rate, 1 - b1^t, 1 - b2^t
+def hyper(+hp: Hp, +ly: L.Lay, +lr: F32, +step: Nat, s: Array<F32>) -> Array<F32>:
+  Io.put([lr, F32.sub(1.0, F32.pow(Hp.b1(hp), F32.from_nat(step))), F32.sub(1.0, F32.pow(Hp.b2(hp), F32.from_nat(step)))], s, S.cell.lr(ly))
+
+def step.fin(+rn: Run, +hp: Hp, +lr: F32, +step: Nat, +k: F32, r: Array<F32> & F32) -> Array<F32> & F32 & F32:
   (s, l) = r
   +ly = Run.ly(rn)
-  Out.fin(F32.div(l, k), Io.get1(P.run(Run.upd(rn), hyper(ly, lr, step, s)), L.Lay.gnorm(ly)))
+  Out.fin(F32.div(l, k), Io.get1(P.run(Run.upd(rn), hyper(hp, ly, lr, step, s)), L.Lay.gnorm(ly)))
 
 # one optimizer step: zero the gradients, accumulate the micro-batches,
 # clip and update
-def train.step(+rn: Run, +mb: Nat, bw: List<&2, List<&2, U32>>, +lr: F32, +step: Nat, s: Array<F32>) -> Array<F32> & F32 & F32:
-  +ms = micros(mb, bw)
+def train.step(+rn: Run, +hp: Hp, bw: List<&2, List<&2, U32>>, +lr: F32, +step: Nat, s: Array<F32>) -> Array<F32> & F32 & F32:
+  +ms = micros(Hp.mb(hp), bw)
   +k = F32.from_nat(List.length(&2, List<&2, List<&2, U32>>, ms))
-  step.fin(rn, lr, step, k, micro.go(ms, rn, (P.run(S.zero.grads(Run.ly(rn)), s), 0.0)))
+  step.fin(rn, hp, lr, step, k, micro.go(ms, rn, (P.run(S.zero.grads(Run.ly(rn)), s), 0.0)))
 
 def valid.one(mw: List<&2, List<&2, U32>>, +rn: Run, r: Array<F32> & F32) -> Array<F32> & F32:
   (s, l0) = r
@@ -163,79 +228,136 @@ def save(+path: String, +c: C.Config, +tok: String, +step: Nat, +xs: List<&2, F3
 
 # The loop -----------------------------------------------------------------
 
-type Hp is Data:
-  Hp{lr: F32, warm: Nat, total: Nat, batch: Nat, every: Nat, mb: Nat}
+# Progress -----------------------------------------------------------------
 
-def Hp.lr(+h: Hp) -> F32:
-  match h:
-    case Hp{a, b, c, d, e, f}:
-      a
+# What the log carries between steps: the training-loss EMA (master's
+# decay 0.98, seeded by the first loss), the steps and milliseconds run so
+# far, and the previous and best validation losses (seen: there is one).
+type St is Data:
+  St{ema: F32, n: Nat, ms: Nat, prev: F32, seen: Bool, best: F32}
 
-def Hp.warm(+h: Hp) -> Nat:
-  match h:
-    case Hp{a, b, c, d, e, f}:
-      b
+def St.init() -> St:
+  St{0.0, 0n, 0n, 0.0, False{}, 0.0}
 
-def Hp.total(+h: Hp) -> Nat:
-  match h:
-    case Hp{a, b, c, d, e, f}:
-      c
-
-def Hp.batch(+h: Hp) -> Nat:
-  match h:
-    case Hp{a, b, c, d, e, f}:
-      d
-
-def Hp.every(+h: Hp) -> Nat:
-  match h:
-    case Hp{a, b, c, d, e, f}:
+def St.ema(+st: St) -> F32:
+  match st:
+    case St{e, n, ms, p, sn, b}:
       e
 
-def Hp.mb(+h: Hp) -> Nat:
-  match h:
-    case Hp{a, b, c, d, e, f}:
-      f
+def ema.next(first: Bool, +ema: F32, +l: F32) -> F32:
+  match first:
+    case True{}:
+      l
+    case False{}:
+      F32.add(F32.mul(0.98, ema), F32.mul(0.02, l))
 
-def report.valid.print(+step: Nat, r: Array<F32> & F32) -> IO(Array<F32>):
+# after a step of dt ms with loss l
+def St.step(+l: F32, +dt: Nat, st: St) -> St:
+  match st:
+    case St{ema, +n, ms, p, sn, b}:
+      St{ema.next(Nat.is_eq(n, 0n), ema, l), 1n+n, Nat.add(ms, dt), p, sn, b}
+
+# a/b as a percentage, three decimals
+def pct(+a: Nat, +b: Nat) -> String:
+  F32.show(F32.div(F32.round(F32.mul(100000.0, F32.div(F32.from_nat(a), F32.from_nat(Nat.max(b, 1n))))), 1000.0))
+
+# (large Nat literals expand at compile time, so the constants below are U32)
+
+def hm(+ms: Nat) -> String:
+  +s = Nat.div(ms, U32.to_nat(1000))
+  Nat.show(Nat.div(s, U32.to_nat(3600))) ++ "h" ++ Nat.show(Nat.div(Nat.mod(s, U32.to_nat(3600)), U32.to_nat(60))) ++ "m"
+
+# master's step line (backend/gpu/Main.hs logTraining) plus the step's
+# time and throughput
+def step.line(+hp: Hp, +step: Nat, +lr: F32, +l: F32, +g: F32, +dt: Nat, st: St) -> String & St:
+  +st2 = St.step(l, dt, st)
+  ("step=" ++ Nat.show(step) ++ "/" ++ Nat.show(Hp.total(hp)) ++ " progress=" ++ pct(step, Hp.total(hp)) ++ "%"
+    ++ " lr=" ++ F32.show(lr) ++ " train_loss=" ++ F32.show(l) ++ " train_loss_ema=" ++ F32.show(St.ema(st2))
+    ++ " gradient_norm=" ++ F32.show(g) ++ " clipped=" ++ Bool.show(F32.is_gt(g, Hp.clip(hp)))
+    ++ " ms=" ++ Nat.show(dt) ++ " tok/s=" ++ Nat.show(Nat.div(Nat.mul(Hp.toks(hp), U32.to_nat(1000)), Nat.max(dt, 1n))), st2)
+
+def delta.text(seen: Bool, +prev: F32, +l: F32) -> String:
+  match seen:
+    case True{}:
+      F32.show(F32.sub(l, prev))
+    case False{}:
+      "na"
+
+def eta.text(none: Bool, +ms: Nat) -> String:
+  match none:
+    case True{}:
+      "na"
+    case False{}:
+      hm(ms)
+
+# master's validation fields, bits per byte over the validation windows
+# (scale), and the time `left` steps take at the mean step time so far
+def valid.line(+step: Nat, +l: F32, +scale: F32, +left: Nat, st: St) -> String & St:
+  match st:
+    case St{ema, +n, +ms, +prev, +seen, +best}:
+      +best2 = Bool.pick(F32, Bool.and(seen, F32.is_le(best, l)), best, l)
+      ("step=" ++ Nat.show(step) ++ " validation_loss=" ++ F32.show(l) ++ " validation_delta=" ++ delta.text(seen, prev, l)
+        ++ " best_validation_loss=" ++ F32.show(best2) ++ " new_best=" ++ Bool.show(Bool.or(Bool.not(seen), F32.is_lt(l, best)))
+        ++ " bits_per_byte=" ++ F32.show(F32.mul(l, scale)) ++ " remaining=" ++ Nat.show(left)
+        ++ " eta=" ++ eta.text(Nat.is_eq(n, 0n), Nat.mul(Nat.div(ms, Nat.max(n, 1n)), left)), St{ema, n, ms, l, True{}, best2})
+
+def print.st(r: String & St, s: Array<F32>) -> IO(Array<F32> & St):
+  (line, st) = r
+  do IO<Array<F32> & St>:
+    IO.print(line)
+    return (s, st)
+
+def loop.print.lg(+hp: Hp, +step2: Nat, +lr: F32, +t0: Nat, s: Array<F32>, lg: F32 & F32, st: St) -> IO(Array<F32> & St):
+  (+l, +g) = lg
+  do IO<Array<F32> & St>:
+    +t1 : Nat <- IO.now()
+    print.st(step.line(hp, step2, lr, l, g, Nat.sub(t1, t0), st), s)
+
+def loop.print(+hp: Hp, +step2: Nat, +lr: F32, +t0: Nat, st: St, r: Array<F32> & F32 & F32) -> IO(Array<F32> & St):
+  (s, lg) = r
+  loop.print.lg(hp, step2, lr, t0, s, lg, st)
+
+def report.valid.print(+step: Nat, +scale: F32, +left: Nat, st: St, r: Array<F32> & F32) -> IO(Array<F32> & St):
   (s, +l) = r
-  do IO<Array<F32>>:
-    IO.print("step " ++ Nat.show(step) ++ " validation loss " ++ F32.show(l))
-    return s
+  print.st(valid.line(step, l, scale, left, st), s)
 
-def report.valid(on: Bool, +rn: Run, +hp: Hp, +vw: List<&2, List<&2, U32>>, +step: Nat, s: Array<F32>) -> IO(Array<F32>):
+def report.valid(on: Bool, +rn: Run, +hp: Hp, +vw: List<&2, List<&2, U32>>, +step: Nat, +scale: F32, +left: Nat,
+                 st: St, s: Array<F32>) -> IO(Array<F32> & St):
   match on:
     case True{}:
-      report.valid.print(step, valid(rn, Hp.mb(hp), vw, s))
+      report.valid.print(step, scale, left, st, valid(rn, Hp.mb(hp), vw, s))
     case False{}:
-      IO.pure(Array<F32>, s)
+      IO.pure(Array<F32> & St, (s, st))
 
-def loop.print.lg(+step2: Nat, +lr: F32, +t0: Nat, s: Array<F32>, lg: F32 & F32) -> IO(Array<F32>):
-  (+l, +g) = lg
-  do IO<Array<F32>>:
-    +t1 : Nat <- IO.now()
-    IO.print("step " ++ Nat.show(step2) ++ " loss " ++ F32.show(l) ++ " grad_norm " ++ F32.show(g)
-      ++ " lr " ++ F32.show(lr) ++ " ms " ++ Nat.show(Nat.sub(t1, t0)))
-    return s
+def report.valid.r(on: Bool, +rn: Run, +hp: Hp, +vw: List<&2, List<&2, U32>>, +step: Nat, +scale: F32, +left: Nat,
+                   r: Array<F32> & St) -> IO(Array<F32> & St):
+  (s, st) = r
+  report.valid(on, rn, hp, vw, step, scale, left, st, s)
 
-def loop.print(+step2: Nat, +lr: F32, +t0: Nat, r: Array<F32> & F32 & F32) -> IO(Array<F32>):
-  (s, lg) = r
-  loop.print.lg(step2, lr, t0, s, lg)
+# bits per byte of a mean loss over these windows: predictions / (bytes the
+# ordinary targets decode to . ln 2) (master's bitsPerByteScale)
+def bpb.scale(+b: Tk.Bpe, +ws: List<&2, List<&2, U32>>) -> F32:
+  F32.div(F32.from_nat(Ev.all.predictions(ws)), F32.mul(F32.from_nat(Nat.max(Ev.all.bytes(b, ws), 1n)), F32.log(2.0)))
+
+# The loop -----------------------------------------------------------------
 
 def loop(n: Nat, +rn: Run, +hp: Hp, +ws: List<&2, List<&2, U32>>, +nw: Nat, +vw: List<&2, List<&2, U32>>,
-         +step: Nat, s: Array<F32>) -> IO(Array<F32>):
+         +scale: F32, +step: Nat, r: Array<F32> & St) -> IO(Array<F32> & St):
   match n:
     case 0n:
-      IO.pure(Array<F32>, s)
+      IO.pure(Array<F32> & St, r)
     case 1n+p:
+      (s, st) = r
       +step2 = {1n+step : Nat}
       +lr = O.lr.at(Hp.lr(hp), step2, Hp.warm(hp), Hp.total(hp))
       +every = Hp.every(hp)
-      do IO<Array<F32>>:
+      do IO<Array<F32> & St>:
         +t0 : Nat <- IO.now()
-        s2 : Array<F32> <- loop.print(step2, lr, t0, train.step(rn, Hp.mb(hp), Tr.batch.at(ws, nw, step, Hp.batch(hp)), lr, step2, s))
-        s3 : Array<F32> <- report.valid(Bool.or(Nat.is_eq(step2, Hp.total(hp)),
-          Bool.and(Nat.is_lt(0n, every), Nat.is_eq(Nat.mod(step2, Nat.max(every, 1n)), 0n))), rn, hp, vw, step2, s2)
-        loop(p, rn, hp, ws, nw, vw, step2, s3)
+        r2 : Array<F32> & St <- loop.print(hp, step2, lr, t0, st, train.step(rn, hp, Tr.batch.at(ws, nw, step, Hp.batch(hp)), lr, step2, s))
+        r3 : Array<F32> & St <- report.valid.r(Bool.or(Nat.is_eq(step2, Hp.total(hp)),
+          Bool.and(Nat.is_lt(0n, every), Nat.is_eq(Nat.mod(step2, Nat.max(every, 1n)), 0n))), rn, hp, vw, step2, scale,
+          Nat.sub(Hp.total(hp), step2), r2)
+        loop(p, rn, hp, ws, nw, vw, scale, step2, r3)
 
 def params.fin(r: Array<F32> & List<&2, F32>) -> List<&2, F32>:
   (s, xs) = r
@@ -254,7 +376,8 @@ def finish.if(skip: Bool, +c: C.Config, +tok: Tr.Tok, +steps: Nat, +out: String,
     case False{}:
       finish.save(c, tok, steps, out, rn, s)
 
-def finish(+c: C.Config, +tok: Tr.Tok, +steps: Nat, +out: String, +rn: Run, s: Array<F32>) -> IO(Unit):
+def finish(+c: C.Config, +tok: Tr.Tok, +steps: Nat, +out: String, +rn: Run, r: Array<F32> & St) -> IO(Unit):
+  (s, st) = r
   finish.if(String.is_empty(out), c, tok, steps, out, rn, s)
 
 def run(+c: C.Config, +tok: Tr.Tok, +text: List<&2, U32>, +hp: Hp, +muon: Bool, +mu: F32, +wd: F32, +clip: F32,
@@ -266,14 +389,16 @@ def run(+c: C.Config, +tok: Tr.Tok, +text: List<&2, U32>, +hp: Hp, +muon: Bool, 
   +m = L.Dm.of.cc(c, Hp.mb(hp), U32.from_nat(chunk))
   +ly = L.Lay.of(c, m)
   +rn = {Run{m, ly, S.fwd(m, ly), S.bwd(m, ly, F32.div(1.0, F32.from_nat(Nat.div(Hp.batch(hp), Hp.mb(hp))))),
-            S.update(muon, ly, S.Hy{0.9, 0.999, 1.0e-8, wd, mu}, m, clip)} : Run}
+            S.update(muon, ly, S.Hy{Hp.b1(hp), Hp.b2(hp), Hp.eps(hp), wd, mu}, m, clip)} : Run}
+  +scale = bpb.scale(Tr.Tok.b(tok), vw)
   do IO<Unit>:
     IO.print("train (dense): " ++ C.Config.model_id(c))
     IO.print("tokenizer " ++ Tr.Tok.id(tok) ++ "; " ++ Nat.show(nw) ++ " training windows, " ++ Nat.show(List.length(&2, List<&2, U32>, vw))
       ++ " validation windows; micro-batch " ++ Nat.show(Hp.mb(hp)) ++ ", store " ++ U32.show(L.Lay.total(ly)) ++ " floats")
-    s0 : Array<F32> <- report.valid(True{}, rn, hp, vw, 0n, Io.put(K.Weights.flat(I.init(c)), Array.new(F32, L.Lay.depth(ly), 0.0), 0))
-    s1 : Array<F32> <- loop(steps, rn, hp, train, Nat.max(nw, 1n), vw, 0n, s0)
-    finish(c, tok, steps, out, rn, s1)
+    r0 : Array<F32> & St <- report.valid(True{}, rn, hp, vw, 0n, scale, steps, St.init(),
+      Io.put(K.Weights.flat(I.init(c)), Array.new(F32, L.Lay.depth(ly), 0.0), 0))
+    r1 : Array<F32> & St <- loop(steps, rn, hp, train, Nat.max(nw, 1n), vw, scale, 0n, r0)
+    finish(c, tok, steps, out, rn, r1)
 
 def start(+tokf: String, +pre: String, +steps_s: String, +batch_s: String, +micro_s: String, +lr_s: String, +wd_s: String,
           +warm_s: String, +opt: String, +mu_s: String, +clip_s: String, +every_s: String, +evals_s: String, +out: String,
@@ -281,15 +406,18 @@ def start(+tokf: String, +pre: String, +steps_s: String, +batch_s: String, +micr
   +steps = Tr.nat.or(steps_s, 100n)
   +batch = Tr.nat.or(batch_s, 4n)
   +mb = Tr.nat.or(micro_s, Nat.min(batch, 32n))
-  run(Tr.preset(pre), Tr.tok.of(tokf, tb), text,
-      Hp{Tr.f32.or(lr_s, 3.0e-4), Nat.min(Tr.nat.or(warm_s, 100n), steps), steps, batch, Tr.nat.or(every_s, 0n), mb},
-      String.eq(opt, "muon"), Tr.f32.or(mu_s, 0.95), Tr.f32.or(wd_s, 0.01), Tr.f32.or(clip_s, 1.0),
+  +c = Tr.preset(pre)
+  +clip = Tr.f32.or(clip_s, 1.0)
+  run(c, Tr.tok.of(tokf, tb), text,
+      Hp{Tr.f32.or(lr_s, 3.0e-4), Nat.min(Tr.nat.or(warm_s, 100n), steps), steps, batch, Tr.nat.or(every_s, 0n), mb,
+         clip, Nat.mul(batch, C.Config.ctx(c)), 0.9, 0.999, 1.0e-8},
+      String.eq(opt, "muon"), Tr.f32.or(mu_s, 0.95), Tr.f32.or(wd_s, 0.01), clip,
       steps, out, Tr.nat.or(evals_s, 16n), Tr.nat.or(chunk_s, 16n))
 
 # Hot start ----------------------------------------------------------------
 
 type Hs is Data:
-  Hs{src: Dk.Src, out: String, every: Nat, stop: Nat, dir: String, size: String, evals: Nat, tok: String, ctx: Nat}
+  Hs{src: Dk.Src, out: String, every: Nat, stop: Nat, dir: String, size: String, evals: Nat, tok: Tr.Tok, ctx: Nat}
 
 def Hs.src(+h: Hs) -> Dk.Src:
   match h:
@@ -326,7 +454,7 @@ def Hs.evals(+h: Hs) -> Nat:
     case Hs{a, b, c, d, e, f, g, t, x}:
       g
 
-def Hs.tok(+h: Hs) -> String:
+def Hs.tok(+h: Hs) -> Tr.Tok:
   match h:
     case Hs{a, b, c, d, e, f, g, t, x}:
       t
@@ -354,6 +482,12 @@ def hot.save.if(on: Bool, +hs: Hs, +rn: Run, +muon: Bool, +step: Nat, s: Array<F
       hot.save(hs, rn, muon, step, s)
     case False{}:
       IO.pure(Array<F32>, s)
+
+def hot.save.r(on: Bool, +hs: Hs, +rn: Run, +muon: Bool, +step: Nat, r: Array<F32> & St) -> IO(Array<F32> & St):
+  (s, st) = r
+  do IO<Array<F32> & St>:
+    s2 : Array<F32> <- hot.save.if(on, hs, rn, muon, step, s)
+    return (s2, st)
 
 def every.at(+every: Nat, +step: Nat) -> Bool:
   Bool.and(Nat.is_lt(0n, every), Nat.is_eq(Nat.mod(step, Nat.max(every, 1n)), 0n))
@@ -394,21 +528,22 @@ def batch.next(+b: Nat, +head: List<&2, List<&2, U32>>, rest: List<&2, List<&2, 
 # n steps of one segment: br is this step's batch and the segment's windows
 # after it, head the segment's first windows (for the final wrap)
 def loop.hot(n: Nat, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, +head: List<&2, List<&2, U32>>,
-             +vw: List<&2, List<&2, U32>>, +step: Nat, br: List<&2, List<&2, U32>> & List<&2, List<&2, U32>>,
-             s: Array<F32>) -> IO(Array<F32>):
+             +vw: List<&2, List<&2, U32>>, +scale: F32, +step: Nat, br: List<&2, List<&2, U32>> & List<&2, List<&2, U32>>,
+             r: Array<F32> & St) -> IO(Array<F32> & St):
   match n:
     case 0n:
-      IO.pure(Array<F32>, s)
+      IO.pure(Array<F32> & St, r)
     case 1n+p:
       (bw, rest) = br
+      (s, st) = r
       +step2 = {1n+step : Nat}
       +lr = O.lr.at(Hp.lr(hp), step2, Hp.warm(hp), Hp.total(hp))
-      do IO<Array<F32>>:
+      do IO<Array<F32> & St>:
         +t0 : Nat <- IO.now()
-        s2 : Array<F32> <- loop.print(step2, lr, t0, train.step(rn, Hp.mb(hp), bw, lr, step2, s))
-        s3 : Array<F32> <- report.valid(every.at(Hp.every(hp), step2), rn, hp, vw, step2, s2)
-        s4 : Array<F32> <- hot.save.if(Bool.or(every.at(Hs.every(hs), step2), Nat.is_eq(step2, Hs.stop(hs))), hs, rn, muon, step2, s3)
-        loop.hot(p, rn, hp, hs, muon, head, vw, step2, batch.next(Hp.batch(hp), head, rest), s4)
+        r2 : Array<F32> & St <- loop.print(hp, step2, lr, t0, st, train.step(rn, hp, bw, lr, step2, s))
+        r3 : Array<F32> & St <- report.valid.r(every.at(Hp.every(hp), step2), rn, hp, vw, step2, scale, Nat.sub(Hs.stop(hs), step2), r2)
+        r4 : Array<F32> & St <- hot.save.r(Bool.or(every.at(Hs.every(hs), step2), Nat.is_eq(step2, Hs.stop(hs))), hs, rn, muon, step2, r3)
+        loop.hot(p, rn, hp, hs, muon, head, vw, scale, step2, batch.next(Hp.batch(hp), head, rest), r4)
 
 def seg.check(ok: Bool, +why: String) -> IO(Unit):
   match ok:
@@ -417,65 +552,74 @@ def seg.check(ok: Bool, +why: String) -> IO(Unit):
     case False{}:
       Dk.fail.if(why)
 
+def seg.fin(r: Array<F32> & St, +step: Nat) -> Array<F32> & St & Nat:
+  (s, st) = r
+  {(s, st, step) : Array<F32> & St & Nat}
+
 # one segment's shard: its epoch windows, checked against the plan's count
 # as master checks it, then the segment's steps up to the stop
 def seg.train(+seg: Pl.Seg, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, +first: Bool, +co: Cc.Corpus, +step: Nat,
-              s: Array<F32>) -> IO(Array<F32> & Nat):
+              r: Array<F32> & St) -> IO(Array<F32> & St & Nat):
+  (s, st) = r
   +ctx = Hs.ctx(hs)
   +docs = Cc.Corpus.docs(co)
   +ws = Pl.epoch(ctx, Pl.Seg.offset(seg), docs)
   +nw = List.length(&2, List<&2, U32>, ws)
   +vw = Pl.valid(ctx, Pl.Seg.offset(seg), Hs.evals(hs), docs)
   +n = Nat.sub(Nat.min(Pl.Seg.end(seg), Hs.stop(hs)), step)
-  do IO<Array<F32> & Nat>:
-    u0 : Unit <- Dk.fail.if(Cc.Corpus.problem(co, Hs.tok(hs)))
+  +scale = bpb.scale(Tr.Tok.b(Hs.tok(hs)), vw)
+  do IO<Array<F32> & St & Nat>:
+    u0 : Unit <- Dk.fail.if(Cc.Corpus.problem(co, Tr.Tok.id(Hs.tok(hs))))
     u1 : Unit <- seg.check(String.eq(Cc.Corpus.dataset(co), Pl.Seg.id(seg)), "segment corpus identity does not match the run plan")
     u2 : Unit <- seg.check(Nat.is_eq(nw, Pl.Seg.tw(seg)), "segment training windows (" ++ Nat.show(nw) ++ ") differ from the plan's")
     IO.print("shard " ++ Nat.show(Pl.Seg.index(seg)) ++ ": " ++ Nat.show(nw) ++ " training windows, global "
       ++ Nat.show(Pl.Seg.start(seg)) ++ ".." ++ Nat.show(Pl.Seg.end(seg)) ++ "; running " ++ Nat.show(step) ++ ".." ++ Nat.show(Nat.add(step, n)))
-    s1 : Array<F32> <- report.valid(first, rn, hp, vw, step, s)
-    s2 : Array<F32> <- loop.hot(n, rn, hp, hs, muon, List.take(&2, List<&2, U32>, ws, Hp.batch(hp)), vw, step,
+    r1 : Array<F32> & St <- report.valid(first, rn, hp, vw, step, scale, n, st, s)
+    r2 : Array<F32> & St <- loop.hot(n, rn, hp, hs, muon, List.take(&2, List<&2, U32>, ws, Hp.batch(hp)), vw, scale, step,
       batch.next(Hp.batch(hp), List.take(&2, List<&2, U32>, ws, Hp.batch(hp)),
-        List.drop(&2, List<&2, U32>, ws, Nat.mod(Nat.mul(Nat.sub(step, Pl.Seg.start(seg)), Hp.batch(hp)), Nat.max(nw, 1n)))), s1)
-    return (s2, Nat.add(step, n))
+        List.drop(&2, List<&2, U32>, ws, Nat.mod(Nat.mul(Nat.sub(step, Pl.Seg.start(seg)), Hp.batch(hp)), Nat.max(nw, 1n)))), r1)
+    return seg.fin(r2, Nat.add(step, n))
 
 def shard.path(+hs: Hs, +seg: Pl.Seg) -> String:
   Hs.dir(hs) ++ "/shard-" ++ Nat.show(Pl.Seg.index(seg)) ++ "-" ++ Hs.size(hs) ++ ".corpus"
 
 def seg.read(+seg: Pl.Seg, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, +first: Bool, +t0: Nat, +co: Cc.Corpus, +step: Nat,
-             s: Array<F32>) -> IO(Array<F32> & Nat):
-  do IO<Array<F32> & Nat>:
+             r: Array<F32> & St) -> IO(Array<F32> & St & Nat):
+  do IO<Array<F32> & St & Nat>:
     +t1 : Nat <- IO.now()
     IO.print("parsed (" ++ Nat.show(Nat.sub(t1, t0)) ++ " ms)")
-    seg.train(seg, rn, hp, hs, muon, first, co, step, s)
+    seg.train(seg, rn, hp, hs, muon, first, co, step, r)
 
 def seg.run.if(go: Bool, +seg: Pl.Seg, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, +first: Bool, +step: Nat,
-               s: Array<F32>) -> IO(Array<F32> & Nat):
+               r: Array<F32> & St) -> IO(Array<F32> & St & Nat):
   match go:
     case False{}:
-      IO.pure(Array<F32> & Nat, (s, step))
+      IO.pure(Array<F32> & St & Nat, seg.fin(r, step))
     case True{}:
-      do IO<Array<F32> & Nat>:
+      do IO<Array<F32> & St & Nat>:
         +t0 : Nat <- IO.now()
         IO.print("reading " ++ shard.path(hs, seg))
         +xs : List<&2, U32> <- B.Bytes.read_all(shard.path(hs, seg))
-        seg.read(seg, rn, hp, hs, muon, first, t0, Cc.corpus(xs), step, s)
+        seg.read(seg, rn, hp, hs, muon, first, t0, Cc.corpus(xs), step, r)
 
-def seg.run(+seg: Pl.Seg, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, +first: Bool, r: Array<F32> & Nat) -> IO(Array<F32> & Nat):
-  (s, +step) = r
-  seg.run.if(Nat.is_lt(step, Hs.stop(hs)), seg, rn, hp, hs, muon, first, step, s)
+def seg.run.at(+step: Nat, +seg: Pl.Seg, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, +first: Bool, r: Array<F32> & St) -> IO(Array<F32> & St & Nat):
+  seg.run.if(Nat.is_lt(step, Hs.stop(hs)), seg, rn, hp, hs, muon, first, step, r)
 
-def segs.go(ss: List<&2, Pl.Seg>, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, +first: Bool, r: Array<F32> & Nat) -> IO(Array<F32> & Nat):
+def seg.run(+seg: Pl.Seg, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, +first: Bool, r: Array<F32> & St & Nat) -> IO(Array<F32> & St & Nat):
+  (s, st, step) = r
+  seg.run.at(step, seg, rn, hp, hs, muon, first, {(s, st) : Array<F32> & St})
+
+def segs.go(ss: List<&2, Pl.Seg>, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, +first: Bool, r: Array<F32> & St & Nat) -> IO(Array<F32> & St & Nat):
   match ss:
     case Nil{}:
-      IO.pure(Array<F32> & Nat, r)
+      IO.pure(Array<F32> & St & Nat, r)
     case +seg <> t:
-      do IO<Array<F32> & Nat>:
-        r2 : Array<F32> & Nat <- seg.run(seg, rn, hp, hs, muon, first, r)
+      do IO<Array<F32> & St & Nat>:
+        r2 : Array<F32> & St & Nat <- seg.run(seg, rn, hp, hs, muon, first, r)
         segs.go(t, rn, hp, hs, muon, False{}, r2)
 
-def hot.fin(r: Array<F32> & Nat) -> IO(Unit):
-  (s, +step) = r
+def hot.fin(r: Array<F32> & St & Nat) -> IO(Unit):
+  (s, st, step) = r
   IO.print("done at step " ++ Nat.show(step))
 
 def run.hot(+c: C.Config, +tok: Tr.Tok, +plan: List<&2, U32>, +hp: Hp, +muon: Bool, +mu: F32, +clip: F32, +wd: F32,
@@ -483,14 +627,15 @@ def run.hot(+c: C.Config, +tok: Tr.Tok, +plan: List<&2, U32>, +hp: Hp, +muon: Bo
   +m = L.Dm.of.cc(c, Hp.mb(hp), U32.from_nat(chunk))
   +ly = L.Lay.of(c, m)
   +rn = {Run{m, ly, S.fwd(m, ly), S.bwd(m, ly, F32.div(1.0, F32.from_nat(Nat.div(Hp.batch(hp), Hp.mb(hp))))),
-            S.update(muon, ly, S.Hy{0.9, 0.999, 1.0e-8, wd, mu}, m, clip)} : Run}
+            S.update(muon, ly, S.Hy{Hp.b1(hp), Hp.b2(hp), Hp.eps(hp), wd, mu}, m, clip)} : Run}
   +step0 = Dk.Src.step(Hs.src(hs))
   +ss = Pl.remaining(Pl.parse(plan), step0)
   do IO<Unit>:
     IO.print("train (dense, hot start): " ++ C.Config.model_id(c) ++ " from step " ++ Nat.show(step0) ++ " to " ++ Nat.show(Hs.stop(hs))
       ++ " of " ++ Nat.show(Hp.total(hp)) ++ "; lr " ++ F32.show(Hp.lr(hp)) ++ ", warmup " ++ Nat.show(Hp.warm(hp))
+      ++ ", " ++ Bool.pick(String, muon, "Muon", "AdamW") ++ ", clip " ++ F32.show(clip)
       ++ ", micro-batch " ++ Nat.show(Hp.mb(hp)) ++ ", " ++ Nat.show(List.length(&2, Pl.Seg, ss)) ++ " segments left")
-    r : Array<F32> & Nat <- segs.go(ss, rn, hp, hs, muon, True{}, (s, step0))
+    r : Array<F32> & St & Nat <- segs.go(ss, rn, hp, hs, muon, True{}, {(s, St.init(), step0) : Array<F32> & St & Nat})
     hot.fin(r)
 
 # Evaluate (EVAL_CORPUS set): master's `evaluate` on the dense forward. Every
@@ -569,14 +714,16 @@ def start.hot.go(+c: C.Config, +tok: Tr.Tok, +plan: List<&2, U32>, +steps: Nat, 
                  +out: String, +save: Nat, +dir: String, +size: String, +chunk: Nat, r: Array<F32> & Dk.Src) -> IO(Unit):
   (s, +src) = r
   +stop = Nat.min(Nat.add(Dk.Src.step(src), steps), Dk.Src.total(src))
+  +clip = Tr.f32.or(clip_s, Dk.Src.clip(src))
   do IO<Unit>:
     u : Unit <- Dk.fail.if(Bool.pick(String, U32.is_eq(Dk.Manifest.version(Dk.Src.man(src)), 4), "",
       "training continues version-4 checkpoints only (this one can be evaluated)"))
     run.hot(c, tok, plan,
-      Hp{Tr.f32.or(lr_s, Dk.Src.lr(src)), Tr.nat.or(warm_s, Dk.Src.warm(src)), Dk.Src.total(src), batch, every, mb},
+      Hp{Tr.f32.or(lr_s, Dk.Src.lr(src)), Tr.nat.or(warm_s, Dk.Src.warm(src)), Dk.Src.total(src), batch, every, mb,
+         clip, Nat.mul(batch, C.Config.ctx(c)), Dk.Src.b1(src), Dk.Src.b2(src), Dk.Src.eps(src)},
       Bool.or(String.eq(opt, "muon"), Bool.and(String.is_empty(opt), Dk.Src.mom(src))),
-      Tr.f32.or(mu_s, Dk.Src.mu(src)), Tr.f32.or(clip_s, Dk.Src.clip(src)), Tr.f32.or(wd_s, Dk.Src.wd(src)),
-      Hs{src, out, save, stop, dir, size, evals, Tr.Tok.id(tok), C.Config.ctx(c)}, chunk, s)
+      Tr.f32.or(mu_s, Dk.Src.mu(src)), clip, Tr.f32.or(wd_s, Dk.Src.wd(src)),
+      Hs{src, out, save, stop, dir, size, evals, tok, C.Config.ctx(c)}, chunk, s)
 
 def start.hot.pick(train: Bool, +c: C.Config, +tok: Tr.Tok, +plan: List<&2, U32>, +steps: Nat, +batch: Nat, +mb: Nat,
                    +lr_s: String, +wd_s: String, +warm_s: String, +opt: String, +mu_s: String, +clip_s: String,

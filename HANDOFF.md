@@ -2,7 +2,33 @@
 
 This document holds everything needed to continue this work from another machine and account.
 
-## ▶ CONTINUE HERE (2026-09-24): Bend2 training at GPU speed, all phases done
+## ▶ CONTINUE HERE (2026-09-24, evening): the dense trainer continues master's v3 run
+
+**Goal.** Improve on master's v3 (step 8000) with the Bend2 dense trainer; `bend` merges into master when its continuations beat master v3's.
+
+**What exists now (commits b6d81ae..HEAD)**
+- **Hot start:** `TRAIN_INIT=<ftc2>` loads master's FTC2 checkpoint (parameters, Adam moments, Muon momentum, step) into the dense store and trains on master's plan and shards (`PLAN`, `RUN_DIR`, `SHARD_SIZE`), in master's epoch order, with the manifest's schedule and betas. `SAVE_EVERY` writes FTC2 that master's resume reads (`bend/Dense/Ckpt.bend`, `bend/Dense/Plan.bend`, `bend/Corpus.bend`).
+- **Dense evaluate:** `EVAL_CORPUS=<ftcc>` scores a checkpoint with master's formula (bpb over every full window; v3 and v2-era manifests).
+- **Fork published:** `github:hhefesto/bend2/ft-kernels`, with `File.read_f32be/write_f32be/write_bytes/read_at` (the flake pins it).
+- **Log format:** master's fields (`step=/total progress= lr= train_loss= train_loss_ema= gradient_norm= clipped=`, `validation_loss= validation_delta= best_validation_loss= new_best= bits_per_byte=`) plus `ms= tok/s= remaining= eta=`; `hot.sh` runs under `stdbuf -oL` because the runtime's print does not flush.
+
+**Verified**
+- Load→save is byte-identical on master's v3 step-8000 and the mkt checkpoints (`bend/tests/hot.bend`, run by hand: it needs a real checkpoint, so it is not a flake check).
+- Validation at step 8000 on the box: 3.627147; master logged 3.6271493 on the same 256 windows.
+- Schedule (cosine to zero), epoch hash (`splitmix(i + 0x45504f4348)`), split seed and per-shard window counts equal master's.
+
+**The run (vast 52365970, Michigan RTX 3090, `ssh -p 40037 root@74.126.26.42`, `/root/hot`)**
+- v3 step 8000 → 28000 on master's data; checkpoints `out/v3-bend-step<N>.checkpoint` every 2000; `eval-bend.txt` has each one's enwik8 bpb.
+- **Speed: 2,290 ms/step = 7,155 tok/s = 1.8× master's v3 3090 run (4,110 ms)**, below the 1,702 ms G3 measured on another card. Unexplained; this card shows `SW Thermal Slowdown: Active` at 81 °C, 350–380 W of 390 W, 1.7–1.8 GHz. Check `nvidia-smi -q -d PERFORMANCE` on every box (the first Washington box ran at 450 MHz).
+- enwik8 test split, 6,184 windows, one evaluator for all rows: v2 final 1.3728; v3 step 8000 1.4903; Bend 10k 1.5019, 12k 1.5023, 14k 1.4851, 16k 1.4669, 18k 1.4636.
+
+**Open items**
+1. Finish the run, pull `out/*.checkpoint` with sha256, run `bend/gpu/g3.sh` for 20 steps on the same box (card or code?), then `vastai destroy instance 52365970 -y`.
+2. Compare against master v3 step 8000: the bpb table plus continuations (`bend-generate`, same prompts and seeds). The user decides on merging.
+3. Speed: the GLA einsum kernels are ~60% of the step (see the previous section's item 5).
+4. `Dense/Ckpt.bend`: offsets are U32 (files under 4 GB; v4 at 463M would not fit) and saves write in place (no rename effect).
+
+## Previous (2026-09-24, morning): Bend2 training at GPU speed, all phases done
 
 **Goal.** Bend2 training at least as fast as master, using the GPU fully.
 - **Result:** bpe100m-v3 on a vast RTX 3090 runs at **9,626 tok/s (1,702 ms/step)**. Master's logged v3 run on a 3090 did **3,985 tok/s**, so this is **2.4×**.
@@ -32,11 +58,11 @@ This document holds everything needed to continue this work from another machine
 | G3 | tok/s against master | 2.4× master |
 | checks | `bend-spec`, `bend-dense`, `bend-tests`, `bend-train` | pass |
 
-**Open items, in order of value**
-1. **Publish the fork.** This needs the user's OK. Then point `inputs.bend2` at the published fork instead of the local path.
-2. **Same-box A/B against master.** Master's number is from a different 3090. Building master's gemm-cuda trainer on a box needs nix, which is slow. The 2.4× margin is large, but it is not a controlled comparison.
-3. **Warm start** from an FTC2 checkpoint in the dense trainer.
-4. **Dense evaluate:** master evaluates with its batch forward. Generate stays on the tree decoder, which is byte-identical to master.
+**Open items, in order of value** (1, 3 and 4 done in the evening; see above)
+1. ~~Publish the fork.~~ Done: `github:hhefesto/bend2/ft-kernels`.
+2. **Same-box A/B against master.** Master's number is from a different 3090. Building master's gemm-cuda trainer on a box needs nix, which is slow. The hot run measured 1.8× on a third card, so the margin is real but the exact factor is not.
+3. ~~Warm start~~ Done (hot start).
+4. ~~Dense evaluate~~ Done (`EVAL_CORPUS`).
 5. **More speed.** The remaining time is mostly the GLA einsums that have `exp(B_τ − B_σ)` inside, and their transposes: about 60% of the step.
    - Candidates: shared-memory tiled einsum kernels, or the cumulative decay as a product (needs per-op fp32 numerics).
    - Chunk 8 is about 3.5% faster than 16.

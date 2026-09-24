@@ -2,6 +2,7 @@
 # Hot start on a GPU box: the dense Bend trainer continues master's
 # bpe100m-v3 run from its step-8000 checkpoint, on master's plan and
 # shards, with master's schedule (lr, warmup, total from the manifest).
+# stdout is line-buffered (stdbuf) so the log shows every step as it ends.
 # Expects in the working directory: traind.c (bend TrainDense.bend -o
 # traind.c), ckpt (the FTC2 checkpoint), tok.bpe, plan.tsv and shards/
 # (shard-<k>-bpe100m.corpus). Needs clang (any version) and /usr/local/cuda.
@@ -22,5 +23,5 @@ nohup nvidia-smi dmon -s pucm -d 10 > dmon.txt 2>&1 &
 BEND_GEMM_NUMERICS=tf32 TRAIN_INIT=ckpt TOKENIZER_FILE=tok.bpe PLAN=plan.tsv RUN_DIR=shards SHARD_SIZE=bpe100m \
   TRAIN_STEPS=${STEPS:-20000} TRAIN_BATCH=64 TRAIN_MICRO=32 TRAIN_CHUNK=16 EVAL_EVERY=2000 EVAL_WINDOWS=256 \
   SAVE_EVERY=${SAVE:-2000} OUT=out/v3-bend \
-  nohup ./traind --gpu ${MEM:-48GB} > train.log 2>&1 &
+  nohup stdbuf -oL ./traind --gpu ${MEM:-48GB} > train.log 2>&1 &
 echo "trainer pid $!"
