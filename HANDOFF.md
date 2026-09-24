@@ -26,7 +26,7 @@ This document holds everything needed to continue this work from another machine
 
 **Open items**
 1. ~~Finish, pull, time, destroy.~~ Done (above).
-2. Compare against master v3 step 8000: the bpb table (above) plus continuations (`bend-generate`, five prompts, greedy and seed 0) for steps 8000, 20000, 22000 and 28000. Greedy loops for every checkpoint at this stage; ranking needs many seeds scored blind or a repetition-aware decode. The user decides on merging.
+2. Compare against master v3 step 8000: the bpb table (above) plus continuations (`bend-generate`, five prompts, greedy and seed 0) for steps 8000, 20000, 22000 and 28000. **Measured 2026-09-24:** distinct 4-grams / total over the five greedy continuations fall with training, 0.70 (8000) → 0.60 (20k) → 0.55 (22k) → 0.54 (28k), while the seeded samples stay at 0.97–0.99 and enwik8 improves. Greedy decoding loops more as the model grows more confident on this (mostly short-document) data; the eye judging greedy output sees the later checkpoints as worse. Ranking checkpoints needs many seeded samples scored blind, or a repetition-aware decode, not greedy. The user decides on merging.
 3. Speed: the GLA einsum kernels are ~60% of the step (see the previous section's item 5).
 4. `Dense/Ckpt.bend`: offsets are U32 (files under 4 GB; v4 at 463M would not fit) and saves write in place (no rename effect).
 
