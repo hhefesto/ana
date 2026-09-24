@@ -357,13 +357,18 @@ def report.valid.print(+step: Nat, +scale: F32, +left: Nat, st: St, r: Array<F32
   (s, +l) = r
   print.st(valid.line(step, l, scale, left, st), s)
 
-def report.valid(on: Bool, +rn: Run, +hp: Hp, +vw: List<&2, List<&2, U32>>, +step: Nat, +scale: F32, +left: Nat,
-                 st: St, s: Array<F32>) -> IO(Array<F32> & St):
+def report.valid.on(on: Bool, +rn: Run, +hp: Hp, +vw: List<&2, List<&2, U32>>, +step: Nat, +scale: F32, +left: Nat,
+                    st: St, s: Array<F32>) -> IO(Array<F32> & St):
   match on:
     case True{}:
       report.valid.print(step, scale, left, st, valid(rn, Hp.mb(hp), vw, s))
     case False{}:
       IO.pure(Array<F32> & St, (s, st))
+
+# validation when asked and there are windows (master skips an empty split)
+def report.valid(on: Bool, +rn: Run, +hp: Hp, +vw: List<&2, List<&2, U32>>, +step: Nat, +scale: F32, +left: Nat,
+                 st: St, s: Array<F32>) -> IO(Array<F32> & St):
+  report.valid.on(Bool.and(on, Nat.is_lt(0n, List.length(&2, List<&2, U32>, vw))), rn, hp, vw, step, scale, left, st, s)
 
 def report.valid.r(on: Bool, +rn: Run, +hp: Hp, +vw: List<&2, List<&2, U32>>, +step: Nat, +scale: F32, +left: Nat,
                    r: Array<F32> & St) -> IO(Array<F32> & St):
