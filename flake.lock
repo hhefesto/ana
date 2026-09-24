@@ -3,11 +3,11 @@
     "bend2": {
       "flake": false,
       "locked": {
-        "lastModified": 1790226690,
-        "narHash": "sha256-2pL+DLn2CNLh/BOKcdSbNXxi776zzG2AF+LSY6R3NTk=",
+        "lastModified": 1790264203,
+        "narHash": "sha256-AcYfq2Dv6exSkGXI9TM7c1oS09zluojuYYTnq2dICLY=",
         "owner": "hhefesto",
         "repo": "bend2",
-        "rev": "e72981e6505eed7a2f99d952b6c6ffb210af15d1",
+        "rev": "592e29e15841d2e590b3140cf96f5a4487e81b1b",
         "type": "github"
       },
       "original": {

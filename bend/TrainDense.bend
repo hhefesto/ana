@@ -40,7 +40,8 @@ import ./Tokenizer.bend as Tk
 # the first step. The log lines carry master's fields (step=, lr=,
 # train_loss=, train_loss_ema=, gradient_norm=, clipped=, validation_loss=,
 # validation_delta=, best_validation_loss=, new_best=, bits_per_byte=)
-# plus ms=, tok/s=, remaining= and eta=.
+# plus ms=, tok/s=, remaining= and eta=, each line behind a Mexico City
+# timestamp.
 #
 # The step is a program over one store (bend/Dense): on a CUDA build of the
 # Bend2 fork its products run on cuBLAS and its einsums as generated
@@ -228,6 +229,41 @@ def save(+path: String, +c: C.Config, +tok: String, +step: Nat, +xs: List<&2, F3
 
 # The loop -----------------------------------------------------------------
 
+# Clock --------------------------------------------------------------------
+
+# Every line is stamped in the user's local time, Mexico City: UTC-6 with
+# no daylight saving (since 2022). IO.time is the wall clock in ms.
+
+def pad2(+x: U32) -> String:
+  Bool.pick(String, U32.is_lt(x, 10), "0", "") ++ U32.show(x)
+
+# days since 1970-01-01 as y-m-d (Hinnant's civil_from_days; every
+# intermediate is nonnegative, so U32 subtraction is exact)
+def civil(+z0: U32) -> String:
+  +z = U32.add(z0, 719468)
+  +era = U32.div(z, 146097)
+  +doe = U32.sub(z, U32.mul(era, 146097))
+  +yoe = U32.div(U32.sub(U32.add(doe, U32.div(doe, 36524)), U32.add(U32.div(doe, 1460), U32.div(doe, 146096))), 365)
+  +doy = U32.sub(doe, U32.sub(U32.add(U32.mul(365, yoe), U32.div(yoe, 4)), U32.div(yoe, 100)))
+  +mp = U32.div(U32.add(U32.mul(5, doy), 2), 153)
+  +d = U32.add(U32.sub(doy, U32.div(U32.add(U32.mul(153, mp), 2), 5)), 1)
+  +m = Bool.pick(U32, U32.is_lt(mp, 10), U32.add(mp, 3), U32.sub(mp, 9))
+  +y = U32.add(U32.add(yoe, U32.mul(era, 400)), Bool.pick(U32, U32.is_le(m, 2), 1, 0))
+  U32.show(y) ++ "-" ++ pad2(m) ++ "-" ++ pad2(d)
+
+# "[YYYY-MM-DD HH:MM:SS CDMX]" for a wall-clock reading in ms
+def stamp(+ms: Nat) -> String:
+  +t = U32.sub(U32.from_nat(Nat.div(ms, U32.to_nat(1000))), 21600)
+  +s = U32.mod(t, 86400)
+  "[" ++ civil(U32.div(t, 86400)) ++ " " ++ pad2(U32.div(s, 3600)) ++ ":" ++ pad2(U32.div(U32.mod(s, 3600), 60))
+    ++ ":" ++ pad2(U32.mod(s, 60)) ++ " CDMX]"
+
+# print a log line behind its timestamp
+def say(+line: String) -> IO(Unit):
+  do IO<Unit>:
+    +t : Nat <- IO.time()
+    IO.print(stamp(t) ++ " " ++ line)
+
 # Progress -----------------------------------------------------------------
 
 # What the log carries between steps: the training-loss EMA (master's
@@ -304,7 +340,7 @@ def valid.line(+step: Nat, +l: F32, +scale: F32, +left: Nat, st: St) -> String &
 def print.st(r: String & St, s: Array<F32>) -> IO(Array<F32> & St):
   (line, st) = r
   do IO<Array<F32> & St>:
-    IO.print(line)
+    say(line)
     return (s, st)
 
 def loop.print.lg(+hp: Hp, +step2: Nat, +lr: F32, +t0: Nat, s: Array<F32>, lg: F32 & F32, st: St) -> IO(Array<F32> & St):
@@ -366,7 +402,7 @@ def params.fin(r: Array<F32> & List<&2, F32>) -> List<&2, F32>:
 def finish.save(+c: C.Config, +tok: Tr.Tok, +steps: Nat, +out: String, +rn: Run, s: Array<F32>) -> IO(Unit):
   do IO<Unit>:
     save(out, c, Tr.Tok.id(tok), steps, params.fin(Io.get(U32.to_nat(L.Lay.params(Run.ly(rn))), s, 0)))
-    IO.print("wrote " ++ out)
+    say("wrote " ++ out)
 
 # OUT empty: no checkpoint
 def finish.if(skip: Bool, +c: C.Config, +tok: Tr.Tok, +steps: Nat, +out: String, +rn: Run, s: Array<F32>) -> IO(Unit):
@@ -392,8 +428,8 @@ def run(+c: C.Config, +tok: Tr.Tok, +text: List<&2, U32>, +hp: Hp, +muon: Bool, 
             S.update(muon, ly, S.Hy{Hp.b1(hp), Hp.b2(hp), Hp.eps(hp), wd, mu}, m, clip)} : Run}
   +scale = bpb.scale(Tr.Tok.b(tok), vw)
   do IO<Unit>:
-    IO.print("train (dense): " ++ C.Config.model_id(c))
-    IO.print("tokenizer " ++ Tr.Tok.id(tok) ++ "; " ++ Nat.show(nw) ++ " training windows, " ++ Nat.show(List.length(&2, List<&2, U32>, vw))
+    say("train (dense): " ++ C.Config.model_id(c))
+    say("tokenizer " ++ Tr.Tok.id(tok) ++ "; " ++ Nat.show(nw) ++ " training windows, " ++ Nat.show(List.length(&2, List<&2, U32>, vw))
       ++ " validation windows; micro-batch " ++ Nat.show(Hp.mb(hp)) ++ ", store " ++ U32.show(L.Lay.total(ly)) ++ " floats")
     r0 : Array<F32> & St <- report.valid(True{}, rn, hp, vw, 0n, scale, steps, St.init(),
       Io.put(K.Weights.flat(I.init(c)), Array.new(F32, L.Lay.depth(ly), 0.0), 0))
@@ -473,7 +509,7 @@ def hot.save(+hs: Hs, +rn: Run, +muon: Bool, +step: Nat, s: Array<F32>) -> IO(Ar
     +t0 : Nat <- IO.now()
     s2 : Array<F32> <- Dk.save(path, Hs.src(hs), step, Run.ly(rn), Run.m(rn), muon, s)
     +t1 : Nat <- IO.now()
-    IO.print("saved " ++ path ++ " (" ++ Nat.show(Nat.sub(t1, t0)) ++ " ms)")
+    say("saved " ++ path ++ " (" ++ Nat.show(Nat.sub(t1, t0)) ++ " ms)")
     return s2
 
 def hot.save.if(on: Bool, +hs: Hs, +rn: Run, +muon: Bool, +step: Nat, s: Array<F32>) -> IO(Array<F32>):
@@ -572,7 +608,7 @@ def seg.train(+seg: Pl.Seg, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, +first: Boo
     u0 : Unit <- Dk.fail.if(Cc.Corpus.problem(co, Tr.Tok.id(Hs.tok(hs))))
     u1 : Unit <- seg.check(String.eq(Cc.Corpus.dataset(co), Pl.Seg.id(seg)), "segment corpus identity does not match the run plan")
     u2 : Unit <- seg.check(Nat.is_eq(nw, Pl.Seg.tw(seg)), "segment training windows (" ++ Nat.show(nw) ++ ") differ from the plan's")
-    IO.print("shard " ++ Nat.show(Pl.Seg.index(seg)) ++ ": " ++ Nat.show(nw) ++ " training windows, global "
+    say("shard " ++ Nat.show(Pl.Seg.index(seg)) ++ ": " ++ Nat.show(nw) ++ " training windows, global "
       ++ Nat.show(Pl.Seg.start(seg)) ++ ".." ++ Nat.show(Pl.Seg.end(seg)) ++ "; running " ++ Nat.show(step) ++ ".." ++ Nat.show(Nat.add(step, n)))
     r1 : Array<F32> & St <- report.valid(first, rn, hp, vw, step, scale, n, st, s)
     r2 : Array<F32> & St <- loop.hot(n, rn, hp, hs, muon, List.take(&2, List<&2, U32>, ws, Hp.batch(hp)), vw, scale, step,
@@ -587,7 +623,7 @@ def seg.read(+seg: Pl.Seg, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, +first: Bool
              r: Array<F32> & St) -> IO(Array<F32> & St & Nat):
   do IO<Array<F32> & St & Nat>:
     +t1 : Nat <- IO.now()
-    IO.print("parsed (" ++ Nat.show(Nat.sub(t1, t0)) ++ " ms)")
+    say("parsed (" ++ Nat.show(Nat.sub(t1, t0)) ++ " ms)")
     seg.train(seg, rn, hp, hs, muon, first, co, step, r)
 
 def seg.run.if(go: Bool, +seg: Pl.Seg, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, +first: Bool, +step: Nat,
@@ -598,7 +634,7 @@ def seg.run.if(go: Bool, +seg: Pl.Seg, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, 
     case True{}:
       do IO<Array<F32> & St & Nat>:
         +t0 : Nat <- IO.now()
-        IO.print("reading " ++ shard.path(hs, seg))
+        say("reading " ++ shard.path(hs, seg))
         +xs : List<&2, U32> <- B.Bytes.read_all(shard.path(hs, seg))
         seg.read(seg, rn, hp, hs, muon, first, t0, Cc.corpus(xs), step, r)
 
@@ -620,7 +656,7 @@ def segs.go(ss: List<&2, Pl.Seg>, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, +firs
 
 def hot.fin(r: Array<F32> & St & Nat) -> IO(Unit):
   (s, st, step) = r
-  IO.print("done at step " ++ Nat.show(step))
+  say("done at step " ++ Nat.show(step))
 
 def run.hot(+c: C.Config, +tok: Tr.Tok, +plan: List<&2, U32>, +hp: Hp, +muon: Bool, +mu: F32, +clip: F32, +wd: F32,
             +hs: Hs, +chunk: Nat, s: Array<F32>) -> IO(Unit):
@@ -631,7 +667,7 @@ def run.hot(+c: C.Config, +tok: Tr.Tok, +plan: List<&2, U32>, +hp: Hp, +muon: Bo
   +step0 = Dk.Src.step(Hs.src(hs))
   +ss = Pl.remaining(Pl.parse(plan), step0)
   do IO<Unit>:
-    IO.print("train (dense, hot start): " ++ C.Config.model_id(c) ++ " from step " ++ Nat.show(step0) ++ " to " ++ Nat.show(Hs.stop(hs))
+    say("train (dense, hot start): " ++ C.Config.model_id(c) ++ " from step " ++ Nat.show(step0) ++ " to " ++ Nat.show(Hs.stop(hs))
       ++ " of " ++ Nat.show(Hp.total(hp)) ++ "; lr " ++ F32.show(Hp.lr(hp)) ++ ", warmup " ++ Nat.show(Hp.warm(hp))
       ++ ", " ++ Bool.pick(String, muon, "Muon", "AdamW") ++ ", clip " ++ F32.show(clip)
       ++ ", micro-batch " ++ Nat.show(Hp.mb(hp)) ++ ", " ++ Nat.show(List.length(&2, Pl.Seg, ss)) ++ " segments left")
@@ -683,9 +719,9 @@ def eval.print(+scale: F32, +preds: Nat, +bytes: Nat, a: Ea) -> IO(Unit):
     case Ea{+sum, +n}:
       +loss = F32.div(sum, F32.from_nat(Nat.max(n, 1n)))
       do IO<Unit>:
-        IO.print("windows: " ++ Nat.show(n) ++ "  predictions: " ++ Nat.show(preds) ++ "  bytes: " ++ Nat.show(bytes))
-        IO.print("loss: " ++ F32.show(loss) ++ " nats/token")
-        IO.print("bits_per_byte: " ++ F32.show(F32.mul(loss, scale)))
+        say("windows: " ++ Nat.show(n) ++ "  predictions: " ++ Nat.show(preds) ++ "  bytes: " ++ Nat.show(bytes))
+        say("loss: " ++ F32.show(loss) ++ " nats/token")
+        say("bits_per_byte: " ++ F32.show(F32.mul(loss, scale)))
 
 def eval.fin(+scale: F32, +nw: Nat, +preds: Nat, +bytes: Nat, r: Array<F32> & Ea) -> IO(Unit):
   (s, a) = r
@@ -705,7 +741,7 @@ def eval.run(+c: C.Config, +tok: Tr.Tok, +mb: Nat, +chunk: Nat, +path: String, +
   +scale = F32.div(F32.from_nat(preds), F32.mul(F32.from_nat(bytes), F32.log(2.0)))
   do IO<Unit>:
     u : Unit <- Dk.fail.if(Cc.Corpus.problem(co, Tr.Tok.id(tok)))
-    IO.print("evaluate (dense): step " ++ Nat.show(Dk.Src.step(src)) ++ " on " ++ path ++ " (" ++ Cc.Corpus.dataset(co) ++ ")")
+    say("evaluate (dense): step " ++ Nat.show(Dk.Src.step(src)) ++ " on " ++ path ++ " (" ++ Cc.Corpus.dataset(co) ++ ")")
     eval.fin(scale, List.length(&2, List<&2, U32>, ws), preds, bytes, eval.go(micros(mb, pad.to(mb, ws)), rn, (s, Ea{0.0, 0n})))
 
 # TRAIN_OPT unset: the checkpoint's optimizer (Muon when it carries momentum)
@@ -752,7 +788,7 @@ def start.hot.man(+init: String, +tokf: String, +steps_s: String, +batch_s: Stri
   do IO<Unit>:
     r : Array<F32> & Dk.Src <- Dk.load(init, man, h, Tr.Tok.id(tok), ly, m, Array.new(F32, L.Lay.depth(ly), 0.0))
     +t1 : Nat <- IO.now()
-    IO.print("loaded " ++ init ++ " (" ++ Nat.show(Nat.sub(t1, t0)) ++ " ms)")
+    say("loaded " ++ init ++ " (" ++ Nat.show(Nat.sub(t1, t0)) ++ " ms)")
     start.hot.pick(String.is_empty(evc), c, tok, plan, Tr.nat.or(steps_s, 100n), batch, mb, lr_s, wd_s, warm_s, opt,
       mu_s, clip_s, Tr.nat.or(every_s, 0n), evals_s, out, Tr.nat.or(save_s, 1000n), dir, size, chunk, evc, xs, r)
 
