@@ -5,16 +5,16 @@
       "locked": {
         "lastModified": 1790216178,
         "narHash": "sha256-mGTkrUtDLu168O+qDVuNFdDFlGAdpBg/weIQxKUkKnw=",
-        "ref": "ft-kernels",
+        "owner": "hhefesto",
+        "repo": "bend2",
         "rev": "01c67bab87e1947bba2d71c6dbd2acd1c068beb8",
-        "revCount": 8,
-        "type": "git",
-        "url": "file:///home/hhefesto/src/bend2"
+        "type": "github"
       },
       "original": {
+        "owner": "hhefesto",
         "ref": "ft-kernels",
-        "type": "git",
-        "url": "file:///home/hhefesto/src/bend2"
+        "repo": "bend2",
+        "type": "github"
       }
     },
     "nixpkgs": {

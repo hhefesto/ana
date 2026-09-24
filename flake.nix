@@ -6,11 +6,11 @@
   # bendlang/bend 8008146a (the revision ~/src/refl uses) that adds the bulk
   # GPU ops the dense trainer runs on (Array.gemm/mm on cuBLAS,
   # Array.einsum as generated CUDA kernels; each op's meaning is its
-  # base.bend definition). Local until the fork is published.  Source only:
+  # base.bend definition), published at github:hhefesto/bend2.  Source only:
   # calling bend2/main.ts directly skips the upstream launcher, which phones
   # home and self-updates.
   inputs.bend2 = {
-    url = "git+file:///home/hhefesto/src/bend2?ref=ft-kernels";
+    url = "github:hhefesto/bend2/ft-kernels";
     flake = false;
   };
 
