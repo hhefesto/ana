@@ -52,29 +52,23 @@ def LT.get(+d: Nat, +t: LT, +i: U32) -> List<&2, U32>:
     case _ _:
       Nil{}
 
-def hit.b(+b: U32, +es: List<&2, U32>) -> Bool:
-  match es:
-    case e <> t:
-      U32.is_eq(U32.shrn(e, 16n), b)
-    case Nil{}:
-      False{}
-
 def none() -> U32:
   4294967295
 
-# the merge id of (a, b), or none()
-def rank.find(+es: List<&2, U32>, +b: U32, hit: Bool) -> U32:
-  match es hit:
-    case e <> t True{}:
-      U32.and(e, 65535)
-    case e <> +t False{}:
-      rank.find(t, b, hit.b(b, t))
-    case Nil{} _:
+# a pair's key in the rank table: tokens are below 2^16
+def pair.key(+a: U32, +b: U32) -> U32:
+  U32.or(U32.shln(a, 16n), b)
+
+def rank.first(es: List<&2, U32>) -> U32:
+  match es:
+    case e <> t:
+      e
+    case Nil{}:
       none()
 
+# the merge id of (a, b), or none()
 def rank(+ranks: LT, +a: U32, +b: U32) -> U32:
-  +es = LT.get(16n, ranks, a)
-  rank.find(es, b, hit.b(b, es))
+  rank.first(LT.get(32n, ranks, pair.key(a, b)))
 
 def head.is(~p: @+x:U32 -> Bool, +xs: List<&2, U32>) -> Bool:
   match xs:
@@ -176,9 +170,12 @@ def eos() -> U32:
 
 # Index trees ------------------------------------------------------------
 #
-# A depth-16 tree over U32 keys holding a list at each key: the decode
-# table (key: merge id, list: [a, b]) and the rank table (key: left
-# operand a, list: b * 65536 + new for every merge starting with a).
+# A binary tree over U32 keys holding a list at each key: the decode
+# table (depth 16; key: merge id, list: [a, b]) and the rank table (depth
+# 32; key: the pair a * 65536 + b, list: the merge ids of that pair, the
+# latest first).  Keying ranks by the whole pair makes a lookup 32 steps;
+# keying by the left operand alone made it a scan over every merge sharing
+# that operand, thousands for a code vocabulary's common prefixes.
 
 type LP is Data:
   LP{go: LT, keep: LT}
@@ -260,7 +257,7 @@ def build(ms: List<&2, Merge>, +dec: LT, +ranks: LT) -> LT & LT:
       (dec, ranks)
     case Merge{+a, +b, +n} <> t:
       build(t, LT.push(16n, LT.push(16n, dec, n, b), n, a),
-               LT.push(16n, ranks, a, U32.add(U32.mul(b, 65536), n)))
+               LT.push(32n, ranks, pair.key(a, b), n))
 
 # Merge ids must be contiguous from 258, as parseFastBpe requires.
 def contiguous(ms: List<&2, Merge>, +next: U32) -> Bool:
@@ -514,9 +511,112 @@ def encode.word.go(fuel: Nat, +dec: LT, +ranks: LT, +xs: List<&2, U32>, +n: U32,
     case _ _:
       xs
 
-def encode.word(fuel: Nat, +dec: LT, +ranks: LT, +xs: List<&2, U32>) -> List<&2, U32>:
+# The reference: master's encodeWord.  While some adjacent pair has a
+# merge, take the lowest merge id among them and replace that pair's every
+# occurrence, left to right without overlap, by the merged token (a merge's
+# id is its token).  It looks every pair up again on every merge, so a
+# word of L bytes costs O(L^2) lookups of 32 steps.
+def encode.word.ref(fuel: Nat, +dec: LT, +ranks: LT, +xs: List<&2, U32>) -> List<&2, U32>:
   +n = best(ranks, xs, none())
   encode.word.go(fuel, dec, ranks, xs, n, U32.is_eq(n, none()))
+
+# The same function, faster.  Each token carries the merge id of the pair
+# it starts (none() for the last), so finding the lowest is a scan without
+# lookups, and a merge sweep recomputes only the ids a merge touched: the
+# merged token's own, and its left neighbour's.  The sweep takes the same
+# decisions as the reference's (a token starts a merge iff its pair's id is
+# the chosen one, and a merged pair is skipped whole), and a merge only
+# creates pairs whose ids exceed the chosen one (a merge's operands precede
+# it), so every round picks what the reference picks.
+type Sym is Data:
+  Sym{t: U32, r: U32}
+
+def syms(+ranks: LT, xs: List<&2, U32>) -> List<&2, Sym>:
+  match xs:
+    case +a <> +b <> t:
+      Sym{a, rank(ranks, a, b)} <> syms(ranks, b <> t)
+    case a <> t:
+      [Sym{a, none()}]
+    case Nil{}:
+      Nil{}
+
+def sym.min(ss: List<&2, Sym>, +acc: U32) -> U32:
+  match ss:
+    case Nil{}:
+      acc
+    case Sym{t, r} <> more:
+      sym.min(more, U32.min(acc, r))
+
+def sym.head.t(+ss: List<&2, Sym>) -> U32:
+  match ss:
+    case Sym{t, r} <> more:
+      t
+    case Nil{}:
+      none()
+
+def sym.hit(+ss: List<&2, Sym>, +m: U32) -> Bool:
+  match ss:
+    case Sym{t, r} <> more:
+      U32.is_eq(r, m)
+    case Nil{}:
+      False{}
+
+def sym.toks(ss: List<&2, Sym>) -> List<&2, U32>:
+  match ss:
+    case Nil{}:
+      Nil{}
+    case Sym{t, r} <> more:
+      t <> sym.toks(more)
+
+# a swept tail, and whether its head was just merged (so the token before
+# it starts a new pair)
+type Sw is Data:
+  Sw{ss: List<&2, Sym>, fresh: Bool}
+
+def sw.merged(+ranks: LT, +n: U32, w: Sw) -> Sw:
+  match w:
+    case Sw{+ss, f}:
+      Sw{Sym{n, rank(ranks, n, sym.head.t(ss))} <> ss, True{}}
+
+def sw.kept.r(+ranks: LT, +a: U32, +ra: U32, +b: U32, fresh: Bool) -> U32:
+  match fresh:
+    case True{}:
+      rank(ranks, a, b)
+    case False{}:
+      ra
+
+def sw.kept(+ranks: LT, +a: U32, +ra: U32, w: Sw) -> Sw:
+  match w:
+    case Sw{+ss, f}:
+      Sw{Sym{a, sw.kept.r(ranks, a, ra, sym.head.t(ss), f)} <> ss, False{}}
+
+def sweep(+ranks: LT, +m: U32, ss: List<&2, Sym>, hit: Bool) -> Sw:
+  match ss hit:
+    case Sym{a, ra} <> Sym{b, rb} <> +rest True{}:
+      sw.merged(ranks, m, sweep(ranks, m, rest, sym.hit(rest, m)))
+    case Sym{+a, +ra} <> +more _:
+      sw.kept(ranks, a, ra, sweep(ranks, m, more, sym.hit(more, m)))
+    case Nil{} _:
+      Sw{Nil{}, False{}}
+
+def Sw.ss(w: Sw) -> List<&2, Sym>:
+  match w:
+    case Sw{ss, f}:
+      ss
+
+def encode.syms(fuel: Nat, +ranks: LT, +ss: List<&2, Sym>, +m: U32, done: Bool) -> List<&2, U32>:
+  match fuel done:
+    case 1n+p False{}:
+      +next = Sw.ss(sweep(ranks, m, ss, sym.hit(ss, m)))
+      +m2 = sym.min(next, none())
+      encode.syms(p, ranks, next, m2, U32.is_eq(m2, none()))
+    case _ _:
+      sym.toks(ss)
+
+def encode.word(fuel: Nat, +dec: LT, +ranks: LT, +xs: List<&2, U32>) -> List<&2, U32>:
+  +ss = syms(ranks, xs)
+  +m = sym.min(ss, none())
+  encode.syms(fuel, ranks, ss, m, U32.is_eq(m, none()))
 
 def byte.ids(xs: List<&2, U32>) -> List<&2, U32>:
   match xs:

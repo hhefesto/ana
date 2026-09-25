@@ -177,6 +177,12 @@
           bend-train-dense = bendBinary pkgs "bend-train-dense" "TrainDense.bend";
           # master's `evaluate CKPT CORPUS` (CKPT, CORPUS, EVAL_WINDOWS)
           bend-evaluate = bendBinary pkgs "bend-evaluate" "Evaluate.bend";
+          # the corpus tools (deploy/plan-corpus.sh drives them), each
+          # byte-identical to master's Haskell subcommand of the same job:
+          # pack-stdin, prepare-bpe-stdin and plan-segment, over files
+          bend-pack = bendBinary pkgs "bend-pack" "Pack.bend";
+          bend-prepare = bendBinary pkgs "bend-prepare" "Prepare.bend";
+          bend-plan-segment = bendBinary pkgs "bend-plan-segment" "PlanSegment.bend";
           # `ana` on the Bend2 port: the same flags, the same environment
           # (TEMPERATURE, TOP_K, TOP_P, SAMPLE_SEED, SAMPLE_STATS,
           # TOKENIZER_FILE), run from the repository root so the tokenizer

@@ -1,28 +1,40 @@
 #!/usr/bin/env bash
 # plan-corpus.sh — shard and plan a JSONL {id, text} corpus in a single pass.
 #
-# Why this exists rather than `wiki-train`: that app extracts each shard with
+# Why this exists rather than `wiki-train`: that app extracted each shard with
 #   awk -v a=first -v b=last 'NR>b{exit} NR>=a' "$data"
 # which rescans from line 1 for every shard, so total reads grow as the square
-# of the shard count. At Wikipedia's 18.9 GB and 1,465 shards that was survivable
-# only because the file fits in page cache. At 37 GB and ~3,400 shards it would
-# read on the order of 60 TB. Splitting once up front makes it linear.
+# of the shard count. Splitting once up front makes it linear.
 #
-# Everything else -- the plan format, the segment records, the identity string,
-# the offset-invariant document split -- is unchanged, so `deploy/train-cloud.sh`
-# consumes the output without modification.
+# The corpus tools are the Bend ones (bend/Pack.bend, bend/Prepare.bend,
+# bend/PlanSegment.bend), byte-identical to master's Haskell pack-stdin,
+# prepare-bpe-stdin and plan-segment (docs/BEND-CORPUS-TOOLS.md records the
+# comparison). They read and write files, not pipes, so every shard passes
+# through a NUL-framed file on disk.
+#
+# Shards are prepared in parallel, one single-threaded process each: the Bend
+# runtime scales this allocation-heavy work to about two cores inside one
+# process, while separate processes scale with the cores. Planning (the
+# cumulative step count, the completeness assertions) stays a sequential pass.
+#
+# The plan format, the segment records, the identity string and the
+# offset-invariant document split are unchanged, so a plan written here is
+# byte-identical to one written with the Haskell tools.
 #
 # Usage:
-#   TOKENIZER=weights/enwiki-c4-32k.bpe \
+#   TOKENIZER=run/code32k.bpe \
 #   deploy/plan-corpus.sh DATA.jsonl RUN_DIR SIZE BATCH [ARTICLES_PER_SHARD]
 #
 # Env:
 #   PACK_TARGET  pack documents up to this many bytes before tokenizing, so
 #                short documents survive windowing (128 KB clears 98% of bytes
 #                at context 1024, against 52% unpacked). Pair it with a smaller
-#                PER: at a 128 KB target, PER=2000 keeps a shard near the
-#                ~272 MB of text the v2 run proved safe to plan in RAM.
+#                PER: at a 128 KB target, PER=2000 keeps a shard's text small.
 #   PACK_GROUP   pack only within a repository (ids must be repo/path).
+#   JOBS         shards prepared at once (default: available memory / 3 GB,
+#                at most the core count; a 23 MB shard peaks near 1.7 GB).
+#   BEND_TOOLS   a directory holding bend-pack, bend-prepare and
+#                bend-plan-segment (default: built from this flake).
 set -euo pipefail
 
 DATA="${1:?usage: plan-corpus.sh DATA.jsonl RUN_DIR SIZE BATCH [PER]}"
@@ -34,7 +46,16 @@ TOKENIZER="${TOKENIZER:?set TOKENIZER to the .bpe artifact}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
-CLI="${CLI:-$(nix build --no-link --print-out-paths .#formal-transformer)/bin/formal-transformer}"
+tool() {
+  if [ -n "${BEND_TOOLS:-}" ]; then
+    echo "$BEND_TOOLS/$1"
+  else
+    echo "$(nix build --no-link --print-out-paths ".#$1")/bin/$1"
+  fi
+}
+PACK="$(tool bend-pack)"
+PREPARE="$(tool bend-prepare)"
+PLANSEG="$(tool bend-plan-segment)"
 
 test -f "$DATA" || { echo "plan-corpus: no such file: $DATA" >&2; exit 1; }
 test -f "$TOKENIZER" || { echo "plan-corpus: no such tokenizer: $TOKENIZER" >&2; exit 1; }
@@ -69,83 +90,89 @@ echo "plan-corpus: $shards shards" >&2
 pack_id="${PACK_TARGET:+:pack=$PACK_TARGET${PACK_GROUP:+-grouped}}"
 global_id="mixed-global-v1:sha256=$data_hash:documents=$total:shard=$PER:batch=$BATCH:size=$SIZE:tokenizer=$tokenizer_hash$pack_id"
 
+# Prepare one shard: part-k (JSONL) -> NUL stream -> [pack] -> FTCC corpus.
+# Every intermediate is a file; the corpus appears under its final name only
+# once complete (written to .tmp, then renamed), so an interrupted run never
+# leaves a short corpus that looks finished. On a packed run the pack counts
+# persist beside the corpus, for the completeness assertion below.
+prepare_shard() {
+  local k="$1"
+  local part corpus nul packed filter
+  part="$(printf '%s/parts/part-%06d' "$RUN_DIR" "$k")"
+  corpus="$RUN_DIR/shard-$k-$SIZE.corpus"
+  [ -f "$corpus" ] && return 0
+  nul="$part.nul"
+  # Web text contains occasional NUL bytes. JSON cannot hold a raw control
+  # character in a string, so they arrive as a backslash-u escape; jq decodes
+  # that to a real NUL and --raw-output0 then refuses to emit it, because a
+  # NUL inside a field would break the framing that separates fields.
+  #
+  # They cannot be stripped textually: a record containing an escaped
+  # backslash followed by the literal text u0000 has the same six bytes, and
+  # deleting them leaves a dangling backslash -- invalid JSON. So remove the
+  # character after decoding, via explode/implode, which needs no escape in
+  # the filter. That is expensive, so it is only used on the rare parts that
+  # actually contain the escape.
+  if grep -q '\\u0000' "$part"; then
+    filter='.id, (.text | explode | map(select(. != 0)) | implode)'
+  else
+    filter='.id, .text'
+  fi
+  jq --raw-output0 "$filter" < "$part" > "$nul"
+  if [ -n "${PACK_TARGET:-}" ]; then
+    # The prefix carries the shard index because ids restart per shard and
+    # must stay globally distinct.
+    packed="$part.packed.nul"
+    if ! "$PACK" --threads 1 "$nul" "$packed" --target "$PACK_TARGET" --prefix "pack$k" \
+        ${PACK_GROUP:+--group} --stats 2> "$corpus.pack.log"; then
+      echo "plan-corpus: shard $k pack failed:" >&2
+      cat "$corpus.pack.log" >&2
+      return 1
+    fi
+    sed -n 's/^pack-stdin: \([0-9]*\) documents in, \([0-9]*\) packed.*/\1 \2/p' \
+      "$corpus.pack.log" > "$corpus.pack.tmp"
+    if [ ! -s "$corpus.pack.tmp" ]; then
+      echo "plan-corpus: shard $k produced no pack stats line:" >&2
+      cat "$corpus.pack.log" >&2
+      return 1
+    fi
+    rm -f "$nul" "$corpus.pack.log"
+    nul="$packed"
+  fi
+  if ! "$PREPARE" --threads 1 "$TOKENIZER" "$nul" "$corpus.tmp" > "$corpus.log" 2>&1; then
+    echo "plan-corpus: shard $k failed to prepare from $part:" >&2
+    cat "$corpus.log" >&2
+    return 1
+  fi
+  rm -f "$nul" "$corpus.log"
+  [ -f "$corpus.pack.tmp" ] && mv "$corpus.pack.tmp" "$corpus.pack"
+  mv "$corpus.tmp" "$corpus"
+  # The split doubles the corpus on disk. Drop each part once its corpus
+  # exists; an interrupted run re-splits from the source and skips shards
+  # already prepared, so this costs a rescan rather than correctness.
+  if [ "${PRUNE_PARTS:-1}" = 1 ]; then rm -f "$part"; fi
+}
+export -f prepare_shard
+export RUN_DIR SIZE TOKENIZER PACK PREPARE PACK_TARGET PACK_GROUP PRUNE_PARTS
+
+cores="$(nproc)"
+avail_gb="$(awk '/MemAvailable/ {print int($2 / 1048576)}' /proc/meminfo)"
+jobs="${JOBS:-$(( avail_gb / 3 ))}"
+[ "$jobs" -ge 1 ] || jobs=1
+[ "$jobs" -le "$cores" ] || jobs="$cores"
+echo "plan-corpus: preparing shards, $jobs at a time" >&2
+seq 0 $(( shards - 1 )) | xargs -P "$jobs" -I{} bash -c 'prepare_shard "$@"' _ {}
+
 segments="$PLAN.segments.tmp"
 pending="$PLAN.tmp"
 rm -f "$segments" "$pending"
 cumulative=0
 for (( k = 0; k < shards; k++ )); do
-  part="$(printf '%s/parts/part-%06d' "$RUN_DIR" "$k")"
   corpus="$RUN_DIR/shard-$k-$SIZE.corpus"
   offset=$(( k * PER ))
   if [ ! -f "$corpus" ]; then
-    # prepare-bpe-stdin reports failures on stdout and still exits 0, so the
-    # output has to be inspected rather than discarded -- otherwise a rejected
-    # shard (a duplicate document id, say) looks like success and only surfaces
-    # as a confusing "corpus file not found" from plan-segment.
-    # Web text contains occasional NUL bytes. JSON cannot hold a raw control
-    # character in a string, so they arrive as a backslash-u escape; jq decodes
-    # that to a real NUL and --raw-output0 then refuses to emit it, because a
-    # NUL inside a field would break the framing that separates fields.
-    #
-    # They cannot be stripped textually: a record containing an escaped
-    # backslash followed by the literal text u0000 has the same six bytes, and
-    # deleting them leaves a dangling backslash -- invalid JSON. So remove the
-    # character after decoding, via explode/implode, which needs no escape in
-    # the filter. That is expensive, so it is only used on the rare parts that
-    # actually contain the escape (one record in C4 shard 0, at document 19112).
-    if grep -q '\\u0000' "$part"; then
-      filter='.id, (.text | explode | map(select(. != 0)) | implode)'
-    else
-      filter='.id, .text'
-    fi
-    # PACK_TARGET concatenates short documents so they survive windowing.
-    # The trainer cuts documents into non-overlapping windows and discards the
-    # remainder, so at context 1024 a document under ~4.4 KB contributes
-    # nothing at all -- see FormalTransformer.Pack. Packing happens here, inside
-    # the per-shard pipeline, so it costs no extra pass over the source and the
-    # packed corpus never has to exist on disk. The prefix carries the shard
-    # index because ids restart per shard and must stay globally distinct.
-    if [ -n "${PACK_TARGET:-}" ]; then
-      # pack-stdin's stderr is captured to a file so its stats line can be
-      # parsed -- but on failure that file holds the actual diagnostic, so it
-      # must be shown, not deleted; under `set -e` an unguarded failure here
-      # would exit with the cause still sitting in a temp file nobody reads.
-      if ! prepared="$(jq --raw-output0 "$filter" < "$part" \
-        | "$CLI" pack-stdin --target "$PACK_TARGET" --prefix "pack$k" \
-            ${PACK_GROUP:+--group} --stats 2> "$PLAN.pack.tmp" \
-        | "$CLI" prepare-bpe-stdin "$TOKENIZER" "$corpus")"; then
-        echo "plan-corpus: shard $k pipeline failed; pack-stdin reported:" >&2
-        cat "$PLAN.pack.tmp" >&2
-        exit 1
-      fi
-      packed_counts="$(sed -n \
-        's/^pack-stdin: \([0-9]*\) documents in, \([0-9]*\) packed.*/\1 \2/p' \
-        "$PLAN.pack.tmp")"
-      if [ -z "$packed_counts" ]; then
-        echo "plan-corpus: shard $k produced no pack-stdin stats line:" >&2
-        cat "$PLAN.pack.tmp" >&2
-        exit 1
-      fi
-      rm -f "$PLAN.pack.tmp"
-      # Persist the counts beside the corpus: the completeness assertions below
-      # run on EVERY iteration, including shards prepared by an earlier,
-      # interrupted invocation, so they cannot depend on shell variables that
-      # died with that process.
-      echo "$packed_counts" > "$corpus.pack"
-    else
-      prepared="$(jq --raw-output0 "$filter" < "$part" \
-        | "$CLI" prepare-bpe-stdin "$TOKENIZER" "$corpus")"
-    fi
-    if [ ! -f "$corpus" ]; then
-      echo "plan-corpus: shard $k failed to prepare from $part" >&2
-      echo "  $prepared" >&2
-      exit 1
-    fi
-    # The split doubles the corpus on disk, which a 37 GB source cannot afford
-    # alongside its shards. Drop each part once its corpus exists; an
-    # interrupted run re-splits from the source and skips shards already
-    # prepared, so this costs a rescan rather than correctness.
-    [ "${PRUNE_PARTS:-1}" = 1 ] && rm -f "$part"
+    echo "plan-corpus: shard $k has no corpus ($corpus)" >&2
+    exit 1
   fi
   if [ -n "${PACK_TARGET:-}" ]; then
     if [ ! -f "$corpus.pack" ]; then
@@ -156,22 +183,20 @@ for (( k = 0; k < shards; k++ )); do
     fi
     read -r packed_in packed_out < "$corpus.pack"
   fi
-  record="$("$CLI" plan-segment "$corpus" "$offset" "$BATCH" "$SIZE")"
+  record="$("$PLANSEG" --threads 1 "$corpus" "$offset" "$BATCH" "$SIZE")"
   read -r tag planned_offset documents corpus_id train_windows validation_windows steps <<< "$record"
   if [ "$tag" != segment ] || [ "$planned_offset" != "$offset" ]; then
     echo "plan-corpus: invalid segment plan for shard $k: $record" >&2
     exit 1
   fi
-  # Assert the shard is complete. A producer that dies mid-stream (a jq parse
-  # error, say) leaves a corpus that is structurally valid but short, and
-  # nothing downstream would notice -- the plan would simply describe a corpus
-  # missing documents, and the run would train on it. This caught shard 83
-  # holding 1,625 of 4,000 documents.
+  # Assert the shard is complete. A producer that dies mid-stream leaves a
+  # corpus that is structurally valid but short, and nothing downstream would
+  # notice. This caught shard 83 holding 1,625 of 4,000 documents.
   #
   # Packing changes what to count: the corpus now holds packed documents, far
-  # fewer than PER, so the check moves upstream to what the packer was fed --
-  # which is the same intent stated more directly. The second half asserts that
-  # everything the packer emitted reached the corpus.
+  # fewer than PER, so the check moves upstream to what the packer was fed.
+  # The second half asserts that everything the packer emitted reached the
+  # corpus.
   if [ -n "${PACK_TARGET:-}" ]; then
     if [ "$packed_in" != "$PER" ] && [ "$k" != "$(( shards - 1 ))" ]; then
       echo "plan-corpus: shard $k is short: packed $packed_in of $PER documents" >&2

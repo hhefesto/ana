@@ -20,7 +20,17 @@ EVAL="${3:-run/code-eval.jsonl}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
-CLI="${CLI:-$(nix build --no-link --print-out-paths .#formal-transformer)/bin/formal-transformer}"
+# The Bend corpus tools (bend/Pack.bend, bend/Prepare.bend), byte-identical
+# to master's pack-stdin / prepare-bpe-stdin; they read and write files.
+tool() {
+  if [ -n "${BEND_TOOLS:-}" ]; then
+    echo "$BEND_TOOLS/$1"
+  else
+    echo "$(nix build --no-link --print-out-paths ".#$1")/bin/$1"
+  fi
+}
+PACK="$(tool bend-pack)"
+PREPARE="$(tool bend-prepare)"
 PACK_TARGET="${PACK_TARGET:-131072}"
 
 test -f "$TOKENIZER" || { echo "build-code-evals: no such tokenizer: $TOKENIZER" >&2; exit 1; }
@@ -43,17 +53,20 @@ for entry in $languages; do
   fi
   # --group keeps a packed document inside one repository, so a window never
   # spans two unrelated projects.
-  prepared="$(jq --raw-output0 '.id, (.text | explode | map(select(. != 0)) | implode)' \
-      < "$OUT_DIR/.$name.jsonl" \
-    | "$CLI" pack-stdin --target "$PACK_TARGET" --prefix "eval-$name" --group \
-    | "$CLI" prepare-bpe-stdin "$TOKENIZER" "$corpus")"
+  jq --raw-output0 '.id, (.text | explode | map(select(. != 0)) | implode)' \
+    < "$OUT_DIR/.$name.jsonl" > "$OUT_DIR/.$name.nul"
   rm -f "$OUT_DIR/.$name.jsonl"
-  if [ ! -f "$corpus" ]; then
+  "$PACK" --threads 1 "$OUT_DIR/.$name.nul" "$OUT_DIR/.$name.packed.nul" \
+    --target "$PACK_TARGET" --prefix "eval-$name" --group
+  rm -f "$OUT_DIR/.$name.nul"
+  if ! prepared="$("$PREPARE" --threads 1 "$TOKENIZER" "$OUT_DIR/.$name.packed.nul" "$corpus.tmp")"; then
     echo "build-code-evals: $name failed to prepare" >&2
     echo "  $prepared" >&2
     exit 1
   fi
-  tokens=$("$CLI" inspect-corpus "$corpus" | sed -n 's/^ordinary tokens: //p')
+  rm -f "$OUT_DIR/.$name.packed.nul"
+  mv "$corpus.tmp" "$corpus"
+  tokens=$(sed -n 's/^ordinary tokens: //p' <<< "$prepared")
   printf 'build-code-evals: %-8s %6d held-out files -> %9s tokens  %s\n' \
     "$name" "$documents" "$tokens" "$corpus" >&2
 done

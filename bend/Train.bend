@@ -53,6 +53,21 @@ def nat.or(+s: String, +d: Nat) -> Nat:
 def preset.pick(+s: String, +name: String, +c: C.Config, +rest: C.Config) -> C.Config:
   Bool.pick(C.Config, String.eq(s, name), c, rest)
 
+# the names preset() knows (anything else falls back to small4-v3, so a
+# tool that must not guess checks here first)
+def preset.names() -> List<&2, String>:
+  ["tiny", "tiny-v3", "small", "small4", "small4-v3", "bpe10m", "bpe10m-v3", "bpe100m", "bpe100m-v3", "bpe460m"]
+
+def preset.member(ns: List<&2, String>, +s: String) -> Bool:
+  match ns:
+    case Nil{}:
+      False{}
+    case n <> more:
+      Bool.or(String.eq(n, s), preset.member(more, s))
+
+def preset.known(+s: String) -> Bool:
+  preset.member(preset.names(), s)
+
 # master's presets by name (Config.sizePresets); anything else is small4-v3
 def preset(+s: String) -> C.Config:
   preset.pick(s, "tiny", C.Config.tiny(),
@@ -62,7 +77,8 @@ def preset(+s: String) -> C.Config:
   preset.pick(s, "bpe10m", C.Config.bpe10m(),
   preset.pick(s, "bpe10m-v3", C.Config{U32.to_nat(8192), U32.to_nat(256), U32.to_nat(320), U32.to_nat(864), 6n, 5n, True{}, True{}, True{}, True{}},
   preset.pick(s, "bpe100m", C.Config{U32.to_nat(32768), U32.to_nat(256), U32.to_nat(768), U32.to_nat(2048), 12n, 12n, False{}, False{}, False{}, True{}},
-  preset.pick(s, "bpe100m-v3", C.Config.bpe100m_v3(), C.Config.small4_v3()))))))))
+  preset.pick(s, "bpe100m-v3", C.Config.bpe100m_v3(),
+  preset.pick(s, "bpe460m", C.Config.bpe460m(), C.Config.small4_v3())))))))))
 
 # the byte tokenizer as a BPE with no merges
 def bytes.bpe() -> Tk.Bpe:
