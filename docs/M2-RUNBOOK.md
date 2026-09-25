@@ -5,6 +5,15 @@ by the hour; M2 gets one because `run/code-train-v2.jsonl` and `run/code32k.bpe`
 are the inputs to a ~$250-350 run and must be reproducible and auditable from
 the repo.  These are the invocations that produced the artifacts on disk.
 
+**2026-09-25:** the `formal-transformer` commands below are the Haskell CLI,
+kept at the tag `haskell-final` (with the deleted `deploy/build-tokenizer-sample.sh`).
+`pack-stdin`, `prepare-bpe-stdin` and `plan-segment` have Bend replacements that
+write the same bytes (`docs/BEND-CORPUS-TOOLS.md`); section 4 now uses them and
+reproduces the per-language and transcript corpora in `run/eval/` exactly.
+`learn-bpe` and `prepare-bpe` (whole files as documents, with a fingerprint over
+the source bytes) have none: `code32k.bpe` is fixed (a copy is vendored as
+`weights/code32k.bpe`) and `enwik8-test-code32k.corpus` stays as built.
+
 ## 1. Acquisition (`run/code-sources/`)
 
 - **Hackage** (`tarballs/`, 19,418 of 19,426 packages; the 8 absent are pulled
@@ -72,10 +81,9 @@ formal-transformer prepare-bpe run/code32k.bpe \
   run/eval/enwik8-test-code32k.corpus /tmp/enwik8-test.txt
 
 # the Claude-Code transcript holdout (273 docs, 4 whole sessions, scrubbed):
-jq --raw-output0 '.id, .text' < ~/src/llm-transcript/corpus.jsonl.holdout.jsonl \
-  | formal-transformer pack-stdin --target 131072 --prefix transcript --stats \
-  | formal-transformer prepare-bpe-stdin run/code32k.bpe \
-      run/eval/transcript-code32k.corpus
+jq --raw-output0 '.id, .text' < ~/src/llm-transcript/corpus.jsonl.holdout.jsonl > /tmp/tr.nul
+bend-pack /tmp/tr.nul /tmp/tr.packed.nul --target 131072 --prefix transcript --stats
+bend-prepare run/code32k.bpe /tmp/tr.packed.nul run/eval/transcript-code32k.corpus
 ```
 
 Holdout strength varies and must be quoted with the number: Haskell, Agda and

@@ -48,7 +48,7 @@ def nat.or(m: Maybe<&2, U32>, d: Nat) -> Nat:
 
 def candidates() -> List<&2, String>:
   ["weights/enwiki-fineweb-32k.bpe", "run/enwiki-fineweb-32k.bpe",
-   "weights/enwiki-8k.bpe", "run/code32k.bpe", "run/enwiki-c4-32k.bpe"]
+   "weights/code32k.bpe", "run/code32k.bpe", "run/enwiki-c4-32k.bpe"]
 
 def open.try(r: Result<&1, &1, U32 & String, File>) -> IO(List<&2, U32>):
   match r:

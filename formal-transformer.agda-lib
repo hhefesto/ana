@@ -1,3 +1,0 @@
-name: formal-transformer
-include: .
-depend: standard-library
