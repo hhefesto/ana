@@ -251,12 +251,12 @@ def civil(+z0: U32) -> String:
   +y = U32.add(U32.add(yoe, U32.mul(era, 400)), Bool.pick(U32, U32.is_le(m, 2), 1, 0))
   U32.show(y) ++ "-" ++ pad2(m) ++ "-" ++ pad2(d)
 
-# "[YYYY-MM-DD HH:MM:SS CDMX]" for a wall-clock reading in ms
+# "[YYYY-MM-DD HH:MM:SS UTC-6]" for a wall-clock reading in ms
 def stamp(+ms: Nat) -> String:
   +t = U32.sub(U32.from_nat(Nat.div(ms, U32.to_nat(1000))), 21600)
   +s = U32.mod(t, 86400)
   "[" ++ civil(U32.div(t, 86400)) ++ " " ++ pad2(U32.div(s, 3600)) ++ ":" ++ pad2(U32.div(U32.mod(s, 3600), 60))
-    ++ ":" ++ pad2(U32.mod(s, 60)) ++ " CDMX]"
+    ++ ":" ++ pad2(U32.mod(s, 60)) ++ " UTC-6]"
 
 # print a log line behind its timestamp
 def say(+line: String) -> IO(Unit):
