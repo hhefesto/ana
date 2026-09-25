@@ -1,86 +1,150 @@
 # Session Handoff
 
-This document holds everything needed to continue this work from another machine and account.
+This file holds everything needed to continue this work from another machine and account. It was restarted from zero on 2026-09-25 for a new path. The previous handoff (the v3 hot start and the dense trainer) is in git at `41e1920:HANDOFF.md`, and master's Haskell-era trainer is at the tag `haskell-final`.
 
-## ▶ CONTINUE HERE (2026-09-24, evening): the dense trainer continues master's v3 run
+## ▶ CONTINUE HERE (2026-09-25, evening): Phase 3, the transcript pipeline works end to end
 
-**Goal.** Improve on master's v3 (step 8000) with the Bend2 dense trainer; `bend` merges into master when its continuations beat master v3's.
+**Built.** Each tool is described in `docs/TRANSCRIPT-FORMAT.md`, which also has two real transcripts and the pilot table.
 
-**What exists now (commits b6d81ae..HEAD)**
-- **Hot start:** `TRAIN_INIT=<ftc2>` loads master's FTC2 checkpoint (parameters, Adam moments, Muon momentum, step) into the dense store and trains on master's plan and shards (`PLAN`, `RUN_DIR`, `SHARD_SIZE`), in master's epoch order, with the manifest's schedule and betas. `SAVE_EVERY` writes FTC2 that master's resume reads (`bend/Dense/Ckpt.bend`, `bend/Dense/Plan.bend`, `bend/Corpus.bend`).
-- **Dense evaluate:** `EVAL_CORPUS=<ftcc>` scores a checkpoint with master's formula (bpb over every full window; v3 and v2-era manifests).
-- **Fork published:** `github:hhefesto/bend2/ft-kernels`, with `File.read_f32be/write_f32be` and `IO.time` (the flake pins it). **Rebased onto upstream 2.0.27 on 2026-09-24 (evening):** one squashed port commit `d4ffb6a6` on top of upstream `95317d95`; the ten-commit history on 2.0.4 is the tag `ft-kernels-2.0.4`. Upstream 2.0.13 had added `File.read_at`, `File.write_bytes` and `File.size` with the same signatures, so the fork's copies went. Verified on the rebased fork: `tests/io/{time,f32be}.bend` on the interpreter, C and JS lanes; `GemmConf`/`EinsumConf` JS definition == C loop byte for byte; `TrainDense.bend -o` compiles CPU-only and against CUDA 12.8 headers; flake checks `bend-spec/tests/train/dense` pass; `tests/hot.bend` round trip on v3 step 8000 byte-identical; `bend-generate` gives the same 20 continuations as before the rebase. Not yet run on a GPU (needs a box). The new checker checks template bodies (2.0.4 did not), which exposed three wrong proofs, fixed in `Spec/Trie.bend`, `Spec/ResidualStream.bend`, `Spec/Decoding.bend`; `bend Everything.bend` now prints `All terms check.` with no unsafe annotations.
-- **Log format:** master's fields (`step=/total progress= lr= train_loss= train_loss_ema= gradient_norm= clipped=`, `validation_loss= validation_delta= best_validation_loss= new_best= bits_per_byte=`) plus `ms= tok/s= remaining= eta=`, every line behind a Mexico City timestamp (`[YYYY-MM-DD HH:MM:SS UTC-6]`, Mexico City, from the fork's `IO.time`; `IO.now` is monotonic); `hot.sh` runs under `stdbuf -oL` because the runtime's print does not flush.
+- **`bend/Units.bend`** (`bend-units LANG IN.nul OUT.nul [MAX_PER_FILE]`) cuts source files into declaration units.
+  - Each unit holds the signature, the body, the file around it, the doc comment, the names the body uses, a hole and up to four mutants. Mutants never touch comments, strings or a line's first word.
+  - Every unit rebuilds its file byte for byte: checked on 2,087 pilot units, and by `bend/tests/units.bend` in the `bend-tests` check.
+- **`deploy/check/{haskell,lean,agda,nix,bend}.sh`** (shared code in `lib.sh`) run the real checker on each unit's original, hole and mutants, and ask it for the Context types.
+  - A unit is kept only when its original checks; a mutant only when it fails.
+  - `deploy/check/Harness.lean` elaborates a Lean file's head once and every variant from that state, which makes mathlib affordable.
+  - The flake's `ghc-harness` is GHC 9.10 with 31 common Hackage packages.
+- **`bend/Transcript.bend`** (`bend-transcript TOKENIZER RESULTS OUT [WINDOW]`) renders the turns and the shapes.
+  - Shapes: type→term 60 (a quarter right the first time, the rest repair), hole 25, term→type 15 (ghc only).
+  - It drops any transcript over the window; nothing is cut.
 
-**Verified**
-- **Step for step against master.** Master's v3 process ran on to step 8019 after saving the 8000 checkpoint; the Bend run started from that checkpoint and its 19 overlapping step lines agree with master's to ~5e-6 in the loss and ~1e-5 in the gradient norm (e.g. 8001: 3.4582634/0.3414476 vs 3.4582589/0.34144256; 8019: 3.4962168/0.3393160 vs 3.4962144/0.33931524). Same windows in the same order, same Muon step, same schedule (`run/train-cloud-v3-final.log` vs the box's `train.log`).
-- Load→save is byte-identical on master's v3 step-8000 and the mkt checkpoints (`bend/tests/hot.bend`, run by hand: it needs a real checkpoint, so it is not a flake check).
-- Validation at step 8000 on the box: 3.627147; master logged 3.6271493 on the same 256 windows.
-- Schedule (cosine to zero), epoch hash (`splitmix(i + 0x45504f4348)`), split seed and per-shard window counts equal master's.
+**The pilot** (samples, one 16-core machine): 1,244 files → 2,087 units → 517 checked → 966 transcripts, 361,206 tokens (374 per transcript on average).
 
-**The run (vast 52365970, Michigan RTX 3090; DESTROYED 2026-09-24 after the pull; logs in `bend/gpu/hot-rtx3090-2026-09-24/`)**
-- v3 step 8000 → **28000 done** on master's data, 20,000 steps in 12.7 h. Checkpoints 20k–28k are in `run/pulled-vast-52365970/` with `sha256.txt` (each 1,846,967,877 bytes; master's resume reads them).
-- **Speed: 2,290 ms/step = 7,155 tok/s = 1.8× master's v3 3090 run (4,110 ms).** The gap to the 1,702 ms G3 measured on another card is the card: the same cold G3 setting on this box ran at 2,180 ms/step (`timing.txt`), so the hot path costs ~110 ms/step (5%) over the cold benchmark and the rest is the box (`SW Thermal Slowdown: Active` at 81 °C, 350–380 W of 390 W, 1.7–1.8 GHz). Check `nvidia-smi -q -d PERFORMANCE` on every box; the first Washington box ran at 450 MHz.
-- enwik8 test split, 6,184 windows, one evaluator for all rows: v2 final 1.3728; v3 step 8000 1.4903; Bend 10k 1.5019, 12k 1.5023, 14k 1.4851, 16k 1.4669, 18k 1.4636, 20k 1.4606, **22k 1.4462 (best)**, 24k 1.4534, 26k 1.4478, 28k 1.4516. The last 6k steps plateau around 1.45 on shards 7–8 (4.8–5.3 windows per document).
-- **The dip at 10k–12k is the data, not the trainer.** The plan's shards differ in document length: shards 0–1 have 9.9 and 7.7 windows per document, shards 2–3 have 3.9 and 3.6 (mean training loss 2.88 and 2.71 against ~3.47 elsewhere), and 272 of the 304 shards have 1–3. Master's v3 saw only the two long-document shards; the continuation moved into short-document text, enwik8 (long articles) got worse for 4,000 steps, then recovered. Greedy continuations at step 20k do not look better than at 8k for the same reason plus greedy looping, which both checkpoints do.
-
-**Open items**
-1. ~~Finish, pull, time, destroy.~~ Done (above).
-2. Compare against master v3 step 8000: the bpb table (above) plus continuations (`bend-generate`, five prompts, greedy and seed 0) for steps 8000, 20000, 22000 and 28000. **Measured 2026-09-24:** distinct 4-grams / total over the five greedy continuations fall with training, 0.70 (8000) → 0.60 (20k) → 0.55 (22k) → 0.54 (28k), while the seeded samples stay at 0.97–0.99 and enwik8 improves. Greedy decoding loops more as the model grows more confident on this (mostly short-document) data; the eye judging greedy output sees the later checkpoints as worse. Ranking checkpoints needs many seeded samples scored blind, or a repetition-aware decode, not greedy. The user decides on merging.
-3. Speed: the GLA einsum kernels are ~60% of the step (see the previous section's item 5).
-4. `Dense/Ckpt.bend`: offsets are U32 (files under 4 GB; v4 at 463M would not fit) and saves write in place (no rename effect).
-
-## Previous (2026-09-24, morning): Bend2 training at GPU speed, all phases done
-
-**Goal.** Bend2 training at least as fast as master, using the GPU fully.
-- **Result:** bpe100m-v3 on a vast RTX 3090 runs at **9,626 tok/s (1,702 ms/step)**. Master's logged v3 run on a 3090 did **3,985 tok/s**, so this is **2.4×**.
-- **MFU** by master's formula: 27.6%.
-- **Power:** median 304 W of 315 W.
-- Details, the method, and the table of each speed-up are in `docs/BEND-PORT.md`, section "Training on a GPU: the dense trainer". Logs are in `bend/gpu/g3-rtx3090-2026-09-24/`.
-
-**Where the code is**
-- **The fork** `~/src/bend2`, branch `ft-kernels`, which the flake uses via `git+file`, adds these ops to `base.bend` (each op's meaning is its Bend definition):
-  - `Array.gemm` and `Array.mm`: products, run on cuBLAS via dlopen, or on a C loop without a GPU;
-  - `Array.einsum`: an `Ex` expression summed over up to six indices, with indirect views for gather and scatter. It runs as NVRTC-generated kernels with self-tuned strategies, or as the reference-order loop on the CPU.
-- **How ops run:** bulk ops queue on one stream (lazy sync). A program that has bulk ops but no `!` builds with any clang, using `-DBEND_NO_SRC`.
-- **Runtime knobs:** `BEND_GEMM_NUMERICS`, `BEND_GEMM=loop` (the oracle), `BEND_PROFILE=1|2`, `BEND_FT_STRAT`, `BEND_FT_CACHE`, `BEND_FT_DUMP`.
-- **The port** (`bend` branch):
-  - `bend/Dense/{Ex,Op,Layout,Model,Step,Io}.bend`: the step as data, with reverse mode derived as a program transformation;
-  - `bend/TrainDense.bend`: the trainer (`bend-train-dense`). It takes the same environment as `Train.bend`, plus `TRAIN_MICRO` and `TRAIN_CHUNK` (default 16);
-  - `bend/Spec/Dense.bend`: the structural laws;
-  - `bend/tests/dense.bend`: the oracle against the tree trainer.
-
-**Gates**
-
-| gate | what | result |
+| language | kept | time |
 |---|---|---|
-| G0 | GEMM from Bend against direct cuBLAS | matches |
-| G1 | generated kernels against the loop | identical output |
-| G2 | dense against tree trainer: every gradient on CPU and GPU; 6-step AdamW/Muon trajectories | within 5e-7; match to about 1e-7 |
-| G3 | tok/s against master | 2.4× master |
-| checks | `bend-spec`, `bend-dense`, `bend-tests`, `bend-train` | pass |
+| Haskell | 10% | 42 s per 716 units |
+| Lean (mathlib) | 90% | 9 s per unit per worker; 6 workers fit in 31 GB |
+| Agda (stdlib) | 87% | |
+| Nix | 67% | |
+| Bend | 75% | |
 
-**Open items, in order of value** (1, 3 and 4 done in the evening; see above)
-1. ~~Publish the fork.~~ Done: `github:hhefesto/bend2/ft-kernels`.
-2. **Same-box A/B against master.** Master's number is from a different 3090. Building master's gemm-cuda trainer on a box needs nix, which is slow. The hot run measured 1.8× on a third card, so the margin is real but the exact factor is not.
-3. ~~Warm start~~ Done (hot start).
-4. ~~Dense evaluate~~ Done (`EVAL_CORPUS`).
-5. **More speed.** The remaining time is mostly the GLA einsums that have `exp(B_τ − B_σ)` inside, and their transposes: about 60% of the step.
-   - Candidates: shared-memory tiled einsum kernels, or the cumulative decay as a product (needs per-op fp32 numerics).
-   - Chunk 8 is about 3.5% faster than 16.
-   - The micro-batch is 32, capped by the 2³¹-float array limit; two stores would allow 64.
+**Next, in order:**
 
-**Box lessons (2026-09-24)**
-- A vast box in Korea downloaded at about 140 KB/s, so apt's clang-19 would have taken hours. Test the network before staging.
-- Ubuntu's clang-15 builds a bulk-op program in 44 s.
-- Pick boxes with at least 64 GB RAM, and run with `--gpu 48GB`: the managed heap also holds the host's lists and trees.
+1. **Haskell yield.** 85% of the failures import a module of the unit's own package. Rebuilding each package's tree from the corpus and passing `-i` is the lever.
+2. **Cleaning:** exact dedup by body hash, then a 10-gram decontamination against the evals, then MinHash near-dedup. Record each count in the doc.
+3. **Packing.** The trainer makes no window from a document shorter than ctx, and transcripts average about 374 tokens. The choice:
+   - (a) `bend-pack` into large documents, so windows cut across transcripts. This works today.
+   - (b) Token-exact best-fit packing, with padding or loss masking added to the trainer. The research favours this.
+4. **The full run** over `run/code-train-v2.jsonl` (with `bend-units` at `MAX_PER_FILE` 4):
+   - Haskell: about 566K units, about 9 h here.
+   - Lean: about 60K units, about 25 h at 6 workers.
+   - A bigger CPU box would shorten it, and it costs money, so **ask first**.
+5. **`deploy/claude-batch.sh`** writes the task lines and repair diagnoses. Write it, but **ask before running it** (it costs money).
+6. Phase 2b, the store split. It is independent of all of the above.
 
-## Rules that bit before
+How to check a Bend file: run `bend FILE.bend` with the flake's `bend` (`nix build .#bend`). `bend Everything.bend` prints `All terms check.`. The Lean toolchain is the one mathlib pins, under `~/.elan/toolchains`; `lean.sh` finds it by itself. The mathlib checkout with its cache is `run/harness/mathlib4`.
 
-- A CUDA build of a Bend program **uses the GPU by default**, so a CPU baseline needs `--gpu off --threads N`.
-- The NVRTC `--gpu-build` step takes about 15 min for a 2.2 MB program. The resulting `.gpu` cubin can be reused on the same `sm_XX`.
-- The vast image `nvidia/cuda:12.4.1-devel-ubuntu22.04` needs clang-19 (install with `llvm.sh 19`) and lacks `/usr/bin/time`.
-  - `nproc` reports the host's cores, not the container's; read `/sys/fs/cgroup/cpu.max` instead.
-  - Destroy the box with `vastai destroy instance ID -y`.
-- `pkill -f` matches its own ssh shell, so kill by PID.
-- Rent a box only once the binaries and scripts are staged. Commits carry no Co-Authored-By, and nothing is pushed without asking.
+## The goal
+
+The goal is training data for a **functional-programming coding agent** in Haskell, Lean, Agda, Nix and Bend, with bash only for running those. The repository itself is Bend: 16,320 of 17,945 tracked source lines are Bend (91%), with the rest in shell 1,279, Nix 278 and C 68.
+
+Decisions taken with the user on 2026-09-25 (plan: `~/.claude/plans/assess-and-start-the-snug-eich.md`):
+
+1. **Delete the Haskell, Agda and Futhark code, and port the missing corpus tools to Bend.** Done.
+2. **Data: real code checked by real compilers, plus Claude-written prose** (the task line and a one-sentence repair diagnosis). Code and compiler output are never generated.
+3. **Cold start under `code32k`.** The embedding is tied to the vocabulary, so no v3 weights carry over.
+4. **Lean from the start.**
+5. **Context 2048, after the store split.**
+6. **Types/propositions and terms/proofs are separate turns.**
+   - `## Type` carries a flag line, `proposition` or `type`, then the fence. `## Term` holds the program or proof.
+   - `## Context` holds `name : type` lines printed by the checker. Holes show goal states.
+   - There are three task shapes: type→term 60%, hole 25%, term→type 15%.
+   - Agda's flag comes from a heuristic, and the rule is recorded.
+
+## Facts
+
+**Context window.** Every trained checkpoint so far has ctx 256 (v1, v2, v3 and the Bend continuation to 28k). The architecture does not fix the context: the softmax layers have no positional embedding and the GLA layers are recurrent, so ctx is a cost choice. The new preset `fp100m` (`bend/Config.bend`, `bend/Train.bend`) is the 115M `bpe100m-v3` layout with ctx 2048 and vocab 32768.
+
+**How much code fits.** Bytes per token under `code32k`: Haskell 4.06, Nix 3.80, Lean 3.59, Agda 3.16. So:
+
+- **256 tokens** hold about 1 KB of Haskell or about 800 B of Agda: one function.
+- **2048 tokens** hold about 8 KB: a small module plus its compiler output and a repair.
+
+**Memory.** Exact, from `Lay.floats` at `bend/Dense/Layout.bend` (bpe100m layout, chunk 16):
+
+| ctx | floats/window | max micro in one 2³¹ array | 3090 (24 GB) after the split | 5090 (32 GB) |
+|---|---|---|---|---|
+| 256 | 19M | 64 | ~250 | ~330 |
+| 1024 | 104M | 15 | ~50 | ~70 |
+| 2048 | 309M | **5** (8.2 GB) | **12 safe (17 GB), 16 tight (22 GB)** | ~20 |
+| 4096 | 1,020M | 1 | ~5 | ~7 |
+
+The binding limit today is the single `Array<F32>` store (2³¹ floats), not the card. `TrainDense` now refuses a store over 2³¹ with a message that names `TRAIN_MICRO`, where before `Lay.of`'s U32 sums wrapped silently. At ctx 2048 the two `[b,h,t,t]` score buffers are most of the workspace; they are the next wall.
+
+**Data on disk** (nothing needs re-collecting):
+
+- `run/code-train-v2.jsonl`: 1.87 GB, 270,054 files. Haskell 88%, Lean 8%, Nix 3%, Agda 1%.
+- `run/code-eval-v2.jsonl`: whole-project holdouts.
+- The tokenizers `weights/code32k.bpe` and `weights/enwiki-fineweb-32k.bpe` (sha256 in `weights/SHA256SUMS`).
+- The eval corpora in `run/eval/`.
+- The user's own Claude Code sessions: `~/src/llm-transcript/corpus.jsonl`.
+
+**Research** (for the data recipe, summarized in `docs/TRANSCRIPT-FORMAT.md`):
+
+- Keep only checker-verified output; verified data does not collapse a model the way unverified self-generated data does.
+- Mutation-repair in the APRIL style.
+- Near-duplicates: MinHash on 5-grams at Jaccard 0.7. Contamination: 10-gram overlap with the evals.
+- Loss weights: response 1.0, prompt 0.2–0.3, tool output 0–0.1.
+- Best-fit packing without cross-document attention.
+- Size: 100K–500K verified transcripts.
+- No public Agda dataset exists.
+
+## Phases
+
+| phase | what | state |
+|---|---|---|
+| 0 | Bend-only repo: `backend/`, `FormalTransformer/`, the Futhark kernels, 22 deploy scripts and the bpe10m weights deleted (all in `haskell-final`); `flake.nix` 1,530 → 278 lines | **done** (`228bd06`) |
+| 1 | Corpus tools in Bend (`bend-pack`, `bend-prepare`, `bend-plan-segment`), byte-identical to master's on a 20k-file plan, the five code evals and the transcript eval (`docs/BEND-CORPUS-TOOLS.md`) | **done** (`0908864`) |
+| — | Fork `hhefesto/bend2` `ft-kernels` rebased onto upstream 2.0.28; its flake's `default` builds from source; the repo takes it as a flake input | **done** (`5633395`) |
+| 2a | Dense store: the workspace counted once (the old layout counted it twice, 26% of the store), exact size check, `fp100m`, byte-identity harness `bend/tests/dense-identity.sh` with goldens in the `bend-dense` check | **done** (`41e1920`) |
+| 2b | Four-array store split (st, act, ws, gws) so ctx 2048 runs at micro 12–16: a fork `einsum4`/`mm4` with array slots, then Layout/Op/Model/Step/Ckpt; the gate is CPU identity against the goldens | not started |
+| 2c | GPU identity plus one hour on a 3090 timing ctx 2048 at micro 4/8/12/16 | **needs a box: ask first** |
+| 3 | Transcript corpus: units → checker → prose → transcripts → pack/prepare | **pipeline works on samples** (above); full run, cleaning, packing, prose to do |
+| 4 | The run: `fp100m`, cold start, `code32k`, one epoch over the mix; checkpoints ranked by repair accuracy on 200 held-out prefixes, not by bpb | **needs a box: ask first** |
+
+Phase 2b and Phase 3 are independent. The run can start at micro 5 without 2b.
+
+## Where things are
+
+- **Trainers:**
+  - `bend/Train.bend` is the tree trainer. `bend/TrainDense.bend` is the dense GPU trainer.
+  - `bend/Dense/*` holds the dense trainer's modules. `bend/Spec/*` holds the laws (`bend bend/Everything.bend`).
+- **Corpus tools:**
+  - `bend/{Nul,Ftcc,Pack,Prepare,PlanSegment,Tokenizer,Corpus}.bend`.
+  - `deploy/plan-corpus.sh` runs one process per shard, with `--threads 1`: the runtime scales allocation-heavy work to only about 2 cores in one process.
+  - `deploy/build-code-evals.sh` builds the code eval corpora.
+  - `deploy/mix-corpus.sh` interleaves sources.
+- **Transcript tools:** `bend/Units.bend` (`bend-units`), `deploy/check/*.sh` with `deploy/check/Harness.lean` (Lean), and `bend/Transcript.bend` (`bend-transcript`). The Lean driver is the one non-Bend program the harness needs, because only Lean itself can keep an elaborated environment in memory.
+- **Flake:**
+  - Packages: `bend`, `bend-train`, `bend-train-dense`, `bend-evaluate`, `bend-generate`, `bend-pack`, `bend-prepare`, `bend-plan-segment`, `bend-units`, `bend-transcript`, `ghc-harness`, `ana-bend`.
+  - Checks: `bend-spec`, `bend-tests`, `bend-train`, `bend-dense`. All pass at `41e1920`.
+- **Fork:** `~/src/bend2`. Remote `origin` is upstream `bendlang/bend`, so never push there; the fork is remote `hhefesto`, branch `ft-kernels` = upstream 2.0.28 + one squashed commit `1b877d3f`. Old heads are tagged `ft-kernels-2.0.27` and `ft-kernels-2.0.4`. The rebase recipe is in memory `project-bend2-fork-remotes`.
+- **Docs:**
+  - `docs/TRANSCRIPT-FORMAT.md`: the transcript format and pipeline.
+  - `docs/BEND-CORPUS-TOOLS.md`: the byte-identity record.
+  - `docs/BEND-PORT.md`: the dense trainer and GPU work.
+  - `docs/haskell-era/`: everything older.
+
+## Rules
+
+- **Money:** rent a GPU box only once everything is staged, and ask the user before spending money. That covers boxes and the Claude Message Batches API.
+- **Box hygiene:**
+  - DESTROY a box, never stop it; `vastai` lives in `~/.local/share/vastai-venv`.
+  - Run long jobs under `nohup` and `stdbuf -oL`, because the Bend runtime's print does not flush.
+  - Check `nvidia-smi -q -d PERFORMANCE` for thermal slowdown.
+  - A CUDA-built Bend program uses the GPU by default, so a CPU baseline needs `--gpu off --threads N`.
+- **Git:**
+  - Commits carry no Co-Authored-By. Nothing is pushed without asking.
+  - `private/*` branches push only to the `private` remote. Never push to `origin` in `~/src/bend2`.
+- **Logs:** every log line is stamped in Mexico City time (UTC-6), from the fork's `IO.time`.
+- **Subagents:** they run on Opus 5.5 only, never another model.
+- **Byte identity:** every layout or corpus-tool change is held to it, with `bend/tests/dense-identity.sh` for the trainer and `cmp` of `.corpus` and plan files for the tools.

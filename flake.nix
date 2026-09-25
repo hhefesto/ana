@@ -34,6 +34,16 @@
       # the pinned bend command (clang on its PATH, telemetry off)
       bendFor = pkgs: bend2.packages.${pkgs.stdenv.hostPlatform.system}.default;
       # A Bend2 program compiled to a native binary (C via clang).
+      ghcHarness =
+        pkgs:
+        pkgs.haskellPackages.ghcWithPackages (
+          p: with p; [
+            aeson array async attoparsec bytestring containers data-default deepseq directory
+            exceptions filepath free hashable lens megaparsec mtl parsec primitive process
+            QuickCheck random safe scientific split stm text time transformers
+            unordered-containers vector
+          ]
+        );
       bendBinary =
         pkgs: name: entry:
         pkgs.runCommand name { nativeBuildInputs = [ (bendFor pkgs) ]; } ''
@@ -72,6 +82,14 @@
           bend-pack = bendBinary pkgs "bend-pack" "Pack.bend";
           bend-prepare = bendBinary pkgs "bend-prepare" "Prepare.bend";
           bend-plan-segment = bendBinary pkgs "bend-plan-segment" "PlanSegment.bend";
+          # the transcript corpus (docs/TRANSCRIPT-FORMAT.md): declarations
+          # cut out of source files, then, after deploy/check/<lang>.sh has
+          # run the real checkers on them, rendered as transcripts
+          bend-units = bendBinary pkgs "bend-units" "Units.bend";
+          bend-transcript = bendBinary pkgs "bend-transcript" "Transcript.bend";
+          # the GHC deploy/check/haskell.sh drives: the common Hackage
+          # packages, so a module importing only these checks on its own
+          ghc-harness = ghcHarness pkgs;
           # `ana` on the Bend2 port: the same flags, the same environment
           # (TEMPERATURE, TOP_K, TOP_P, SAMPLE_SEED, SAMPLE_STATS,
           # TOKENIZER_FILE), run from the repository root so the tokenizer
@@ -153,6 +171,10 @@
             bend layout.bend > layout.out
             if grep -q MISMATCH layout.out; then cat layout.out; exit 1; fi
             test "$(grep -c '^ok ' layout.out)" = 52
+            # the unit extractor: unit counts per language, and every unit
+            # rebuilds its file byte for byte
+            bend units.bend > units.out
+            printf '%s\n' "ok haskell 2" "ok agda 1" "ok lean 2" "ok bend 2" "ok nix 1" | diff - units.out
             touch $out
           '';
           # the training stack: the hand-written pullbacks agree with central
@@ -253,7 +275,7 @@
             packages = [
               (bendFor pkgs)
               pkgs.jq
-              pkgs.ghc
+              (ghcHarness pkgs)
               agda
               pkgs.elan
             ];
