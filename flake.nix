@@ -2,15 +2,15 @@
   description = "ana: an autoregressive transformer specified, trained and evaluated in Bend, and the corpus tools that feed it";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  # Bend 2 (TypeScript, run by Bun; no build step): the ft-kernels fork of
-  # bendlang/bend that adds the bulk GPU ops the dense trainer runs on
-  # (Array.gemm/mm on cuBLAS, Array.einsum as generated CUDA kernels; each
-  # op's meaning is its base.bend definition), published at
-  # github:hhefesto/bend2.  Source only: calling bend2/main.ts directly skips
-  # the upstream launcher, which phones home and self-updates.
+  # Bend 2: the ft-kernels fork of bendlang/bend (github:hhefesto/bend2),
+  # which adds the bulk GPU ops the dense trainer runs on (Array.gemm/mm on
+  # cuBLAS, Array.einsum as generated CUDA kernels; each op's meaning is its
+  # base.bend definition), F32 file I/O and IO.time.  Bend is a flake; the
+  # fork's `default` package runs its own source with Bun (upstream's
+  # `default` fetches the release archive, which cannot carry the fork).
   inputs.bend2 = {
     url = "github:hhefesto/bend2/ft-kernels";
-    flake = false;
+    inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs =
@@ -31,20 +31,8 @@
         };
       # Every .bend source, nothing else.
       bendSrc = sourceOf [ (nixpkgs.lib.fileset.fileFilter (f: f.hasExt "bend") ./bend) ];
-      bendFor =
-        pkgs:
-        pkgs.writeShellApplication {
-          name = "bend";
-          runtimeInputs = [
-            pkgs.bun
-            pkgs.clang
-          ];
-          text = ''
-            export BEND_NO_TELEMETRY=1
-            unset CC
-            exec bun ${bend2}/bend2/main.ts "$@"
-          '';
-        };
+      # the pinned bend command (clang on its PATH, telemetry off)
+      bendFor = pkgs: bend2.packages.${pkgs.stdenv.hostPlatform.system}.default;
       # A Bend2 program compiled to a native binary (C via clang).
       bendBinary =
         pkgs: name: entry:

@@ -1,13 +1,17 @@
 {
   "nodes": {
     "bend2": {
-      "flake": false,
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
       "locked": {
-        "lastModified": 1790297830,
-        "narHash": "sha256-UO3jV00ddCTdDpqC+wr+NFGeYW8WSXyVWMn1HMXc7Xc=",
+        "lastModified": 1790360935,
+        "narHash": "sha256-I7oxFOWI7mta3UgntNj5oyYF8BqUaSEcLlZ7cnJATJM=",
         "owner": "hhefesto",
         "repo": "bend2",
-        "rev": "d4ffb6a6ae2d76aaa722fe8f501cf638a76f1ebf",
+        "rev": "1b877d3fb118bb717d3a808f3bfbf24164486e5a",
         "type": "github"
       },
       "original": {

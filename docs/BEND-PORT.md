@@ -1,12 +1,15 @@
-# The Bend2 port (branch `bend`)
+# The Bend2 port
 
 Everything under `bend/` is Bend2 alone: the specification (ported from the Agda
 modules), the decoder, the tokenizer, the trainer and the evaluator. There is
 no FFI and no custom C/JS effect. The Bend2 toolchain is pinned in `flake.nix`
-(input `bend2`, the fork `github:hhefesto/bend2/ft-kernels`: upstream 2.0.27 plus
-the bulk ops, the F32 file effects and `IO.time`; rebased from 2.0.4 on
-2026-09-24, the old base kept as the tag `ft-kernels-2.0.4`). The Haskell, Agda and Futhark trees stay on the branch as the
-reference. Nothing under `bend/` builds or calls them.
+(input `bend2`, the fork `github:hhefesto/bend2/ft-kernels`, consumed as a flake:
+upstream 2.0.28 plus one squashed commit with the bulk ops, the F32 file effects,
+`IO.time`, and a `default` package that runs the fork's own source with Bun,
+since upstream's `default` fetches the release archive; rebased 2026-09-25, the
+earlier bases kept as the tags `ft-kernels-2.0.27` and `ft-kernels-2.0.4`). The
+Haskell, Agda and Futhark trees this port came from are at the tag
+`haskell-final`; comments citing `backend/...` or `FormalTransformer/...` refer to it.
 
 ```
 nix run .#ana-bend -- --prompt "The history of"      # generate (FTC2 or BTC1)
@@ -142,7 +145,7 @@ out of scope. What it does have:
 
 ### The dense trainer
 
-`TrainDense.bend` (flake app `bend-train-dense`) runs master's step at GPU speed. It needs a CUDA build made with the Bend2 fork `~/src/bend2`, branch `ft-kernels` (upstream 2.0.27 plus one squashed port commit), which the flake uses.
+`TrainDense.bend` (flake app `bend-train-dense`) runs master's step at GPU speed. It needs a CUDA build made with the Bend2 fork (`github:hhefesto/bend2`, branch `ft-kernels`: upstream 2.0.28 plus one squashed port commit), which the flake uses.
 
 **Bulk ops in Base.** The fork adds three bulk ops to `base.bend`:
 - `Array.gemm` and `Array.mm`, matrix products;
