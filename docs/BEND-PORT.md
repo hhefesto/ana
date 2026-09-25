@@ -12,7 +12,7 @@ Haskell, Agda and Futhark trees this port came from are at the tag
 `haskell-final`; comments citing `backend/...` or `FormalTransformer/...` refer to it.
 
 ```
-nix run .#ana-bend -- --prompt "The history of"      # generate (FTC2 or BTC1)
+nix run .#ana -- --prompt "The history of"           # generate from the newest local checkpoint (FTC2 or BTC1)
 nix run .#ana-bend-train                              # train (env: CORPUS, PRESET, TRAIN_*)
 nix build .#bend-evaluate                             # evaluate (env: CKPT, CORPUS, EVAL_WINDOWS)
 nix build .#checks.x86_64-linux.{bend-spec,bend-tests,bend-train}

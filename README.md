@@ -49,7 +49,9 @@ nix develop                          # bend, jq, ghc, agda (with its standard li
 ## Generate
 
 ```sh
-nix run .#ana-bend -- --checkpoint run/pulled-vast-52365970/step-22000.checkpoint --prompt "The history of"
+nix run .#ana -- --prompt "The history of"      # the newest local checkpoint
+nix run .#ana -- --list                          # every local checkpoint, newest first
+nix run .#ana -- --checkpoint run/pulled-vast-52365970/v3-bend-step22000.checkpoint "The history of"
 ```
 
 `TEMPERATURE`, `TOP_K`, `TOP_P` and `SAMPLE_SEED` control sampling. The
