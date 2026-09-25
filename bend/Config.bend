@@ -142,6 +142,12 @@ def Config.bpe10m() -> Config:
 def Config.bpe100m_v3() -> Config:
   Config{U32.to_nat(32768), U32.to_nat(256), U32.to_nat(768), U32.to_nat(2048), 12n, 12n, True{}, True{}, True{}, True{}}
 
+# the coding-agent run: bpe100m-v3's dimensions (115M) at context 2048, so a
+# small program, its checker's output and a repair fit in one window; the
+# architecture carries no position, so the context is a training choice
+def Config.fp100m() -> Config:
+  Config{U32.to_nat(32768), U32.to_nat(2048), U32.to_nat(768), U32.to_nat(2048), 12n, 12n, True{}, True{}, True{}, True{}}
+
 # master's v4 preset (Config.hs bpe460mPreset): 4x bpe100m-v3 at context 1024
 def Config.bpe460m() -> Config:
   Config{U32.to_nat(32768), U32.to_nat(1024), U32.to_nat(1280), U32.to_nat(3456), 20n, 20n, True{}, True{}, True{}, True{}}

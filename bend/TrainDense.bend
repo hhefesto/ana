@@ -421,6 +421,20 @@ def finish(+c: C.Config, +tok: Tr.Tok, +steps: Nat, +out: String, +rn: Run, r: A
   (s, st) = r
   finish.if(String.is_empty(out), c, tok, steps, out, rn, s)
 
+# One Array<F32> holds the store, at most 2^31 floats; Lay.of's U32 offsets
+# would wrap silently past 2^32, so the exact size (Lay.floats) is checked
+# before anything is laid out in memory.
+def store.check.if(ok: Bool, +floats: Nat, +mb: Nat) -> IO(Unit):
+  match ok:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      IO.die(Unit, 1, "train (dense): the store would be " ++ Nat.show(floats) ++ " floats at micro-batch " ++ Nat.show(mb)
+        ++ "; one array holds at most 2^31 = 2147483648: lower TRAIN_MICRO")
+
+def store.check(+c: C.Config, +mb: Nat, +chunk: Nat) -> IO(Unit):
+  store.check.if(L.Lay.fits(c, mb, chunk), L.Lay.floats(c, mb, chunk), mb)
+
 def run(+c: C.Config, +tok: Tr.Tok, +text: List<&2, U32>, +hp: Hp, +muon: Bool, +mu: F32, +wd: F32, +clip: F32,
         +steps: Nat, +out: String, +evals: Nat, +chunk: Nat) -> IO(Unit):
   +sp = D.split(D.encode.all(Tr.Tok.b(tok), D.documents(text)))
@@ -433,6 +447,7 @@ def run(+c: C.Config, +tok: Tr.Tok, +text: List<&2, U32>, +hp: Hp, +muon: Bool, 
             S.update(muon, ly, S.Hy{Hp.b1(hp), Hp.b2(hp), Hp.eps(hp), wd, mu}, m, clip)} : Run}
   +scale = bpb.scale(Tr.Tok.b(tok), vw)
   do IO<Unit>:
+    store.check(c, Hp.mb(hp), chunk)
     say("train (dense): " ++ C.Config.model_id(c))
     say("tokenizer " ++ Tr.Tok.id(tok) ++ "; " ++ Nat.show(nw) ++ " training windows, " ++ Nat.show(List.length(&2, List<&2, U32>, vw))
       ++ " validation windows; micro-batch " ++ Nat.show(Hp.mb(hp)) ++ ", store " ++ U32.show(L.Lay.total(ly)) ++ " floats")
@@ -791,6 +806,7 @@ def start.hot.man(+init: String, +tokf: String, +steps_s: String, +batch_s: Stri
   +m = L.Dm.of.cc(c, mb, U32.from_nat(chunk))
   +ly = L.Lay.of(c, m)
   do IO<Unit>:
+    store.check(c, mb, chunk)
     r : Array<F32> & Dk.Src <- Dk.load(init, man, h, Tr.Tok.id(tok), ly, m, Array.new(F32, L.Lay.depth(ly), 0.0))
     +t1 : Nat <- IO.now()
     say("loaded " ++ init ++ " (" ++ Nat.show(Nat.sub(t1, t0)) ++ " ms)")

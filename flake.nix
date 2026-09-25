@@ -148,6 +148,11 @@
               248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1 | diff - sha.out
             bend num.bend > num.out
             printf '%s\n' 236d88fe5618cf00 9bde02468acf1357 0000000048d159e2 0000000000000001 ffffffffffffffff 1.5 | diff - num.out
+            # the exact store size (Nat) equals Lay.of's U32 total wherever
+            # U32 cannot wrap
+            bend layout.bend > layout.out
+            if grep -q MISMATCH layout.out; then cat layout.out; exit 1; fi
+            test "$(grep -c '^ok ' layout.out)" = 52
             touch $out
           '';
           # the training stack: the hand-written pullbacks agree with central
@@ -190,6 +195,16 @@
             awk '/validation_loss=/ { for (i = 1; i <= NF; i++) if ($i ~ /^validation_loss=/) { split($i, a, "="); v[++n] = a[2] } }
                  END { if (n < 2 || !(v[n] < v[1] - 0.3)) { print "loss did not fall"; exit 1 } }' run.out
             head -1 tiny.btc | grep -qx BTC1
+            # the trajectory itself, byte for byte (bend/tests/dense-identity.sh
+            # writes the goldens): six steps of small4-v3, batch 8 in micro-
+            # batches of 4, AdamW and Muon, on a corpus nothing edits. A layout
+            # change must leave these parameters unchanged.
+            for opt in adamw muon; do
+              CORPUS=${./docs/haskell-era/RUN-2026-07-25-WIKI-FULL.md} PRESET=small4-v3 TRAIN_STEPS=6 TRAIN_BATCH=8 \
+                TRAIN_MICRO=4 TRAIN_LR=3e-3 TRAIN_WARMUP=2 TRAIN_OPT=$opt EVAL_EVERY=3 OUT=$opt.btc \
+                ${self.packages.${system}.bend-train-dense}/bin/bend-train-dense --gpu off --threads 4 > $opt.log
+            done
+            sha256sum adamw.btc muon.btc | diff - ${./bend/tests/dense-identity.sha256}
             touch $out
           '';
         }

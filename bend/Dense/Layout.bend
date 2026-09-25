@@ -758,7 +758,10 @@ def Lay.of(+c: C.Config, +m: Dm) -> Lay:
   +tw = U32.add(ttg, Dm.n(m))
   +x0 = align(U32.add(tw, Dm.n(m)))
   +ws = U32.add(x0, U32.mul(U32.add(Dm.l(m), 1), U32.mul(Dm.n(m), Dm.d(m))))
-  +hd = U32.add(ws, U32.max(Wg.end(Wg.at(m, ws)), Ws.end(Ws.at(m, ws))))
+  # Wg.at and Ws.at lay the workspace out from ws, so their ends are
+  # absolute (adding ws again counted the workspace twice: 26% of the store
+  # at bpe100m-v3, micro 32)
+  +hd = U32.max(Wg.end(Wg.at(m, ws)), Ws.end(Ws.at(m, ws)))
   +sc = align(U32.sub(Hd.end(Hd.at(m, hd)), 0))
   +g = align(U32.add(sc, 16))
   +mo = U32.add(g, g)
@@ -780,3 +783,81 @@ def Lay.gnorm(+ly: Lay) -> U32:
 
 def Lay.depth(+ly: Lay) -> Nat:
   depth(31n, U32.is_lt(2, Lay.total(ly)), Lay.total(ly), 0n, 1)
+
+# The store's size, exactly ---------------------------------------------------
+#
+# Lay.of sums U32 offsets, and a sum past 2^32 wraps silently into a small,
+# wrong store. Lay.floats is the same total in Nat (exact up to 2^48, and a
+# run-time error past it): region by region the sizes Lay.of lays out
+# (Wg.at, Ws.at, Hd.at; the parameters of BP.size; align's 2 MB rounding).
+# tests/layout.bend checks it equals Lay.total wherever U32 cannot wrap; the
+# trainer refuses a store past Lay.cap() before allocating it.
+
+def Lay.cap() -> Nat:
+  U32.to_nat(2147483648)
+
+def align.n(+x: Nat) -> Nat:
+  Nat.mul(Nat.div(Nat.add(x, U32.to_nat(524287)), U32.to_nat(524288)), U32.to_nat(524288))
+
+def when.n(b: Bool, +n: Nat) -> Nat:
+  Bool.pick(Nat, b, n, 0n)
+
+def BP.size.n.k(k: C.LayerKind, +c: C.Config, +common: Nat, +d: Nat) -> Nat:
+  match k:
+    case C.Gla{}:
+      Nat.add(common, Nat.add(Nat.mul(d, d), when.n(C.Config.rglru(c), d)))
+    case C.Softmax{}:
+      Nat.add(common, Nat.add(when.n(C.Config.qk(c), Nat.mul(2n, C.Config.hd(c))), when.n(C.Config.sinks(c), C.Config.heads(c))))
+
+def BP.size.n(k: C.LayerKind, +c: C.Config) -> Nat:
+  +d = C.Config.d(c)
+  BP.size.n.k(k, c, Nat.add(Nat.mul(2n, d), Nat.add(Nat.mul(4n, Nat.mul(d, d)), Nat.mul(3n, Nat.mul(C.Config.f(c), d)))), d)
+
+def blocks.n(n: Nat, +c: C.Config, +i: Nat) -> Nat:
+  match n:
+    case 0n:
+      0n
+    case 1n+p:
+      Nat.add(BP.size.n(C.kind_of(i), c), blocks.n(p, c, 1n+i))
+
+# rows.fit in Nat: halve r while its logits pass 2^25 cells and it stays even
+def rows.big.n(+r: Nat, +v: Nat) -> Bool:
+  Bool.and(Nat.is_lt(U32.to_nat(33554432), Nat.mul(r, v)), Nat.is_eq(Nat.mod(r, 2n), 0n))
+
+def rows.fit.n(fuel: Nat, +r: Nat, +v: Nat, big: Bool) -> Nat:
+  match fuel big:
+    case 1n+p True{}:
+      +half = Nat.div(r, 2n)
+      rows.fit.n(p, half, v, rows.big.n(half, v))
+    case _ _:
+      r
+
+# the floats of a store for config c at micro-batch mb, GLA chunks of cc0
+def Lay.floats(+c: C.Config, +mb: Nat, +cc0: Nat) -> Nat:
+  +t = C.Config.ctx(c)
+  +d = C.Config.d(c)
+  +f = C.Config.f(c)
+  +h = C.Config.heads(c)
+  +v = C.Config.vocab(c)
+  +l = C.Config.layers(c)
+  +hd = Nat.div(d, h)
+  +cc = Nat.min(cc0, t)
+  +n = Nat.mul(mb, t)
+  +nd = Nat.mul(n, d)
+  +nh = Nat.mul(n, h)
+  +nf = Nat.mul(n, f)
+  +st = Nat.mul(Nat.mul(Nat.div(n, cc), h), Nat.mul(hd, hd))
+  +bht = Nat.mul(Nat.mul(mb, h), t)
+  +bhtt = Nat.mul(bht, t)
+  +r = rows.fit.n(32n, n, v, rows.big.n(n, v))
+  +params = Nat.add(Nat.add(Nat.mul(v, d), blocks.n(l, c, 0n)), d)
+  +gla = Nat.add(Nat.add(Nat.mul(17n, nd), Nat.mul(2n, n)), Nat.add(Nat.add(Nat.mul(2n, nh), Nat.mul(nh, cc)), Nat.add(Nat.mul(2n, st), Nat.mul(3n, nf))))
+  +sm = Nat.add(Nat.add(Nat.mul(12n, nd), Nat.mul(2n, n)), Nat.add(Nat.add(Nat.mul(2n, nh), Nat.mul(2n, bhtt)), Nat.add(Nat.mul(4n, bht), Nat.mul(3n, nf))))
+  +x0 = align.n(Nat.add(align.n(params), Nat.mul(3n, n)))
+  +ws = Nat.add(x0, Nat.mul(Nat.add(l, 1n), nd))
+  +hdend = Nat.add(Nat.add(ws, Nat.max(gla, sm)), Nat.add(Nat.add(Nat.mul(2n, n), nd), Nat.add(Nat.add(Nat.mul(r, v), Nat.mul(2n, r)), Nat.add(2n, mb))))
+  +g = align.n(Nat.add(align.n(hdend), 16n))
+  Nat.add(Nat.add(g, g), Nat.mul(2n, align.n(params)))
+
+def Lay.fits(+c: C.Config, +mb: Nat, +cc0: Nat) -> Bool:
+  Nat.is_le(Lay.floats(c, mb, cc0), Lay.cap())
