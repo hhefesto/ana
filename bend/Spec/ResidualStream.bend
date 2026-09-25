@@ -84,7 +84,7 @@ def dot_zeros(~C: Data, ~R: Al.Semiring<C>, +n: Nat, +xs: List<&2, C>) ->
     {dot(~C, ~R, zeros(~C, ~R, n), xs) == Al.SR.zero(C, R) : C}:
   match n xs:
     case 1n+p +x <> t:
-      %Al.SR.zero_l(C, R, x) : {Al.SR.add(C, R)(_, dot(~C, ~R, zeros(~C, ~R, p), t)) == Al.SR.zero(C, R) : C}
+      %Equal.sym(C, Al.SR.mul(C, R)(Al.SR.zero(C, R), x), Al.SR.zero(C, R), Al.SR.zero_l(C, R, x)) : {Al.SR.add(C, R)(_, dot(~C, ~R, zeros(~C, ~R, p), t)) == Al.SR.zero(C, R) : C}
       %Equal.sym(C, dot(~C, ~R, zeros(~C, ~R, p), t), Al.SR.zero(C, R), dot_zeros(~C, ~R, p, t)) : {Al.SR.add(C, R)(Al.SR.zero(C, R), _) == Al.SR.zero(C, R) : C}
       Al.SR.add_zero_l(C, R, Al.SR.zero(C, R))
     case 0n _:

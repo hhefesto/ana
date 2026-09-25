@@ -252,21 +252,14 @@ def topK_all(k, xs, h):
       %topK_all(q, t, O.le.pred(List.length(&2, Nat, t), q, h)) : {x <> topK(q, t) == x <> _ : List<&2, Nat>}
       {==}
 
-def min.succ.go(b: Bool, +k: Nat, +v: Nat, +hb: {Nat.is_lt(k, v) == b : Bool}) ->
-    {Bool.pick(Nat, b, 1n+k, 1n+v) == 1n+Bool.pick(Nat, b, k, v) : Nat}:
-  match b:
-    case True{}:
-      {==}
-    case False{}:
-      {==}
-
 law min.succ:
   for +k: Nat
   for +v: Nat
   {Nat.min(1n+k, 1n+v) == 1n+Nat.min(k, v) : Nat}
 
+# Base's Nat.min is structural (2.0.27), so this is its successor case
 def min.succ(k, v):
-  min.succ.go(Nat.is_lt(k, v), k, v, {==})
+  {==}
 
 # On the uniform measure (v tokens of weight u), top-k keeps exactly
 # min(k, v) * u of the total v * u: the share k/v, which no floor bounds.
@@ -383,6 +376,32 @@ def keep_max.go(s: Bool, k: Bool, +x: Nat, +m: Nat, +t: Nat, +den: Nat, +M: Nat,
     case True{} False{}:
       ih(eq)
 
+# Base's Nat.max is structural (2.0.27); keep_max reasons by the pick it
+# equals: the larger, and the right one on a tie
+def max.pick.go(s: Bool, +ap: Nat, +bp: Nat, ih: {Nat.max(ap, bp) == Bool.pick(Nat, s, bp, ap) : Nat}) ->
+    {1n+Nat.max(ap, bp) == Bool.pick(Nat, s, 1n+bp, 1n+ap) : Nat}:
+  match s:
+    case True{}:
+      Equal.cong(Nat, Nat, n => 1n+n, Nat.max(ap, bp), bp, ih)
+    case False{}:
+      Equal.cong(Nat, Nat, n => 1n+n, Nat.max(ap, bp), ap, ih)
+
+law max.pick:
+  for +a: Nat
+  for +b: Nat
+  {Nat.max(a, b) == Bool.pick(Nat, Nat.is_lt(a, b), b, a) : Nat}
+
+def max.pick(a, b):
+  match a b:
+    case 0n 0n:
+      {==}
+    case 0n 1n+bp:
+      {==}
+    case 1n+ap 0n:
+      {==}
+    case 1n+ap 1n+bp:
+      max.pick.go(Nat.is_lt(ap, bp), ap, bp, max.pick(ap, bp))
+
 # the maximum survives filtering whenever it passes its own test
 law keep_max:
   for +xs: List<&2, Nat>
@@ -400,7 +419,10 @@ def keep_max(xs, t, den, M, pass, eq):
       NL.Le.refl(0n)
     case +x <> rest:
       keep_max.go(Nat.is_lt(x, maxW(rest)), Nat.is_le(t, Nat.mul(den, x)), x, maxW(rest), t, den, M, keep(rest, t, den),
-        {==}, pass, eq, e => keep_max(rest, t, den, M, pass, e))
+        {==}, pass,
+        Equal.trans(Nat, Bool.pick(Nat, Nat.is_lt(x, maxW(rest)), maxW(rest), x), Nat.max(x, maxW(rest)), M,
+          Equal.sym(Nat, Nat.max(x, maxW(rest)), Bool.pick(Nat, Nat.is_lt(x, maxW(rest)), maxW(rest), x), max.pick(x, maxW(rest))), eq),
+        e => keep_max(rest, t, den, M, pass, e))
 
 # the argmax always survives min-p when num <= den, so renormalization is
 # total: min-p has no empty-support case

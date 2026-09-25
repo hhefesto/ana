@@ -113,10 +113,14 @@ def Bisim(n: Nat, -A: Data, -W: Data, s: Trie(n, A, W), t: Trie(n, A, W)) -> Typ
 # ≈-sound / ≈-complete, stated for the tries of two languages.
 def sound(~A: Data, ~W: Data, ~L: List<&2, A> -> W, ~K: List<&2, A> -> W,
           ~same: @+xs: List<&2, A> -> {L(xs) == K(xs) : W},
-          xs: List<&2, A>, +prefix: List<&2, A>) ->
+          +xs: List<&2, A>, +prefix: List<&2, A>) ->
     {toLanguage(len(A, xs), A, W, xs, fromLanguage(~A, ~W, ~L, len(A, xs), prefix)) == toLanguage(len(A, xs), A, W, xs, fromLanguage(~A, ~W, ~K, len(A, xs), prefix)) : W}:
-  %to_from(~A, ~W, ~L, xs, prefix) : {_ == toLanguage(len(A, xs), A, W, xs, fromLanguage(~A, ~W, ~K, len(A, xs), prefix)) : W}
-  %to_from(~A, ~W, ~K, xs, prefix) : {L(List.append(&2, A, prefix, xs)) == _ : W}
+  # `%e : P` with e : {a == b} wants b at P's `_` and leaves a there, so each
+  # side is rewritten through the symmetric of to_from
+  %Equal.sym(W, toLanguage(len(A, xs), A, W, xs, fromLanguage(~A, ~W, ~L, len(A, xs), prefix)), L(List.append(&2, A, prefix, xs)), to_from(~A, ~W, ~L, xs, prefix))
+    : {_ == toLanguage(len(A, xs), A, W, xs, fromLanguage(~A, ~W, ~K, len(A, xs), prefix)) : W}
+  %Equal.sym(W, toLanguage(len(A, xs), A, W, xs, fromLanguage(~A, ~W, ~K, len(A, xs), prefix)), K(List.append(&2, A, prefix, xs)), to_from(~A, ~W, ~K, xs, prefix))
+    : {L(List.append(&2, A, prefix, xs)) == _ : W}
   same(List.append(&2, A, prefix, xs))
 
 # The tries of one language, built after different prefixes, agree at

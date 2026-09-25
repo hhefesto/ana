@@ -3,8 +3,9 @@
 Everything under `bend/` is Bend2 alone: the specification (ported from the Agda
 modules), the decoder, the tokenizer, the trainer and the evaluator. There is
 no FFI and no custom C/JS effect. The Bend2 toolchain is pinned in `flake.nix`
-(input `bend2`, `github:bendlang/bend/8008146a…`, v2.0.4, the same pin as
-`~/src/refl`). The Haskell, Agda and Futhark trees stay on the branch as the
+(input `bend2`, the fork `github:hhefesto/bend2/ft-kernels`: upstream 2.0.27 plus
+the bulk ops, the F32 file effects and `IO.time`; rebased from 2.0.4 on
+2026-09-24, the old base kept as the tag `ft-kernels-2.0.4`). The Haskell, Agda and Futhark trees stay on the branch as the
 reference. Nothing under `bend/` builds or calls them.
 
 ```
@@ -85,9 +86,13 @@ out of scope. What it does have:
 ## What the proofs cover, and what they trust
 
 - **Generic laws over a semiring.** Each is written once as a theorem
-  template over a `Semiring` record. Bend2 checks a template only when it is
-  instantiated, so every template is instantiated at the Nat and Bool
-  semirings in its module. That instantiation is what the gate checks. The
+  template over a `Semiring` record. Since Bend 2.0.27 a template body is
+  checked once, at its definition, against opaque parameters (2.0.4 checked
+  only instances, and three template proofs written in the wrong rewrite
+  direction went unnoticed until the rebase: `Trie.sound`,
+  `ResidualStream.dot_zeros`, and `Decoding.keep_max` after `Nat.max` became
+  structural). Every template is still instantiated at the Nat and Bool
+  semirings in its module, so the gate also runs them. The
   structural laws (folds, tries, decoding truncations, linear attention's
   recurrent/parallel/chunked equality, the batch theorem) are fully generic.
 - **F32 is axiomatic.** Bend2's F32 has no algebraic laws, which is correct:
@@ -137,7 +142,7 @@ out of scope. What it does have:
 
 ### The dense trainer
 
-`TrainDense.bend` (flake app `bend-train-dense`) runs master's step at GPU speed. It needs a CUDA build made with the Bend2 fork `~/src/bend2`, branch `ft-kernels`, which the flake now uses.
+`TrainDense.bend` (flake app `bend-train-dense`) runs master's step at GPU speed. It needs a CUDA build made with the Bend2 fork `~/src/bend2`, branch `ft-kernels` (upstream 2.0.27 plus one squashed port commit), which the flake uses.
 
 **Bulk ops in Base.** The fork adds three bulk ops to `base.bend`:
 - `Array.gemm` and `Array.mm`, matrix products;
