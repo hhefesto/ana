@@ -747,7 +747,7 @@ def Nat.sel(b: Bool, x: Nat, y: Nat) -> Nat:
 
 def utf8.mode.go(+h: U32, +t: List<&2, U32>) -> Nat:
   +n = cont.count(h)
-  Nat.sel(Nat.is_eq(n, 9n), 0n, Nat.sel(Nat.is_le(n, List.length(&2, U32, t)), 1n, 2n))
+  Nat.sel(Nat.is_eq(n, 9n), 0n, Nat.sel(Nat.is_le(n, List.length(&2, U32, List.take(&2, U32, t, n))), 1n, 2n))
 
 # 0: a byte that cannot start a scalar, 1: a complete scalar, 2: an
 # incomplete tail (or the end)
