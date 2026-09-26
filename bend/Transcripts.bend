@@ -24,7 +24,8 @@ import ./Check/Lib.bend as L
 #   LANG   haskell | agda | lean | nix | bend
 #
 # Run it from the repository root.  Everything lands in $OUT/LANG/ (default
-# run/transcripts): files-{hi,lo}.nul, units.nul, results.nul (+ .stats),
+# run/transcripts): files-{hi,lo}.nul, units.nul, results.nul (+ .stats;
+# a restart puts a stopped run's results.prev.nul in front),
 # results.{train,holdout}.nul (+ train's .stats), transcripts.{train,holdout}.nul,
 # and log, whose lines are stamped in Mexico City time
 # (UTC-6).  A stage whose output exists is skipped, so a killed run resumes
@@ -663,14 +664,35 @@ def stat.sum(fs: List<String>, st: List<&2, L.Stat>) -> IO(List<&2, L.Stat>):
         +xs : List<&2, U32> <- S.read(f)
         stat.sum(more, stat.lines(S.split.lines(xs), st))
 
+# results files one after another into results.nul, their stats summed
+def cat.into(fs: List<String>, sfs: List<String>, +dir: String) -> IO(Unit):
+  do IO<Unit>:
+    +st : U32 <- S.run.log(".", [], 2000000, "cat", fs, dir ++ "/results.nul.cat")
+    ok.or(st, "cat of the results", dir ++ "/results.nul.cat")
+    +sts : List<&2, L.Stat> <- stat.sum(sfs, Nil{})
+    S.write(dir ++ "/results.nul.stats", S.b(L.stat.show(sts)))
+    S.mv(dir ++ "/results.nul.cat", dir ++ "/results.nul")
+
+# A restart after a stop: results.prev.nul (+ .stats) holds the stopped
+# run's kept results, and DONE (bend-check) the ids it decided; they go
+# back in front of the new results.
+def prev.then(none: Bool, +dir: String, +ext: String, rest: List<String>) -> List<String>:
+  match none:
+    case True{}:
+      rest
+    case False{}:
+      (dir ++ "/results.prev.nul" ++ ext) <> rest
+
+def prev.none(+dir: String) -> IO(Bool):
+  do IO<Bool>:
+    +n : Nat <- S.size(dir ++ "/results.prev.nul.stats")
+    return Nat.is_eq(n, 0n)
+
 # the shards' results one after another (shard order), and their stats
 def shards.cat(+n: Nat, +dir: String) -> IO(Unit):
   do IO<Unit>:
-    +st : U32 <- S.run.log(".", [], 2000000, "cat", shards.files(n, 0n, dir, ""), dir ++ "/results.nul.tmp")
-    ok.or(st, "cat of the shards", dir ++ "/results.nul.tmp")
-    +sts : List<&2, L.Stat> <- stat.sum(shards.files(n, 0n, dir, ".stats"), Nil{})
-    S.write(dir ++ "/results.nul.stats", S.b(L.stat.show(sts)))
-    S.mv(dir ++ "/results.nul.tmp", dir ++ "/results.nul")
+    +none : Bool <- prev.none(dir)
+    cat.into(prev.then(none, dir, "", shards.files(n, 0n, dir, "")), prev.then(none, dir, ".stats", shards.files(n, 0n, dir, ".stats")), dir)
 
 def shards.all(bad: Nat, +n: Nat, +dir: String) -> IO(Unit):
   match bad:
@@ -679,14 +701,23 @@ def shards.all(bad: Nat, +n: Nat, +dir: String) -> IO(Unit):
     case 1n+b:
       IO.die(Unit, 1, "bend-transcripts: " ++ Nat.show(bad) ++ " of " ++ Nat.show(n) ++ " bend-check shards failed, see " ++ dir ++ "/check.K.out")
 
+def one.fin(none: Bool, +dir: String) -> IO(Unit):
+  match none:
+    case True{}:
+      do IO<Unit>:
+        S.mv(dir ++ "/results.nul.tmp.stats", dir ++ "/results.nul.stats")
+        S.mv(dir ++ "/results.nul.tmp", dir ++ "/results.nul")
+    case False{}:
+      cat.into([dir ++ "/results.prev.nul", dir ++ "/results.nul.tmp"], [dir ++ "/results.prev.nul.stats", dir ++ "/results.nul.tmp.stats"], dir)
+
 def check.one(+code: Nat, +lang: String, +dir: String, +bc: String, +jobs: Nat) -> IO(Unit):
   do IO<Unit>:
     env : List<String> <- check.env(code)
     say(dir, "check: bend-check " ++ lang ++ " with " ++ Nat.show(jobs) ++ " workers")
     +st : U32 <- S.run.log(".", env, 2000000, bc, [lang, dir ++ "/units.nul", dir ++ "/results.nul.tmp", Nat.show(jobs)], dir ++ "/check.out")
     ok.or(st, "bend-check", dir ++ "/check.out")
-    S.mv(dir ++ "/results.nul.tmp.stats", dir ++ "/results.nul.stats")
-    S.mv(dir ++ "/results.nul.tmp", dir ++ "/results.nul")
+    +none : Bool <- prev.none(dir)
+    one.fin(none, dir)
 
 def check.many(+code: Nat, +n: Nat, +lang: String, +dir: String, +bc: String, +jobs: Nat) -> IO(Unit):
   do IO<Unit>:

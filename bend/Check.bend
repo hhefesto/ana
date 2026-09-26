@@ -20,7 +20,8 @@ import ./Check/AgdaLibs.bend as Al
 # checker runs and what it needs from the environment.  Common to all:
 # TIMEOUT (seconds per checker run; each language has its default),
 # CAP_LINES (100: lines of checker output a check keeps), KEEP_WORK (set:
-# the work directory is kept and named on stderr).
+# the work directory is kept and named on stderr), DONE (a file of unit ids
+# a stopped run decided, one a line: passed over), SHARD/SHARDS.
 #
 # JOBS workers (default: the runtime's thread count) take jobs from a
 # channel as they free up.  A job is one unit, except for Haskell: a first
@@ -177,6 +178,38 @@ def join.all(chs: List<Chan(List<&2, L.Stat>)>, st: List<&2, L.Stat>) -> IO(List
         s : List<&2, L.Stat> <- IO.join(List<&2, L.Stat>, ch)
         join.all(more, L.stat.merge(s, st))
 
+def set.fin(r: Set() & Bool) -> Bool:
+  (s, b) = r
+  b
+
+def set.has(s: Set(), +k: String) -> Bool:
+  set.fin(Set.has(s, k))
+
+def words.str(ws: List<&2, List<&2, U32>>) -> List<&2, String>:
+  match ws:
+    case Nil{}:
+      Nil{}
+    case w <> more:
+      S.str(w) <> words.str(more)
+
+# DONE (a file of unit ids, one a line; unset: none): the units a run that
+# stopped already decided, passed over as another shard's are, so a
+# restart checks only the rest (bend-transcripts puts the kept ones back
+# from results.prev.nul)
+def done.read(none: Bool, +path: String) -> IO(Set()):
+  match none:
+    case True{}:
+      IO.pure(Set(), Set.new())
+    case False{}:
+      do IO<Set()>:
+        xs : List<&2, U32> <- S.read(path)
+        +s : Set() = Set.from_list(words.str(S.split.lines(xs)))
+        Ck.log("bend-check: " ++ Nat.show(Set.size(s)) ++ " units done before (" ++ path ++ "), passed over")
+        return s
+
+def done.of(+path: String) -> IO(Set()):
+  done.read(String.is_empty(path), path)
+
 # A process's share of the units (SHARD of SHARDS): those whose Haskell
 # package, or (the other languages) file, hashes to SHARD mod SHARDS, the hash (7; h * 31 + c mod 1000003) over the
 # code points, as bend-transcripts' hackage.ok.
@@ -221,7 +254,7 @@ def dp.mine(mine: Bool, same: Bool, +jobs: Chan(Job), rd: S.Rd, +i: Nat, key: Li
     case False{}:
       IO.pure(Dp, Dp{rd, 1n+i, key, grp, gn, True{}})
 
-def dp.rec.m(+c: Cfg, +sk: Nat, +sn: Nat, +jobs: Chan(Job), rd: S.Rd, +i: Nat, +key: List<&2, U32>, grp: List<&2, L.U>, +gn: Nat, +id: List<&2, U32>, m: Maybe<&2, List<&2, U32>>) -> IO(Dp):
+def dp.rec.m(+c: Cfg, +sk: Nat, +sn: Nat, +done: Set(), +jobs: Chan(Job), rd: S.Rd, +i: Nat, +key: List<&2, U32>, grp: List<&2, L.U>, +gn: Nat, +id: List<&2, U32>, m: Maybe<&2, List<&2, U32>>) -> IO(Dp):
   match m:
     case None{}:
       do IO<Dp>:
@@ -230,13 +263,13 @@ def dp.rec.m(+c: Cfg, +sk: Nat, +sn: Nat, +jobs: Chan(Job), rd: S.Rd, +i: Nat, +
     case Some{+rec}:
       +u = {L.U{i, id, L.fields(rec)} : L.U}
       +k = Cfg.key(c, u)
-      dp.mine(shard.mine(sk, sn, S.str(Hs.upto(id, 35))), Bool.and(S.eq(k, key), Nat.is_lt(gn, Cfg.group(c))), jobs, rd, i, key, grp, gn, u, k)
+      dp.mine(Bool.and(shard.mine(sk, sn, S.str(Hs.upto(id, 35))), Bool.not(set.has(done, S.str(id)))), Bool.and(S.eq(k, key), Nat.is_lt(gn, Cfg.group(c))), jobs, rd, i, key, grp, gn, u, k)
 
-def dp.rec(+c: Cfg, +sk: Nat, +sn: Nat, +jobs: Chan(Job), +i: Nat, +key: List<&2, U32>, grp: List<&2, L.U>, +gn: Nat, +id: List<&2, U32>, r: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(Dp):
+def dp.rec(+c: Cfg, +sk: Nat, +sn: Nat, +done: Set(), +jobs: Chan(Job), +i: Nat, +key: List<&2, U32>, grp: List<&2, L.U>, +gn: Nat, +id: List<&2, U32>, r: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(Dp):
   (rd, m) = r
-  dp.rec.m(c, sk, sn, jobs, rd, i, key, grp, gn, id, m)
+  dp.rec.m(c, sk, sn, done, jobs, rd, i, key, grp, gn, id, m)
 
-def dp.id.m(+c: Cfg, +sk: Nat, +sn: Nat, +jobs: Chan(Job), rd: S.Rd, +i: Nat, +key: List<&2, U32>, grp: List<&2, L.U>, +gn: Nat, m: Maybe<&2, List<&2, U32>>) -> IO(Dp):
+def dp.id.m(+c: Cfg, +sk: Nat, +sn: Nat, +done: Set(), +jobs: Chan(Job), rd: S.Rd, +i: Nat, +key: List<&2, U32>, grp: List<&2, L.U>, +gn: Nat, m: Maybe<&2, List<&2, U32>>) -> IO(Dp):
   match m:
     case None{}:
       do IO<Dp>:
@@ -245,24 +278,24 @@ def dp.id.m(+c: Cfg, +sk: Nat, +sn: Nat, +jobs: Chan(Job), rd: S.Rd, +i: Nat, +k
     case Some{+id}:
       do IO<Dp>:
         r : S.Rd & Maybe<&2, List<&2, U32>> <- S.Rd.next(rd)
-        dp.rec(c, sk, sn, jobs, i, key, grp, gn, id, r)
+        dp.rec(c, sk, sn, done, jobs, i, key, grp, gn, id, r)
 
-def dp.id(+c: Cfg, +sk: Nat, +sn: Nat, +jobs: Chan(Job), +i: Nat, +key: List<&2, U32>, grp: List<&2, L.U>, +gn: Nat, r: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(Dp):
+def dp.id(+c: Cfg, +sk: Nat, +sn: Nat, +done: Set(), +jobs: Chan(Job), +i: Nat, +key: List<&2, U32>, grp: List<&2, L.U>, +gn: Nat, r: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(Dp):
   (rd, m) = r
-  dp.id.m(c, sk, sn, jobs, rd, i, key, grp, gn, m)
+  dp.id.m(c, sk, sn, done, jobs, rd, i, key, grp, gn, m)
 
-def dp.step(+c: Cfg, +sk: Nat, +sn: Nat, +jobs: Chan(Job), d: Dp) -> IO(Dp):
+def dp.step(+c: Cfg, +sk: Nat, +sn: Nat, +done: Set(), +jobs: Chan(Job), d: Dp) -> IO(Dp):
   match d:
     case Dp{rd, +i, +key, grp, +gn, g}:
       do IO<Dp>:
         r : S.Rd & Maybe<&2, List<&2, U32>> <- S.Rd.next(rd)
-        dp.id(c, sk, sn, jobs, i, key, grp, gn, r)
+        dp.id(c, sk, sn, done, jobs, i, key, grp, gn, r)
 
 # every unit dispatched: the reader and the number of units
-def dp.go(fuel: Nat, +c: Cfg, +sk: Nat, +sn: Nat, +jobs: Chan(Job), d: Dp) -> IO(S.Rd & Nat):
+def dp.go(fuel: Nat, +c: Cfg, +sk: Nat, +sn: Nat, +done: Set(), +jobs: Chan(Job), d: Dp) -> IO(S.Rd & Nat):
   match fuel d:
     case 1n+p Dp{rd, i, key, grp, gn, True{}}:
-      IO.bind(Dp, S.Rd & Nat, dp.step(c, sk, sn, jobs, Dp{rd, i, key, grp, gn, True{}}), dp.go(p, c, sk, sn, jobs))
+      IO.bind(Dp, S.Rd & Nat, dp.step(c, sk, sn, done, jobs, Dp{rd, i, key, grp, gn, True{}}), dp.go(p, c, sk, sn, done, jobs))
     case _ Dp{rd, i, key, grp, gn, g}:
       IO.pure(S.Rd & Nat, (rd, i))
 
@@ -271,13 +304,6 @@ def dp.go(fuel: Nat, +c: Cfg, +sk: Nat, +sn: Nat, +jobs: Chan(Job), d: Dp) -> IO
 # A unit's package, as the dispatcher sees it: a Hackage package, else the
 # nearest directory above the file that holds a .cabal or .cabal.in (dirs),
 # else the repository.
-def set.fin(r: Set() & Bool) -> Bool:
-  (s, b) = r
-  b
-
-def set.has(s: Set(), +k: String) -> Bool:
-  set.fin(Set.has(s, k))
-
 def hkey.walk(fuel: Nat, +p: String, +base: String, +dirs: Set()) -> String:
   match fuel:
     case 0n:
@@ -426,6 +452,54 @@ def grps.cap(+cap: Nat, +rest: Bool, gs: List<&2, Grp>) -> List<&2, Grp>:
       +r = grps.cap(cap, rest, more)
       Bool.pick(List<&2, Grp>, Nat.is_eq(k, 0n), r, Grp{k, xs, ls} <> r)
 
+# which of a package's units DONE does not hold
+def undone.mask(+done: Set(), xs: List<&2, List<&2, U32>>) -> List<&2, Bool>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case x <> more:
+      Bool.not(set.has(done, S.str(x))) <> undone.mask(done, more)
+
+def keep.id(m: Bool, x: List<&2, U32>, r: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match m:
+    case True{}:
+      x <> r
+    case False{}:
+      r
+
+def undone.ids(ms: List<&2, Bool>, xs: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match ms xs:
+    case m <> mt x <> xt:
+      keep.id(m, x, undone.ids(mt, xt))
+    case _ _:
+      Nil{}
+
+def keep.lc(m: Bool, x: Lc, r: List<&2, Lc>) -> List<&2, Lc>:
+  match m:
+    case True{}:
+      x <> r
+    case False{}:
+      r
+
+def undone.locs(ms: List<&2, Bool>, xs: List<&2, Lc>) -> List<&2, Lc>:
+  match ms xs:
+    case m <> mt x <> xt:
+      keep.lc(m, x, undone.locs(mt, xt))
+    case _ _:
+      Nil{}
+
+# the packages' units DONE does not hold, the emptied packages gone
+def grps.undone(+done: Set(), gs: List<&2, Grp>) -> List<&2, Grp>:
+  match gs:
+    case Nil{}:
+      Nil{}
+    case Grp{n, +ids, locs} <> more:
+      +ms = undone.mask(done, ids)
+      +ls = undone.locs(ms, locs)
+      +k = List.length(&2, Lc, ls)
+      +r = grps.undone(done, more)
+      Bool.pick(List<&2, Grp>, Nat.is_eq(k, 0n), r, Grp{k, undone.ids(ms, ids), ls} <> r)
+
 def send.grps(+q: Chan(Job), gs: List<&2, Grp>) -> IO(Unit):
   match gs:
     case Nil{}:
@@ -451,10 +525,10 @@ def List.head.or(gs: List<&2, Grp>) -> Grp:
 
 # every unit read once for its package; then the packages as jobs, the
 # largest first
-def kp.sent(+cap: Nat, +rest: Bool, +q: Chan(Job), k: Kp) -> IO(Unit):
+def kp.sent(+cap: Nat, +rest: Bool, +done: Set(), +q: Chan(Job), k: Kp) -> IO(Unit):
   match k:
     case Kp{rd, i, off, +m, order, g}:
-      +gs = List.sort(~Grp, ~grp.le, grps.cap(cap, rest, grps(m, List.reverse(&2, String, order))))
+      +gs = List.sort(~Grp, ~grp.le, grps.undone(done, grps.cap(cap, rest, grps(m, List.reverse(&2, String, order)))))
       do IO<Unit>:
         S.Rd.close(rd)
         Ck.log("bend-check: " ++ Nat.show(Grp.sum(gs)) ++ " of " ++ Nat.show(i) ++ " units in " ++ Nat.show(List.length(&2, Grp, gs)) ++ " packages, the largest " ++ Nat.show(Grp.n(List.head.or(gs))))
@@ -469,9 +543,11 @@ def dispatch.keyed(+cs: String, +dirs: Set(), +units: String, +q: Chan(Job)) -> 
     +cap : Nat <- S.env.nat("PKG_CAP", 0n)
     +rest : Nat <- S.env.nat("PKG_REST", 0n)
     Ck.log("bend-check: shard " ++ Nat.show(sk) ++ " of " ++ Nat.show(sn) ++ ", package cap " ++ Nat.show(cap) ++ Bool.pick(String, Nat.is_eq(rest, 0n), "", " (the rest)"))
+    +dn : String <- S.env("DONE", "")
+    +done : Set() <- done.of(dn)
     rd : S.Rd <- S.Rd.open(units)
     k : Kp <- kp.go(big(), cs, dirs, sk, sn, Kp{rd, 0n, 0n, Map.new(&2, Grp), Nil{}, True{}})
-    kp.sent(cap, Bool.not(Nat.is_eq(rest, 0n)), q, k)
+    kp.sent(cap, Bool.not(Nat.is_eq(rest, 0n)), done, q, k)
 
 def dispatch.fin(r: S.Rd & Nat) -> IO(Unit):
   (rd, n) = r
@@ -482,8 +558,10 @@ def dispatch.stream(+c: Cfg, +units: String, +q: Chan(Job)) -> IO(Unit):
     +sk : Nat <- S.env.nat("SHARD", 0n)
     +sn : Nat <- S.env.nat("SHARDS", 1n)
     Ck.log("bend-check: shard " ++ Nat.show(sk) ++ " of " ++ Nat.show(sn))
+    +dn : String <- S.env("DONE", "")
+    +done : Set() <- done.of(dn)
     rd : S.Rd <- S.Rd.open(units)
-    r : S.Rd & Nat <- dp.go(big(), c, sk, sn, q, Dp{rd, 0n, Nil{}, Nil{}, 0n, True{}})
+    r : S.Rd & Nat <- dp.go(big(), c, sk, sn, done, q, Dp{rd, 0n, Nil{}, Nil{}, 0n, True{}})
     dispatch.fin(r)
 
 def dispatch(+c: Cfg, +units: String, +q: Chan(Job)) -> IO(Unit):
@@ -737,13 +815,6 @@ def libs.there(ok: Bool, +libs: String) -> IO(Unit):
       IO.pure(Unit, Unit{})
     case False{}:
       IO.die(Unit, 1, "bend-check: " ++ libs ++ " missing: run bend-check agda-libs")
-
-def words.str(ws: List<&2, List<&2, U32>>) -> List<&2, String>:
-  match ws:
-    case Nil{}:
-      Nil{}
-    case w <> more:
-      S.str(w) <> words.str(more)
 
 def hide.of(+have: Set(), ps: List<&2, String>) -> List<&2, String>:
   match ps:
