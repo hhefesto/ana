@@ -41,6 +41,8 @@
       );
       ghcHarness =
         pkgs: pkgs.haskellPackages.ghcWithPackages (p: map (n: p.${n}) ghcPackageNames);
+      # the Agda the transcript harness drives (bend-check agda)
+      agdaFor = pkgs: pkgs.agda.withPackages (p: [ p.standard-library ]);
       bendBinary =
         pkgs: name: entry:
         pkgs.runCommand name { nativeBuildInputs = [ (bendFor pkgs) ]; } ''
@@ -79,17 +81,78 @@
           bend-pack = bendBinary pkgs "bend-pack" "Pack.bend";
           bend-prepare = bendBinary pkgs "bend-prepare" "Prepare.bend";
           bend-plan-segment = bendBinary pkgs "bend-plan-segment" "PlanSegment.bend";
+          # the corpus drivers: the code corpus from the source trees, its
+          # shards and plan, the code eval corpora, the mix of sources, and
+          # the transfer to a training box (with `bend-push link`)
+          bend-extract = bendBinary pkgs "bend-extract" "Extract.bend";
+          bend-plan-corpus = bendBinary pkgs "bend-plan-corpus" "PlanCorpus.bend";
+          bend-code-evals = bendBinary pkgs "bend-code-evals" "CodeEvals.bend";
+          bend-mix = bendBinary pkgs "bend-mix" "Mix.bend";
+          bend-push = bendBinary pkgs "bend-push" "Push.bend";
           # the transcript corpus (docs/TRANSCRIPT-FORMAT.md): declarations
-          # cut out of source files, then, after deploy/check/<lang>.sh has
-          # run the real checkers on them, rendered as transcripts
+          # cut out of source files, then, after bend-check has run the real
+          # checkers on them, rendered as transcripts
           bend-units = bendBinary pkgs "bend-units" "Units.bend";
           bend-transcript = bendBinary pkgs "bend-transcript" "Transcript.bend";
+          # the checkers: `bend-check LANG UNITS.nul RESULTS.nul [JOBS]` runs
+          # ghc, agda, lean, nix-instantiate or bend on every unit's variants
+          bend-check = bendBinary pkgs "bend-check" "Check.bend";
+          # the stages from the code corpus to transcripts, per language
+          bend-transcripts = bendBinary pkgs "bend-transcripts" "Transcripts.bend";
           # transcripts packed whole into one-context windows, the rest of
-          # each window the end of a code file (deploy/plan-transcripts.sh)
+          # each window the end of a code file (`bend-windows plan` plans them)
           bend-windows = bendBinary pkgs "bend-windows" "Windows.bend";
           # the GHC deploy/check/haskell.sh drives: the common Hackage
           # packages, so a module importing only these checks on its own
           ghc-harness = ghcHarness pkgs;
+          # the corpus tools by their job, with the toolchains they drive on
+          # PATH: `nix run .#deploy -- check haskell UNITS.nul RESULTS.nul`
+          # runs bend-check, `deploy transcripts all nix` bend-transcripts,
+          # and so on (TOOL is the binary's name without `bend-`).  Run it
+          # from the repository root.  nix-instantiate is the system's, as
+          # when the Nix units were checked.  Lean comes through elan (a Lean
+          # project pins its own toolchain).
+          deploy = pkgs.writeShellApplication {
+            name = "deploy";
+            runtimeInputs =
+              (map (t: self.packages.${system}.${t}) [
+                "bend-check"
+                "bend-transcripts"
+                "bend-units"
+                "bend-transcript"
+                "bend-windows"
+                "bend-pack"
+                "bend-prepare"
+                "bend-plan-segment"
+                "bend-extract"
+                "bend-plan-corpus"
+                "bend-code-evals"
+                "bend-mix"
+                "bend-push"
+              ])
+              ++ [
+                (bendFor pkgs)
+                (ghcHarness pkgs)
+                (agdaFor pkgs)
+                pkgs.elan
+                pkgs.coreutils
+                pkgs.findutils
+                pkgs.gnutar
+                pkgs.gzip
+                pkgs.git
+                pkgs.rsync
+                pkgs.openssh
+              ];
+            text = ''
+              if [ "$#" -eq 0 ]; then
+                echo "usage: deploy TOOL [ARGS...]   (TOOL: extract, plan-corpus, code-evals, mix, push, transcripts, check, units, transcript, windows, pack, prepare, plan-segment)" >&2
+                exit 2
+              fi
+              tool=$1
+              shift
+              exec "bend-$tool" "$@"
+            '';
+          };
           # `ana`: the Haskell-era app of the same name, on the Bend2 decoder.
           # The same flags, the same environment (WIKI_*, TEMPERATURE, TOP_K,
           # TOP_P, SAMPLE_SEED, SAMPLE_STATS, TOKENIZER_FILE), the same
@@ -372,6 +435,23 @@
             # rebuilds its file byte for byte
             bend units.bend > units.out
             printf '%s\n' "ok haskell 2" "ok agda 1" "ok lean 2" "ok bend 2" "ok nix 1" "ok lagda 1" | diff - units.out
+            # the corpus tools' libraries: processes and text (Sys), JSON
+            # strings as jq decodes and writes them (Json), POSIX cksum
+            bend sys.bend > sys.out
+            printf 'ok %s\n' run merge timeout cwd env stdin clean parent root chomp split replace nul slurp exists | diff - sys.out
+            bend json.bend > json.out
+            printf 'ok %s\n' escapes space trailing bad-escape unpaired-high lone-low raw-tab unclosed quote doc doc-order doc-extra nonul line | diff - json.out
+            bend cksum.bend > cksum.out
+            if grep -v '^ok ' cksum.out; then exit 1; fi
+            test "$(grep -c '^ok ' cksum.out)" = 5
+            # the drivers' own rules: the mix's rounding and ids, the
+            # extractor's UTF-8, license and holdout verdicts
+            bend mix.bend > mix.out
+            if grep -v '^ok ' mix.out; then exit 1; fi
+            test "$(grep -c '^ok ' mix.out)" = 12
+            bend extract.bend > extract.out
+            if grep -v '^ok ' extract.out; then exit 1; fi
+            test "$(grep -c '^ok ' extract.out)" = 32
             touch $out
           '';
           # the training stack: the hand-written pullbacks agree with central
@@ -446,6 +526,11 @@
           program = "${self.packages.${system}.bend}/bin/bend";
           meta.description = "The pinned Bend2 compiler and checker";
         };
+        deploy = {
+          type = "app";
+          program = "${self.packages.${system}.deploy}/bin/deploy";
+          meta.description = "The corpus tools (bend-check, bend-transcripts, ...) with the toolchains they drive";
+        };
         default = self.apps.${system}.ana;
       });
 
@@ -456,7 +541,7 @@
             inherit system;
             config.allowUnfree = true;
           };
-          agda = pkgs.agda.withPackages (p: [ p.standard-library ]);
+          agda = agdaFor pkgs;
           cudaPackages = pkgs.cudaPackages_12_8;
           cudaCudart = cudaPackages.cuda_cudart;
           cudaCccl = cudaPackages.cccl;
