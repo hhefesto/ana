@@ -56,8 +56,17 @@ def lit.line() -> String:
   +ok = Bool.and(Bool.and(U.eq(plain, U.b(lagda.plain())), Nat.is_eq(n, 1n)), all.whole(us, plain))
   Bool.pick(String, ok, "ok lagda " ++ Nat.show(n), "MISMATCH lagda " ++ Nat.show(n))
 
+# the Term turn's body: haskell, agda and bend lose the first line's indent
+# on every line, lean only on the first (its body starts after `:=`)
+def term.line(+name: String, +lang: String, +body: String, +want: String) -> String:
+  Bool.pick(String, U.eq(T.tidy.term(U.b(lang), U.b(body)), U.b(want)), "ok term " ++ name, "MISMATCH term " ++ name)
+
 def main() -> IO(Unit):
   do IO<Unit>:
+    IO.print(term.line("bend", "bend", "  match x:\n    case 0n:\n      1n\n", "match x:\n  case 0n:\n    1n"))
+    IO.print(term.line("haskell-instance", "haskell", "  fmap f (Just x) = Just (f x)\n  fmap _ Nothing = Nothing\n", "fmap f (Just x) = Just (f x)\nfmap _ Nothing = Nothing"))
+    IO.print(term.line("haskell", "haskell", "\nf x = y\n  where y = x\n", "f x = y\n  where y = x"))
+    IO.print(term.line("lean", "lean", " by\n  simp\n", "by\n  simp"))
     IO.print(line("haskell", 0n, hs(), 2n))
     IO.print(line("agda", 1n, agda(), 1n))
     IO.print(line("lean", 2n, lean(), 2n))

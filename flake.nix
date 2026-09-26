@@ -441,9 +441,9 @@
             if grep -q MISMATCH layout.out; then cat layout.out; exit 1; fi
             test "$(grep -c '^ok ' layout.out)" = 52
             # the unit extractor: unit counts per language, and every unit
-            # rebuilds its file byte for byte
+            # rebuilds its file byte for byte; the Term turn's indentation
             bend units.bend > units.out
-            printf '%s\n' "ok haskell 2" "ok agda 1" "ok lean 2" "ok bend 2" "ok nix 1" "ok lagda 1" | diff - units.out
+            printf '%s\n' "ok term bend" "ok term haskell-instance" "ok term haskell" "ok term lean" "ok haskell 2" "ok agda 1" "ok lean 2" "ok bend 2" "ok nix 1" "ok lagda 1" | diff - units.out
             # the corpus tools' libraries: processes and text (Sys), JSON
             # strings as jq decodes and writes them (Json), POSIX cksum
             bend sys.bend > sys.out

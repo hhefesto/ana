@@ -79,6 +79,32 @@ def lead.trim(+xs: List<&2, U32>) -> List<&2, U32>:
 def tidy(+xs: List<&2, U32>) -> List<&2, U32>:
   U.trim.right(lead.trim(xs))
 
+# the spaces a line starts with
+def lead.spaces(xs: List<&2, U32>, +n: Nat) -> Nat:
+  match xs:
+    case Nil{}:
+      n
+    case +h <> t:
+      Bool.pick(Nat, U32.is_eq(h, 32), lead.spaces(t, 1n+n), n)
+
+def unindent.go(ls: List<&2, List<&2, U32>>, +k: Nat) -> List<&2, U32>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> more:
+      U.append(List.drop(&2, U32, l, Nat.min(k, lead.spaces(l, 0n))), unindent.go(more, k))
+
+# a body that starts a line (haskell and agda equations, a bend def's body)
+# loses its first line's indent on every line: a method's equations in an
+# instance, or a bend def's `match` over its cases, keep their layout (tidy
+# trims the first line alone, which is right after lean's `:=` only)
+def unindent(+xs: List<&2, U32>) -> List<&2, U32>:
+  +ys = Bool.pick(List<&2, U32>, head.is(xs, 10), drop.nls.go(xs, True{}), xs)
+  U.trim.right(unindent.go(U.lines(ys), lead.spaces(ys, 0n)))
+
+def tidy.term(+lang: List<&2, U32>, +xs: List<&2, U32>) -> List<&2, U32>:
+  Bool.pick(List<&2, U32>, Bool.or(U.eq(lang, U.b("lean")), U.eq(lang, U.b("nix"))), tidy(xs), unindent(xs))
+
 # Checks ------------------------------------------------------------------------
 #
 # A check is its status, the byte 0x1F, its output.
@@ -154,7 +180,7 @@ def typ(+fs: List<&2, List<&2, U32>>) -> List<&2, U32>:
   Bool.pick(List<&2, U32>, is.nix(field(fs, 0n)), Nil{}, turn(U.b("Type"), cat([field(fs, 1n), nl(), fence(field(fs, 0n), tidy(field(fs, 4n)))])))
 
 def term(+fs: List<&2, List<&2, U32>>, +body: List<&2, U32>) -> List<&2, U32>:
-  turn(U.b("Term"), fence(field(fs, 0n), tidy(body)))
+  turn(U.b("Term"), fence(field(fs, 0n), tidy.term(field(fs, 0n), body)))
 
 def check.turn(+fs: List<&2, List<&2, U32>>, +c: List<&2, U32>) -> List<&2, U32>:
   checker(tool(field(fs, 0n)), c)

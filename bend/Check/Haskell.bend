@@ -43,8 +43,10 @@ import ./Lib.bend as L
 #
 # GHCi has no two-way pipe here: one GHCi run per batch of a package's
 # units (at most 50) is fed the whole command script at once, each variant
-# copied over Unit.hs by `:!cp` before its `:load`, each command followed by
-# `:!echo @@@END`, and the output is cut at those markers.  A batch that
+# copied over Unit.hs by `:!cp` before it is loaded (the run's first by
+# `:load`, the rest by `:reload`: the package's modules are typechecked once
+# a run), each command followed by `:!echo @@@END`, and the output is cut at
+# those markers.  A batch that
 # times out or dies is halved; a single unit is then run command by command
 # (an original that times out drops the unit, a mutant that times out is
 # not kept).  Checks made in GHCi have status `-`.  A file without a
@@ -738,8 +740,18 @@ def segs(+xs: List<&2, U32>) -> List<&2, List<&2, U32>>:
 def marker() -> String:
   ":!echo @@@END\n"
 
-def load.cmds(+file: String) -> String:
-  ":!cp " ++ file ++ " Unit.hs\n:load Unit.hs\n" ++ marker()
+# the first load of a GHCi run sets Unit.hs as its target; the rest reload
+# it, so the package modules it imports stay loaded (a `:load` forgets them
+# and typechecks them all again: ~6 s against ~1 s for amazonka-dms)
+def load.cmd(first: Bool) -> String:
+  match first:
+    case True{}:
+      ":load Unit.hs\n"
+    case False{}:
+      ":reload\n"
+
+def load.cmds(+first: Bool, +file: String) -> String:
+  ":!cp " ++ file ++ " Unit.hs\n" ++ load.cmd(first) ++ marker()
 
 def types(ns: List<&2, List<&2, U32>>) -> String:
   match ns:
@@ -800,6 +812,7 @@ def write.unit(+dir: String, +x: Pu) -> IO(Unit):
     S.write(dir ++ "/" ++ p ++ ".o.hs", variant(x, True{}, L.U.at(u, 7n)))
     S.write(dir ++ "/" ++ p ++ ".h.hs", variant(x, True{}, L.U.at(u, 10n)))
     S.write(dir ++ "/" ++ p ++ ".t.hs", variant(x, False{}, L.U.at(u, 7n)))
+    S.write(dir ++ "/" ++ p ++ ".d.hs", S.append(variant(x, True{}, L.U.at(u, 7n)), [10]))
     write.muts(dir, x, mutants.tried(u), 0n)
 
 def mut.cmds(+p: String, n: Nat, +j: Nat) -> String:
@@ -807,17 +820,22 @@ def mut.cmds(+p: String, n: Nat, +j: Nat) -> String:
     case 0n:
       ""
     case 1n+k:
-      load.cmds(p ++ ".m" ++ Nat.show(j) ++ ".hs") ++ mut.cmds(p, k, 1n+j)
+      load.cmds(False{}, p ++ ".m" ++ Nat.show(j) ++ ".hs") ++ mut.cmds(p, k, 1n+j)
 
-# the commands a unit sends, and how many markers they print
-def unit.cmds(+x: Pu, +muts: Bool) -> String:
+# the commands a unit sends, and how many markers they print.  A reload
+# passes over a Unit.hs whose text it last loaded without errors, so a unit
+# without a signature line (its .t.hs is its .o.hs) first reloads its .d.hs
+# (the original and a newline) for the warning to come; what that says
+# lands in the `:set` answer, which is not read
+def unit.cmds(+x: Pu, +muts: Bool, +first: Bool) -> String:
   +u = Pu.u(x)
   +p = Pu.p(x)
   +ns = L.words(L.U.at(u, 9n))
-  load.cmds(p ++ ".o.hs")
+  load.cmds(first, p ++ ".o.hs")
     ++ Bool.pick(String, Nat.is_eq(List.length(&2, List<&2, U32>, ns), 0n), "", types(ns) ++ marker())
-    ++ Bool.pick(String, Nat.is_eq(S.len(L.U.at(u, 10n)), 0n), "", load.cmds(p ++ ".h.hs"))
-    ++ ":set -Wmissing-signatures\n" ++ marker() ++ load.cmds(p ++ ".t.hs") ++ ":set -w\n" ++ marker()
+    ++ Bool.pick(String, Nat.is_eq(S.len(L.U.at(u, 10n)), 0n), "", load.cmds(False{}, p ++ ".h.hs"))
+    ++ Bool.pick(String, Nat.is_eq(S.len(L.U.at(u, 6n)), 0n), ":!cp " ++ p ++ ".d.hs Unit.hs\n:reload\n", "")
+    ++ ":set -Wmissing-signatures\n" ++ marker() ++ load.cmds(False{}, p ++ ".t.hs") ++ ":set -w\n" ++ marker()
     ++ Bool.pick(String, muts, mut.cmds(p, List.length(&2, List<&2, U32>, L.U.mutants(u)), 0n), "")
 
 def unit.segs(+x: Pu, +muts: Bool) -> Nat:
@@ -830,12 +848,12 @@ def unit.segs(+x: Pu, +muts: Bool) -> Nat:
 def setup.cmds() -> String:
   ":set prompt \"\"\n" ++ marker() ++ ":set prompt-cont \"\"\n" ++ marker()
 
-def batch.cmds(xs: List<&2, Pu>) -> String:
+def batch.cmds(xs: List<&2, Pu>, +first: Bool) -> String:
   match xs:
     case Nil{}:
       ""
     case +x <> more:
-      unit.cmds(x, True{}) ++ batch.cmds(more)
+      unit.cmds(x, True{}, first) ++ batch.cmds(more, False{})
 
 def batch.segs(xs: List<&2, Pu>) -> Nat:
   match xs:
@@ -897,10 +915,13 @@ def other.progress(+l: List<&2, U32>) -> Bool:
     Bool.and(Nat.is_lt(0n, S.len(v)), Bool.not(Bool.or(S.prefix(v, S.b("Unit ")), S.eq(v, S.b("Unit"))))))
 
 # GHCi's own lines: progress (`Compiling`) and the closing Ok/Failed
+# (`loaded.` after a load, `reloaded.` after a reload, and `Failed, unloaded
+# all modules.` after a load that leaves none)
 def ghci.line(+l: List<&2, U32>) -> Bool:
   +n = progress.len(l)
-  Bool.or(Bool.and(Nat.is_lt(0n, n), S.prefix(List.drop(&2, U32, l, n), S.b("Compiling "))),
-    Bool.and(Bool.or(S.prefix(l, S.b("Ok, ")), S.prefix(l, S.b("Failed, "))), S.suffix(l, S.b(" loaded."))))
+  Bool.or(Bool.or(Bool.and(Nat.is_lt(0n, n), S.prefix(List.drop(&2, U32, l, n), S.b("Compiling "))),
+    Bool.and(Bool.or(S.prefix(l, S.b("Ok, ")), S.prefix(l, S.b("Failed, "))), Bool.or(S.suffix(l, S.b(" loaded.")), S.suffix(l, S.b(" reloaded."))))),
+    S.eq(l, S.b("Failed, unloaded all modules.")))
 
 def drop.lines(ls: List<&2, List<&2, U32>>, +which: Nat) -> List<&2, U32>:
   match ls:
@@ -1076,7 +1097,7 @@ def batch.ran(+c: Hc, +dir: String, +xs: List<&2, Pu>) -> IO(Bst):
   +n = batch.segs(xs)
   do IO<Bst>:
     write.all(dir, xs)
-    +o : S.Out <- ghci(c, dir, batch.flags(xs), setup.cmds() ++ batch.cmds(xs), U32.add(60, U32.mul(Hc.t(c), U32.from_nat(n))))
+    +o : S.Out <- ghci(c, dir, batch.flags(xs), setup.cmds() ++ batch.cmds(xs, True{}), U32.add(60, U32.mul(Hc.t(c), U32.from_nat(n))))
     return ran.of(n, o)
 
 # A single unit, command by command: the original's commands in one run
@@ -1099,7 +1120,7 @@ def fm.step(+c: Hc, +dir: String, +x: Pu, st: Fm) -> IO(Fm):
   match st:
     case Fm{g, ms, ss, +j, +kept}:
       do IO<Fm>:
-        +o : S.Out <- ghci(c, dir, Pkg.flags(Pu.pkg(x)), setup.cmds() ++ load.cmds(Pu.p(x) ++ ".m" ++ Nat.show(j) ++ ".hs"), U32.add(60, Hc.t(c)))
+        +o : S.Out <- ghci(c, dir, Pkg.flags(Pu.pkg(x)), setup.cmds() ++ load.cmds(True{}, Pu.p(x) ++ ".m" ++ Nat.show(j) ++ ".hs"), U32.add(60, Hc.t(c)))
         +r : Bst = ran.of(1n, o)
         return fm.next(r, ms, ss, j, kept)
 
@@ -1158,7 +1179,7 @@ def single(+c: Hc, +dir: String, +x: Pu) -> IO(L.Got):
   +n = unit.segs(x, False{})
   do IO<L.Got>:
     write.unit(dir, x)
-    +o : S.Out <- ghci(c, dir, Pkg.flags(Pu.pkg(x)), setup.cmds() ++ unit.cmds(x, False{}), U32.add(60, U32.mul(Hc.t(c), U32.from_nat(n))))
+    +o : S.Out <- ghci(c, dir, Pkg.flags(Pu.pkg(x)), setup.cmds() ++ unit.cmds(x, False{}, True{}), U32.add(60, U32.mul(Hc.t(c), U32.from_nat(n))))
     single.ran(c, dir, x, ran.of(n, o))
 
 def singles(+c: Hc, +dir: String, xs: List<&2, Pu>) -> IO(List<&2, L.Got>):
