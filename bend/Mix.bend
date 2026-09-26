@@ -27,7 +27,7 @@ import ./Json.bend as J
 # uniqueness across sources before the file is renamed into place
 # (CHECK_IDS=0 skips it).  A repeated or cycled line is written as
 # `jq -c '.id = .id + "#r" + $r'` writes it, so such a source must hold
-# `{"id": ..., "text": ...}` lines (id first, as extract-code.sh writes them;
+# `{"id": ..., "text": ...}` lines (id first, as bend-extract writes them;
 # blank lines are skipped as jq skips them); every other source is copied
 # line for line, byte for byte.
 #
@@ -313,7 +313,7 @@ def id.any(m: Maybe<&2, List<&2, J.Kv>>) -> List<&2, U32>:
     case None{}:
       S.b("null\n")
 
-# the first field is the id (as extract-code.sh writes it), else the whole
+# the first field is the id (as bend-extract writes it), else the whole
 # object is read for it
 def id.key(first: Bool, +v: List<&2, U32>, +l: List<&2, U32>) -> List<&2, U32>:
   match first:

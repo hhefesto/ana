@@ -293,7 +293,7 @@ def quote(xs: List<&2, U32>) -> List<&2, U32>:
 # Corpus lines -----------------------------------------------------------
 
 # A corpus line, `{"id": ..., "text": ...}` with the id first, as
-# extract-code.sh writes them (jq -c): None for anything else.
+# bend-extract writes them (as jq -c did): None for anything else.
 type Doc is Data:
   Doc{id: List<&2, U32>, text: List<&2, U32>}
 

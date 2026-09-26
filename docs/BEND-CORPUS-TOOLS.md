@@ -19,23 +19,24 @@ tokenizer identity and the documents).
 ## Differences in use
 
 - **Files, not pipes.** Bend reads files; a pipe reports size 0 and reads as
-  an empty stream. `deploy/plan-corpus.sh` and `deploy/build-code-evals.sh`
-  write every intermediate NUL stream to disk.
+  an empty stream. `bend-plan-corpus` and `bend-code-evals` (once
+  `deploy/plan-corpus.sh` and `deploy/build-code-evals.sh`) write every
+  intermediate NUL stream to disk.
 - **Failures exit non-zero and write nothing.** Master's `prepare-bpe-stdin`
-  printed failures and exited 0, and `plan-corpus.sh` had to inspect its
+  printed failures and exited 0, and the planner had to inspect its
   stdout. Refusals keep master's messages, with the tool's own name as the
   prefix (`pack:`, `prepare:`, `plan-segment:`).
 - **Unknown presets are refused.** `bend-plan-segment` checks the size name
   against `preset.names` in `bend/Train.bend`; `preset` itself still falls
   back to `small4-v3` for the trainers.
-- **`prepare` prints `ordinary tokens: N`**, which `build-code-evals.sh` used
+- **`prepare` prints `ordinary tokens: N`**, which the code-evals driver used
   to get from `inspect-corpus`.
 - **One process per shard, `--threads 1`.** Measured on a 16-core machine on
   a 4,000-document code shard (23 MB): 41 s and 1.2 GB for `prepare`, 3.9 s
   and 1.7 GB for `pack`, 0.6 s for `plan-segment`. Splitting a shard's
   documents across the runtime's lanes gave 23 s wall for 41 s of CPU: this
   allocation-heavy work scales to about two cores inside one process.
-  `plan-corpus.sh` runs `JOBS` shards at once (default: available memory
+  `bend-plan-corpus` runs `JOBS` shards at once (default: available memory
   over 3 GB, capped at the core count).
 
 ## The tokenizer, made fast without changing its meaning
@@ -95,3 +96,45 @@ file); `plan-segment` at offsets 0, 4000, 8000 and 12000, batches 1, 7, 16
 and 64, presets `tiny`, `bpe100m-v3` and `bpe460m`, packed and unpacked; the
 refusals (an incomplete final pair, an empty id, an empty stream, `--target
 0`, a prefix with `/`, a value option without its value).
+
+## The drivers and the checkers (2026-09-25, evening)
+
+The shell in `deploy/` became Bend programs, each gated byte-identical
+against its script before the script was deleted (the scripts are in
+`159d8e4`). They run programs through `Sys.run` in `bend/Sys.bend`: the
+fork's `Process.run` under `sh -c 'cd "$1" && shift && exec "$@" 2>&1'`
+with coreutils `timeout`, so a working directory, an environment, the
+timeout's status 124 with the output so far, and stderr merged in write
+order are as the shell had them.
+
+| tool | replaces | gate | result |
+|---|---|---|---|
+| `bend-check nix` | `check/nix.sh` | 300 units (+12 with a trailing empty field), 1 worker vs 4 | identical records and stats (after the fixes below); 40 s vs 2m12s |
+| `bend-check bend` | `check/bend.sh` | 112 units | identical; 1m28s vs 5m10s |
+| `bend-check lean` | `check/lean.sh` | 41 mathlib units | identical; 2m vs 5m |
+| `bend-check haskell` | `check/haskell.sh` | 138 units of 8 packages (Hackage, repos, curated, own) | identical, input order included; 2m33s vs 1m59s (4 workers vs 1, batch GHCi) |
+| `bend-check agda` | `check/agda.sh` | 69 units, after the library precompile, `FTUnit*` cleared before each side (below) | identical, 455,831 bytes; 20m33s vs 23m7s, one worker each, under load |
+| `bend-check agda-libs` | `check/agda-libs.sh` | a copy of the libraries, a stub agda | identical trees and sessions |
+| `bend-transcripts` | `transcripts.sh` | sources of all five languages; units of Nix and Bend | identical |
+| `bend-extract` | `extract-code.sh` | 80 tarballs, 8 repos, own, curated; holdout on | identical against the script with sorted listings (the port's order fix) |
+| `bend-plan-corpus` | `plan-corpus.sh` | 20,000 documents, unpacked and packed, resume | parts, corpora, sidecars and plans identical |
+| `bend-code-evals` | `build-code-evals.sh` | a 309-line holdout slice with NULs | the five corpora identical |
+| `bend-mix` | `mix-corpus.sh` | plain, repeated, cycled, dry, duplicate ids, usage errors | identical output and summary |
+| `bend-push` | `push-corpus.sh`, `check-link.sh` | stub ssh and rsync, 16 cases | identical output and commands |
+
+Fixes the port carries (each one visible in its gate): a record's trailing
+empty field is kept (the shell's `readarray` dropped it and `set -u` then
+killed the worker); an Agda message with a raw control character is
+decoded instead of lost; results come in input order; the work directory's
+parent is stripped from messages as well as the directory; extraction
+lists sources and files in byte order; an empty `:cycle` source stops the
+mix instead of hanging. Found in the shell while gating and fixed in
+`159d8e4` so the reference was right: the keys files read whole by gawk,
+CRs in a Windows `.cabal`, a dead GHCi killing its worker through SIGPIPE.
+
+Agda's bytes depend on the state of the libraries' interfaces: a unit is
+checked inside its library as `FTUnit<k>.agda`, and its interface stays in
+the library's `_build`, so a second run of the same unit finds it up to
+date and prints nothing for it, and a library module another run built
+is no longer printed as checked. The gate therefore clears the `FTUnit*`
+files before each side and runs after the library precompile has ended.

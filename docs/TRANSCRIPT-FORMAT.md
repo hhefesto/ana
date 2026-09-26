@@ -30,7 +30,7 @@ The prose turns: the User line is the declaration's doc comment when it has
 one, else a plain request (``Define `f`.``, ``Prove `f`.``, ``Write the type
 signature of `f`.``, `Write this Nix expression.`). A Claude-written task
 line and a one-sentence diagnosis before a repair are planned
-(`deploy/claude-batch.sh`, not yet written or run); only prose will ever be
+(a Bend driver over the Message Batches API, not yet written or run); only prose will ever be
 generated, never code or checker output.
 
 ### The flag line: proposition or type
@@ -177,13 +177,18 @@ unwrapOr :: a -> Maybe a -> a
 ## How transcripts are made
 
 ```
-source files ──► bend-units ──► units.nul ──► deploy/check/<lang>.sh ──► results.nul
+source files ──► bend-units ──► units.nul ──► bend-check LANG ──► results.nul
  (NUL stream)    (Units.bend)                 (the real checker)
                                                               │
                                                               ▼
                                          bend-transcript ──► transcripts.nul ──► packing ──► bend-prepare
                                          (Transcript.bend)
 ```
+
+`bend-transcripts STAGE LANG` (`bend/Transcripts.bend`) runs the stages for
+one language from the code corpus: `sources` (the language's files as a
+NUL stream, split by how many units a file may give), `units`, `check`,
+`render`, or `all`; outputs and a UTC-6 log in `run/transcripts/LANG/`.
 
 1. **Units** (`bend-units LANG IN.nul OUT.nul [MAX_PER_FILE]`). Each source
    file is cut into declarations by the column-0 layout every one of these
@@ -200,8 +205,8 @@ source files ──► bend-units ──► units.nul ──► deploy/check/<la
    never touched, nor a line's first word (an equation's own name).
    Positions come from a hash of the unit's id, so the corpus is
    reproducible.
-2. **Checking** (`deploy/check/<lang>.sh UNITS RESULTS [JOBS]`, formats in
-   `deploy/check/lib.sh`). The real checker runs on the original, the hole
+2. **Checking** (`bend-check LANG UNITS RESULTS [JOBS]`, formats in
+   `bend/Check/Lib.bend`, each checker in `bend/Check/<Lang>.bend`). The real checker runs on the original, the hole
    and each mutant; a unit whose original fails is dropped (usually an
    import the harness lacks), and a mutant that still checks is dropped.
    The same run asks the checker for the types of the names the body uses
@@ -249,9 +254,11 @@ Still to build, in this order, each with its count recorded:
   held-out projects (`run/code-eval-v2.jsonl`) are whole packages or
   repositories; add a 10-gram check against the evals.
 - **Near-dedup**: MinHash over 5-gram shingles at Jaccard 0.7.
-- **Mix** by transcript count with `deploy/mix-corpus.sh`: Haskell 35, Lean
+- **Mix** by transcript count with `bend-mix`: Haskell 35, Lean
   25, Agda 20, Nix 10, Bend 10, plus 5% raw code as an anchor; interleave,
   never concatenate.
 - **Packing.** The trainer drops any document shorter than a window, and a
-  transcript averages ~374 tokens: transcripts must be packed into windows
-  (best fit, whole transcripts, EOS between them) before `bend-prepare`.
+  transcript averages ~374 tokens: transcripts are packed whole into
+  one-context windows, EOS between them, the gap filled with the end of a
+  code file (`bend-windows lengths`, `plan`, `build`; next fit in order, so
+  a window holds neighbouring units).

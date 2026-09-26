@@ -5,6 +5,13 @@ by the hour; M2 gets one because `run/code-train-v2.jsonl` and `run/code32k.bpe`
 are the inputs to a ~$250-350 run and must be reproducible and auditable from
 the repo.  These are the invocations that produced the artifacts on disk.
 
+**2026-09-25, evening:** the `deploy/*.sh` scripts below are Bend programs now
+(`docs/BEND-CORPUS-TOOLS.md`, last section; the scripts are in `159d8e4`):
+`deploy/extract-code.sh OUT` is `nix run .#deploy -- extract OUT`,
+`deploy/build-code-evals.sh` is `deploy code-evals`, `deploy/mix-corpus.sh`
+is `deploy mix`, `deploy/plan-corpus.sh` is `deploy plan-corpus`, with the
+same arguments and environment.
+
 **2026-09-25:** the `formal-transformer` commands below are the Haskell CLI,
 kept at the tag `haskell-final` (with the deleted `deploy/build-tokenizer-sample.sh`).
 `pack-stdin`, `prepare-bpe-stdin` and `plan-segment` have Bend replacements that

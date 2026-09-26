@@ -6,7 +6,7 @@ import ./Json.bend as J
 #
 #   bend-code-evals TOKENIZER.bpe OUT_DIR [EVAL.jsonl]
 #
-# The sources here were held out WHOLE by extract-code.sh, chosen by a hash of
+# The sources here were held out WHOLE by bend-extract, chosen by a hash of
 # the package or repository name. That matters: the trainer's own
 # train/validation split is a hash of document position, and code vendors
 # heavily, so a position-based split puts the same file on both sides.

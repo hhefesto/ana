@@ -28,8 +28,10 @@ sampling is its unfold into the trie of continuations (`bend/Spec/Trie.bend`).
 | `bend/Generate.bend`, `bend/Evaluate.bend` | the decoder and the bits-per-byte scorer |
 | `bend/Tokenizer.bend` | byte-level BPE (encode, decode, identity) |
 | `bend/Pack.bend`, `bend/Prepare.bend`, `bend/PlanSegment.bend` | the corpus tools, byte-identical to the Haskell ones they replaced (`docs/BEND-CORPUS-TOOLS.md`) |
+| `bend/Extract.bend`, `PlanCorpus`, `CodeEvals`, `Mix`, `Push` | the corpus drivers: extraction, shards and plan, eval corpora, mixing, box transfers (they run programs through `bend/Sys.bend`) |
+| `bend/Units.bend`, `Check.bend` + `Check/`, `Transcript.bend`, `Transcripts.bend`, `Windows.bend` | the transcript corpus: units, the real checkers, rendering, the stages, one-context windows (`docs/TRANSCRIPT-FORMAT.md`) |
 | `bend/gpu/` | GPU conformance programs, box scripts and the logs of the runs |
-| `deploy/` | shell drivers: corpus extraction, mixing, planning, eval corpora, box transfers |
+| `deploy/check/` | `Harness.lean` (the Lean checker's driver, the one program only Lean can be) and the harness GHC's package list |
 | `weights/` | the two tokenizers: `enwiki-fineweb-32k.bpe` (v2/v3) and `code32k.bpe` (code) |
 | `references/` | the papers the specification formalizes |
 
@@ -43,7 +45,8 @@ port came from are at the tag `haskell-final`; comments that cite
 ```sh
 nix flake check                      # the Bend spec, unit tests, trainer and dense-trainer checks
 nix run .#bend -- bend/Everything.bend
-nix develop                          # bend, jq, ghc, agda (with its standard library), elan for Lean
+nix develop                          # bend, ghc, agda (with its standard library), elan for Lean
+nix run .#deploy -- TOOL ARGS        # a corpus tool (bend-TOOL) with those toolchains on PATH
 ```
 
 ## Generate
@@ -61,13 +64,15 @@ matching file under `weights/` or `run/`.
 ## Corpora
 
 ```sh
+nix run .#deploy -- extract run/code-train-v3.jsonl
 TOKENIZER=weights/code32k.bpe PACK_TARGET=131072 PACK_GROUP=1 \
-  deploy/plan-corpus.sh run/code-train-v2.jsonl RUN_DIR SIZE BATCH 2000
-deploy/build-code-evals.sh weights/code32k.bpe run/eval run/code-eval-v2.jsonl
+  nix run .#deploy -- plan-corpus run/code-train-v2.jsonl RUN_DIR fp100m BATCH 2000
+nix run .#deploy -- code-evals weights/code32k.bpe run/eval run/code-eval-v2.jsonl
+nix run .#deploy -- transcripts all haskell      # sources, units, check, render
 ```
 
-Every source is JSONL `{id, text}`; `jq` turns it into the NUL-framed stream
-the Bend tools read. Interleave sources (`deploy/mix-corpus.sh`), never
+Every source is JSONL `{id, text}`; the drivers turn it into the NUL-framed
+stream the Bend tools read. Interleave sources (`deploy mix`), never
 concatenate them: the trainer reads shards in order under one schedule.
 
 ## Versions

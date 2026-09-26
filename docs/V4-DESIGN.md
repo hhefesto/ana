@@ -268,7 +268,7 @@ inside a permissive package is not caught.  Dual-licensed repos shipping only
 `LICENSE-MIT`/`LICENSE-APACHE` (no bare `LICENSE`) are dropped conservatively.
 
 **Haskell dominates at 88%, far more than the plan assumed.** Phase B's
-per-language balance is therefore a job for `mix-corpus.sh`'s repeat counts
+per-language balance is therefore a job for `mix-corpus.sh`'s (now `bend-mix`'s) repeat counts
 rather than something the corpus provides for free.
 
 **1lab is excluded and that is correct** — it is AGPL-3.0. It would have been a

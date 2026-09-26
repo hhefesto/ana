@@ -34,7 +34,7 @@
       # the pinned bend command (clang on its PATH, telemetry off)
       bendFor = pkgs: bend2.packages.${pkgs.stdenv.hostPlatform.system}.default;
       # A Bend2 program compiled to a native binary (C via clang).
-      # the GHC deploy/check/haskell.sh drives: the packages listed in
+      # the GHC `bend-check haskell` drives: the packages listed in
       # deploy/check/ghc-packages.txt (one per line, # comments)
       ghcPackageNames = builtins.filter (l: l != "" && builtins.substring 0 1 l != "#") (
         nixpkgs.lib.splitString "\n" (builtins.readFile ./deploy/check/ghc-packages.txt)
@@ -102,7 +102,7 @@
           # transcripts packed whole into one-context windows, the rest of
           # each window the end of a code file (`bend-windows plan` plans them)
           bend-windows = bendBinary pkgs "bend-windows" "Windows.bend";
-          # the GHC deploy/check/haskell.sh drives: the common Hackage
+          # the GHC `bend-check haskell` drives: the common Hackage
           # packages, so a module importing only these checks on its own
           ghc-harness = ghcHarness pkgs;
           # the corpus tools by their job, with the toolchains they drive on
@@ -551,13 +551,12 @@
         in
         {
           # Bend, plus the toolchains the transcript harness drives
-          # (deploy/check/*.sh): the compilers and checkers of the languages
+          # (bend-check): the compilers and checkers of the languages
           # the corpus teaches.  Lean comes through elan, because a Lean
           # project pins its own toolchain (mathlib's lean-toolchain).
           default = pkgs.mkShell {
             packages = [
               (bendFor pkgs)
-              pkgs.jq
               (ghcHarness pkgs)
               agda
               pkgs.elan

@@ -20,7 +20,7 @@ import ./Ftcc.bend as Fc
 # nothing on any refusal (an empty id, a duplicate id, an incomplete final
 # pair, an empty stream, an unparseable tokenizer).
 #
-# Run it with `--threads 1`, one process per shard (deploy/plan-corpus.sh
+# Run it with `--threads 1`, one process per shard (bend-plan-corpus
 # does).  Splitting a shard's documents across the runtime's lanes was
 # measured (2026-09-25, 16 cores, a 4,000-document code shard): 23 s wall
 # for 41 s of CPU, where one lane takes 41 s, because this allocation-heavy

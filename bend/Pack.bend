@@ -20,7 +20,7 @@ import ./Bytes.bend as B
 # named prefix-00000000, prefix-00000001, ... ("pack" by default).
 #
 # Every decision here is master's packStep / packFlush, one for one; the
-# stats line (on stderr, with --stats) is master's, which plan-corpus.sh
+# stats line (on stderr, with --stats) is master's, which bend-plan-corpus
 # parses.
 
 type Cfg is Data:
