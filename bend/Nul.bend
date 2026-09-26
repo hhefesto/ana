@@ -1,8 +1,9 @@
 import Base
 
 # The NUL-framed document stream every corpus tool reads and writes: an id,
-# a NUL byte, the text, a NUL byte, repeated.  `jq --raw-output0 '.id,
-# .text'` produces it from JSONL, so no tool here parses JSON.
+# a NUL byte, the text, a NUL byte, repeated.  The JSONL drivers
+# (bend-transcripts, bend-plan-corpus, ...) write it from `{id, text}` lines
+# with Json.bend, so these tools parse no JSON.
 #
 # Meaning: a list of (id, text) byte-list pairs, in stream order.  A stream
 # whose last pair lacks either NUL is refused ("incomplete final pair"), as
