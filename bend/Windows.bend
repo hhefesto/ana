@@ -26,28 +26,32 @@ import ./Ftcc.bend as Fc
 #
 # `lengths` writes CORPUS.lengths: each document's token count, one per
 # line.  `plan` reads two such files and writes PLAN, one line per window,
-# `f skip k`: the window takes the next k
-# transcripts in TRANSCRIPTS' order and, when f > 0, the last f tokens of
-# the filler document `skip` documents after the one the previous filler
-# came from (every filler document is used at most once, in order).  A
-# window whose length is not CAPACITY, a plan that runs past either
-# corpus, or a filler shorter than f is refused (exit 1, nothing written).
+# `f i k`: the window takes the next k transcripts in TRANSCRIPTS' order
+# and, when f > 0, the last f tokens of filler document i (counted from 0
+# in FILLER; every filler document is used at most once).  A window whose
+# length is not CAPACITY, a plan that runs past the transcripts, or a
+# filler document missing or shorter than f is refused (exit 1, nothing
+# written).
 # The output is FTCC v2 with TRANSCRIPTS' tokenizer identity and master's
 # dataset fingerprint (Ftcc.bend); window ids are PREFIX-00000000,
 # PREFIX-00000001, ...
 #
-# The plan is next fit in order: a window takes transcripts while the next
-# one (with its EOS) still fits, and the rest, f = CAPACITY - used, is the
-# end of the next filler document at least f tokens long (the shorter ones
-# before it are skipped).  In order, not first-fit decreasing: a window's
-# transcripts are neighbours in TRANSCRIPTS (units of one file, one
-# package), `f skip k` needs no permutation, and every window is full
-# anyway, the gap being real code.  A transcript that does not fit an empty
-# window (bend-transcript drops those past WINDOW - 64) or a filler corpus
-# that runs out is refused (exit 1, nothing written).
+# The plan is next fit in order for the transcripts: a window takes
+# transcripts while the next one (with its EOS) still fits.  In order, not
+# first-fit decreasing: a window's transcripts are neighbours in
+# TRANSCRIPTS (units of one file, one package), and every window is full
+# anyway, the gap being real code.  The gap, f = CAPACITY - used, is filled
+# best fit: the end of the shortest unused filler document at least f
+# tokens long (the first in FILLER of equal lengths).  Taking the next long
+# enough document instead skips the short ones for good: on Nix and Bend
+# shards of 5,000 transcripts and 2,500 filler files, next fit ran out of
+# filler after 841 to 1,120 of 1,116 to 1,473 windows, best fit served them
+# all.  A transcript that does not fit an empty window (bend-transcript
+# drops those past WINDOW - 64) or a filler corpus that runs out is refused
+# (exit 1, nothing written).
 
 type Plan is Data:
-  Plan{f: Nat, skip: Nat, k: Nat}
+  Plan{f: Nat, i: Nat, k: Nat}
 
 # The plan: every natural number in the text, in threes ---------------------
 
@@ -98,50 +102,58 @@ def last(+xs: List<&2, U32>, +f: Nat) -> List<&2, U32>:
 # corpora, the windows so far (newest first) and the first problem met (after
 # which nothing more is built)
 type St is Data:
-  St{fs: List<&2, List<&2, U32>>, ts: List<&2, List<&2, U32>>, problem: String, docs: List<&2, Fc.Doc>}
+  St{fs: Map<&2, List<&2, U32>>, ts: List<&2, List<&2, U32>>, problem: String, docs: List<&2, Fc.Doc>}
 
-# the filler of a window: f = 0 takes none and keeps the filler stream;
-# otherwise skip documents, take the next one's last f tokens
-def filler.next(+f: Nat, fs: List<&2, List<&2, U32>>) -> Maybe<&2, List<&2, U32>> & List<&2, List<&2, U32>>:
-  match fs:
+# the filler documents by their index (Nat.show) in FILLER
+def fmap(ds: List<&2, List<&2, U32>>, +j: Nat, m: Map<&2, List<&2, U32>>) -> Map<&2, List<&2, U32>>:
+  match ds:
     case Nil{}:
-      (None{}, Nil{})
-    case +x <> more:
-      (Bool.pick(Maybe<&2, List<&2, U32>>, Nat.is_le(f, List.length(&2, U32, x)), Some{last(x, f)}, None{}), more)
+      m
+    case d <> more:
+      fmap(more, 1n+j, Map.set(&2, List<&2, U32>, m, Nat.show(j), d))
 
-def filler.take(+f: Nat, +skip: Nat, fs: List<&2, List<&2, U32>>) -> Maybe<&2, List<&2, U32>> & List<&2, List<&2, U32>>:
+def filler.cut(+f: Nat, +x: List<&2, U32>) -> Maybe<&2, List<&2, U32>>:
+  Bool.pick(Maybe<&2, List<&2, U32>>, Nat.is_le(f, List.length(&2, U32, x)), Some{last(x, f)}, None{})
+
+def filler.got(+f: Nat, r: Map<&2, List<&2, U32>> & List<&2, U32>) -> Maybe<&2, List<&2, U32>> & Map<&2, List<&2, U32>>:
+  (m, x) = r
+  (filler.cut(f, x), m)
+
+# the filler of a window: f = 0 takes none; otherwise document i's last f
+# tokens (a missing document reads as empty, so too short)
+def filler.take(+f: Nat, +i: Nat, fs: Map<&2, List<&2, U32>>) -> Maybe<&2, List<&2, U32>> & Map<&2, List<&2, U32>>:
   match f:
     case 0n:
       (Some{Nil{}}, fs)
     case 1n+p:
-      filler.next(1n+p, List.drop(&2, List<&2, U32>, fs, skip))
+      filler.got(1n+p, Map.get(List<&2, U32>, Nil{}, fs, Nat.show(i)))
 
-def St.check(ok: Bool, +toks: List<&2, U32>, fs: List<&2, List<&2, U32>>, ts: List<&2, List<&2, U32>>, docs: List<&2, Fc.Doc>, +cap: Nat, +prefix: String, +i: Nat) -> St:
+def St.check(ok: Bool, +toks: List<&2, U32>, fs: Map<&2, List<&2, U32>>, ts: List<&2, List<&2, U32>>, docs: List<&2, Fc.Doc>, +cap: Nat, +prefix: String, +i: Nat) -> St:
   match ok:
     case False{}:
       St{fs, ts, "windows: window " ++ Nat.show(i) ++ " holds " ++ Nat.show(List.length(&2, U32, toks)) ++ " tokens, not " ++ Nat.show(cap) ++ " (or the transcripts ran out)", docs}
     case True{}:
       St{fs, ts, "", Fc.Doc{id.of(prefix, i), toks} <> docs}
 
-def St.fill(fl: Maybe<&2, List<&2, U32>>, fs: List<&2, List<&2, U32>>, +ts: List<&2, List<&2, U32>>, docs: List<&2, Fc.Doc>, +k: Nat, +cap: Nat, +prefix: String, +i: Nat) -> St:
+def St.fill(fl: Maybe<&2, List<&2, U32>>, fs: Map<&2, List<&2, U32>>, +ts: List<&2, List<&2, U32>>, docs: List<&2, Fc.Doc>, +k: Nat, +cap: Nat, +prefix: String, +i: Nat) -> St:
   match fl:
     case None{}:
-      St{fs, ts, "windows: window " ++ Nat.show(i) ++ ": the filler corpus ran out or its document is too short", docs}
+      St{fs, ts, "windows: window " ++ Nat.show(i) ++ ": its filler document is missing or too short", docs}
     case Some{+pre}:
       +mine = List.take(&2, List<&2, U32>, ts, k)
       +toks = List.append(&2, U32, pre, eos.join(mine))
       St.check(Bool.and(Nat.is_eq(List.length(&2, List<&2, U32>, mine), k), Nat.is_eq(List.length(&2, U32, toks), cap)), toks, fs, List.drop(&2, List<&2, U32>, ts, k), docs, cap, prefix, i)
 
-def St.take(r: Maybe<&2, List<&2, U32>> & List<&2, List<&2, U32>>, +ts: List<&2, List<&2, U32>>, docs: List<&2, Fc.Doc>, +k: Nat, +cap: Nat, +prefix: String, +i: Nat) -> St:
+def St.take(r: Maybe<&2, List<&2, U32>> & Map<&2, List<&2, U32>>, +ts: List<&2, List<&2, U32>>, docs: List<&2, Fc.Doc>, +k: Nat, +cap: Nat, +prefix: String, +i: Nat) -> St:
   (fl, rest) = r
   St.fill(fl, rest, ts, docs, k, cap, prefix, i)
 
-def St.step.ok(ok: Bool, fs: List<&2, List<&2, U32>>, +ts: List<&2, List<&2, U32>>, +prob: String, docs: List<&2, Fc.Doc>, p: Plan, +cap: Nat, +prefix: String, +i: Nat) -> St:
+def St.step.ok(ok: Bool, fs: Map<&2, List<&2, U32>>, +ts: List<&2, List<&2, U32>>, +prob: String, docs: List<&2, Fc.Doc>, p: Plan, +cap: Nat, +prefix: String, +i: Nat) -> St:
   match ok p:
     case False{} _:
       St{fs, ts, prob, docs}
-    case True{} Plan{+f, +skip, +k}:
-      St.take(filler.take(f, skip, fs), ts, docs, k, cap, prefix, i)
+    case True{} Plan{+f, +j, +k}:
+      St.take(filler.take(f, j, fs), ts, docs, k, cap, prefix, i)
 
 def St.step(st: St, p: Plan, +cap: Nat, +prefix: String, +i: Nat) -> St:
   match st:
@@ -179,57 +191,131 @@ def fit(ts: List<&2, Nat>, +used: Nat, +k: Nat, +cap: Nat, ok: Bool) -> Fit:
     case Nil{} True{}:
       Fit{k, used, Nil{}}
 
-# is the first filler document at least f tokens long
-def long(+fs: List<&2, Nat>, +f: Nat) -> Bool:
-  match fs:
+# The filler pool: for each length b = 0 .. top (top = CAPACITY + 1 holds
+# every document longer than CAPACITY) the unused documents of that length,
+# first first.
+type Fd is Data:
+  Fd{len: Nat, i: Nat}
+
+def fd.le(a: Fd, c: Fd) -> Bool:
+  match a c:
+    case Fd{+x, i} Fd{+y, j}:
+      Bool.or(Nat.is_lt(x, y), Bool.and(Nat.is_eq(x, y), Nat.is_le(i, j)))
+
+def fds(ls: List<&2, Nat>, +top: Nat, +i: Nat) -> List<&2, Fd>:
+  match ls:
     case Nil{}:
-      False{}
-    case +x <> more:
-      Nat.is_le(f, x)
+      Nil{}
+    case +l <> more:
+      Fd{Bool.pick(Nat, Nat.is_le(l, top), l, top), i} <> fds(more, top, 1n+i)
 
-# the next filler document at least f long: found, how many were skipped,
-# the documents after it
-type Sk is Data:
-  Sk{found: Bool, skip: Nat, rest: List<&2, Nat>}
+# bucketing the sorted documents: b the bucket being filled, cur its
+# indices (newest first), acc the buckets closed (newest first)
+type Bk is Data:
+  Bk{b: Nat, cur: List<&2, Nat>, acc: List<&2, List<&2, Nat>>, xs: List<&2, Fd>, go: Bool}
 
-def seek(fs: List<&2, Nat>, +f: Nat, +skip: Nat, ok: Bool) -> Sk:
-  match fs ok:
-    case x <> more True{}:
-      Sk{True{}, skip, more}
-    case x <> +more False{}:
-      seek(more, f, 1n+skip, long(more, f))
-    case Nil{} _:
-      Sk{False{}, skip, Nil{}}
+def bk.close(+b: Nat, +cur: List<&2, Nat>, acc: List<&2, List<&2, Nat>>, xs: List<&2, Fd>, +go: Bool) -> Bk:
+  Bk{1n+b, Nil{}, List.reverse(&2, Nat, cur) <> acc, xs, go}
 
-# the planner's state: what is left of both, the plan so far (newest
-# first), the filler tokens used, the windows planned
+# the next document joins bucket b when its length is b; otherwise (it is
+# longer: the list is sorted) bucket b closes
+def bk.step(+top: Nat, st: Bk) -> Bk:
+  match st:
+    case Bk{+b, +cur, +acc, xs, g}:
+      match xs:
+        case Nil{}:
+          bk.close(b, cur, acc, Nil{}, Nat.is_lt(b, top))
+        case Fd{+l, +i} <> +more:
+          Bool.pick(Bk, Nat.is_eq(l, b), Bk{b, i <> cur, acc, more, True{}}, bk.close(b, cur, acc, Fd{l, i} <> more, True{}))
+
+def bk.go(fuel: Nat, +top: Nat, st: Bk) -> Bk:
+  match fuel st:
+    case 1n+p Bk{b, cur, acc, xs, True{}}:
+      bk.go(p, top, bk.step(top, Bk{b, cur, acc, xs, True{}}))
+    case _ other:
+      other
+
+def bk.of(st: Bk) -> List<&2, List<&2, Nat>>:
+  match st:
+    case Bk{b, cur, acc, xs, g}:
+      List.reverse(&2, List<&2, Nat>, acc)
+
+def buckets(+ls: List<&2, Nat>, +top: Nat) -> List<&2, List<&2, Nat>>:
+  +n = List.length(&2, Nat, ls)
+  bk.of(bk.go(Nat.add(Nat.add(n, top), 2n), top, Bk{0n, Nil{}, Nil{}, List.sort(~Fd, ~fd.le, fds(ls, top, 0n)), True{}}))
+
+# buckets 0 .. f-1 and f ..
+type Cut is Data:
+  Cut{pre: List<&2, List<&2, Nat>>, post: List<&2, List<&2, Nat>>}
+
+def cut.cons(+b: List<&2, Nat>, c: Cut) -> Cut:
+  match c:
+    case Cut{pre, post}:
+      Cut{b <> pre, post}
+
+def cut(f: Nat, bs: List<&2, List<&2, Nat>>) -> Cut:
+  match f bs:
+    case 0n other:
+      Cut{Nil{}, other}
+    case 1n+p b <> more:
+      cut.cons(b, cut(p, more))
+    case _ Nil{}:
+      Cut{Nil{}, Nil{}}
+
+# the first document of the first non-empty bucket, and the buckets without it
+type Pop is Data:
+  Pop{got: Maybe<&2, Nat>, bs: List<&2, List<&2, Nat>>}
+
+def pop.cons(+b: List<&2, Nat>, p: Pop) -> Pop:
+  match p:
+    case Pop{m, bs}:
+      Pop{m, b <> bs}
+
+def pop.first(bs: List<&2, List<&2, Nat>>) -> Pop:
+  match bs:
+    case Nil{}:
+      Pop{None{}, Nil{}}
+    case b <> more:
+      match b:
+        case Nil{}:
+          pop.cons(Nil{}, pop.first(more))
+        case x <> xt:
+          Pop{Some{x}, xt <> more}
+
+# the planner's state: what is left of the transcripts, the filler pool, the
+# plan so far (newest first), the filler tokens used, the windows planned
 type Pst is Data:
-  Pgo{ts: List<&2, Nat>, fs: List<&2, Nat>, acc: List<&2, Plan>, fill: Nat, n: Nat}
+  Pgo{ts: List<&2, Nat>, bs: List<&2, List<&2, Nat>>, acc: List<&2, Plan>, fill: Nat, n: Nat}
   Pdone{acc: List<&2, Plan>, fill: Nat, n: Nat}
   Perr{why: String}
 
-def step.seek(+f: Nat, +k: Nat, rest: List<&2, Nat>, acc: List<&2, Plan>, +fill: Nat, +n: Nat, s: Sk) -> Pst:
-  match s:
-    case Sk{True{}, skip, fr}:
-      Pgo{rest, fr, Plan{f, skip, k} <> acc, Nat.add(fill, f), 1n+n}
-    case Sk{False{}, skip, fr}:
-      Perr{"windows: the filler corpus has no document of " ++ Nat.show(f) ++ " tokens left for window " ++ Nat.show(n)}
+def step.pop(+f: Nat, +k: Nat, rest: List<&2, Nat>, acc: List<&2, Plan>, +fill: Nat, +n: Nat, pre: List<&2, List<&2, Nat>>, p: Pop) -> Pst:
+  match p:
+    case Pop{Some{i}, post}:
+      Pgo{rest, List.append(&2, List<&2, Nat>, pre, post), Plan{f, i, k} <> acc, Nat.add(fill, f), 1n+n}
+    case Pop{None{}, post}:
+      Perr{"windows: the filler corpus has no unused document of at least " ++ Nat.show(f) ++ " tokens for window " ++ Nat.show(n)}
 
-def step.fill(f: Nat, +k: Nat, rest: List<&2, Nat>, +fs: List<&2, Nat>, acc: List<&2, Plan>, +fill: Nat, +n: Nat) -> Pst:
+def step.cut(+f: Nat, +k: Nat, rest: List<&2, Nat>, acc: List<&2, Plan>, +fill: Nat, +n: Nat, c: Cut) -> Pst:
+  match c:
+    case Cut{pre, post}:
+      step.pop(f, k, rest, acc, fill, n, pre, pop.first(post))
+
+def step.fill(f: Nat, +k: Nat, rest: List<&2, Nat>, bs: List<&2, List<&2, Nat>>, acc: List<&2, Plan>, +fill: Nat, +n: Nat) -> Pst:
   match f:
     case 0n:
-      Pgo{rest, fs, Plan{0n, 0n, k} <> acc, fill, 1n+n}
+      Pgo{rest, bs, Plan{0n, 0n, k} <> acc, fill, 1n+n}
     case 1n+(+g):
-      step.seek(1n+g, k, rest, acc, fill, n, seek(fs, 1n+g, 0n, long(fs, 1n+g)))
+      step.cut(1n+g, k, rest, acc, fill, n, cut(1n+g, bs))
 
-def step.fit(empty: Bool, r: Fit, fs: List<&2, Nat>, acc: List<&2, Plan>, +fill: Nat, +n: Nat, +cap: Nat, +head: Nat) -> Pst:
+def step.fit(empty: Bool, r: Fit, bs: List<&2, List<&2, Nat>>, acc: List<&2, Plan>, +fill: Nat, +n: Nat, +cap: Nat, +head: Nat) -> Pst:
   match empty r:
     case True{} _:
       Pdone{acc, fill, n}
     case False{} Fit{0n, used, rest}:
       Perr{"windows: a transcript of " ++ Nat.show(head) ++ " tokens does not fit a window of " ++ Nat.show(cap)}
     case False{} Fit{1n+j, used, rest}:
-      step.fill(Nat.sub(cap, used), 1n+j, rest, fs, acc, fill, n)
+      step.fill(Nat.sub(cap, used), 1n+j, rest, bs, acc, fill, n)
 
 def first(ns: List<&2, Nat>) -> Nat:
   match ns:
@@ -240,8 +326,8 @@ def first(ns: List<&2, Nat>) -> Nat:
 
 def step(st: Pst, +cap: Nat) -> Pst:
   match st:
-    case Pgo{+ts, fs, acc, +fill, +n}:
-      step.fit(Nat.is_eq(List.length(&2, Nat, ts), 0n), fit(ts, 0n, 0n, cap, fits(ts, 0n, cap)), fs, acc, fill, n, cap, first(ts))
+    case Pgo{+ts, bs, acc, +fill, +n}:
+      step.fit(Nat.is_eq(List.length(&2, Nat, ts), 0n), fit(ts, 0n, 0n, cap, fits(ts, 0n, cap)), bs, acc, fill, n, cap, first(ts))
     case Pdone{acc, fill, n}:
       Pdone{acc, fill, n}
     case Perr{w}:
@@ -249,8 +335,8 @@ def step(st: Pst, +cap: Nat) -> Pst:
 
 def plan.go(fuel: Nat, st: Pst, +cap: Nat) -> Pst:
   match fuel st:
-    case 1n+p Pgo{ts, fs, acc, fill, n}:
-      plan.go(p, step(Pgo{ts, fs, acc, fill, n}, cap), cap)
+    case 1n+p Pgo{ts, bs, acc, fill, n}:
+      plan.go(p, step(Pgo{ts, bs, acc, fill, n}, cap), cap)
     case _ other:
       other
 
@@ -269,7 +355,7 @@ def plan.write(st: Pst, +ntr: Nat, +cap: Nat, +out: String) -> IO(Unit):
         IO.print("windows: " ++ Nat.show(n) ++ " windows of " ++ Nat.show(cap) ++ " tokens for " ++ Nat.show(ntr) ++ " transcripts; filler " ++ Nat.show(fill) ++ " tokens of " ++ Nat.show(Nat.mul(n, cap)) ++ " to " ++ out)
     case Perr{w}:
       IO.die(Unit, 1, w)
-    case Pgo{ts, fs, acc, fill, n}:
+    case Pgo{ts, bs, acc, fill, n}:
       IO.die(Unit, 1, "windows: the plan did not finish")
 
 def nums(+xs: List<&2, U32>) -> List<&2, Nat>:
@@ -281,7 +367,7 @@ def plan(+tp: String, +fp: String, +cap: Nat, +out: String) -> IO(Unit):
     +fx : List<&2, U32> <- Ns.read(fp)
     +ts : List<&2, Nat> = nums(tx)
     +n : Nat = List.length(&2, Nat, ts)
-    plan.write(plan.go(1n+n, Pgo{ts, nums(fx), Nil{}, 0n, 0n}, cap), n, cap, out)
+    plan.write(plan.go(1n+n, Pgo{ts, buckets(nums(fx), 1n+cap), Nil{}, 0n, 0n}, cap), n, cap, out)
 
 def plan.cap(+t: String, +f: String, m: Maybe<&2, Nat>, +o: String) -> IO(Unit):
   match m:
@@ -334,7 +420,7 @@ def build(+tp: String, +fp: String, +pp: String, +out: String, +cap: Nat, +prefi
     +px : List<&2, U32> <- Ns.read(pp)
     +tc : Cc.Corpus <- IO.pure(Cc.Corpus, Cc.corpus(tx))
     +fc : Cc.Corpus <- IO.pure(Cc.Corpus, Cc.corpus(fx))
-    write(build.go(plan.read(px), St{Cc.Corpus.docs(fc), Cc.Corpus.docs(tc), "", Nil{}}, cap, prefix, 0n), tok.of(tc), out)
+    write(build.go(plan.read(px), St{fmap(Cc.Corpus.docs(fc), 0n, Map.new(&2, List<&2, U32>)), Cc.Corpus.docs(tc), "", Nil{}}, cap, prefix, 0n), tok.of(tc), out)
 
 def build.cap(+t: String, +f: String, +p: String, +o: String, m: Maybe<&2, Nat>, +pre: String) -> IO(Unit):
   match m:

@@ -105,6 +105,10 @@
           # transcripts packed whole into one-context windows, the rest of
           # each window the end of a code file (`bend-windows plan` plans them)
           bend-windows = bendBinary pkgs "bend-windows" "Windows.bend";
+          # the languages' transcripts mixed, packed into windows (with the
+          # languages' files as filler) and cut into training shards with
+          # their plan: `deploy plan-windows RUN_DIR SIZE BATCH LANG:PER ...`
+          bend-plan-windows = bendBinary pkgs "bend-plan-windows" "PlanWindows.bend";
           # the GHC `bend-check haskell` drives: the common Hackage
           # packages, so a module importing only these checks on its own
           ghc-harness = ghcHarness pkgs;
@@ -125,6 +129,7 @@
                 "bend-transcript"
                 "bend-clean"
                 "bend-windows"
+                "bend-plan-windows"
                 "bend-pack"
                 "bend-prepare"
                 "bend-plan-segment"
@@ -149,7 +154,7 @@
               ];
             text = ''
               if [ "$#" -eq 0 ]; then
-                echo "usage: deploy TOOL [ARGS...]   (TOOL: extract, plan-corpus, code-evals, mix, push, transcripts, check, units, clean, transcript, windows, pack, prepare, plan-segment)" >&2
+                echo "usage: deploy TOOL [ARGS...]   (TOOL: extract, plan-corpus, code-evals, mix, push, transcripts, check, units, clean, transcript, windows, plan-windows, pack, prepare, plan-segment)" >&2
                 exit 2
               fi
               tool=$1

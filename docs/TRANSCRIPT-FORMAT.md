@@ -269,8 +269,19 @@ Still to build:
 - **Mix** by transcript count with `bend-mix`: Haskell 35, Lean
   25, Agda 20, Nix 10, Bend 10, plus 5% raw code as an anchor; interleave,
   never concatenate.
-- **Packing.** The trainer drops any document shorter than a window, and a
-  transcript averages ~374 tokens: transcripts are packed whole into
-  one-context windows, EOS between them, the gap filled with the end of a
-  code file (`bend-windows lengths`, `plan`, `build`; next fit in order, so
-  a window holds neighbouring units).
+- **Packing** (built: `bend-plan-windows RUN_DIR SIZE BATCH LANG:PER[:cycle] ...`,
+  `bend/PlanWindows.bend`). The trainer drops any document shorter than a
+  window, and a transcript averages ~374 tokens: transcripts are packed
+  whole into one-context windows (2,046 tokens, EOS between them), next fit
+  in order, so a window holds neighbouring units. The gap is the end of a
+  code file, best fit: the shortest unused file at least as long as the gap
+  (`bend-windows plan` writes `f i k` per window). Next fit over the filler
+  instead skipped the short files for good and ran Nix shards dry. The
+  filler is the same languages' files (`files-hi.nul`, then `files-lo.nul`),
+  mixed the same way, minus every file a holdout unit was cut from; each
+  shard gets an equal share of it. Test on Nix + Bend (10:10 per round,
+  shards of 5,000): 30,954 transcripts in 8,206 windows, every one 2,046
+  tokens, every transcript placed once, no filler file used twice, none of
+  the 308 held-out files in the filler; the gap was 13% of the tokens; the
+  plan (`plan-fp100m-b16-windows.tsv`) is 469 steps at batch 16, five
+  minutes on this machine.
