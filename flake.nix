@@ -34,16 +34,13 @@
       # the pinned bend command (clang on its PATH, telemetry off)
       bendFor = pkgs: bend2.packages.${pkgs.stdenv.hostPlatform.system}.default;
       # A Bend2 program compiled to a native binary (C via clang).
+      # the GHC deploy/check/haskell.sh drives: the packages listed in
+      # deploy/check/ghc-packages.txt (one per line, # comments)
+      ghcPackageNames = builtins.filter (l: l != "" && builtins.substring 0 1 l != "#") (
+        nixpkgs.lib.splitString "\n" (builtins.readFile ./deploy/check/ghc-packages.txt)
+      );
       ghcHarness =
-        pkgs:
-        pkgs.haskellPackages.ghcWithPackages (
-          p: with p; [
-            aeson array async attoparsec bytestring containers data-default deepseq directory
-            exceptions filepath free hashable lens megaparsec mtl parsec primitive process
-            QuickCheck random safe scientific split stm text time transformers
-            unordered-containers vector
-          ]
-        );
+        pkgs: pkgs.haskellPackages.ghcWithPackages (p: map (n: p.${n}) ghcPackageNames);
       bendBinary =
         pkgs: name: entry:
         pkgs.runCommand name { nativeBuildInputs = [ (bendFor pkgs) ]; } ''
@@ -87,6 +84,9 @@
           # run the real checkers on them, rendered as transcripts
           bend-units = bendBinary pkgs "bend-units" "Units.bend";
           bend-transcript = bendBinary pkgs "bend-transcript" "Transcript.bend";
+          # transcripts packed whole into one-context windows, the rest of
+          # each window the end of a code file (deploy/plan-transcripts.sh)
+          bend-windows = bendBinary pkgs "bend-windows" "Windows.bend";
           # the GHC deploy/check/haskell.sh drives: the common Hackage
           # packages, so a module importing only these checks on its own
           ghc-harness = ghcHarness pkgs;
@@ -371,7 +371,7 @@
             # the unit extractor: unit counts per language, and every unit
             # rebuilds its file byte for byte
             bend units.bend > units.out
-            printf '%s\n' "ok haskell 2" "ok agda 1" "ok lean 2" "ok bend 2" "ok nix 1" | diff - units.out
+            printf '%s\n' "ok haskell 2" "ok agda 1" "ok lean 2" "ok bend 2" "ok nix 1" "ok lagda 1" | diff - units.out
             touch $out
           '';
           # the training stack: the hand-written pullbacks agree with central

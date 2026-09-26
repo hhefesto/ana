@@ -47,15 +47,17 @@ clean() { sed -e "s|$1/||g" | head -n "$CAP_LINES"; }
 check_of() { printf '%s%s%s' "$1" "$US" "$2"; }
 
 worker() {
-  local in=$1 out=$2 jobs=$3 k=$4 dir=$5 n=0 id rec
+  local in=$1 out=$2 jobs=$3 k=$4 dir=$5 id rec
   mkdir -p "$dir"
   : > "$out"
   while IFS= read -r -d '' id && IFS= read -r -d '' rec; do
-    (( n++ % jobs == k )) || continue
     stat units
     F=()
     UNIT_ID=$id
     readarray -t -d "$FS" F < <(printf '%s' "$rec")
+    # readarray drops a trailing empty field: a unit with an empty hole and
+    # no mutants must still have its 11 fields
+    while (( ${#F[@]} < 11 )); do F+=(""); done
     if check_unit "$dir"; then
       stat kept
       printf '%s\0%s\0' "$id" "$RESULT" >> "$out"
@@ -71,18 +73,52 @@ result() {
   RESULT="${F[*]:0:11}$FS$*"
 }
 
+# The units split into one shard per worker. By default unit n goes to
+# worker n mod JOBS. A language script may set KEYS to a file of
+# `id<TAB>key` lines: then every unit of a key goes to one worker (a
+# package's units to the worker that builds its interfaces), keys dealt
+# largest first to the least loaded worker.
+shard() {
+  local in=$1 dir=$2 jobs=$3
+  gawk -v RS='\0' -v ORS='\0' -v J="$jobs" -v dir="$dir" -v keys="${KEYS:-}" '
+    BEGIN {
+      if (keys != "") {
+        RS = "\n"   # the keys file is lines; the units are NUL-framed
+        while ((getline line < keys) > 0) { t = index(line, "\t"); k = substr(line, t + 1); key[substr(line, 1, t - 1)] = k; size[k]++ }
+        RS = "\0"
+        n = 0; for (k in size) { n++; ks[n] = k }
+        # largest first (insertion into a sorted order by size)
+        m = asorti(size, order, "@val_num_desc")
+        for (i = 1; i <= J; i++) load[i - 1] = 0
+        for (i = 1; i <= m; i++) {
+          best = 0; for (j = 1; j < J; j++) if (load[j] < load[best]) best = j
+          owner[order[i]] = best; load[best] += size[order[i]]
+        }
+      }
+    }
+    NR % 2 == 1 { id = $0; u = (NR - 1) / 2; next }
+    {
+      w = (keys != "" && (id in key)) ? owner[key[id]] : u % J
+      f = dir "/shard." w
+      print id > f; print $0 > f
+    }' "$in"
+  local k
+  for (( k = 0; k < jobs; k++ )); do [[ -f $dir/shard.$k ]] || : > "$dir/shard.$k"; done
+}
+
 check_main() {
   local in=${1:?usage: $0 UNITS.nul RESULTS.nul [JOBS]} out=${2:?usage: $0 UNITS.nul RESULTS.nul [JOBS]}
   local jobs=${3:-$(nproc)} work k
   work=$(mktemp -d)
+  shard "$in" "$work" "$jobs"
   for (( k = 0; k < jobs; k++ )); do
-    worker "$in" "$out.part$k" "$jobs" "$k" "$work/$k" &
+    worker "$work/shard.$k" "$out.part$k" "$jobs" "$k" "$work/$k" &
   done
   wait
   : > "$out"
   for (( k = 0; k < jobs; k++ )); do cat "$out.part$k" >> "$out"; done
   cat "$out".part*.stats | awk '{ s[$1] += $2 } END { for (k in s) print k, s[k] }' | sort > "$out.stats"
   rm -f "$out".part*
-  rm -rf "$work"
+  [[ -n ${KEEP_WORK:-} ]] && echo "work: $work" >&2 || rm -rf "$work"
   cat "$out.stats"
 }

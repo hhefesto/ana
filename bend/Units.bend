@@ -228,6 +228,108 @@ def nth(+ls: List<&2, List<&2, U32>>, +i: Nat) -> List<&2, U32>:
 def slice(+ls: List<&2, List<&2, U32>>, +a: Nat, +e: Nat) -> List<&2, U32>:
   concat(List.take(&2, List<&2, U32>, List.drop(&2, List<&2, U32>, ls, a), Nat.sub(e, a)))
 
+# Literate Agda -----------------------------------------------------------------
+#
+# A .lagda.md or .lagda / .lagda.tex file is read as the plain Agda it
+# means: a prose line becomes a line comment ("-- " before it; a blank one
+# stays blank), a code block's delimiter lines become "--", and code lines
+# are kept as they are. No line moves and no code column moves, so a
+# checker's positions in the plain file are the literate file's.
+#
+# The blocks are Agda's own (Agda.Syntax.Parser.Literate): in Markdown a
+# block opens on a line that is ``` or ```agda (a block in another language
+# is prose) and closes on ```; in LaTeX it opens on \begin{code} and closes
+# on \end{code}. A blank prose line right above an opening line becomes
+# "--" too, so the paragraph above a block is the doc comment of the block's
+# first declaration.
+
+def lit.core(+l: List<&2, U32>) -> List<&2, U32>:
+  trim.right(trim.left(l))
+
+def lit.dash(+l: List<&2, U32>) -> List<&2, U32>:
+  append(b("--"), Bool.pick(List<&2, U32>, has(l, 10), [10], Nil{}))
+
+def lit.cmt(+l: List<&2, U32>) -> List<&2, U32>:
+  append(b("-- "), l)
+
+def md.opens(+l: List<&2, U32>) -> Bool:
+  +c = lit.core(l)
+  Bool.or(eq(c, b("```")), eq(c, b("```agda")))
+
+def md.closes(+l: List<&2, U32>) -> Bool:
+  eq(lit.core(l), b("```"))
+
+# the line in the plain file, from the state (0 prose, 1 an Agda block,
+# 2 another language's block) and the next line
+def md.line(+st: Nat, +l: List<&2, U32>, +next: List<&2, U32>) -> List<&2, U32>:
+  match st:
+    case 0n:
+      Bool.pick(List<&2, U32>, md.opens(l), lit.dash(l),
+        Bool.pick(List<&2, U32>, blank(l), Bool.pick(List<&2, U32>, md.opens(next), lit.dash(l), l), lit.cmt(l)))
+    case 1n:
+      Bool.pick(List<&2, U32>, md.closes(l), lit.dash(l), l)
+    case _:
+      lit.cmt(l)
+
+def md.next(+st: Nat, +l: List<&2, U32>) -> Nat:
+  match st:
+    case 0n:
+      Bool.pick(Nat, md.opens(l), 1n, Bool.pick(Nat, prefix(lit.core(l), b("```")), 2n, 0n))
+    case _:
+      Bool.pick(Nat, md.closes(l), 0n, st)
+
+def md.go(ls: List<&2, List<&2, U32>>, +st: Nat) -> List<&2, List<&2, U32>>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> +t:
+      md.line(st, l, nth(t, 0n)) <> md.go(t, md.next(st, l))
+
+def tex.opens(+l: List<&2, U32>) -> Bool:
+  Bool.and(infix(l, b("\\begin{code}")), Bool.not(prefix(trim.left(l), b("%"))))
+
+def tex.closes(+l: List<&2, U32>) -> Bool:
+  infix(l, b("\\end{code}"))
+
+def tex.line(+st: Nat, +l: List<&2, U32>, +next: List<&2, U32>) -> List<&2, U32>:
+  match st:
+    case 0n:
+      Bool.pick(List<&2, U32>, tex.opens(l), lit.dash(l),
+        Bool.pick(List<&2, U32>, blank(l), Bool.pick(List<&2, U32>, tex.opens(next), lit.dash(l), l), lit.cmt(l)))
+    case _:
+      Bool.pick(List<&2, U32>, tex.closes(l), lit.dash(l), l)
+
+def tex.next(+st: Nat, +l: List<&2, U32>) -> Nat:
+  match st:
+    case 0n:
+      Bool.pick(Nat, tex.opens(l), 1n, 0n)
+    case _:
+      Bool.pick(Nat, tex.closes(l), 0n, 1n)
+
+def tex.go(ls: List<&2, List<&2, U32>>, +st: Nat) -> List<&2, List<&2, U32>>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> +t:
+      tex.line(st, l, nth(t, 0n)) <> tex.go(t, tex.next(st, l))
+
+def suffix(+xs: List<&2, U32>, +s: List<&2, U32>) -> Bool:
+  prefix(List.reverse(&2, U32, xs), List.reverse(&2, U32, s))
+
+# 0 plain, 1 literate Markdown, 2 literate LaTeX (Agda files only)
+def lit.kind(+lang: Nat, +id: List<&2, U32>) -> Nat:
+  +tex = Bool.or(suffix(id, b(".lagda")), suffix(id, b(".lagda.tex")))
+  Bool.pick(Nat, Nat.is_eq(lang, 1n), Bool.pick(Nat, suffix(id, b(".lagda.md")), 1n, Bool.pick(Nat, tex, 2n, 0n)), 0n)
+
+def unlit(+k: Nat, +text: List<&2, U32>) -> List<&2, U32>:
+  match k:
+    case 0n:
+      text
+    case 1n:
+      concat(md.go(lines(text), 0n))
+    case _:
+      concat(tex.go(lines(text), 0n))
+
 # Units -------------------------------------------------------------------------
 
 def lines.count(+ls: List<&2, List<&2, U32>>) -> Nat:
@@ -254,43 +356,63 @@ def head.indented(+ls: List<&2, List<&2, U32>>) -> Bool:
     case Nil{}:
       False{}
 
-def sig.more.go(ls: List<&2, List<&2, U32>>, ok: Bool) -> Nat:
+# A declaration may sit at an indent (an Agda one inside `module _ where`,
+# an `instance` or a `where` block): its signature's first line and its
+# equations start at that indent, what belongs to them is deeper. At indent
+# 0, `at` is col0 and `deeper` is indented, so every other shape is unchanged.
+def indent(+l: List<&2, U32>) -> Nat:
+  Nat.sub(len(l), len(trim.left(l)))
+
+def deeper(+ind: Nat, +l: List<&2, U32>) -> Bool:
+  Bool.and(Nat.is_lt(ind, indent(l)), Bool.not(blank(l)))
+
+def at(+ind: Nat, +l: List<&2, U32>) -> Bool:
+  Bool.and(Nat.is_eq(indent(l), ind), Bool.not(blank(l)))
+
+def head.deeper(+ind: Nat, +ls: List<&2, List<&2, U32>>) -> Bool:
+  match ls:
+    case l <> t:
+      deeper(ind, l)
+    case Nil{}:
+      False{}
+
+def sig.more.go(ls: List<&2, List<&2, U32>>, +ind: Nat, ok: Bool) -> Nat:
   match ls ok:
     case l <> +t True{}:
-      1n+sig.more.go(t, head.indented(t))
+      1n+sig.more.go(t, ind, head.deeper(ind, t))
     case _ _:
       0n
 
-def sig.more(+ls: List<&2, List<&2, U32>>) -> Nat:
-  sig.more.go(ls, head.indented(ls))
+def sig.more(+ind: Nat, +ls: List<&2, List<&2, U32>>) -> Nat:
+  sig.more.go(ls, ind, head.deeper(ind, ls))
 
-def eq.line(+name: List<&2, U32>, +l: List<&2, U32>) -> Bool:
-  Bool.or(indented(l), Bool.and(col0(l), eq(word0(l), name)))
+def eq.line(+ind: Nat, +name: List<&2, U32>, +l: List<&2, U32>) -> Bool:
+  Bool.or(deeper(ind, l), Bool.and(at(ind, l), eq(word0(trim.left(l)), name)))
 
-def eq.next(+name: List<&2, U32>, +ls: List<&2, List<&2, U32>>) -> Bool:
+def eq.next(+ind: Nat, +name: List<&2, U32>, +ls: List<&2, List<&2, U32>>) -> Bool:
   match ls:
     case Nil{}:
       False{}
     case +l <> t:
-      eq.line(name, l)
+      eq.line(ind, name, l)
 
-def eq.ok(+name: List<&2, U32>, +ls: List<&2, List<&2, U32>>) -> Bool:
+def eq.ok(+ind: Nat, +name: List<&2, U32>, +ls: List<&2, List<&2, U32>>) -> Bool:
   match ls:
     case Nil{}:
       False{}
     case +l <> t:
-      Bool.or(eq.line(name, l), Bool.and(blank(l), eq.next(name, t)))
+      Bool.or(eq.line(ind, name, l), Bool.and(blank(l), eq.next(ind, name, t)))
 
 # lines of equations from ls on (trailing blank lines not counted)
-def eq.go(ls: List<&2, List<&2, U32>>, +name: List<&2, U32>, +k: Nat, +last: Nat, ok: Bool) -> Nat:
+def eq.go(ls: List<&2, List<&2, U32>>, +ind: Nat, +name: List<&2, U32>, +k: Nat, +last: Nat, ok: Bool) -> Nat:
   match ls ok:
     case +l <> +t True{}:
-      eq.go(t, name, 1n+k, Bool.pick(Nat, blank(l), last, 1n+k), eq.ok(name, t))
+      eq.go(t, ind, name, 1n+k, Bool.pick(Nat, blank(l), last, 1n+k), eq.ok(ind, name, t))
     case _ _:
       last
 
-def eq.len(+name: List<&2, U32>, +ls: List<&2, List<&2, U32>>) -> Nat:
-  eq.go(ls, name, 0n, 0n, Bool.and(eq.next(name, ls), True{}))
+def eq.len(+ind: Nat, +name: List<&2, U32>, +ls: List<&2, List<&2, U32>>) -> Nat:
+  eq.go(ls, ind, name, 0n, 0n, Bool.and(eq.next(ind, name, ls), True{}))
 
 # the right side of the last one-line equation replaced by mark (" _" in
 # haskell, " ?" in agda): the body's lines walked from the last, the first
@@ -309,17 +431,17 @@ def eq.sign.at(+l: List<&2, U32>, +k: Nat) -> Nat:
 def hole.line(+l: List<&2, U32>, +mark: List<&2, U32>) -> List<&2, U32>:
   append(List.take(&2, U32, l, Nat.sub(eq.sign.at(l, 0n), 1n)), append(mark, b("\n")))
 
-def hole.fits(+l: List<&2, U32>, +next.indented: Bool) -> Bool:
-  Bool.and(col0(l), Bool.and(Bool.not(next.indented), Bool.not(Nat.is_eq(eq.sign.at(l, 0n), 0n))))
+def hole.fits(+ind: Nat, +l: List<&2, U32>, +next.indented: Bool) -> Bool:
+  Bool.and(at(ind, l), Bool.and(Bool.not(next.indented), Bool.not(Nat.is_eq(eq.sign.at(l, 0n), 0n))))
 
 # rls: the body's lines, last first; acc: the lines already walked, in order
-def hole.go(rls: List<&2, List<&2, U32>>, +mark: List<&2, U32>, +done: Bool, +next.indented: Bool, acc: List<&2, List<&2, U32>>) -> Hl:
+def hole.go(rls: List<&2, List<&2, U32>>, +ind: Nat, +mark: List<&2, U32>, +done: Bool, +next.indented: Bool, acc: List<&2, List<&2, U32>>) -> Hl:
   match rls:
     case Nil{}:
       Hl{done, acc}
     case +l <> t:
-      +fits = Bool.and(Bool.not(done), hole.fits(l, next.indented))
-      hole.go(t, mark, Bool.or(done, fits), indented(l), Bool.pick(List<&2, U32>, fits, hole.line(l, mark), l) <> acc)
+      +fits = Bool.and(Bool.not(done), hole.fits(ind, l, next.indented))
+      hole.go(t, ind, mark, Bool.or(done, fits), deeper(ind, l), Bool.pick(List<&2, U32>, fits, hole.line(l, mark), l) <> acc)
 
 def hole.fin(h: Hl) -> List<&2, U32>:
   match h:
@@ -327,8 +449,8 @@ def hole.fin(h: Hl) -> List<&2, U32>:
       Bool.pick(List<&2, U32>, done, concat(ls), Nil{})
 
 # the body with its hole, or empty when no equation fits
-def hole.eqs(+body: List<&2, U32>, +mark: List<&2, U32>) -> List<&2, U32>:
-  hole.fin(hole.go(List.reverse(&2, List<&2, U32>, lines(body)), mark, False{}, False{}, Nil{}))
+def hole.eqs(+ind: Nat, +body: List<&2, U32>, +mark: List<&2, U32>) -> List<&2, U32>:
+  hole.fin(hole.go(List.reverse(&2, List<&2, U32>, lines(body)), ind, mark, False{}, False{}, Nil{}))
 
 # Words ---------------------------------------------------------------------------
 #
@@ -389,17 +511,30 @@ def Run.rest(+r: Run) -> List<&2, U32>:
     case Run{a, t}:
       t
 
-def segs.go(fuel: Nat, +xs: List<&2, U32>, +nl: Bool) -> List<&2, Seg>:
+# the bytes after the last newline of a run (all of it when it has none)
+def tail.nl(+rs: List<&2, U32>) -> Nat:
+  match rs:
+    case Nil{}:
+      0n
+    case h <> +t:
+      Bool.pick(Nat, U32.is_eq(h, 10), 0n, 1n+tail.nl(t))
+
+# does the word after this delimiter run start a line at the declaration's
+# indent (nl: the run itself starts a line)
+def lead.after(+run: List<&2, U32>, +ind: Nat, +nl: Bool) -> Bool:
+  Bool.pick(Bool, has(run, 10), Nat.is_eq(tail.nl(List.reverse(&2, U32, run)), ind), Bool.and(nl, Nat.is_eq(len(run), ind)))
+
+def segs.go(fuel: Nat, +xs: List<&2, U32>, +ind: Nat, +nl: Bool) -> List<&2, Seg>:
   match fuel xs:
     case 1n+p +h <> +t:
       +d = is_delim(h)
       +r = run.go(h <> t, d, True{})
-      Seg{Bool.not(d), Bool.and(Bool.not(d), nl), Run.run(r)} <> segs.go(p, Run.rest(r), Bool.and(d, last.nl(Run.run(r))))
+      Seg{Bool.not(d), Bool.and(Bool.not(d), nl), Run.run(r)} <> segs.go(p, Run.rest(r), ind, Bool.and(d, lead.after(Run.run(r), ind, nl)))
     case _ _:
       Nil{}
 
-def segs(+body: List<&2, U32>) -> List<&2, Seg>:
-  segs.go(1n+len(body), body, True{})
+def segs(+body: List<&2, U32>, +ind: Nat) -> List<&2, Seg>:
+  segs.go(1n+len(body), body, ind, True{})
 
 def segs.join(ss: List<&2, Seg>) -> List<&2, U32>:
   match ss:
@@ -456,8 +591,10 @@ def mask.go(ss: List<&2, Seg>, +lang: Nat, +st: Nat) -> List<&2, Seg>:
       +nst = Bool.pick(Nat, w, word.state(st, lang, bs), delim.state(st, bs))
       Seg{code, Bool.and(l, code), bs} <> mask.go(t, lang, nst)
 
+# an Agda body's indent is its first line's; every other body's is 0
 def mask(+lang: Nat, +body: List<&2, U32>) -> List<&2, Seg>:
-  mask.go(segs(body), lang, 0n)
+  +ind = Bool.pick(Nat, Nat.is_eq(lang, 1n), indent(body), 0n)
+  mask.go(segs(body, ind), lang, 0n)
 
 # Names: words that may name something the checker can type ------------------
 
@@ -754,9 +891,10 @@ def hs.start(+l: List<&2, U32>) -> Bool:
   Bool.and(Bool.and(col0(l), is_lower(Maybe.default(&2, U32, List.get(&2, U32, l, 0n), 0))), prefix(after0(l), b("::")))
 
 def agda.start(+l: List<&2, U32>) -> Bool:
-  +w = word0(l)
-  +a = after0(l)
-  Bool.and(Bool.and(col0(l), Bool.or(prefix(a, b(": ")), prefix(a, b(":\n")))), Bool.and(Bool.not(has(w, 95)), Bool.not(prefix(w, b("--")))))
+  +t = trim.left(l)
+  +w = word0(t)
+  +a = after0(t)
+  Bool.and(Bool.and(Bool.not(blank(l)), Bool.or(prefix(a, b(": ")), prefix(a, b(":\n")))), Bool.and(Bool.not(has(w, 95)), Bool.not(prefix(w, b("--")))))
 
 # agda's proposition rule: the result type (after the last →) mentions a
 # relation, or the module is a Properties module
@@ -768,19 +906,19 @@ def agda.kind(+sig: List<&2, U32>, +id: List<&2, U32>) -> List<&2, U32>:
   +rel = any.infix(bs.of(["≡", "≤", "<", "≈", "¬", "↔", "⊥", "Dec", "∈", "⊆", "∼"]), agda.result(sig))
   Bool.pick(List<&2, U32>, Bool.or(rel, infix(id, b("Properties"))), b("proposition"), b("type"))
 
-def hit.eqs.if(ok: Bool, +lang: Nat, +id: List<&2, U32>, +rest: List<&2, List<&2, U32>>, +above: List<&2, List<&2, U32>>, +i: Nat, +name: List<&2, U32>) -> Hit:
+def hit.eqs.if(ok: Bool, +lang: Nat, +id: List<&2, U32>, +rest: List<&2, List<&2, U32>>, +above: List<&2, List<&2, U32>>, +i: Nat, +ind: Nat, +name: List<&2, U32>) -> Hit:
   match ok:
     case False{}:
       No{}
     case True{}:
-      +ns : Nat = 1n+sig.more(List.drop(&2, List<&2, U32>, rest, 1n))
-      +nb = eq.len(name, List.drop(&2, List<&2, U32>, rest, ns))
+      +ns : Nat = 1n+sig.more(ind, List.drop(&2, List<&2, U32>, rest, 1n))
+      +nb = eq.len(ind, name, List.drop(&2, List<&2, U32>, rest, ns))
       +sig = slice(rest, 0n, ns)
       +body = slice(rest, ns, Nat.add(ns, nb))
       +hs = Nat.is_eq(lang, 0n)
       +kind = Bool.pick(List<&2, U32>, hs, b("type"), agda.kind(sig, id))
       +doc = Bool.pick(List<&2, U32>, hs, doc.hs(above), doc.agda(above))
-      +hole = hole.eqs(body, Bool.pick(List<&2, U32>, hs, b(" _"), b(" ?")))
+      +hole = hole.eqs(ind, body, Bool.pick(List<&2, U32>, hs, b(" _"), b(" ?")))
       hit.fin(Bool.not(Nat.is_eq(nb, 0n)), Hit{i, Nat.add(ns, nb), name, kind, doc, trim.right(sig), sig, body, hole})
 
 # lean: [@[attrs]] [modifiers] theorem|lemma|def|abbrev|instance name
@@ -857,17 +995,17 @@ def hit.lean.if(ok: Bool, +rest: List<&2, List<&2, U32>>, +above: List<&2, List<
 
 # bend: `law name:` and the `def name(` proving it, or `def name(...) -> T:`
 def hit.law(+rest: List<&2, List<&2, U32>>, +above: List<&2, List<&2, U32>>, +i: Nat, +name: List<&2, U32>) -> Hit:
-  +nl : Nat = 1n+eq.len(Nil{}, List.drop(&2, List<&2, U32>, rest, 1n))
+  +nl : Nat = 1n+eq.len(0n, Nil{}, List.drop(&2, List<&2, U32>, rest, 1n))
   +after = List.drop(&2, List<&2, U32>, rest, nl)
   +nbl = blank.run.go(after, head.blank(after))
   +dr = List.drop(&2, List<&2, U32>, rest, Nat.add(nl, nbl))
   +dl = nth(dr, 0n)
-  +nd : Nat = 1n+eq.len(Nil{}, List.drop(&2, List<&2, U32>, dr, 1n))
+  +nd : Nat = 1n+eq.len(0n, Nil{}, List.drop(&2, List<&2, U32>, dr, 1n))
   +ok = prefix(dl, append(b("def "), append(name, b("("))))
   hit.fin(ok, Hit{i, Nat.add(Nat.add(nl, nbl), nd), name, b("proposition"), doc.bend(above), trim.right(slice(rest, 0n, nl)), slice(rest, 0n, Nat.add(nl, nbl)), slice(dr, 0n, nd), append(dl, b("  ?goal\n"))})
 
 def hit.def(+rest: List<&2, List<&2, U32>>, +above: List<&2, List<&2, U32>>, +i: Nat, +name: List<&2, U32>) -> Hit:
-  +nb = eq.len(Nil{}, List.drop(&2, List<&2, U32>, rest, 1n))
+  +nb = eq.len(0n, Nil{}, List.drop(&2, List<&2, U32>, rest, 1n))
   +l = nth(rest, 0n)
   hit.fin(Bool.not(Nat.is_eq(nb, 0n)), Hit{i, 1n+nb, name, b("type"), doc.bend(above), trim.right(l), l, slice(rest, 1n, 1n+nb), b("  ?goal\n")})
 
@@ -883,9 +1021,9 @@ def hit.bend(isl: Bool, df: Bool, +rest: List<&2, List<&2, U32>>, +above: List<&
 def hit.at(+lang: Nat, +id: List<&2, U32>, +l: List<&2, U32>, +rest: List<&2, List<&2, U32>>, +above: List<&2, List<&2, U32>>, +i: Nat) -> Hit:
   match lang:
     case 0n:
-      hit.eqs.if(hs.start(l), 0n, id, rest, above, i, word0(l))
+      hit.eqs.if(hs.start(l), 0n, id, rest, above, i, 0n, word0(l))
     case 1n:
-      hit.eqs.if(agda.start(l), 1n, id, rest, above, i, word0(l))
+      hit.eqs.if(agda.start(l), 1n, id, rest, above, i, indent(l), word0(trim.left(l)))
     case 2n:
       +m = drop.mods(4n, drop.attr(l))
       hit.lean.if(lean.start(l, m), rest, above, i, name.cut(after0(m)), word0(m))
@@ -1089,10 +1227,15 @@ def units.lines(ok: Bool, +lang: Nat, +maxn: Nat, +id: List<&2, U32>, +ls: List<
       builds(choose(scan(Nat.is_eq(lang, 4n), lang, id, ls, text), maxn, U32.to_nat(fnv32(id))), lang, id, ls, nl)
 
 # a file holding the record separators, or longer than 2,000 lines, gives none
-def units.file(+lang: Nat, +maxn: Nat, +id: List<&2, U32>, +text: List<&2, U32>) -> List<&2, Ns.Doc>:
+def units.plain(+lang: Nat, +maxn: Nat, +id: List<&2, U32>, +text: List<&2, U32>) -> List<&2, Ns.Doc>:
   +ls = lines(text)
   +nl = lines.count(ls)
   units.lines(Bool.and(Nat.is_le(nl, 2000n), Bool.not(Bool.or(has(text, 30), has(text, 31)))), lang, maxn, id, ls, nl, text)
+
+# a literate file's units are those of the plain Agda it means (above), so
+# their head ++ pre ++ body ++ tail is that plain file
+def units.file(+lang: Nat, +maxn: Nat, +id: List<&2, U32>, +text: List<&2, U32>) -> List<&2, Ns.Doc>:
+  units.plain(lang, maxn, id, unlit(lit.kind(lang, id), text))
 
 def units.all(+lang: Nat, +maxn: Nat, fs: List<&2, Ns.Doc>) -> List<&2, Ns.Doc>:
   match fs:

@@ -31,7 +31,7 @@ trap 'chmod -R u+rwX "$WORK" 2>/dev/null || true; rm -rf "$WORK" 2>/dev/null || 
 
 # Source extensions. Everything else in a package -- READMEs, changelogs,
 # generated C, test fixtures -- stays out.
-EXTENSIONS='\.(hs|lhs|nix|agda|lagda|lean|idr|ipkg)$'
+EXTENSIONS='\.(hs|lhs|nix|agda|lagda|lagda\.md|lagda\.tex|lagda\.rst|lean|idr|ipkg|bend)$'
 
 # A permissive license, by the names Cabal and SPDX actually use. Anything
 # GPL-family, unstated, or unrecognized is dropped: the default is exclusion,
@@ -182,14 +182,18 @@ if [ -d "$SOURCES/tarballs" ]; then
 fi
 
 echo "extract-code: cloned repositories" >&2
-for tree in "$SOURCES"/repos/*/ "$SOURCES"/own/*/; do
+for tree in "$SOURCES"/repos/*/ "$SOURCES"/own/*/ "$SOURCES"/curated/*/; do
   [ -d "$tree" ] || continue
   considered=$((considered+1))
   name="$(basename "$tree")"
+  class="$(basename "$(dirname "${tree%/}")")"
   # Repository licenses are prose, not a field, so match on the text. The
   # user's own repositories are included regardless: they are the whole point
-  # of the corpus and their licensing is theirs to decide.
-  if [ "$(dirname "${tree%/}")" != "$SOURCES/own" ]; then
+  # of the corpus and their licensing is theirs to decide. So are the curated
+  # ones (curated/): repositories the user chose by name for the corpus, the
+  # user's decision of 2026-09-25 (Conal Elliott's, most of whose Agda carries
+  # no license file at all, which the gate would read as exclusion).
+  if [ "$class" = repos ]; then
     # Read the whole file, not a window: MIT and BSD both open with a
     # copyright roll and only reach the grant clause further down, which is how
     # an earlier version of this gate rejected agda and agda-stdlib. Match the
@@ -208,18 +212,20 @@ for tree in "$SOURCES"/repos/*/ "$SOURCES"/own/*/; do
     done
     # Copyleft is checked first and wins: a file can name MIT in passing while
     # actually being AGPL, and the safe direction of a wrong guess is exclusion.
-    if printf '%s' "$licensetext" | grep -qEi 'GNU (GENERAL|(LESSER|AFFERO) GENERAL) PUBLIC LICENSE|GNU (L|A)?GPL|SPDX-License-Identifier:.*(GPL|AGPL|LGPL)'; then
+    # Creative Commons: Attribution alone passes (PLFA is CC-BY-4.0); the
+    # ShareAlike, NonCommercial and NoDerivatives variants do not.
+    if printf '%s' "$licensetext" | grep -qEi 'GNU (GENERAL|(LESSER|AFFERO) GENERAL) PUBLIC LICENSE|GNU (L|A)?GPL|SPDX-License-Identifier:.*(GPL|AGPL|LGPL)|ShareAlike|NonCommercial|NoDerivatives'; then
       skipped_license=$((skipped_license+1)); continue
     fi
     if ! printf '%s' "$licensetext" | grep -qEi \
-        'Permission is hereby granted, free of charge|Redistribution and use in source|Apache License|ISC License|Mozilla Public License|CC0|public domain|MIT License'; then
+        'Permission is hereby granted, free of charge|Redistribution and use in source|Apache License|ISC License|Mozilla Public License|CC0|public domain|MIT License|Attribution 4\.0 International'; then
       skipped_license=$((skipped_license+1)); continue
     fi
   fi
   # The user's own repositories are spared the holdout: they are the point of
   # the corpus and there is far too little of them to measure with.
-  if [ "$(dirname "${tree%/}")" = "$SOURCES/own" ]; then
-    group="own:$name"
+  if [ "$class" = own ] || [ "$class" = curated ]; then
+    group="$class:$name"
     set_holdout "$group" spare
   else
     group="repo:$name"

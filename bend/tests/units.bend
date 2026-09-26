@@ -22,6 +22,15 @@ def bend() -> String:
 def nix() -> String:
   "# a set\n{ a = 1; b = 2; }\n"
 
+# literate Agda: prose above the block, blank line, fence (the doc comment
+# of `twice` is the paragraph)
+def lagda() -> String:
+  "# Doubling\n\n```agda\nmodule Twice where\n\nopen import Agda.Builtin.Nat\n```\n\nDouble a number.\n\n```agda\ntwice : Nat → Nat\ntwice n = n + n\n```\n"
+
+def lagda.plain() -> String:
+  "-- # Doubling\n--\n--\nmodule Twice where\n\nopen import Agda.Builtin.Nat\n--\n\n-- Double a number.\n--\n--\ntwice : Nat → Nat\ntwice n = n + n\n--\n"
+
+
 def whole(+fs: List<&2, List<&2, U32>>) -> List<&2, U32>:
   U.concat([U.nth(fs, 5n), U.nth(fs, 6n), U.nth(fs, 7n), U.nth(fs, 8n)])
 
@@ -39,6 +48,14 @@ def line(+name: String, +lang: Nat, +src: String, +expect: Nat) -> String:
   +ok = Bool.and(Nat.is_eq(n, expect), all.whole(us, text))
   Bool.pick(String, ok, "ok " ++ name ++ " " ++ Nat.show(n), "MISMATCH " ++ name ++ " " ++ Nat.show(n))
 
+def lit.line() -> String:
+  +id = U.b("own:test/Twice.lagda.md")
+  +plain = U.unlit(U.lit.kind(1n, id), U.b(lagda()))
+  +us = U.units.file(1n, 0n, id, U.b(lagda()))
+  +n = List.length(&2, Ns.Doc, us)
+  +ok = Bool.and(Bool.and(U.eq(plain, U.b(lagda.plain())), Nat.is_eq(n, 1n)), all.whole(us, plain))
+  Bool.pick(String, ok, "ok lagda " ++ Nat.show(n), "MISMATCH lagda " ++ Nat.show(n))
+
 def main() -> IO(Unit):
   do IO<Unit>:
     IO.print(line("haskell", 0n, hs(), 2n))
@@ -46,3 +63,4 @@ def main() -> IO(Unit):
     IO.print(line("lean", 2n, lean(), 2n))
     IO.print(line("bend", 3n, bend(), 2n))
     IO.print(line("nix", 4n, nix(), 1n))
+    IO.print(lit.line())
