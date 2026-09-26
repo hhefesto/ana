@@ -2,7 +2,7 @@
 
 This file holds everything needed to continue this work from another machine and account. It was restarted from zero on 2026-09-25 for a new path. The previous handoff (the v3 hot start and the dense trainer) is in git at `41e1920:HANDOFF.md`, and master's Haskell-era trainer is at the tag `haskell-final`.
 
-## ▶ CONTINUE HERE (2026-09-25, 20:50 UTC-6): deploy/ is Bend now; the full transcript run is checking
+## ▶ CONTINUE HERE (2026-09-25, 21:35 UTC-6): deploy/ is Bend now; the full transcript run is checking
 
 ### State of the run (all on this machine, free)
 
@@ -10,7 +10,7 @@ This file holds everything needed to continue this work from another machine and
 |---|---|---|---|---|---|
 | Haskell | 75,072 | 172,177 | 4 `bend-check` processes × 2 workers (`CHECK_PROCS=4 CHECK_JOBS=2 PKG_CAP=200`), started 20:42; logs `run/transcripts/haskell/check.K.out`. Pass 1 checks at most 200 evenly spaced units per package (78% of the units); `PKG_REST=1` checks the rest afterwards if the corpus is to be uncapped | running | |
 | Lean | 8,478 | 32,743 | the old shell harness, 5 workers, started 14:44 | running | |
-| Agda | 8,528 | 34,271 | `bend-check`, 4 workers (memory: 31 GB shared with Lean and Haskell), TIMEOUT 300, started 20:09 | running | |
+| Agda | 8,528 | 34,271 | 4 `bend-check` processes × 2 workers (`TIMEOUT=300 CHECK_PROCS=4 CHECK_JOBS=2`), started 21:31. The 4-worker run of 20:09 was stopped at ~600 records (about 50 h to go: each agda run re-checks the unit's file head, 34–83 s, up to 1.3 GB); its work is in `run/transcripts/agda/stopped-bend-20260925/` | running | |
 | Nix | 23,300 | 13,256 | re-run on `bend-check`, done 19:34 (old results in `run/transcripts/nix/bash-20260925/`; they differ in the 12 shifted records and 3 temporary paths only) | 13,150 | 12,722 (24,694) / 249 (478); 109 contaminated, 70 near duplicates |
 | Bend | 1,694 | 9,041 | re-run from 20:44 (`bend-check`, 3 workers, niced) on `run/code-bend-v3.jsonl`: v3's Bend files with this repo's `bend/` refreshed (75 → 102 files), and `MAX_HI=64` units per file (Bend is scarce: 24,066 defs and laws; the cap of 8 used at most 8,409). The 14:46 run is in `run/transcripts/bend/snapshot-1446/` | running | 14:46 run: 4,643 kept; 3,494 (6,260) / 61 (112); 918 exact and 161 near duplicates, 9 contaminated |
 
