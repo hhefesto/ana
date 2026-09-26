@@ -4,7 +4,7 @@ import ./Tokenizer.bend as Tk
 import ./Ftcc.bend as Fc
 
 # units: declarations cut out of source files, each carrying what the
-# checker harness (deploy/check/<lang>.sh) needs to check it and its
+# checker harness (bend-check LANG) needs to check it and its
 # variants, for the coding-agent transcripts (docs/TRANSCRIPT-FORMAT.md).
 #
 #   bend-units LANG INPUT.nul OUTPUT.nul [MAX_PER_FILE]

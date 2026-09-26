@@ -4,12 +4,12 @@ import ./Tokenizer.bend as Tk
 import ./Nul.bend as Ns
 import ./Units.bend as U
 
-# transcripts: the checked units (deploy/check/<lang>.sh) rendered as the
+# transcripts: the checked units (bend-check LANG) rendered as the
 # coding-agent documents of docs/TRANSCRIPT-FORMAT.md.
 #
 #   bend-transcript TOKENIZER RESULTS.nul OUTPUT.nul [WINDOW]
 #
-# Each input pair is a unit with its checks (deploy/check/lib.sh lists the
+# Each input pair is a unit with its checks (bend/Check.bend lists the
 # fields). The output is one (id, text) pair per transcript, the id the
 # unit's with `/<shape>` appended; a transcript whose tokens (under
 # TOKENIZER, plus BOS and EOS) pass WINDOW - 64 (WINDOW default 2048) is
