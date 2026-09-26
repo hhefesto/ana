@@ -6,19 +6,19 @@ This file holds everything needed to continue this work from another machine and
 
 ### State of the run (all on this machine, free)
 
-| language | files | units | check | kept |
-|---|---|---|---|---|
-| Haskell | 75,072 | 172,177 | `bend-check`, 10 workers, started 18:46 (about 17 h; `run/transcripts/haskell/check.out`) | running |
-| Lean | 8,478 | 32,743 | the old shell harness, 5 workers, started 14:44 | running |
-| Agda | 8,528 | 34,271 | `bend-check`, 4 workers (memory: 31 GB shared with Lean and Haskell), TIMEOUT 300, started 20:09 | running |
-| Nix | 23,300 | 13,256 | re-run on `bend-check`, done 19:34 (old results in `run/transcripts/nix/bash-20260925/`; they differ in the 12 shifted records and 3 temporary paths only) | 13,150 |
-| Bend | 1,667 | 5,591 | done 18:49 (shell harness; no unit hit its bugs) | 4,643 |
+| language | files | units | check | kept | after `clean`: train (transcripts) / holdout |
+|---|---|---|---|---|---|
+| Haskell | 75,072 | 172,177 | `bend-check`, 10 workers, started 18:46 (about 17 h; `run/transcripts/haskell/check.out`) | running | |
+| Lean | 8,478 | 32,743 | the old shell harness, 5 workers, started 14:44 | running | |
+| Agda | 8,528 | 34,271 | `bend-check`, 4 workers (memory: 31 GB shared with Lean and Haskell), TIMEOUT 300, started 20:09 | running | |
+| Nix | 23,300 | 13,256 | re-run on `bend-check`, done 19:34 (old results in `run/transcripts/nix/bash-20260925/`; they differ in the 12 shifted records and 3 temporary paths only) | 13,150 | 12,722 (24,694) / 249 (478); 109 contaminated, 70 near duplicates |
+| Bend | 1,667 | 5,591 | done 18:49 (shell harness; no unit hit its bugs) | 4,643 | 3,494 (6,260) / 61 (112); 918 exact and 161 near duplicates, 9 contaminated |
 
 - Everything lands in `run/transcripts/<lang>/`; each language's `log` has its stages in UTC-6. Resume or continue a language with `nix run .#deploy -- transcripts STAGE LANG` (a stage whose output exists is skipped).
 - Lean's sources came from `code-train-v2.jsonl` (v3 did not exist yet): the v3-only own/curated Lean files (refl's three) are missing from it.
 - The stopped shell Haskell run's partial parts are in `run/transcripts/haskell/stopped-bash-20260925/` (useless; its keys were wrong).
 - **Decision for the user:** generated API bindings dominate Haskell (stripeapi 2,070 units, amazonka-* up to 2,012 each, jsaddle-dom 1,920). A cap per package keeps 78% at 200, 66% at 100. The check runs uncapped; a cap can still be applied when mixing.
-- Next, in order: render each language as its check ends (`deploy transcripts render LANG`); cleaning (dedup, decontamination); holdout; windows (`bend-windows lengths`, `plan`, `build`); mix; `bend-plan-corpus`; the route below from step 3.
+- Next, in order: as each check ends, `deploy transcripts clean LANG` then `render LANG` (Lean: its results are the shell's, so run clean and render on them as they are); then windows (`bend-windows lengths`, `plan`, `build`) on `transcripts.train.nul` per language; mix; shards and plan; the route below from step 4. The holdouts (`transcripts.holdout.nul`) become `run/eval/transcript-fp.corpus`.
 
 ### What happened on 2026-09-25, evening: deploy/ in Bend
 
@@ -110,7 +110,7 @@ What is missing and goes in, with the license the extractor will see:
 - Expected transcripts after step 1: about 600K (Haskell around 500K, Lean about 100K, Agda about 25K, Nix about 60K, Bend under 1K), about 250M tokens. That is above the research's 100K–500K target, so the mix can afford to be strict.
 - A rented CPU box would only shorten the wait; the output is the same. Not needed.
 
-**3. Cleaning** (`bend/Clean.bend`, `bend-clean`; one day; runs on the units, before rendering, so every count is per unit).
+**3. Cleaning** (**done**: `bend/Clean.bend`, `bend-clean`, the `clean` stage of `bend-transcripts`; the text below was the plan, docs/TRANSCRIPT-FORMAT.md has what it does; runs on the units, before rendering, so every count is per unit).
 
 - Exact dedup by sha256 of signature plus body across all units (the file-level dedup misses a function copied between packages).
 - Decontamination: every 10-gram of a unit's body against the 10-grams of `run/code-eval-v2.jsonl`, the code eval corpora in `run/eval/` and the transcript holdout; any hit drops the unit.

@@ -246,14 +246,26 @@ check, a mutant must fail, the output shown is the output produced); no word
 of a comment or a string is mutated; transcripts past the window are dropped,
 not cut; at most two transcripts per declaration.
 
-Still to build, in this order, each with its count recorded:
+`bend-clean` (`bend-transcripts clean LANG`) then drops, per language and
+before rendering, in this order, each count in `results.train.nul.stats`:
 
-- **Exact dedup** by the hash of a unit's body (vendored copies across
-  packages become one unit).
-- **Contamination.** Units come only from `run/code-train-v2.jsonl`, whose
-  held-out projects (`run/code-eval-v2.jsonl`) are whole packages or
-  repositories; add a 10-gram check against the evals.
-- **Near-dedup**: MinHash over 5-gram shingles at Jaccard 0.7.
+- **Exact duplicates**: a unit whose signature and body are an earlier
+  unit's (vendored copies across packages become one unit).
+- **Contamination**: a unit sharing a 10-gram of whitespace words with a
+  text of `run/code-eval-v2.jsonl`, the whole-project holdout (the units
+  come from `code-train-v3.jsonl`, which holds none of those projects, so
+  this catches copies).
+- **Near duplicates**: MinHash over 5-word shingles (128 hashes, 32 bands
+  of 4); a candidate pair whose signatures agree in 90 of 128 places
+  (Jaccard about 0.7) drops the later unit.
+- **Holdout**: 2% of the rest by a hash of the unit id goes to
+  `results.holdout.nul`, rendered apart as `transcripts.holdout.nul`.
+
+Bend, the first language through it: 4,643 kept units → 918 exact
+duplicates, 161 near duplicates, 9 contaminated (generic runs such as a
+long `f0, f1, … f9` field list), 3,494 train, 61 holdout.
+
+Still to build:
 - **Mix** by transcript count with `bend-mix`: Haskell 35, Lean
   25, Agda 20, Nix 10, Bend 10, plus 5% raw code as an anchor; interleave,
   never concatenate.

@@ -14,26 +14,32 @@ import ./Clock.bend as Ck
 #                    wants more of, MAX otherwise)
 #          units     bend-units over chunks of CHUNK files, UNIT_JOBS at once
 #          check     bend-check LANG with CHECK_JOBS workers
-#          render    bend-transcript with the code32k tokenizer
-#          all       the four in order
+#          clean     bend-clean: exact and near duplicates and units
+#                    contaminated by EVAL dropped, the rest split into
+#                    train and holdout (HOLDOUT_PCT of units by id hash)
+#          render    bend-transcript with the code32k tokenizer, train and
+#                    holdout apart
+#          all       the five in order
 #   LANG   haskell | agda | lean | nix | bend
 #
 # Run it from the repository root.  Everything lands in $OUT/LANG/ (default
 # run/transcripts): files-{hi,lo}.nul, units.nul, results.nul (+ .stats),
-# transcripts.nul, and log, whose lines are stamped in Mexico City time
+# results.{train,holdout}.nul (+ train's .stats), transcripts.{train,holdout}.nul,
+# and log, whose lines are stamped in Mexico City time
 # (UTC-6).  A stage whose output exists is skipped, so a killed run resumes
 # at the stage it died in.
 #
 # Environment: CORPUS (default run/code-train-v3.jsonl, else v2), OUT,
 # MAX (4), MAX_HI (8), CHUNK (300), UNIT_JOBS (8), CHECK_JOBS (lean 5,
 # agda 8, else the core count), WINDOW (2048), TOKENIZER
-# (weights/code32k.bpe), HACKAGE_PCT (30), and the tools BEND_UNITS,
-# BEND_CHECK, BEND_TRANSCRIPT (default: bend-units, bend-check,
+# (weights/code32k.bpe), HACKAGE_PCT (30), EVAL (run/code-eval-v2.jsonl),
+# HOLDOUT_PCT (2), and the tools BEND_UNITS, BEND_CHECK, BEND_CLEAN,
+# BEND_TRANSCRIPT (default: bend-units, bend-check, bend-clean,
 # bend-transcript on PATH); for LANG bend, BEND (bend) and BEND_SRC
 # (run/code-sources/own) reach bend-check.
 #
 # CORPUS is JSON lines, `{"id": ..., "text": ...}` in that order, as
-# extract-code.sh writes them.  A document whose id or text holds a NUL
+# bend-extract writes them.  A document whose id or text holds a NUL
 # cannot be NUL-framed: it is left out and counted (the jq this replaces
 # wrote its id alone and shifted every pair after it; the corpus has none).
 
@@ -44,10 +50,10 @@ def lang.code(+l: String) -> Nat:
   Bool.pick(Nat, String.eq(l, "haskell"), 1n, Bool.pick(Nat, String.eq(l, "agda"), 2n, Bool.pick(Nat, String.eq(l, "lean"), 3n,
     Bool.pick(Nat, String.eq(l, "nix"), 4n, Bool.pick(Nat, String.eq(l, "bend"), 5n, 0n)))))
 
-# sources 1, units 2, check 3, render 4, all 5 (0: none)
+# sources 1, units 2, check 3, render 4, all 5, clean 6 (0: none)
 def stage.code(+s: String) -> Nat:
   Bool.pick(Nat, String.eq(s, "sources"), 1n, Bool.pick(Nat, String.eq(s, "units"), 2n, Bool.pick(Nat, String.eq(s, "check"), 3n,
-    Bool.pick(Nat, String.eq(s, "render"), 4n, Bool.pick(Nat, String.eq(s, "all"), 5n, 0n)))))
+    Bool.pick(Nat, String.eq(s, "render"), 4n, Bool.pick(Nat, String.eq(s, "all"), 5n, Bool.pick(Nat, String.eq(s, "clean"), 6n, 0n))))))
 
 def ends(+id: List<&2, U32>, s: String) -> Bool:
   S.suffix(id, S.b(s))
@@ -605,6 +611,30 @@ def check(+code: Nat, +lang: String, +dir: String) -> IO(Unit):
     +n : Nat <- S.size(dir ++ "/results.nul")
     check.if(Nat.is_lt(0n, n), code, lang, dir)
 
+# Stage clean: bend-clean ------------------------------------------------------
+
+def clean.run(+dir: String) -> IO(Unit):
+  do IO<Unit>:
+    +bc : String <- S.env("BEND_CLEAN", "bend-clean")
+    +ev : String <- S.env("EVAL", "run/code-eval-v2.jsonl")
+    say(dir, "clean: against " ++ ev)
+    +st : U32 <- S.run.log(".", [], 2000000, bc, [dir ++ "/results.nul", dir ++ "/results.train.nul", dir ++ "/results.holdout.nul", ev], dir ++ "/clean.out")
+    ok.or(st, "bend-clean", dir ++ "/clean.out")
+    stats : List<&2, U32> <- S.read(dir ++ "/results.train.nul.stats")
+    say(dir, "clean: " ++ S.str(nl.sp(stats)))
+
+def clean.if(done: Bool, +dir: String) -> IO(Unit):
+  match done:
+    case True{}:
+      say(dir, "clean: done already")
+    case False{}:
+      clean.run(dir)
+
+def clean(+dir: String) -> IO(Unit):
+  do IO<Unit>:
+    +n : Nat <- S.size(dir ++ "/results.train.nul.stats")
+    clean.if(Nat.is_lt(0n, n), dir)
+
 # Stage render: bend-transcript -------------------------------------------------
 
 def last.line(ls: List<&2, List<&2, U32>>, +d: List<&2, U32>) -> List<&2, U32>:
@@ -614,15 +644,23 @@ def last.line(ls: List<&2, List<&2, U32>>, +d: List<&2, U32>) -> List<&2, U32>:
     case l <> more:
       last.line(more, l)
 
+# one of the two: results.PART.nul to transcripts.PART.nul
+def render.part(+dir: String, +window: Nat, +tok: String, +bt: String, +part: String) -> IO(Unit):
+  +out = dir ++ "/transcripts." ++ part ++ ".nul"
+  +log = dir ++ "/render." ++ part ++ ".out"
+  do IO<Unit>:
+    +st : U32 <- S.run.log(".", [], 2000000, bt, [tok, dir ++ "/results." ++ part ++ ".nul", out ++ ".tmp", Nat.show(window)], log)
+    ok.or(st, "bend-transcript", log)
+    S.mv(out ++ ".tmp", out)
+    xs : List<&2, U32> <- S.read(log)
+    say(dir, "render: " ++ part ++ ": " ++ S.str(last.line(S.split.lines(xs), Nil{})))
+
 def render.run(+dir: String, +window: Nat, +tok: String) -> IO(Unit):
   do IO<Unit>:
     +bt : String <- S.env("BEND_TRANSCRIPT", "bend-transcript")
     say(dir, "render: window " ++ Nat.show(window))
-    +st : U32 <- S.run.log(".", [], 2000000, bt, [tok, dir ++ "/results.nul", dir ++ "/transcripts.nul.tmp", Nat.show(window)], dir ++ "/render.out")
-    ok.or(st, "bend-transcript", dir ++ "/render.out")
-    S.mv(dir ++ "/transcripts.nul.tmp", dir ++ "/transcripts.nul")
-    out : List<&2, U32> <- S.read(dir ++ "/render.out")
-    say(dir, "render: " ++ S.str(last.line(S.split.lines(out), Nil{})))
+    render.part(dir, window, tok, bt, "holdout")
+    render.part(dir, window, tok, bt, "train")
 
 def render.if(done: Bool, +dir: String, +window: Nat, +tok: String) -> IO(Unit):
   match done:
@@ -633,7 +671,7 @@ def render.if(done: Bool, +dir: String, +window: Nat, +tok: String) -> IO(Unit):
 
 def render(+dir: String, +window: Nat, +tok: String) -> IO(Unit):
   do IO<Unit>:
-    +n : Nat <- S.size(dir ++ "/transcripts.nul")
+    +n : Nat <- S.size(dir ++ "/transcripts.train.nul")
     render.if(Nat.is_lt(0n, n), dir, window, tok)
 
 # The driver --------------------------------------------------------------------
@@ -651,11 +689,14 @@ def stage.run(stage: Nat, +code: Nat, +lang: String, +dir: String, +corpus: Stri
       check(code, lang, dir)
     case 4n:
       render(dir, window, tok)
+    case 6n:
+      clean(dir)
     case _:
       do IO<Unit>:
         sources(code, dir, corpus, max, maxhi, pct)
         units(lang, dir, max, maxhi, chunk, jobs)
         check(code, lang, dir)
+        clean(dir)
         render(dir, window, tok)
 
 def stage.go(stage: Nat, c: Tc) -> IO(Unit):
@@ -671,7 +712,7 @@ def start(stage: Nat, code: Nat, +lang: String) -> IO(Unit):
     case _ 0n:
       IO.die(Unit, 2, "bend-transcripts: LANG is haskell, agda, lean, nix or bend")
     case 0n _:
-      IO.die(Unit, 2, "bend-transcripts: STAGE is sources, units, check, render or all")
+      IO.die(Unit, 2, "bend-transcripts: STAGE is sources, units, check, clean, render or all")
     case _ _:
       do IO<Unit>:
         +v3 : Bool <- S.exists("run/code-train-v3.jsonl")

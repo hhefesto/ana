@@ -94,6 +94,9 @@
           # checkers on them, rendered as transcripts
           bend-units = bendBinary pkgs "bend-units" "Units.bend";
           bend-transcript = bendBinary pkgs "bend-transcript" "Transcript.bend";
+          # the checked units cleaned (exact and near duplicates, units
+          # sharing a 10-gram with the eval holdout) and split train/holdout
+          bend-clean = bendBinary pkgs "bend-clean" "Clean.bend";
           # the checkers: `bend-check LANG UNITS.nul RESULTS.nul [JOBS]` runs
           # ghc, agda, lean, nix-instantiate or bend on every unit's variants
           bend-check = bendBinary pkgs "bend-check" "Check.bend";
@@ -120,6 +123,7 @@
                 "bend-transcripts"
                 "bend-units"
                 "bend-transcript"
+                "bend-clean"
                 "bend-windows"
                 "bend-pack"
                 "bend-prepare"
@@ -145,7 +149,7 @@
               ];
             text = ''
               if [ "$#" -eq 0 ]; then
-                echo "usage: deploy TOOL [ARGS...]   (TOOL: extract, plan-corpus, code-evals, mix, push, transcripts, check, units, transcript, windows, pack, prepare, plan-segment)" >&2
+                echo "usage: deploy TOOL [ARGS...]   (TOOL: extract, plan-corpus, code-evals, mix, push, transcripts, check, units, clean, transcript, windows, pack, prepare, plan-segment)" >&2
                 exit 2
               fi
               tool=$1
@@ -452,6 +456,9 @@
             bend extract.bend > extract.out
             if grep -v '^ok ' extract.out; then exit 1; fi
             test "$(grep -c '^ok ' extract.out)" = 32
+            # the cleaner's MinHash: one word apart agrees in 90+ of 128
+            bend clean.bend > clean.out
+            printf 'ok %s\n' near far self grams short key | diff - clean.out
             touch $out
           '';
           # the training stack: the hand-written pullbacks agree with central
