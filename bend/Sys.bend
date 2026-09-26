@@ -197,9 +197,11 @@ def parent(+p: String) -> String:
 # bytes and no trailing newlines.  The directory above it (the run's own
 # temporary directory, which a relative import like ../../lib/x.nix
 # reaches) is removed too: the scripts left its random name in the text.
+# (the first n lines are taken first: the paths hold no newline, so the
+# lines are the same, and a flood of output is not scanned whole)
 def clean(+dir: String, +n: Nat, +xs: List<&2, U32>) -> List<&2, U32>:
-  +ys = replace(replace(xs, b(dir ++ "/"), Nil{}), b(parent(dir) ++ "/"), Nil{})
-  chomp(no.nul(lines.take(ys, n)))
+  +ys = replace(replace(lines.take(xs, n), b(dir ++ "/"), Nil{}), b(parent(dir) ++ "/"), Nil{})
+  chomp(no.nul(ys))
 
 def split.put(h: U32, r: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
   match r:

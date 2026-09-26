@@ -678,17 +678,41 @@ def has.module.line(ls: List<&2, List<&2, U32>>) -> Bool:
 
 # The segments of a GHCi run: the output between `@@@END` markers, as the
 # shell read it line by line (a marker ends a line; the text before it on
-# that line, if any, is one more line of the segment).
+# that line, if any, is one more line of the segment).  Lines gather newest
+# first and a segment is joined once, at its marker: appending each line to
+# the text so far (and copying both for a strict pick) was quadratic in a
+# batch's output, and a large module's error flood held a checker's one
+# evaluator thread for tens of minutes.
 type Sg is Data:
-  Sg{cur: List<&2, U32>, out: List<&2, List<&2, U32>>}
+  Sg{cur: List<&2, List<&2, U32>>, out: List<&2, List<&2, U32>>}
+
+# lines given newest first, as one text, each line followed by a newline
+def sg.text(ls: List<&2, List<&2, U32>>, acc: List<&2, U32>) -> List<&2, U32>:
+  match ls:
+    case Nil{}:
+      acc
+    case l <> more:
+      sg.text(more, S.append(l, 10 <> acc))
+
+def sg.pre(empty: Bool, +pre: List<&2, U32>, cur: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match empty:
+    case True{}:
+      cur
+    case False{}:
+      pre <> cur
+
+def sg.put(m: Bool, +l: List<&2, U32>, cur: List<&2, List<&2, U32>>, out: List<&2, List<&2, U32>>) -> Sg:
+  match m:
+    case True{}:
+      +pre = List.take(&2, U32, l, Nat.sub(S.len(l), 6n))
+      Sg{Nil{}, sg.text(sg.pre(Nat.is_eq(S.len(pre), 0n), pre, cur), Nil{}) <> out}
+    case False{}:
+      Sg{l <> cur, out}
 
 def sg.line(+l: List<&2, U32>, st: Sg) -> Sg:
   match st:
-    case Sg{+cur, +out}:
-      +m = S.suffix(l, S.b("@@@END"))
-      +pre = List.take(&2, U32, l, Nat.sub(S.len(l), 6n))
-      Bool.pick(Sg, m, Sg{Nil{}, S.append(cur, Bool.pick(List<&2, U32>, Nat.is_eq(S.len(pre), 0n), Nil{}, S.append(pre, [10]))) <> out},
-        Sg{S.append(cur, S.append(l, [10])), out})
+    case Sg{cur, out}:
+      sg.put(S.suffix(l, S.b("@@@END")), l, cur, out)
 
 def sg.go(ls: List<&2, List<&2, U32>>, st: Sg) -> Sg:
   match ls:
@@ -892,17 +916,25 @@ def clean(+dir: String, +cap: Nat, +xs: List<&2, U32>) -> List<&2, U32>:
 def session.text(+dir: String, +cap: Nat, +seg: List<&2, U32>) -> List<&2, U32>:
   clean(dir, cap, drop.lines(S.split.lines(seg), 0n))
 
-# the Context: the `name :: type` lines of the :type answers
+# the Context: the `name :: type` lines of the :type answers (kept lines
+# newest first)
 type Cx is Data:
-  Cx{keep: Bool, out: List<&2, U32>}
+  Cx{keep: Bool, out: List<&2, List<&2, U32>>}
+
+def cx.put(take: Bool, +l: List<&2, U32>, out: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match take:
+    case True{}:
+      l <> out
+    case False{}:
+      out
 
 def cx.line(+l: List<&2, U32>, st: Cx) -> Cx:
   match st:
-    case Cx{keep, +out}:
+    case Cx{keep, out}:
       +inter = S.prefix(l, S.b("<interactive>"))
       +top = Bool.and(Nat.is_lt(0n, S.len(l)), Bool.not(Bool.or(S.head.is(l, 32), S.head.is(l, 9))))
       +k = Bool.pick(Bool, inter, False{}, Bool.pick(Bool, top, S.infix(l, S.b(" :: ")), keep))
-      Cx{k, Bool.pick(List<&2, U32>, Bool.and(k, Bool.not(inter)), S.append(out, S.append(l, [10])), out)}
+      Cx{k, cx.put(Bool.and(k, Bool.not(inter)), l, out)}
 
 def cx.go(ls: List<&2, List<&2, U32>>, st: Cx) -> Cx:
   match ls:
@@ -914,26 +946,41 @@ def cx.go(ls: List<&2, List<&2, U32>>, st: Cx) -> Cx:
 def cx.out(st: Cx) -> List<&2, U32>:
   match st:
     case Cx{k, o}:
-      o
+      sg.text(o, Nil{})
 
 def context(+dir: String, +cap: Nat, +seg: List<&2, U32>) -> List<&2, U32>:
   clean(dir, cap, cx.out(cx.go(S.split.lines(seg), Cx{False{}, Nil{}})))
 
-# the type: the missing-signatures warning block for the unit's name
+# the type: the missing-signatures warning block for the unit's name.  A
+# block starts at a `Unit.hs:` line and is kept when a line of it names
+# `name ::` and the block so far says missing-signatures (ms; the word has
+# no newline, so a line holds it or none does).  Lines newest first.
 type Tb is Data:
-  Tb{keep: Bool, blk: List<&2, U32>, out: List<&2, U32>}
+  Tb{keep: Bool, ms: Bool, blk: List<&2, List<&2, U32>>, out: List<&2, List<&2, U32>>}
+
+# a `Unit.hs:` line closes the block, a kept one joining out
+def tb.flush(start: Bool, keep: Bool, ms: Bool, blk: List<&2, List<&2, U32>>, out: List<&2, List<&2, U32>>) -> Tb:
+  match start keep:
+    case True{} True{}:
+      Tb{False{}, False{}, Nil{}, List.append(&2, List<&2, U32>, blk, out)}
+    case True{} False{}:
+      Tb{False{}, False{}, Nil{}, out}
+    case False{} k:
+      Tb{k, ms, blk, out}
+
+# GHCi's own lines join no block
+def tb.add(skip: Bool, +name: List<&2, U32>, +l: List<&2, U32>, t: Tb) -> Tb:
+  match skip t:
+    case True{} other:
+      other
+    case False{} Tb{keep, ms, blk, out}:
+      +ms2 = Bool.or(ms, S.infix(l, S.b("missing-signatures")))
+      Tb{Bool.or(keep, Bool.and(S.infix(l, S.append(name, S.b(" ::"))), ms2)), ms2, l <> blk, out}
 
 def tb.line(+name: List<&2, U32>, +l: List<&2, U32>, st: Tb) -> Tb:
   match st:
-    case Tb{+keep, +blk, +out}:
-      +start = S.prefix(l, S.b("Unit.hs:"))
-      +out1 = Bool.pick(List<&2, U32>, Bool.and(start, keep), S.append(out, blk), out)
-      +blk1 = Bool.pick(List<&2, U32>, start, Nil{}, blk)
-      +keep1 = Bool.and(Bool.not(start), keep)
-      +skip = ghci.line(l)
-      +blk2 = S.append(blk1, S.append(l, [10]))
-      Bool.pick(Tb, skip, Tb{keep1, blk1, out1},
-        Tb{Bool.or(keep1, Bool.and(S.infix(l, S.append(name, S.b(" ::"))), S.infix(blk2, S.b("missing-signatures")))), blk2, out1})
+    case Tb{keep, ms, blk, out}:
+      tb.add(ghci.line(l), name, l, tb.flush(S.prefix(l, S.b("Unit.hs:")), keep, ms, blk, out))
 
 def tb.go(+name: List<&2, U32>, ls: List<&2, List<&2, U32>>, st: Tb) -> Tb:
   match ls:
@@ -944,11 +991,13 @@ def tb.go(+name: List<&2, U32>, ls: List<&2, List<&2, U32>>, st: Tb) -> Tb:
 
 def tb.fin(st: Tb) -> List<&2, U32>:
   match st:
-    case Tb{keep, blk, +out}:
-      Bool.pick(List<&2, U32>, keep, S.append(out, blk), out)
+    case Tb{True{}, ms, blk, out}:
+      sg.text(List.append(&2, List<&2, U32>, blk, out), Nil{})
+    case Tb{False{}, ms, blk, out}:
+      sg.text(out, Nil{})
 
 def type.block(+dir: String, +cap: Nat, +name: List<&2, U32>, +seg: List<&2, U32>) -> List<&2, U32>:
-  clean(dir, cap, tb.fin(tb.go(name, S.split.lines(seg), Tb{False{}, Nil{}, Nil{}})))
+  clean(dir, cap, tb.fin(tb.go(name, S.split.lines(seg), Tb{False{}, False{}, Nil{}, Nil{}})))
 
 # What GHCi said about a unit: its segments, in command order.
 type Said is Data:
