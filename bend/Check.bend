@@ -177,6 +177,19 @@ def join.all(chs: List<Chan(List<&2, L.Stat>)>, st: List<&2, L.Stat>) -> IO(List
         s : List<&2, L.Stat> <- IO.join(List<&2, L.Stat>, ch)
         join.all(more, L.stat.merge(s, st))
 
+# A process's share of the units (SHARD of SHARDS): those whose Haskell
+# package, or (the other languages) file, hashes to SHARD mod SHARDS, the hash (7; h * 31 + c mod 1000003) over the
+# code points, as bend-transcripts' hackage.ok.
+def kh.go(s: String, +h: U32) -> U32:
+  match s:
+    case SNil{}:
+      h
+    case SCon{Chr{c}, t}:
+      kh.go(t, U32.mod(U32.add(U32.mul(h, 31), c), 1000003))
+
+def shard.mine(+sk: Nat, +sn: Nat, +key: String) -> Bool:
+  U32.is_eq(U32.mod(kh.go(key, 7), U32.from_nat(sn)), U32.from_nat(sk))
+
 # The dispatcher: reads UNITS.nul a unit at a time, gathers jobs -------------
 
 type Dp is Type:
@@ -200,7 +213,15 @@ def dp.place(same: Bool, +jobs: Chan(Job), rd: S.Rd, +i: Nat, key: List<&2, U32>
         dp.send(jobs, grp, gn)
         return Dp{rd, 1n+i, k, [u], 1n, True{}}
 
-def dp.rec.m(+c: Cfg, +jobs: Chan(Job), rd: S.Rd, +i: Nat, +key: List<&2, U32>, grp: List<&2, L.U>, +gn: Nat, +id: List<&2, U32>, m: Maybe<&2, List<&2, U32>>) -> IO(Dp):
+# a unit of another shard: passed over, its place still counted
+def dp.mine(mine: Bool, same: Bool, +jobs: Chan(Job), rd: S.Rd, +i: Nat, key: List<&2, U32>, grp: List<&2, L.U>, +gn: Nat, +u: L.U, +k: List<&2, U32>) -> IO(Dp):
+  match mine:
+    case True{}:
+      dp.place(same, jobs, rd, i, key, grp, gn, u, k)
+    case False{}:
+      IO.pure(Dp, Dp{rd, 1n+i, key, grp, gn, True{}})
+
+def dp.rec.m(+c: Cfg, +sk: Nat, +sn: Nat, +jobs: Chan(Job), rd: S.Rd, +i: Nat, +key: List<&2, U32>, grp: List<&2, L.U>, +gn: Nat, +id: List<&2, U32>, m: Maybe<&2, List<&2, U32>>) -> IO(Dp):
   match m:
     case None{}:
       do IO<Dp>:
@@ -209,13 +230,13 @@ def dp.rec.m(+c: Cfg, +jobs: Chan(Job), rd: S.Rd, +i: Nat, +key: List<&2, U32>, 
     case Some{+rec}:
       +u = {L.U{i, id, L.fields(rec)} : L.U}
       +k = Cfg.key(c, u)
-      dp.place(Bool.and(S.eq(k, key), Nat.is_lt(gn, Cfg.group(c))), jobs, rd, i, key, grp, gn, u, k)
+      dp.mine(shard.mine(sk, sn, S.str(Hs.upto(id, 35))), Bool.and(S.eq(k, key), Nat.is_lt(gn, Cfg.group(c))), jobs, rd, i, key, grp, gn, u, k)
 
-def dp.rec(+c: Cfg, +jobs: Chan(Job), +i: Nat, +key: List<&2, U32>, grp: List<&2, L.U>, +gn: Nat, +id: List<&2, U32>, r: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(Dp):
+def dp.rec(+c: Cfg, +sk: Nat, +sn: Nat, +jobs: Chan(Job), +i: Nat, +key: List<&2, U32>, grp: List<&2, L.U>, +gn: Nat, +id: List<&2, U32>, r: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(Dp):
   (rd, m) = r
-  dp.rec.m(c, jobs, rd, i, key, grp, gn, id, m)
+  dp.rec.m(c, sk, sn, jobs, rd, i, key, grp, gn, id, m)
 
-def dp.id.m(+c: Cfg, +jobs: Chan(Job), rd: S.Rd, +i: Nat, +key: List<&2, U32>, grp: List<&2, L.U>, +gn: Nat, m: Maybe<&2, List<&2, U32>>) -> IO(Dp):
+def dp.id.m(+c: Cfg, +sk: Nat, +sn: Nat, +jobs: Chan(Job), rd: S.Rd, +i: Nat, +key: List<&2, U32>, grp: List<&2, L.U>, +gn: Nat, m: Maybe<&2, List<&2, U32>>) -> IO(Dp):
   match m:
     case None{}:
       do IO<Dp>:
@@ -224,24 +245,24 @@ def dp.id.m(+c: Cfg, +jobs: Chan(Job), rd: S.Rd, +i: Nat, +key: List<&2, U32>, g
     case Some{+id}:
       do IO<Dp>:
         r : S.Rd & Maybe<&2, List<&2, U32>> <- S.Rd.next(rd)
-        dp.rec(c, jobs, i, key, grp, gn, id, r)
+        dp.rec(c, sk, sn, jobs, i, key, grp, gn, id, r)
 
-def dp.id(+c: Cfg, +jobs: Chan(Job), +i: Nat, +key: List<&2, U32>, grp: List<&2, L.U>, +gn: Nat, r: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(Dp):
+def dp.id(+c: Cfg, +sk: Nat, +sn: Nat, +jobs: Chan(Job), +i: Nat, +key: List<&2, U32>, grp: List<&2, L.U>, +gn: Nat, r: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(Dp):
   (rd, m) = r
-  dp.id.m(c, jobs, rd, i, key, grp, gn, m)
+  dp.id.m(c, sk, sn, jobs, rd, i, key, grp, gn, m)
 
-def dp.step(+c: Cfg, +jobs: Chan(Job), d: Dp) -> IO(Dp):
+def dp.step(+c: Cfg, +sk: Nat, +sn: Nat, +jobs: Chan(Job), d: Dp) -> IO(Dp):
   match d:
     case Dp{rd, +i, +key, grp, +gn, g}:
       do IO<Dp>:
         r : S.Rd & Maybe<&2, List<&2, U32>> <- S.Rd.next(rd)
-        dp.id(c, jobs, i, key, grp, gn, r)
+        dp.id(c, sk, sn, jobs, i, key, grp, gn, r)
 
 # every unit dispatched: the reader and the number of units
-def dp.go(fuel: Nat, +c: Cfg, +jobs: Chan(Job), d: Dp) -> IO(S.Rd & Nat):
+def dp.go(fuel: Nat, +c: Cfg, +sk: Nat, +sn: Nat, +jobs: Chan(Job), d: Dp) -> IO(S.Rd & Nat):
   match fuel d:
     case 1n+p Dp{rd, i, key, grp, gn, True{}}:
-      IO.bind(Dp, S.Rd & Nat, dp.step(c, jobs, Dp{rd, i, key, grp, gn, True{}}), dp.go(p, c, jobs))
+      IO.bind(Dp, S.Rd & Nat, dp.step(c, sk, sn, jobs, Dp{rd, i, key, grp, gn, True{}}), dp.go(p, c, sk, sn, jobs))
     case _ Dp{rd, i, key, grp, gn, g}:
       IO.pure(S.Rd & Nat, (rd, i))
 
@@ -278,19 +299,6 @@ def hkey(+cs: String, +dirs: Set(), +id: List<&2, U32>) -> String:
   +rel = List.drop(&2, U32, f, 1n+S.len(g))
   +base = hkey.base(cs, g)
   Bool.pick(String, S.prefix(g, S.b("hackage:")), S.str(g), hkey.walk(64n, base ++ "/" ++ S.str(rel), base, dirs))
-
-# A process's share of the packages (SHARD of SHARDS): a package whose key
-# hashes to SHARD mod SHARDS, the hash (7; h * 31 + c mod 1000003) over the
-# code points, as bend-transcripts' hackage.ok.
-def kh.go(s: String, +h: U32) -> U32:
-  match s:
-    case SNil{}:
-      h
-    case SCon{Chr{c}, t}:
-      kh.go(t, U32.mod(U32.add(U32.mul(h, 31), c), 1000003))
-
-def shard.mine(+sk: Nat, +sn: Nat, +key: String) -> Bool:
-  U32.is_eq(U32.mod(kh.go(key, 7), U32.from_nat(sn)), U32.from_nat(sk))
 
 type Grp is Data:
   Grp{n: Nat, ids: List<&2, List<&2, U32>>, locs: List<&2, Lc>}
@@ -471,8 +479,11 @@ def dispatch.fin(r: S.Rd & Nat) -> IO(Unit):
 
 def dispatch.stream(+c: Cfg, +units: String, +q: Chan(Job)) -> IO(Unit):
   do IO<Unit>:
+    +sk : Nat <- S.env.nat("SHARD", 0n)
+    +sn : Nat <- S.env.nat("SHARDS", 1n)
+    Ck.log("bend-check: shard " ++ Nat.show(sk) ++ " of " ++ Nat.show(sn))
     rd : S.Rd <- S.Rd.open(units)
-    r : S.Rd & Nat <- dp.go(big(), c, q, Dp{rd, 0n, Nil{}, Nil{}, 0n, True{}})
+    r : S.Rd & Nat <- dp.go(big(), c, sk, sn, q, Dp{rd, 0n, Nil{}, Nil{}, 0n, True{}})
     dispatch.fin(r)
 
 def dispatch(+c: Cfg, +units: String, +q: Chan(Job)) -> IO(Unit):
