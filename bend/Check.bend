@@ -816,23 +816,25 @@ def wk.go(fuel: Nat, +c: Cfg, +k: Nat, +dir: String, +part: String, +jobs: Chan(
     case _ Wk{g, st}:
       IO.pure(List<&2, L.Stat>, st)
 
-# worker k: its own directory and part file
-def wk(+c: Cfg, +k: Nat, +work: String, +jobs: Chan(Job)) -> IO(List<&2, L.Stat>):
+# worker k: its own directory and part file; tag names its files outside
+# the work directory (Agda's FTUnit<tag>.agda in a unit's library), unique
+# across the shards of a run
+def wk(+c: Cfg, +k: Nat, +tag: Nat, +work: String, +jobs: Chan(Job)) -> IO(List<&2, L.Stat>):
   +dir = work ++ "/" ++ Nat.show(k)
   +part = work ++ "/part." ++ Nat.show(k)
   do IO<List<&2, L.Stat>>:
     S.mkdir(dir)
     S.write(part, Nil{})
-    wk.go(big(), c, k, dir, part, jobs, Wk{True{}, Nil{}})
+    wk.go(big(), c, tag, dir, part, jobs, Wk{True{}, Nil{}})
 
-def fork.all(n: Nat, +k: Nat, +c: Cfg, +work: String, +jobs: Chan(Job)) -> IO(List<Chan(List<&2, L.Stat>)>):
+def fork.all(n: Nat, +k: Nat, +base: Nat, +c: Cfg, +work: String, +jobs: Chan(Job)) -> IO(List<Chan(List<&2, L.Stat>)>):
   match n:
     case 0n:
       IO.pure(List<Chan(List<&2, L.Stat>)>, Nil{})
     case 1n+m:
       do IO<List<Chan(List<&2, L.Stat>)>>:
-        ch : Chan(List<&2, L.Stat>) <- IO.fork(List<&2, L.Stat>, wk(c, k, work, jobs))
-        rest : List<Chan(List<&2, L.Stat>)> <- fork.all(m, 1n+k, c, work, jobs)
+        ch : Chan(List<&2, L.Stat>) <- IO.fork(List<&2, L.Stat>, wk(c, k, Nat.add(base, k), work, jobs))
+        rest : List<Chan(List<&2, L.Stat>)> <- fork.all(m, 1n+k, base, c, work, jobs)
         return ch <> rest
 
 def check(+c: Cfg, +units: String, +out: String, +jobs: Nat) -> IO(Unit):
@@ -841,7 +843,8 @@ def check(+c: Cfg, +units: String, +out: String, +jobs: Nat) -> IO(Unit):
     +keep : String <- S.env("KEEP_WORK", "")
     Ck.log("bend-check " ++ Cfg.name(c) ++ ": " ++ units ++ " with " ++ Nat.show(jobs) ++ " workers in " ++ work)
     +q : Chan(Job) <- Chan.new(Job, U32.from_nat(jobs))
-    chs : List<Chan(List<&2, L.Stat>)> <- fork.all(jobs, 0n, c, work, q)
+    +sk : Nat <- S.env.nat("SHARD", 0n)
+    chs : List<Chan(List<&2, L.Stat>)> <- fork.all(jobs, 0n, Nat.mul(sk, jobs), c, work, q)
     dispatch(c, units, q)
     Chan.close(Job, q)
     +st : List<&2, L.Stat> <- join.all(chs, Nil{})
