@@ -279,6 +279,19 @@ def hkey(+cs: String, +dirs: Set(), +id: List<&2, U32>) -> String:
   +base = hkey.base(cs, g)
   Bool.pick(String, S.prefix(g, S.b("hackage:")), S.str(g), hkey.walk(64n, base ++ "/" ++ S.str(rel), base, dirs))
 
+# A process's share of the packages (SHARD of SHARDS): a package whose key
+# hashes to SHARD mod SHARDS, the hash (7; h * 31 + c mod 1000003) over the
+# code points, as bend-transcripts' hackage.ok.
+def kh.go(s: String, +h: U32) -> U32:
+  match s:
+    case SNil{}:
+      h
+    case SCon{Chr{c}, t}:
+      kh.go(t, U32.mod(U32.add(U32.mul(h, 31), c), 1000003))
+
+def shard.mine(+sk: Nat, +sn: Nat, +key: String) -> Bool:
+  U32.is_eq(U32.mod(kh.go(key, 7), U32.from_nat(sn)), U32.from_nat(sk))
+
 type Grp is Data:
   Grp{n: Nat, ids: List<&2, List<&2, U32>>, locs: List<&2, Lc>}
 
@@ -302,7 +315,15 @@ def kp.put(rd: S.Rd, +i: Nat, +off: Nat, +len: Nat, order: List<&2, String>, +ke
   (m, g) = r
   kp.put.g(rd, i, off, len, order, key, id, m, g)
 
-def kp.rec.m(+cs: String, +dirs: Set(), rd: S.Rd, +i: Nat, +off: Nat, m: Map<&2, Grp>, order: List<&2, String>, +id: List<&2, U32>, x: Maybe<&2, List<&2, U32>>) -> IO(Kp):
+# a unit of another shard's package: passed over, its place still counted
+def kp.mine(mine: Bool, rd: S.Rd, +i: Nat, +off: Nat, +len: Nat, m: Map<&2, Grp>, order: List<&2, String>, +key: String, +id: List<&2, U32>) -> Kp:
+  match mine:
+    case True{}:
+      kp.put(rd, i, off, len, order, key, id, Map.get(Grp, Grp{0n, Nil{}, Nil{}}, m, key))
+    case False{}:
+      Kp{rd, 1n+i, Nat.add(off, len), m, order, True{}}
+
+def kp.rec.m(+cs: String, +dirs: Set(), +sk: Nat, +sn: Nat, rd: S.Rd, +i: Nat, +off: Nat, m: Map<&2, Grp>, order: List<&2, String>, +id: List<&2, U32>, x: Maybe<&2, List<&2, U32>>) -> IO(Kp):
   match x:
     case None{}:
       do IO<Kp>:
@@ -310,36 +331,36 @@ def kp.rec.m(+cs: String, +dirs: Set(), rd: S.Rd, +i: Nat, +off: Nat, m: Map<&2,
         IO.die(Kp, 1, "bend-check: a unit id without its record")
     case Some{+rec}:
       +key = hkey(cs, dirs, id)
-      IO.pure(Kp, kp.put(rd, i, off, Nat.add(Nat.add(S.len(id), S.len(rec)), 2n), order, key, id, Map.get(Grp, Grp{0n, Nil{}, Nil{}}, m, key)))
+      IO.pure(Kp, kp.mine(shard.mine(sk, sn, key), rd, i, off, Nat.add(Nat.add(S.len(id), S.len(rec)), 2n), m, order, key, id))
 
-def kp.rec(+cs: String, +dirs: Set(), +i: Nat, +off: Nat, m: Map<&2, Grp>, order: List<&2, String>, +id: List<&2, U32>, r: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(Kp):
+def kp.rec(+cs: String, +dirs: Set(), +sk: Nat, +sn: Nat, +i: Nat, +off: Nat, m: Map<&2, Grp>, order: List<&2, String>, +id: List<&2, U32>, r: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(Kp):
   (rd, x) = r
-  kp.rec.m(cs, dirs, rd, i, off, m, order, id, x)
+  kp.rec.m(cs, dirs, sk, sn, rd, i, off, m, order, id, x)
 
-def kp.id.m(+cs: String, +dirs: Set(), rd: S.Rd, +i: Nat, +off: Nat, m: Map<&2, Grp>, order: List<&2, String>, x: Maybe<&2, List<&2, U32>>) -> IO(Kp):
+def kp.id.m(+cs: String, +dirs: Set(), +sk: Nat, +sn: Nat, rd: S.Rd, +i: Nat, +off: Nat, m: Map<&2, Grp>, order: List<&2, String>, x: Maybe<&2, List<&2, U32>>) -> IO(Kp):
   match x:
     case None{}:
       IO.pure(Kp, Kp{rd, i, off, m, order, False{}})
     case Some{+id}:
       do IO<Kp>:
         r : S.Rd & Maybe<&2, List<&2, U32>> <- S.Rd.next(rd)
-        kp.rec(cs, dirs, i, off, m, order, id, r)
+        kp.rec(cs, dirs, sk, sn, i, off, m, order, id, r)
 
-def kp.id(+cs: String, +dirs: Set(), +i: Nat, +off: Nat, m: Map<&2, Grp>, order: List<&2, String>, r: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(Kp):
+def kp.id(+cs: String, +dirs: Set(), +sk: Nat, +sn: Nat, +i: Nat, +off: Nat, m: Map<&2, Grp>, order: List<&2, String>, r: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(Kp):
   (rd, x) = r
-  kp.id.m(cs, dirs, rd, i, off, m, order, x)
+  kp.id.m(cs, dirs, sk, sn, rd, i, off, m, order, x)
 
-def kp.step(+cs: String, +dirs: Set(), k: Kp) -> IO(Kp):
+def kp.step(+cs: String, +dirs: Set(), +sk: Nat, +sn: Nat, k: Kp) -> IO(Kp):
   match k:
     case Kp{rd, +i, +off, m, order, g}:
       do IO<Kp>:
         r : S.Rd & Maybe<&2, List<&2, U32>> <- S.Rd.next(rd)
-        kp.id(cs, dirs, i, off, m, order, r)
+        kp.id(cs, dirs, sk, sn, i, off, m, order, r)
 
-def kp.go(fuel: Nat, +cs: String, +dirs: Set(), k: Kp) -> IO(Kp):
+def kp.go(fuel: Nat, +cs: String, +dirs: Set(), +sk: Nat, +sn: Nat, k: Kp) -> IO(Kp):
   match fuel k:
     case 1n+p Kp{rd, i, off, m, order, True{}}:
-      IO.bind(Kp, Kp, kp.step(cs, dirs, Kp{rd, i, off, m, order, True{}}), kp.go(p, cs, dirs))
+      IO.bind(Kp, Kp, kp.step(cs, dirs, sk, sn, Kp{rd, i, off, m, order, True{}}), kp.go(p, cs, dirs, sk, sn))
     case _ Kp{rd, i, off, m, order, g}:
       IO.pure(Kp, Kp{rd, i, off, m, order, g})
 
@@ -359,14 +380,59 @@ def grp.le(a: Grp, c: Grp) -> Bool:
     case Grp{+n, i, l} Grp{+o, j, k}:
       Nat.is_le(o, n)
 
+# PKG_CAP: of a package's n units (j = 0.. in input order) the cap evenly
+# spaced ones, j with j * cap mod n < cap; PKG_REST: the others.  No cap
+# (0) or n <= cap: every unit, and none as the rest.
+def pick.in(+cap: Nat, +n: Nat, +j: Nat) -> Bool:
+  Bool.or(Nat.is_eq(cap, 0n), Bool.or(Nat.is_le(n, cap),
+    U32.is_lt(U32.mod(U32.mul(U32.from_nat(j), U32.from_nat(cap)), U32.from_nat(n)), U32.from_nat(cap))))
+
+def pick.keep(+rest: Bool, +p: Bool) -> Bool:
+  Bool.pick(Bool, rest, Bool.not(p), p)
+
+def pick.ids(+cap: Nat, +rest: Bool, +n: Nat, xs: List<&2, List<&2, U32>>, +j: Nat) -> List<&2, List<&2, U32>>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +x <> more:
+      +r = pick.ids(cap, rest, n, more, 1n+j)
+      Bool.pick(List<&2, List<&2, U32>>, pick.keep(rest, pick.in(cap, n, j)), x <> r, r)
+
+def pick.locs(+cap: Nat, +rest: Bool, +n: Nat, xs: List<&2, Lc>, +j: Nat) -> List<&2, Lc>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +x <> more:
+      +r = pick.locs(cap, rest, n, more, 1n+j)
+      Bool.pick(List<&2, Lc>, pick.keep(rest, pick.in(cap, n, j)), x <> r, r)
+
+# the packages' picked units, in input order, the empty ones gone
+def grps.cap(+cap: Nat, +rest: Bool, gs: List<&2, Grp>) -> List<&2, Grp>:
+  match gs:
+    case Nil{}:
+      Nil{}
+    case Grp{+n, ids, locs} <> more:
+      +xs = pick.ids(cap, rest, n, List.reverse(&2, List<&2, U32>, ids), 0n)
+      +ls = pick.locs(cap, rest, n, List.reverse(&2, Lc, locs), 0n)
+      +k = List.length(&2, Lc, ls)
+      +r = grps.cap(cap, rest, more)
+      Bool.pick(List<&2, Grp>, Nat.is_eq(k, 0n), r, Grp{k, xs, ls} <> r)
+
 def send.grps(+q: Chan(Job), gs: List<&2, Grp>) -> IO(Unit):
   match gs:
     case Nil{}:
       IO.pure(Unit, Unit{})
     case Grp{n, ids, locs} <> more:
       do IO<Unit>:
-        ok : Bool <- Chan.send(Job, q, Keyed{List.reverse(&2, List<&2, U32>, ids), List.reverse(&2, Lc, locs)})
+        ok : Bool <- Chan.send(Job, q, Keyed{ids, locs})
         send.grps(q, more)
+
+def Grp.sum(gs: List<&2, Grp>) -> Nat:
+  match gs:
+    case Nil{}:
+      0n
+    case Grp{n, i, l} <> more:
+      Nat.add(n, Grp.sum(more))
 
 def List.head.or(gs: List<&2, Grp>) -> Grp:
   match gs:
@@ -377,20 +443,27 @@ def List.head.or(gs: List<&2, Grp>) -> Grp:
 
 # every unit read once for its package; then the packages as jobs, the
 # largest first
-def kp.sent(+q: Chan(Job), k: Kp) -> IO(Unit):
+def kp.sent(+cap: Nat, +rest: Bool, +q: Chan(Job), k: Kp) -> IO(Unit):
   match k:
     case Kp{rd, i, off, +m, order, g}:
-      +gs = List.sort(~Grp, ~grp.le, grps(m, List.reverse(&2, String, order)))
+      +gs = List.sort(~Grp, ~grp.le, grps.cap(cap, rest, grps(m, List.reverse(&2, String, order))))
       do IO<Unit>:
         S.Rd.close(rd)
-        Ck.log("bend-check: " ++ Nat.show(i) ++ " units in " ++ Nat.show(List.length(&2, Grp, gs)) ++ " packages, the largest " ++ Nat.show(Grp.n(List.head.or(gs))))
+        Ck.log("bend-check: " ++ Nat.show(Grp.sum(gs)) ++ " of " ++ Nat.show(i) ++ " units in " ++ Nat.show(List.length(&2, Grp, gs)) ++ " packages, the largest " ++ Nat.show(Grp.n(List.head.or(gs))))
         send.grps(q, gs)
 
+# SHARD of SHARDS (default 0 of 1), PKG_CAP (0: none), PKG_REST (1: the
+# units the cap leaves out)
 def dispatch.keyed(+cs: String, +dirs: Set(), +units: String, +q: Chan(Job)) -> IO(Unit):
   do IO<Unit>:
+    +sk : Nat <- S.env.nat("SHARD", 0n)
+    +sn : Nat <- S.env.nat("SHARDS", 1n)
+    +cap : Nat <- S.env.nat("PKG_CAP", 0n)
+    +rest : Nat <- S.env.nat("PKG_REST", 0n)
+    Ck.log("bend-check: shard " ++ Nat.show(sk) ++ " of " ++ Nat.show(sn) ++ ", package cap " ++ Nat.show(cap) ++ Bool.pick(String, Nat.is_eq(rest, 0n), "", " (the rest)"))
     rd : S.Rd <- S.Rd.open(units)
-    k : Kp <- kp.go(big(), cs, dirs, Kp{rd, 0n, 0n, Map.new(&2, Grp), Nil{}, True{}})
-    kp.sent(q, k)
+    k : Kp <- kp.go(big(), cs, dirs, sk, sn, Kp{rd, 0n, 0n, Map.new(&2, Grp), Nil{}, True{}})
+    kp.sent(cap, Bool.not(Nat.is_eq(rest, 0n)), q, k)
 
 def dispatch.fin(r: S.Rd & Nat) -> IO(Unit):
   (rd, n) = r

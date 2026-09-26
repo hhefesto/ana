@@ -2,6 +2,7 @@ import Base
 import ./Sys.bend as S
 import ./Json.bend as J
 import ./Clock.bend as Ck
+import ./Check/Lib.bend as L
 
 # bend-transcripts: the transcript corpus, one language at a time, from the
 # code corpus to rendered transcripts (docs/TRANSCRIPT-FORMAT.md).
@@ -585,17 +586,132 @@ def nl.sp(xs: List<&2, U32>) -> List<&2, U32>:
     case +h <> t:
       Bool.pick(U32, U32.is_eq(h, 10), 32, h) <> nl.sp(t)
 
-def check.run(+code: Nat, +lang: String, +dir: String) -> IO(Unit):
+def shard.done(ok: Bool, +st: U32, +r: String) -> IO(U32):
+  match ok:
+    case True{}:
+      do IO<U32>:
+        S.mv(r ++ ".tmp.stats", r ++ ".stats")
+        S.mv(r ++ ".tmp", r)
+        return st
+    case False{}:
+      IO.pure(U32, st)
+
+# One shard of CHECK_PROCS: bend-check with SHARD=k of SHARDS=n into
+# results.K.nul (the Haskell dispatcher takes the packages whose key hashes
+# to k; one process evaluates on one core, so the shards spread the parsing
+# over processes).  A shard already done is kept.
+def shard.go(have: Bool, +code: Nat, +k: Nat, +n: Nat, +bc: String, +lang: String, +dir: String, +jobs: Nat) -> IO(U32):
+  match have:
+    case True{}:
+      IO.pure(U32, 0)
+    case False{}:
+      +r = dir ++ "/results." ++ Nat.show(k) ++ ".nul"
+      do IO<U32>:
+        env : List<String> <- check.env(code)
+        +st : U32 <- S.run.log(".", ("SHARD=" ++ Nat.show(k)) <> ("SHARDS=" ++ Nat.show(n)) <> env, 2000000, bc, [lang, dir ++ "/units.nul", r ++ ".tmp", Nat.show(jobs)], dir ++ "/check." ++ Nat.show(k) ++ ".out")
+        shard.done(U32.is_eq(st, 0), st, r)
+
+def shard.run(+code: Nat, +k: Nat, +n: Nat, +bc: String, +lang: String, +dir: String, +jobs: Nat) -> IO(U32):
+  do IO<U32>:
+    +have : Nat <- S.size(dir ++ "/results." ++ Nat.show(k) ++ ".nul.stats")
+    shard.go(Nat.is_lt(0n, have), code, k, n, bc, lang, dir, jobs)
+
+def shards.fork(m: Nat, +code: Nat, +k: Nat, +n: Nat, +bc: String, +lang: String, +dir: String, +jobs: Nat) -> IO(List<Chan(U32)>):
+  match m:
+    case 0n:
+      IO.pure(List<Chan(U32)>, Nil{})
+    case 1n+p:
+      do IO<List<Chan(U32)>>:
+        ch : Chan(U32) <- IO.fork(U32, shard.run(code, k, n, bc, lang, dir, jobs))
+        rest : List<Chan(U32)> <- shards.fork(p, code, 1n+k, n, bc, lang, dir, jobs)
+        return ch <> rest
+
+def shards.join(chs: List<Chan(U32)>, +bad: Nat) -> IO(Nat):
+  match chs:
+    case Nil{}:
+      IO.pure(Nat, bad)
+    case ch <> more:
+      do IO<Nat>:
+        +st : U32 <- IO.join(U32, ch)
+        shards.join(more, Bool.pick(Nat, U32.is_eq(st, 0), bad, 1n+bad))
+
+def shards.files(m: Nat, +k: Nat, +dir: String, +ext: String) -> List<String>:
+  match m:
+    case 0n:
+      Nil{}
+    case 1n+p:
+      (dir ++ "/results." ++ Nat.show(k) ++ ".nul" ++ ext) <> shards.files(p, 1n+k, dir, ext)
+
+# `key count` lines, summed over the shards
+def stat.line(+l: List<&2, U32>, st: List<&2, L.Stat>) -> List<&2, L.Stat>:
+  +k = before(l, 32)
+  L.stat.bump(S.str(k), nat.of(List.drop(&2, U32, l, 1n+S.len(k))), st)
+
+def stat.lines(ls: List<&2, List<&2, U32>>, +st: List<&2, L.Stat>) -> List<&2, L.Stat>:
+  match ls:
+    case Nil{}:
+      st
+    case +l <> more:
+      stat.lines(more, Bool.pick(List<&2, L.Stat>, Nat.is_eq(S.len(l), 0n), st, stat.line(l, st)))
+
+def stat.sum(fs: List<String>, st: List<&2, L.Stat>) -> IO(List<&2, L.Stat>):
+  match fs:
+    case Nil{}:
+      IO.pure(List<&2, L.Stat>, st)
+    case +f <> more:
+      do IO<List<&2, L.Stat>>:
+        +xs : List<&2, U32> <- S.read(f)
+        stat.sum(more, stat.lines(S.split.lines(xs), st))
+
+# the shards' results one after another (shard order), and their stats
+def shards.cat(+n: Nat, +dir: String) -> IO(Unit):
   do IO<Unit>:
-    +cj : Nat <- S.env.nat("CHECK_JOBS", 0n)
-    +jobs : Nat <- jobs.or(cj, code)
+    +st : U32 <- S.run.log(".", [], 2000000, "cat", shards.files(n, 0n, dir, ""), dir ++ "/results.nul.tmp")
+    ok.or(st, "cat of the shards", dir ++ "/results.nul.tmp")
+    +sts : List<&2, L.Stat> <- stat.sum(shards.files(n, 0n, dir, ".stats"), Nil{})
+    S.write(dir ++ "/results.nul.stats", S.b(L.stat.show(sts)))
+    S.mv(dir ++ "/results.nul.tmp", dir ++ "/results.nul")
+
+def shards.all(bad: Nat, +n: Nat, +dir: String) -> IO(Unit):
+  match bad:
+    case 0n:
+      shards.cat(n, dir)
+    case 1n+b:
+      IO.die(Unit, 1, "bend-transcripts: " ++ Nat.show(bad) ++ " of " ++ Nat.show(n) ++ " bend-check shards failed, see " ++ dir ++ "/check.K.out")
+
+def check.one(+code: Nat, +lang: String, +dir: String, +bc: String, +jobs: Nat) -> IO(Unit):
+  do IO<Unit>:
     env : List<String> <- check.env(code)
-    +bc : String <- S.env("BEND_CHECK", "bend-check")
     say(dir, "check: bend-check " ++ lang ++ " with " ++ Nat.show(jobs) ++ " workers")
     +st : U32 <- S.run.log(".", env, 2000000, bc, [lang, dir ++ "/units.nul", dir ++ "/results.nul.tmp", Nat.show(jobs)], dir ++ "/check.out")
     ok.or(st, "bend-check", dir ++ "/check.out")
     S.mv(dir ++ "/results.nul.tmp.stats", dir ++ "/results.nul.stats")
     S.mv(dir ++ "/results.nul.tmp", dir ++ "/results.nul")
+
+def check.many(+code: Nat, +n: Nat, +lang: String, +dir: String, +bc: String, +jobs: Nat) -> IO(Unit):
+  do IO<Unit>:
+    say(dir, "check: " ++ Nat.show(n) ++ " bend-check " ++ lang ++ " processes with " ++ Nat.show(jobs) ++ " workers each")
+    chs : List<Chan(U32)> <- shards.fork(n, code, 0n, n, bc, lang, dir, jobs)
+    +bad : Nat <- shards.join(chs, 0n)
+    shards.all(bad, n, dir)
+
+def check.procs(procs: Nat, +code: Nat, +lang: String, +dir: String, +bc: String, +jobs: Nat) -> IO(Unit):
+  match procs:
+    case 0n:
+      check.one(code, lang, dir, bc, jobs)
+    case 1n:
+      check.one(code, lang, dir, bc, jobs)
+    case _:
+      check.many(code, procs, lang, dir, bc, jobs)
+
+# CHECK_PROCS (default 1) processes of CHECK_JOBS workers each
+def check.run(+code: Nat, +lang: String, +dir: String) -> IO(Unit):
+  do IO<Unit>:
+    +cj : Nat <- S.env.nat("CHECK_JOBS", 0n)
+    +jobs : Nat <- jobs.or(cj, code)
+    +procs : Nat <- S.env.nat("CHECK_PROCS", 1n)
+    +bc : String <- S.env("BEND_CHECK", "bend-check")
+    check.procs(procs, code, lang, dir, bc, jobs)
     stats : List<&2, U32> <- S.read(dir ++ "/results.nul.stats")
     say(dir, "check: " ++ S.str(nl.sp(stats)))
 
