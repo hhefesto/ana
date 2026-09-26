@@ -2,8 +2,9 @@ import Base
 import ../Sys.bend as S
 import ./Lib.bend as L
 
-# Bend checks Bend units.  A unit's file id is `own:<path under BEND_SRC>`
-# followed by `#NAME@LINE`.  Bend imports are paths relative to the file,
+# Bend checks Bend units.  A unit's file id is `CLASS:<path under BEND_SRC>`
+# (own:, repo:, curated:; BEND_SRC is that class's tree) followed by
+# `#NAME@LINE`.  Bend imports are paths relative to the file,
 # so each worker copies the .bend files of the unit's repository (the
 # path's first component) once, and writes every variant as Unit.bend
 # beside the original: the head, the declaration's first part (a law, or
@@ -42,9 +43,17 @@ def Cf.cap(+c: Cf) -> Nat:
     case Cf{b, s, t, n}:
       n
 
-# the file's path under BEND_SRC: the id without `own:` and its `#NAME@..`
+# the id after its class (the first `:`)
+def after.class(xs: List<&2, U32>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +h <> +t:
+      Bool.pick(List<&2, U32>, U32.is_eq(h, 58), t, after.class(t))
+
+# the file's path under BEND_SRC: the id without its class and its `#NAME@..`
 def rel.of(+id: List<&2, U32>, +name: List<&2, U32>) -> List<&2, U32>:
-  L.before.last(S.strip(id, S.b("own:")), List.append(&2, U32, 35 <> name, [64]))
+  L.before.last(after.class(id), List.append(&2, U32, 35 <> name, [64]))
 
 def first.go(xs: List<&2, U32>, stop: Bool) -> List<&2, U32>:
   match xs stop:
