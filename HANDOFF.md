@@ -2,23 +2,24 @@
 
 This file holds everything needed to continue this work from another machine and account. It was restarted from zero on 2026-09-25 for a new path. The previous handoff (the v3 hot start and the dense trainer) is in git at `41e1920:HANDOFF.md`, and master's Haskell-era trainer is at the tag `haskell-final`.
 
-## ▶ CONTINUE HERE (2026-09-25, 20:00 UTC-6): deploy/ is Bend now; the full transcript run is checking
+## ▶ CONTINUE HERE (2026-09-25, 20:50 UTC-6): deploy/ is Bend now; the full transcript run is checking
 
 ### State of the run (all on this machine, free)
 
 | language | files | units | check | kept | after `clean`: train (transcripts) / holdout |
 |---|---|---|---|---|---|
-| Haskell | 75,072 | 172,177 | `bend-check`, 10 workers, started 18:46 (about 17 h; `run/transcripts/haskell/check.out`) | running | |
+| Haskell | 75,072 | 172,177 | 4 `bend-check` processes × 2 workers (`CHECK_PROCS=4 CHECK_JOBS=2 PKG_CAP=200`), started 20:42; logs `run/transcripts/haskell/check.K.out`. Pass 1 checks at most 200 evenly spaced units per package (78% of the units); `PKG_REST=1` checks the rest afterwards if the corpus is to be uncapped | running | |
 | Lean | 8,478 | 32,743 | the old shell harness, 5 workers, started 14:44 | running | |
 | Agda | 8,528 | 34,271 | `bend-check`, 4 workers (memory: 31 GB shared with Lean and Haskell), TIMEOUT 300, started 20:09 | running | |
 | Nix | 23,300 | 13,256 | re-run on `bend-check`, done 19:34 (old results in `run/transcripts/nix/bash-20260925/`; they differ in the 12 shifted records and 3 temporary paths only) | 13,150 | 12,722 (24,694) / 249 (478); 109 contaminated, 70 near duplicates |
-| Bend | 1,667 | 5,591 | done 18:49 (shell harness; no unit hit its bugs) | 4,643 | 3,494 (6,260) / 61 (112); 918 exact and 161 near duplicates, 9 contaminated |
+| Bend | 1,694 | 9,041 | re-run from 20:44 (`bend-check`, 3 workers, niced) on `run/code-bend-v3.jsonl`: v3's Bend files with this repo's `bend/` refreshed (75 → 102 files), and `MAX_HI=64` units per file (Bend is scarce: 24,066 defs and laws; the cap of 8 used at most 8,409). The 14:46 run is in `run/transcripts/bend/snapshot-1446/` | running | 14:46 run: 4,643 kept; 3,494 (6,260) / 61 (112); 918 exact and 161 near duplicates, 9 contaminated |
 
 - Everything lands in `run/transcripts/<lang>/`; each language's `log` has its stages in UTC-6. Resume or continue a language with `nix run .#deploy -- transcripts STAGE LANG` (a stage whose output exists is skipped).
 - Lean's sources came from `code-train-v2.jsonl` (v3 did not exist yet): the v3-only own/curated Lean files (refl's three) are missing from it.
 - The stopped shell Haskell run's partial parts are in `run/transcripts/haskell/stopped-bash-20260925/` (useless; its keys were wrong).
-- **Decision for the user:** generated API bindings dominate Haskell (stripeapi 2,070 units, amazonka-* up to 2,012 each, jsaddle-dom 1,920). A cap per package keeps 78% at 200, 66% at 100. The check runs uncapped; a cap can still be applied when mixing.
-- Next, in order: as each check ends, `deploy transcripts clean LANG` then `render LANG` (Lean: its results are the shell's, so run clean and render on them as they are); then windows (`bend-windows lengths`, `plan`, `build`) on `transcripts.train.nul` per language; mix; shards and plan; the route below from step 4. The holdouts (`transcripts.holdout.nul`) become `run/eval/transcript-fp.corpus`.
+- **Decision for the user:** generated API bindings dominate Haskell (stripeapi 2,070 units, amazonka-* up to 2,012 each, jsaddle-dom 1,920). A cap per package keeps 78% at 200, 66% at 100. Pass 1 checks the 200-capped set; the rest (22%, mostly those bindings, whose modules are the slowest to load) is a second pass (`PKG_REST=1 CHECK_PROCS=4 PKG_CAP=200`, into another directory) only if the answer is "uncapped"; a smaller cap can still be applied when mixing.
+- **A Bend process evaluates on one thread.** `IO.fork` gives concurrency for effects (a compiler run, a file read), not for pure work: all forked tasks' parsing runs on the main thread. The first 10-worker Haskell run (18:46–20:35) stalled on it: 7 of 10 workers waited on the one busy evaluator, 1.2k records in 100 minutes, the largest (generated) packages first. Parse-heavy drivers fan out as processes: `CHECK_PROCS` (commit `f5b65f5`). Its partial output is in `run/transcripts/haskell/stopped-bend-20260925/`.
+- Next, in order: as each check ends, `deploy transcripts clean LANG` then `render LANG` (Lean: its results are the shell's, so run clean and render on them as they are); then `bend-plan-windows` (`bend/PlanWindows.bend`, being tested: mixes the languages' `transcripts.train.nul`, packs them into exact 2,046-token windows with raw-file filler, writes the shards and the plan); the route below from step 4. The holdouts (`transcripts.holdout.nul`) become `run/eval/transcript-fp.corpus`.
 
 ### What happened on 2026-09-25, evening: deploy/ in Bend
 
