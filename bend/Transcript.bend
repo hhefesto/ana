@@ -3,6 +3,7 @@ import ./Bytes.bend as B
 import ./Tokenizer.bend as Tk
 import ./Nul.bend as Ns
 import ./Units.bend as U
+import ./Sys.bend as S
 
 # transcripts: the checked units (bend-check LANG) rendered as the
 # coding-agent documents of docs/TRANSCRIPT-FORMAT.md.
@@ -276,29 +277,117 @@ def all(+b: Tk.Bpe, +limit: Nat, rs: List<&2, Ns.Doc>) -> List<&2, Ns.Doc>:
 
 # Main ---------------------------------------------------------------------------
 
-def emit(+out: String, +b: Tk.Bpe, +limit: Nat, +d: Ns.Docs, ok: Bool) -> IO(Unit):
-  match ok:
-    case False{}:
-      IO.die(Unit, 1, "transcript: " ++ Ns.Docs.problem(d))
-    case True{}:
-      +rs = Ns.Docs.docs(d)
-      +ts = all(b, limit, rs)
-      do IO<Unit>:
-        Ns.write(out, Ns.put(ts, Nil{}))
-        IO.print("transcript: " ++ Nat.show(List.length(&2, Ns.Doc, rs)) ++ " units in, " ++ Nat.show(List.length(&2, Ns.Doc, ts)) ++ " transcripts out")
+# The input streams a unit at a time (Sys.Rd: memory is a chunk plus the
+# longest field) and renders batch() units at a time, each batch's
+# transcripts appended to the output as it is done, so an input of any size
+# renders; a unit renders alone, so the output is the whole file's.
+def batch() -> Nat:
+  1000n
 
-def tokenizer(+out: String, +limit: Nat, m: Maybe<&2, Tk.Bpe>, +d: Ns.Docs) -> IO(Unit):
+def big() -> Nat:
+  U32.to_nat(4294967295)
+
+# A batch being read: the reader, its units (newest first), whether the
+# stream ended.
+type Bt is Type:
+  Bt{rd: S.Rd, us: List<&2, Ns.Doc>, eof: Bool}
+
+def bt.rec(+i: List<&2, U32>, us: List<&2, Ns.Doc>, rd: S.Rd, m: Maybe<&2, List<&2, U32>>) -> IO(Bt):
+  match m:
+    case None{}:
+      do IO<Bt>:
+        S.Rd.close(rd)
+        IO.die(Bt, 1, "transcript: a unit id without its record")
+    case Some{+t}:
+      IO.pure(Bt, Bt{rd, Ns.Doc{i, t} <> us, False{}})
+
+def bt.rec.r(+i: List<&2, U32>, us: List<&2, Ns.Doc>, r: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(Bt):
+  (rd, m) = r
+  bt.rec(i, us, rd, m)
+
+def bt.id(us: List<&2, Ns.Doc>, rd: S.Rd, m: Maybe<&2, List<&2, U32>>) -> IO(Bt):
+  match m:
+    case None{}:
+      IO.pure(Bt, Bt{rd, us, True{}})
+    case Some{+i}:
+      do IO<Bt>:
+        r : S.Rd & Maybe<&2, List<&2, U32>> <- S.Rd.next(rd)
+        bt.rec.r(i, us, r)
+
+def bt.id.r(us: List<&2, Ns.Doc>, r: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(Bt):
+  (rd, m) = r
+  bt.id(us, rd, m)
+
+def bt.step(b: Bt) -> IO(Bt):
+  match b:
+    case Bt{rd, us, e}:
+      do IO<Bt>:
+        r : S.Rd & Maybe<&2, List<&2, U32>> <- S.Rd.next(rd)
+        bt.id.r(us, r)
+
+# up to fuel more units into the batch, stopping at the end of the stream
+def bt.go(fuel: Nat, b: Bt) -> IO(Bt):
+  match fuel b:
+    case 1n+p Bt{rd, us, False{}}:
+      IO.bind(Bt, Bt, bt.step(Bt{rd, us, False{}}), bt.go(p))
+    case _ Bt{rd, us, e}:
+      IO.pure(Bt, Bt{rd, us, e})
+
+# The pass so far: the reader, units in, transcripts out, whether the
+# stream ended.
+type Ps is Type:
+  Ps{rd: S.Rd, n: Nat, m: Nat, eof: Bool}
+
+def ps.batch(+out: String, +b: Tk.Bpe, +limit: Nat, +n: Nat, +m: Nat, bt: Bt) -> IO(Ps):
+  match bt:
+    case Bt{rd, us, e}:
+      +rs = List.reverse(&2, Ns.Doc, us)
+      +ts = all(b, limit, rs)
+      do IO<Ps>:
+        S.add(out, Ns.put(ts, Nil{}))
+        return Ps{rd, Nat.add(n, List.length(&2, Ns.Doc, rs)), Nat.add(m, List.length(&2, Ns.Doc, ts)), e}
+
+def ps.step(+out: String, +b: Tk.Bpe, +limit: Nat, p: Ps) -> IO(Ps):
+  match p:
+    case Ps{rd, +n, +m, e}:
+      do IO<Ps>:
+        bt : Bt <- bt.go(batch(), Bt{rd, Nil{}, False{}})
+        ps.batch(out, b, limit, n, m, bt)
+
+# batches until the stream ends
+def ps.go(fuel: Nat, +out: String, +b: Tk.Bpe, +limit: Nat, p: Ps) -> IO(Ps):
+  match fuel p:
+    case 1n+q Ps{rd, n, m, False{}}:
+      IO.bind(Ps, Ps, ps.step(out, b, limit, Ps{rd, n, m, False{}}), ps.go(q, out, b, limit))
+    case _ Ps{rd, n, m, e}:
+      IO.pure(Ps, Ps{rd, n, m, e})
+
+def done(p: Ps) -> IO(Unit):
+  match p:
+    case Ps{rd, +n, +m, True{}}:
+      do IO<Unit>:
+        S.Rd.close(rd)
+        IO.print("transcript: " ++ Nat.show(n) ++ " units in, " ++ Nat.show(m) ++ " transcripts out")
+    case Ps{rd, n, m, False{}}:
+      do IO<Unit>:
+        S.Rd.close(rd)
+        IO.die(Unit, 1, "transcript: out of fuel before the input ended (a bug)")
+
+def tokenizer(+inp: String, +out: String, +limit: Nat, m: Maybe<&2, Tk.Bpe>) -> IO(Unit):
   match m:
     case None{}:
       IO.die(Unit, 1, "transcript: the tokenizer did not parse")
     case Some{+b}:
-      emit(out, b, limit, d, String.is_empty(Ns.Docs.problem(d)))
+      do IO<Unit>:
+        rd : S.Rd <- S.Rd.open(inp)
+        S.write(out, Nil{})
+        p : Ps <- ps.go(big(), out, b, limit, Ps{rd, 0n, 0n, False{}})
+        done(p)
 
 def run(tok: String, inp: String, +out: String, +window: Nat) -> IO(Unit):
   do IO<Unit>:
     tx : List<&2, U32> <- B.Bytes.read_all(tok)
-    +xs : List<&2, U32> <- Ns.read(inp)
-    tokenizer(out, Nat.sub(window, 64n), Tk.Bpe.parse(tx), Ns.docs(xs))
+    tokenizer(inp, out, Nat.sub(window, 64n), Tk.Bpe.parse(tx))
 
 def window.of(xs: List<String>) -> Nat:
   match xs:
