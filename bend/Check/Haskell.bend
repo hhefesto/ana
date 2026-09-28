@@ -753,6 +753,41 @@ def load.cmd(first: Bool) -> String:
 def load.cmds(+first: Bool, +file: String) -> String:
   ":!cp " ++ file ++ " Unit.hs\n" ++ load.cmd(first) ++ marker()
 
+# The unit's own imports as prompt commands, each `import` line with its
+# indented continuation lines in a :{ :} block.  With -fno-code the prompt
+# scope is Unit's exports (`import Unit`), not *Unit: without them a name
+# the module imports answers `Variable not in scope` and types print
+# qualified.  An import GHCi cannot make is an error line the Context drops.
+type Im is Data:
+  Im{on: Bool, out: String}
+
+def im.close(on: Bool) -> String:
+  Bool.pick(String, on, ":}\n", "")
+
+def im.line(+l: List<&2, U32>, st: Im) -> Im:
+  match st:
+    case Im{+on, +out}:
+      +start = S.prefix(l, S.b("import "))
+      +cont = Bool.and(on, Bool.and(Nat.is_lt(0n, S.len(l)), Bool.or(S.head.is(l, 32), S.head.is(l, 9))))
+      Bool.pick(Im, start, Im{True{}, out ++ im.close(on) ++ ":{\n" ++ S.str(l) ++ "\n"}, Bool.pick(Im, cont, Im{True{}, out ++ S.str(l) ++ "\n"}, Im{False{}, out ++ im.close(on)}))
+
+def im.go(ls: List<&2, List<&2, U32>>, st: Im) -> Im:
+  match ls:
+    case Nil{}:
+      st
+    case +l <> more:
+      im.go(more, im.line(l, st))
+
+def im.fin(st: Im) -> String:
+  match st:
+    case Im{on, out}:
+      out ++ im.close(on)
+
+# the prompt scope for the :type answers: Unit's exports (replacing the
+# imports an earlier unit of the run added) and the unit's imports
+def scope(+head: List<&2, U32>) -> String:
+  ":module Unit\n" ++ im.fin(im.go(S.split.lines(head), Im{False{}, ""}))
+
 def types(ns: List<&2, List<&2, U32>>) -> String:
   match ns:
     case Nil{}:
@@ -832,7 +867,7 @@ def unit.cmds(+x: Pu, +muts: Bool, +first: Bool) -> String:
   +p = Pu.p(x)
   +ns = L.words(L.U.at(u, 9n))
   load.cmds(first, p ++ ".o.hs")
-    ++ Bool.pick(String, Nat.is_eq(List.length(&2, List<&2, U32>, ns), 0n), "", types(ns) ++ marker())
+    ++ Bool.pick(String, Nat.is_eq(List.length(&2, List<&2, U32>, ns), 0n), "", scope(L.U.at(u, 5n)) ++ types(ns) ++ marker())
     ++ Bool.pick(String, Nat.is_eq(S.len(L.U.at(u, 10n)), 0n), "", load.cmds(False{}, p ++ ".h.hs"))
     ++ Bool.pick(String, Nat.is_eq(S.len(L.U.at(u, 6n)), 0n), ":!cp " ++ p ++ ".d.hs Unit.hs\n:reload\n", "")
     ++ ":set -Wmissing-signatures\n" ++ marker() ++ load.cmds(False{}, p ++ ".t.hs") ++ ":set -w\n" ++ marker()
@@ -938,7 +973,8 @@ def session.text(+dir: String, +cap: Nat, +seg: List<&2, U32>) -> List<&2, U32>:
   clean(dir, cap, drop.lines(S.split.lines(seg), 0n))
 
 # the Context: the `name :: type` lines of the :type answers (kept lines
-# newest first)
+# newest first).  A long answer prints as the name alone, then `  :: type`
+# on indented lines: a top line with no space starts an answer too.
 type Cx is Data:
   Cx{keep: Bool, out: List<&2, List<&2, U32>>}
 
@@ -954,7 +990,7 @@ def cx.line(+l: List<&2, U32>, st: Cx) -> Cx:
     case Cx{keep, out}:
       +inter = S.prefix(l, S.b("<interactive>"))
       +top = Bool.and(Nat.is_lt(0n, S.len(l)), Bool.not(Bool.or(S.head.is(l, 32), S.head.is(l, 9))))
-      +k = Bool.pick(Bool, inter, False{}, Bool.pick(Bool, top, S.infix(l, S.b(" :: ")), keep))
+      +k = Bool.pick(Bool, inter, False{}, Bool.pick(Bool, top, Bool.or(S.infix(l, S.b(" :: ")), Bool.not(S.infix(l, S.b(" ")))), keep))
       Cx{k, cx.put(Bool.and(k, Bool.not(inter)), l, out)}
 
 def cx.go(ls: List<&2, List<&2, U32>>, st: Cx) -> Cx:
