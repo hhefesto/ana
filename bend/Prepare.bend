@@ -115,5 +115,7 @@ def args(xs: List<String>) -> IO(Unit):
 
 def main() -> IO(Unit):
   do IO<Unit>:
-    xs : List<String> <- IO.args()
+    # IO.args leads with the program as invoked (Bend 2.0.32)
+    argv : List<String> <- IO.args()
+    xs : List<String> = List.tail(&1, String, argv)
     args(xs)
