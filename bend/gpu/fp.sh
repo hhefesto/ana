@@ -19,6 +19,7 @@
 #   fp.sh time [STEPS]     STEPS (20) steps of the real run: ms/step, tok/s, memory
 #   fp.sh run              the whole plan (STEPS, 8803), in the background: out/fp100m-step<N>.checkpoint, train.log
 #   fp.sh eval [CKPT...]   bits per byte of each checkpoint (out/*.checkpoint) on the held-out transcripts
+#                          (ECORPUS: another eval corpus)
 #   fp.sh next CKPT        continue CKPT's run on the next plan (TRAIN_NEXT; traind-next.c built from
 #                          the trainer that has it): run/next/plan-next-b16-windows.tsv and its shards
 #                          run/next/shard-K-next.corpus, saves out/next-step<N>.checkpoint, log next.log;
@@ -95,7 +96,7 @@ case "${1:-}" in
     shift
     for c in ${@:-out/*.checkpoint}; do
       echo "== $c"
-      TRAIN_INIT=$c EVAL_CORPUS=run/eval/transcript-fp.corpus TOKENIZER_FILE=$TOK TRAIN_MICRO=${MICRO:-4} TRAIN_CHUNK=16 \
+      TRAIN_INIT=$c EVAL_CORPUS=${ECORPUS:-run/eval/transcript-fp.corpus} TOKENIZER_FILE=$TOK TRAIN_MICRO=${MICRO:-4} TRAIN_CHUNK=16 \
         BEND_GEMM_NUMERICS=tf32 ./traind --gpu $MEM 2>&1 | grep -v "^bend profile" | tail -3
     done ;;
   *) sed -n 2,30p "$0"; exit 2 ;;
