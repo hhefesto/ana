@@ -420,7 +420,7 @@
             cp -r ${bendSrc}/bend src
             chmod -R u+w src
             bend src/Everything.bend | tee result
-            grep -qx "All terms check." result
+            grep -qx "ALL PROOFS CHECK" result
             touch $out
           '';
           # the self-contained unit tests, against known answers

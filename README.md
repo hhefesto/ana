@@ -23,7 +23,7 @@ sampling is its unfold into the trie of continuations (`bend/Spec/Trie.bend`).
 
 | path | what |
 |---|---|
-| `bend/Spec/` | the specification: every law about the model, proven (`bend bend/Everything.bend` prints `All terms check.`) |
+| `bend/Spec/` | the specification: every law about the model, proven (`bend bend/Everything.bend` prints `ALL PROOFS CHECK`) |
 | `bend/Model.bend`, `bend/Train*.bend`, `bend/Dense/` | the model, the tree trainer, and the dense GPU trainer (reverse mode derived as a program transformation over bulk ops) |
 | `bend/Generate.bend`, `bend/Evaluate.bend` | the decoder and the bits-per-byte scorer |
 | `bend/Tokenizer.bend` | byte-level BPE (encode, decode, identity) |

@@ -65,7 +65,7 @@ out of scope. What it does have:
 
 | master | bend |
 |---|---|
-| `Everything.agda` | `Everything.bend`: gates every Spec module and every implementation module ("All terms check.") |
+| `Everything.agda` | `Everything.bend`: gates every Spec module and every implementation module ("ALL PROOFS CHECK") |
 | `Foundation/Algebra`, `Fold` | `Spec/Algebra`, `Spec/Fold` (plus `Spec/Nat`, `Spec/Order` for the lemmas the Agda stdlib supplied) |
 | `Language/Weighted`, `Autoregressive`, `Decoding`, `SpeculativeDecoding`, `Trie`, `AutoregressiveTrie` | `Spec/` modules with the same names. Tries are depth-indexed, where Agda used coinduction |
 | `Attention/Linear`, `LinearTrie`, `Sink` | `Spec/Linear` (recurrent ≡ parallel, chunk-closed), `Spec/LinearTrie`, `Spec/Sink` |
