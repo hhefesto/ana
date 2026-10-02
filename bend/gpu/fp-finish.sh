@@ -54,5 +54,8 @@ else
   log "WARNING: the pulled checkpoints do not all match the box's; the box is NOT destroyed"; exit 1
 fi
 log "destroy instance $inst"
-$V destroy instance "$inst" 2>&1 | tee -a "$dest/finish.log" && date > "$dest/DESTROYED"
+$V destroy instance "$inst" -y 2>&1 | tee -a "$dest/finish.log"
+sleep 10
+if $V show instances --raw 2>/dev/null | grep -q "\"id\": $inst\b"; then log "WARNING: instance $inst still listed after destroy"; exit 1; fi
+date > "$dest/DESTROYED"
 log "finished"
