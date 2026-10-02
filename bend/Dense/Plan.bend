@@ -200,3 +200,57 @@ def valid.of(+ctx: Nat, +k: Nat, sp: D.Split) -> List<&2, List<&2, U32>>:
 # the first k validation windows of a shard's documents
 def valid(+ctx: Nat, +offset: Nat, +k: Nat, docs: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
   valid.of(ctx, k, D.split.go(docs, offset))
+
+# The header line's fields: plan <version> <total> <identity> <hash> ...
+def header.of(ls: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match ls:
+    case l <> t:
+      cut(l, 32)
+    case Nil{}:
+      Nil{}
+
+def nth(ws: List<&2, List<&2, U32>>, i: Nat) -> List<&2, U32>:
+  match ws i:
+    case Nil{} _:
+      Nil{}
+    case w <> t 0n:
+      w
+    case w <> t 1n+p:
+      nth(t, p)
+
+def header(xs: List<&2, U32>) -> List<&2, List<&2, U32>>:
+  header.of(cut(xs, 10))
+
+# the plan's corpus identity (windows-v1:sha256=...:windows=N:batch=B:...),
+# the dataset a checkpoint trained from it records
+def identity.bytes(xs: List<&2, U32>) -> List<&2, U32>:
+  nth(header(xs), 3n)
+
+def identity(xs: List<&2, U32>) -> String:
+  text(identity.bytes(xs))
+
+def prefix.of(ts: List<&2, List<&2, U32>>, +key: List<&2, U32>) -> Bool:
+  match ts:
+    case t <> rest:
+      same(List.take(&2, U32, t, List.length(&2, U32, key)), key)
+    case Nil{}:
+      False{}
+
+# the digits after KEY= in the first field that starts with it (hit: the
+# head does); 0 when none does
+def kv.go(ts: List<&2, List<&2, U32>>, +key: List<&2, U32>, hit: Bool) -> Nat:
+  match ts hit:
+    case t <> rest True{}:
+      nat(List.drop(&2, U32, t, List.length(&2, U32, key)))
+    case t <> +rest False{}:
+      kv.go(rest, key, prefix.of(rest, key))
+    case Nil{} _:
+      0n
+
+def kv(+ts: List<&2, List<&2, U32>>, +key: List<&2, U32>) -> Nat:
+  kv.go(ts, key, prefix.of(ts, key))
+
+# the batch the plan's schedule was made for (batch=B in the identity; 0
+# when the plan carries none)
+def batch(xs: List<&2, U32>) -> Nat:
+  kv(cut(identity.bytes(xs), 58), [98, 97, 116, 99, 104, 61])

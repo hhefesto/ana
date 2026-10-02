@@ -212,6 +212,23 @@ The environment variables:
 
 The failing files fail for real reasons: a missing `transpose` import, project modules that are not on disk, Agda names used without imports, declarations without definitions.
 
+## Assessment (2026-10-02, a second reading)
+
+What the design gets right, held by the tests and proofs above:
+
+- The meaning is one semantic function and the implementation is held to it: `Spec.score`, `marginal`, `boundary` and `best` enumerate; `Forward` matches them exactly in Bool and Nat and to 1e-4 in logp and maxp, on 4 toy models × 7 lengths. Both are Bend.
+- The round trip is a proof (`law roundtrip`), so the segmenter is a decomposition of the text, never a summary of it.
+- Calibration is measured, not claimed, and the measurement is the right one (the log-score is strictly proper).
+
+What it does not yet have, in order of importance:
+
+1. **Length is not evidence.** A line's weight is its mean log probability per byte times 0.5, chosen by validation because the summed form (lines as independent evidence) is wildly overconfident on long blocks. But the mean form makes a 20-line block count about as much as a 2-line one: the Haskell recall of 0 on unnamed blocks is this, not the prior alone. Both forms are wrong ends of the same mistake: lines in a block are not independent given the tag (indentation, identifiers and shapes repeat), and the right fix is a line model conditioned on the previous line, `Λ_t(line_i | line_{i-1})`. The emission table stays a function of the text, so Spec, Forward and the tests apply unchanged; only `Ngram` grows a context and `Model.raw.rows` passes the previous line. With it the summed form should calibrate, and length returns as evidence.
+2. **`Λ_t` has no specification.** The hashed Witten-Bell table is a refinement of an exact count model that is nowhere written; the only check is Σ_b P(b | h) = 1 on a collision-free table. An `Ngram.spec` over exact counts (Base's `Map`), with the hashed table held to it on small corpora, would close this.
+3. **The boundary answer is not written out.** `Forward.bposteriors` (Jev's `Noul`) is computed and tested but `sections.nul` carries only the tag shares. A section's record should carry P(a section starts here).
+4. **One claim was overstated** and is withdrawn from HANDOFF: "the run is a monoid homomorphism". Forward's alphas are a fold, so it holds by construction, but nothing states or tests it as a law.
+
+On the goal of training material: the conversion is as straightforward as it can be (legere writes the units pipeline's own inputs and the rest of the pipeline runs unchanged), and the transcripts read correctly. The problem is yield (10 transcripts from 3,172 documents), whose causes are upstream of legere (elided Write blocks, Edits as diffs, project modules not on disk) and are listed in HANDOFF.md under "legere's next round".
+
 ## Rules
 
 - **Haskell wrap:** a snippet with no `module` line gets `module Snippet where` after its leading pragmas. `bend-check` skips a file without one, since a Main module needs `main`.

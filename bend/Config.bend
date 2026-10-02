@@ -148,6 +148,11 @@ def Config.bpe100m_v3() -> Config:
 def Config.fp100m() -> Config:
   Config{U32.to_nat(32768), U32.to_nat(2048), U32.to_nat(768), U32.to_nat(2048), 12n, 12n, True{}, True{}, True{}, True{}}
 
+# fp100m's vocabulary and context at toy dimensions: a test of the plan
+# start and its checkpoints on fp100m's own shards, on a CPU
+def Config.fp_tiny() -> Config:
+  Config{U32.to_nat(32768), U32.to_nat(2048), 64n, U32.to_nat(192), 2n, 4n, True{}, True{}, True{}, True{}}
+
 # master's v4 preset (Config.hs bpe460mPreset): 4x bpe100m-v3 at context 1024
 def Config.bpe460m() -> Config:
   Config{U32.to_nat(32768), U32.to_nat(1024), U32.to_nat(1280), U32.to_nat(3456), 20n, 20n, True{}, True{}, True{}, True{}}

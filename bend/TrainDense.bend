@@ -26,8 +26,12 @@ import ./Clock.bend as Ck
 #                the batch's micro-batches accumulate one gradient
 #   TRAIN_CHUNK  GLA chunk length (default 16; master used 64): the chunked form equals
 #                the recurrent one at any length (Spec/Linear.bend)
-# Hot start (TRAIN_INIT set): continue master's run from its FTC2 checkpoint
-# on master's own data and schedule.
+# Plan start (PLAN set, TRAIN_INIT empty): fresh parameters from PRESET,
+# trained on the plan's shards and schedule (bend-plan-windows writes them),
+# saving FTC2 checkpoints TRAIN_INIT continues; TRAIN_BATCH must be the
+# plan's batch, TRAIN_STEPS defaults to the whole plan, OUT to RUN_DIR/ckpt.
+# Hot start (TRAIN_INIT set): continue a run from its FTC2 checkpoint
+# on its own data and schedule.
 #   TRAIN_INIT   the checkpoint (parameters, Adam moments, Muon momentum, step)
 #   PLAN         master's run plan (plan-*.tsv); RUN_DIR its shards,
 #                shard-<k>-<SHARD_SIZE>.corpus (default bpe100m)
@@ -407,6 +411,18 @@ def store.check.if(ok: Bool, +floats: Nat, +mb: Nat) -> IO(Unit):
 def store.check(+c: C.Config, +mb: Nat, +chunk: Nat) -> IO(Unit):
   store.check.if(L.Lay.fits(c, mb, chunk), L.Lay.floats(c, mb, chunk), mb)
 
+# the micro-batches of a step are whole: a micro-batch that does not divide
+# the batch would silently drop the windows past the last whole one
+def micro.check.if(ok: Bool, +batch: Nat, +mb: Nat) -> IO(Unit):
+  match ok:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      IO.die(Unit, 1, "train (dense): the micro-batch (" ++ Nat.show(mb) ++ ") must divide the batch (" ++ Nat.show(batch) ++ ")")
+
+def micro.check(+batch: Nat, +mb: Nat) -> IO(Unit):
+  micro.check.if(Nat.is_eq(Nat.mod(batch, Nat.max(mb, 1n)), 0n), batch, mb)
+
 def run(+c: C.Config, +tok: Tr.Tok, +text: List<&2, U32>, +hp: Hp, +muon: Bool, +mu: F32, +wd: F32, +clip: F32,
         +steps: Nat, +out: String, +evals: Nat, +chunk: Nat) -> IO(Unit):
   +sp = D.split(D.encode.all(Tr.Tok.b(tok), D.documents(text)))
@@ -419,6 +435,7 @@ def run(+c: C.Config, +tok: Tr.Tok, +text: List<&2, U32>, +hp: Hp, +muon: Bool, 
             S.update(muon, ly, S.Hy{Hp.b1(hp), Hp.b2(hp), Hp.eps(hp), wd, mu}, m, clip)} : Run}
   +scale = bpb.scale(Tr.Tok.b(tok), vw)
   do IO<Unit>:
+    micro.check(Hp.batch(hp), Hp.mb(hp))
     store.check(c, Hp.mb(hp), chunk)
     say("train (dense): " ++ C.Config.model_id(c))
     say("tokenizer " ++ Tr.Tok.id(tok) ++ "; " ++ Nat.show(nw) ++ " training windows, " ++ Nat.show(List.length(&2, List<&2, U32>, vw))
@@ -778,6 +795,7 @@ def start.hot.man(+init: String, +tokf: String, +steps_s: String, +batch_s: Stri
   +m = L.Dm.of.cc(c, mb, U32.from_nat(chunk))
   +ly = L.Lay.of(c, m)
   do IO<Unit>:
+    micro.check(batch, mb)
     store.check(c, mb, chunk)
     r : Array<F32> & Dk.Src <- Dk.load(init, man, h, Tr.Tok.id(tok), ly, m, Array.new(F32, L.Lay.depth(ly), 0.0))
     +t1 : Nat <- IO.now()
@@ -795,6 +813,67 @@ def start.hot(+init: String, +tokf: String, +steps_s: String, +batch_s: String, 
     mh : Km.Manifest & Nat <- Dk.header(init)
     start.hot.man(init, tokf, steps_s, batch_s, micro_s, lr_s, wd_s, warm_s, opt, mu_s, clip_s, every_s, evals_s,
       out, save_s, dir, size, chunk_s, plan, tb, evc, xs, t0, mh)
+
+# Plan start -----------------------------------------------------------------
+#
+# A run from fresh parameters on a plan's shards: the hot-start loop with a
+# manifest written here (Checkpoint.Save) instead of one read from a file,
+# so every save is an FTC2 checkpoint of this run that TRAIN_INIT continues.
+# The schedule's total is the plan's global step count and the dataset
+# identity the plan's; the tail (master's best loss and PRNG) is a zero
+# Double and 16 zero bytes, which nothing here reads.
+
+def muon.of(muon: Bool, +mu: F32) -> Maybe<&2, F32>:
+  match muon:
+    case True{}:
+      Some{mu}
+    case False{}:
+      None{}
+
+def batch.check.if(ok: Bool, +pb: Nat, +batch: Nat) -> IO(Unit):
+  match ok:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      IO.die(Unit, 1, "train (dense): the plan's schedule was made for batch " ++ Nat.show(pb) ++ ", TRAIN_BATCH says " ++ Nat.show(batch))
+
+# the plan's batch, when it records one
+def batch.check(+pb: Nat, +batch: Nat) -> IO(Unit):
+  batch.check.if(Bool.or(Nat.is_eq(pb, 0n), Nat.is_eq(pb, batch)), pb, batch)
+
+def start.plan(+tokf: String, +pre: String, +steps_s: String, +batch_s: String, +micro_s: String, +lr_s: String,
+               +wd_s: String, +warm_s: String, +opt: String, +mu_s: String, +clip_s: String, +every_s: String,
+               +evals_s: String, +out: String, +save_s: String, +dir: String, +size: String, +chunk_s: String,
+               +plan: List<&2, U32>, +tb: List<&2, U32>) -> IO(Unit):
+  +c = Tr.preset(pre)
+  +tok = Tr.tok.of(tokf, tb)
+  +total = Pl.total(plan)
+  +pb = Pl.batch(plan)
+  +batch = Tr.nat.or(batch_s, Nat.max(pb, 1n))
+  +mb = Tr.nat.or(micro_s, Nat.min(batch, 32n))
+  +chunk = Tr.nat.or(chunk_s, 16n)
+  +muon = String.eq(opt, "muon")
+  +lr = Tr.f32.or(lr_s, 3.0e-4)
+  +warm = Nat.min(Tr.nat.or(warm_s, 100n), total)
+  +wd = Tr.f32.or(wd_s, 0.01)
+  +mu = Tr.f32.or(mu_s, 0.95)
+  +clip = Tr.f32.or(clip_s, 1.0)
+  +ly = L.Lay.of(c, L.Dm.of.cc(c, mb, U32.from_nat(chunk)))
+  +man = {Km.Manifest{4, c, C.Config.params(c), "hybrid-gla-decoder-flat-parameters", 3,
+            Km.AdamW{lr, 0.9, 0.999, 1.0e-8, wd, warm, total}, muon.of(muon, mu),
+            C.Config.model_id(c), Tr.Tok.id(tok), Pl.identity(plan), clip, 0} : Km.Manifest}
+  +src = {Dk.Src{Km.Save.header(man), List.append(&2, U32, Km.Save.double(0.0), List.replicate(U32, 16n, 0)), 0n, muon, man} : Dk.Src}
+  do IO<Unit>:
+    batch.check(pb, batch)
+    micro.check(batch, mb)
+    store.check(c, mb, chunk)
+    say("train (dense, plan start): " ++ C.Config.model_id(c) ++ "; " ++ Nat.show(total) ++ " global steps at batch "
+      ++ Nat.show(batch) ++ " on " ++ Pl.identity(plan))
+    run.hot(c, tok, plan,
+      Hp{lr, warm, total, batch, Tr.nat.or(every_s, 0n), mb, clip, Nat.mul(batch, C.Config.ctx(c)), 0.9, 0.999, 1.0e-8},
+      muon, mu, clip, wd,
+      Hs{src, out, Tr.nat.or(save_s, 1000n), Nat.min(Tr.nat.or(steps_s, total), total), dir, size, Tr.nat.or(evals_s, 256n), tok, C.Config.ctx(c)},
+      chunk, Io.put(K.Weights.flat(I.init(c)), Array.new(F32, L.Lay.depth(ly), 0.0), 0))
 
 def or.str(empty: Bool, +s: String, +d: String) -> String:
   match empty:
@@ -833,7 +912,30 @@ def main.cold(+corpus: String, +tokf: String, +pre: String, +steps_s: String, +b
     +tb : List<&2, U32> <- Tr.tok.read(tokf)
     start(tokf, pre, steps_s, batch_s, micro_s, lr_s, wd_s, warm_s, opt, mu_s, clip_s, every_s, evals_s, out, chunk_s, text, tb)
 
-def main.pick(hot: Bool, +init: String, +corpus: String, +tokf: String, +pre: String, +steps_s: String, +batch_s: String,
+def main.plan(+plan_p: String, +tokf: String, +pre: String, +steps_s: String, +batch_s: String, +micro_s: String,
+              +lr_s: String, +wd_s: String, +warm_s: String, +opt: String, +mu_s: String, +clip_s: String,
+              +every_s: String, +evals_s: String, +out: String, +chunk_s: String) -> IO(Unit):
+  do IO<Unit>:
+    +dir : String <- Tr.env("RUN_DIR", "run/fp100m")
+    +size : String <- Tr.env("SHARD_SIZE", "fp100m")
+    +save_s : String <- Tr.env("SAVE_EVERY", "1000")
+    +plan : List<&2, U32> <- B.Bytes.read_all(plan_p)
+    +tb : List<&2, U32> <- Tr.tok.read(tokf)
+    start.plan(tokf, pre, steps_s, batch_s, micro_s, lr_s, wd_s, warm_s, opt, mu_s, clip_s, every_s, evals_s,
+      or.str(String.is_empty(out), out, dir ++ "/ckpt"), save_s, dir, size, chunk_s, plan, tb)
+
+# TRAIN_INIT empty: a plan start when PLAN is set, else the text corpus
+def main.fresh(text: Bool, +plan_p: String, +corpus: String, +tokf: String, +pre: String, +steps_s: String, +batch_s: String,
+               +micro_s: String, +lr_s: String, +wd_s: String, +warm_s: String, +opt: String, +mu_s: String,
+               +clip_s: String, +every_s: String, +evals_s: String, +out: String, +chunk_s: String) -> IO(Unit):
+  match text:
+    case True{}:
+      main.cold(corpus, tokf, pre, steps_s, batch_s, micro_s, lr_s, wd_s, warm_s, opt, mu_s, clip_s, every_s, evals_s,
+        or.str(String.is_empty(out), out, "run/bend-train.btc"), chunk_s)
+    case False{}:
+      main.plan(plan_p, tokf, pre, steps_s, batch_s, micro_s, lr_s, wd_s, warm_s, opt, mu_s, clip_s, every_s, evals_s, out, chunk_s)
+
+def main.pick(hot: Bool, +init: String, +plan_p: String, +corpus: String, +tokf: String, +pre: String, +steps_s: String, +batch_s: String,
               +micro_s: String, +lr_s: String, +wd_s: String, +warm_s: String, +opt: String, +mu_s: String,
               +clip_s: String, +every_s: String, +evals_s: String, +out: String, +chunk_s: String) -> IO(Unit):
   match hot:
@@ -841,12 +943,13 @@ def main.pick(hot: Bool, +init: String, +corpus: String, +tokf: String, +pre: St
       main.hot(init, tokf, pre, steps_s, batch_s, micro_s, lr_s, wd_s, warm_s, opt, mu_s, clip_s, every_s, evals_s,
         or.str(String.is_empty(out), out, "run/bend-hot"), chunk_s)
     case False{}:
-      main.cold(corpus, tokf, pre, steps_s, batch_s, micro_s, lr_s, wd_s, warm_s, opt, mu_s, clip_s, every_s, evals_s,
-        or.str(String.is_empty(out), out, "run/bend-train.btc"), chunk_s)
+      main.fresh(String.is_empty(plan_p), plan_p, corpus, tokf, pre, steps_s, batch_s, micro_s, lr_s, wd_s, warm_s, opt, mu_s,
+        clip_s, every_s, evals_s, out, chunk_s)
 
 def main() -> IO(Unit):
   do IO<Unit>:
     +init : String <- Tr.env("TRAIN_INIT", "")
+    +plan_p : String <- Tr.env("PLAN", "")
     +corpus : String <- Tr.env("CORPUS", "README.md")
     +tokf : String <- Tr.env("TOKENIZER_FILE", "")
     +pre : String <- Tr.env("PRESET", "small4-v3")
@@ -863,5 +966,5 @@ def main() -> IO(Unit):
     +evals_s : String <- Tr.env("EVAL_WINDOWS", "")
     +out : String <- Tr.env("OUT", "")
     +chunk_s : String <- Tr.env("TRAIN_CHUNK", "")
-    main.pick(Bool.not(String.is_empty(init)), init, corpus, tokf, pre, steps_s, batch_s, micro_s, lr_s, wd_s, warm_s, opt,
+    main.pick(Bool.not(String.is_empty(init)), init, plan_p, corpus, tokf, pre, steps_s, batch_s, micro_s, lr_s, wd_s, warm_s, opt,
       mu_s, clip_s, every_s, evals_s, out, chunk_s)

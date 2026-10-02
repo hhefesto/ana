@@ -56,7 +56,7 @@ def preset.pick(+s: String, +name: String, +c: C.Config, +rest: C.Config) -> C.C
 # the names preset() knows (anything else falls back to small4-v3, so a
 # tool that must not guess checks here first)
 def preset.names() -> List<&2, String>:
-  ["tiny", "tiny-v3", "small", "small4", "small4-v3", "bpe10m", "bpe10m-v3", "bpe100m", "bpe100m-v3", "bpe460m", "fp100m"]
+  ["tiny", "tiny-v3", "small", "small4", "small4-v3", "bpe10m", "bpe10m-v3", "bpe100m", "bpe100m-v3", "bpe460m", "fp100m", "fp-tiny"]
 
 def preset.member(ns: List<&2, String>, +s: String) -> Bool:
   match ns:
@@ -79,7 +79,8 @@ def preset(+s: String) -> C.Config:
   preset.pick(s, "bpe100m", C.Config{U32.to_nat(32768), U32.to_nat(256), U32.to_nat(768), U32.to_nat(2048), 12n, 12n, False{}, False{}, False{}, True{}},
   preset.pick(s, "bpe100m-v3", C.Config.bpe100m_v3(),
   preset.pick(s, "bpe460m", C.Config.bpe460m(),
-  preset.pick(s, "fp100m", C.Config.fp100m(), C.Config.small4_v3()))))))))))
+  preset.pick(s, "fp100m", C.Config.fp100m(),
+  preset.pick(s, "fp-tiny", C.Config.fp_tiny(), C.Config.small4_v3())))))))))))
 
 # the byte tokenizer as a BPE with no merges
 def bytes.bpe() -> Tk.Bpe:

@@ -181,3 +181,96 @@ def Load.header() -> B.Load(Manifest):
     +mg : U32 <- B.Load.u32be()
     m : Manifest <- Load.header.if(U32.is_eq(mg, magic()))
     return m
+
+# Writing a manifest: the inverse of Load.manifest, in Data.Binary's
+# encoding (big-endian throughout), so a run that starts fresh on a plan
+# (TrainDense.bend) can save FTC2 checkpoints that Dense/Ckpt.bend loads
+# back. Only what Load reads is written; a Double is decodeFloat's pair, the
+# mantissa doubled until whole (a small Integer: tag 0 and an Int32) and the
+# exponent the Int64 -k, which Load.double multiplies back exactly.
+
+def Save.u32be(+x: U32) -> List<&2, U32>:
+  [U32.div(x, 16777216), U32.mod(U32.div(x, 65536), 256), U32.mod(U32.div(x, 256), 256), U32.mod(x, 256)]
+
+# an Int64 below 2^32
+def Save.nat(+n: Nat) -> List<&2, U32>:
+  List.append(&2, U32, [0, 0, 0, 0], Save.u32be(U32.from_nat(n)))
+
+# the Int64 -k, two's complement
+def Save.neg(+k: Nat) -> List<&2, U32>:
+  match k:
+    case 0n:
+      [0, 0, 0, 0, 0, 0, 0, 0]
+    case 1n+p:
+      List.append(&2, U32, [255, 255, 255, 255], Save.u32be(U32.add(U32.sub(4294967295, U32.from_nat(k)), 1)))
+
+def Save.bool(b: Bool) -> List<&2, U32>:
+  match b:
+    case True{}:
+      [1]
+    case False{}:
+      [0]
+
+# a code point in UTF-8
+def Save.cp(+c: U32) -> List<&2, U32>:
+  Bool.pick(List<&2, U32>, U32.is_lt(c, 128), [c],
+  Bool.pick(List<&2, U32>, U32.is_lt(c, 2048), [U32.add(192, U32.div(c, 64)), U32.add(128, U32.mod(c, 64))],
+  Bool.pick(List<&2, U32>, U32.is_lt(c, 65536),
+    [U32.add(224, U32.div(c, 4096)), U32.add(128, U32.mod(U32.div(c, 64), 64)), U32.add(128, U32.mod(c, 64))],
+    [U32.add(240, U32.div(c, 262144)), U32.add(128, U32.mod(U32.div(c, 4096), 64)), U32.add(128, U32.mod(U32.div(c, 64), 64)), U32.add(128, U32.mod(c, 64))])))
+
+def Save.chars(s: String) -> List<&2, U32>:
+  match s:
+    case SNil{}:
+      Nil{}
+    case SCon{Chr{c}, t}:
+      List.append(&2, U32, Save.cp(c), Save.chars(t))
+
+# an Int64 character count, then the characters
+def Save.string(+s: String) -> List<&2, U32>:
+  List.append(&2, U32, Save.nat(String.length(s)), Save.chars(s))
+
+# the mantissa as an Int32 and the exponent -k
+def Save.dbl.fin(+m: F32, +k: Nat) -> List<&2, U32>:
+  +a = U32.from_nat(F32.to_nat(F32.abs(m)))
+  List.append(&2, U32, 0 <> Save.u32be(Bool.pick(U32, F32.is_lt(m, 0.0), U32.add(U32.sub(4294967295, a), 1), a)), Save.neg(k))
+
+# double m until it is whole (whole: it already is)
+def Save.dbl.go(fuel: Nat, whole: Bool, +m: F32, +k: Nat) -> List<&2, U32>:
+  match fuel whole:
+    case 1n+f False{}:
+      +m2 = F32.mul(m, 2.0)
+      Save.dbl.go(f, F32.is_eq(F32.floor(m2), m2), m2, 1n+k)
+    case _ _:
+      Save.dbl.fin(m, k)
+
+def Save.double(+x: F32) -> List<&2, U32>:
+  Save.dbl.go(U32.to_nat(200), F32.is_eq(F32.floor(x), x), x, 0n)
+
+def Save.config(+c: C.Config) -> List<&2, U32>:
+  List.concat(&2, U32, [Save.nat(C.Config.vocab(c)), Save.nat(C.Config.ctx(c)), Save.nat(C.Config.d(c)), Save.nat(C.Config.f(c)),
+    Save.nat(C.Config.layers(c)), Save.nat(C.Config.heads(c)), Save.bool(C.Config.rglru(c)), Save.bool(C.Config.qk(c)),
+    Save.bool(C.Config.sinks(c)), Save.bool(C.Config.tied(c))])
+
+def Save.adamw(a: AdamW) -> List<&2, U32>:
+  match a:
+    case AdamW{lr, b1, b2, e, wd, w, t}:
+      List.concat(&2, U32, [Save.double(lr), Save.double(b1), Save.double(b2), Save.double(e), Save.double(wd), Save.nat(w), Save.nat(t)])
+
+def Save.muon(m: Maybe<&2, F32>) -> List<&2, U32>:
+  match m:
+    case Some{x}:
+      1 <> Save.double(x)
+    case None{}:
+      [0]
+
+def Save.manifest(m: Manifest) -> List<&2, U32>:
+  match m:
+    case Manifest{v, c, n, l, lv, a, mu, mi, ti, di, cl, nu}:
+      List.concat(&2, U32, [Save.u32be(v), Save.config(c), Save.nat(n), Save.string(l), Save.u32be(lv), Save.adamw(a),
+        Save.muon(mu), Save.string(mi), Save.string(ti), Save.string(di), Save.double(cl), [nu]])
+
+# a file's head (the magic and the manifest), which Dense/Ckpt.bend copies
+# into every save
+def Save.header(m: Manifest) -> List<&2, U32>:
+  List.append(&2, U32, Save.u32be(magic()), Save.manifest(m))

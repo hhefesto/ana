@@ -2,40 +2,39 @@
 
 This file holds everything needed to continue this work from another machine and account. It was restarted from zero on 2026-10-02 for a new path: **legere**, the Bend Jev. The previous handoff (the FP-agent transcript corpus: the checks, the Bend ×4 rebuild, the filler) is in git at `e9cce23:HANDOFF.md`. The one before it (the v3 hot start and the dense trainer) is at `41e1920:HANDOFF.md`, and master's Haskell-era trainer is at the tag `haskell-final`.
 
-## ▶ CONTINUE HERE (2026-10-02, 11:30 UTC-6): legere v1 runs end to end; the next model splits the entry prior
+## ▶ CONTINUE HERE (2026-10-02, 12:30 UTC-6): legere reviewed; the trainer can now start ana from the fp100m plan; the box waits for a yes
 
-`nix run .#deploy -- legere STAGE ...` is the tool. `docs/LEGERE.md` has the design, the stages, the measurements and the rules. On the sessions:
+**The user's direction (2026-10-02 afternoon):** legere is the next generation of ana's data path, meant to feed ana new training material continuously; ana's Bend trainer should start training on our dataset on a rented GPU box; and legere improves iteratively so each round of sessions becomes transcripts.
 
-- **`eval`** (holdout: 273 docs, 4 sessions):
-  - lines inside named blocks, names hidden: **0.593 bits/line, 86.8%** against p(tag | inside) at 1.680 bits and 53.0%;
-  - every labelled line, nothing forced: **0.615 bits/line, 84.9%, ECE 0.042** against the prior at 2.322 bits and 35.8%.
+### What was done this afternoon
 
-  Phase 3's gate holds by a wide margin.
-- **`segment`:**
-  - 51,368 sections; all 3,172 docs give their text back byte for byte (Phase 2's gate).
-  - 15 code sections went to the checkers. 38 more Haskell Write blocks were dropped because the session converter elided their middles.
-- **`units` → `bend-check` → `bend-transcript`:**
-  - Haskell: 8 units, 4 kept, 8 transcripts.
-  - Agda: 5 units, 0 kept.
-  - Nix: 1 unit, 1 kept, 2 transcripts.
+1. **legere assessed** (the review is in `docs/LEGERE.md`, "Assessment"; the verdict in short):
+   - The denotational core is sound: `Spec.bend` is a real semantic function (every labelling enumerated), `Forward.bend` is held to it exactly in Bool and Nat and to 1e-4 in logp/maxp (`bend tests/legere.bend`: 11 `ok` lines, re-run today), and `roundtrip` is a proof, not a test. Spec and implementation are both Bend, as asked.
+   - Three claims were tightened: "the run is a monoid homomorphism" was listed as a law but never stated or tested (it is a fold by construction; removed from the laws below); the line model `Λ_t` (hashed Witten-Bell) has no specification of its own, only the Σ_b P = 1 test; the boundary posterior (Jev's `Noul`) is computed and tested but not written to `sections.nul`.
+   - The design flaw behind the known weakness: the mean-per-byte scale (fit at 0.5) throws away the block's *length* as evidence, so a 20-line Haskell block adds only 1–6 nats against a 4.5-nat entry prior. The summed form overcounts because lines in a block are not independent given the tag. The fix that keeps the meaning is a context-conditioned line model, `Λ_t(line_i | line_{i-1})`: the emission table is still a function of the text, so Spec, Forward and the tests apply unchanged. That is the next legere model, ahead of the entry-prior split.
+   - The output is straightforward to convert: `segment → units → bend-check → bend-clean → bend-transcript` runs unchanged on legere's files and produced correct transcripts. The yield is the problem (10 transcripts from 3,172 docs), not the shape; see "legere's next round" below.
+2. **The trainer gained a plan start** (`bend/TrainDense.bend`, `Checkpoint.bend` `Save.*`, `Dense/Plan.bend` `identity`/`batch`; `docs/BEND-PORT.md` "Plan start"). Until today a fresh run could only tokenize a text file and a hot start alone read a plan's shards: **the fp100m run could not have started.** Now `PLAN` set with `TRAIN_INIT` empty trains from fresh parameters on the plan's shards and schedule and saves FTC2 every `SAVE_EVERY` steps, which `TRAIN_INIT` continues. The micro-batch must divide the batch in every mode (a remainder used to drop its windows silently). `PRESET=fp-tiny` (fp100m's vocabulary and context, toy dimensions) exists for CPU tests.
+   - **CPU round trip** (plan start 2 steps on fp100m's shard 0 saving each step, then a hot start from step 1 for one step; the step-2 lines and checkpoints must agree): **passes** (12:43 UTC-6): B's step-2 line equals A's (train_loss 10.148527, gradient_norm 2.7763617) and the step-2 checkpoints are byte-identical (sha256 `64dd2b66…`, 35.4 MB). A CPU step of fp-tiny at batch 16 × ctx 2048 takes ~890 s, so the test is a 45-minute run (`scratchpad/plan/roundtrip.sh` of this session; the recipe is in `docs/BEND-PORT.md`). The flake's `bend-dense` identity check still passes (goldens unchanged). One thing the log showed: training-time validation averages over *whole* micro-batches, so `EVAL_WINDOWS` below `TRAIN_MICRO` prints `validation_loss=0`; keep it a multiple (fp.sh uses 128 at micro 4).
+3. **The box is staged, not rented** (`bend/gpu/fp-stage.sh HOST PORT`, then on the box `fp.sh gate`, `fp.sh time`, `fp.sh run`, `fp.sh eval`; `bend/gpu/fp100m-box.env` for `bend-push`). Checked today without a box: `bend TrainDense.bend -o traind.c` works on 2.0.34 (5.8 MB of C, 7 s); it compiles clean with clang under `-DBEND_CUDA=1 -DBEND_NO_SRC` against CUDA 12.8 headers and stubs, and as a CPU binary it trains; `bend-push` dry run sends the plan, the tokenizer and the 36 shards in plan order, **0.64 GB** in all. The GPU gate on the box is G2 (`tests/dense.bend` on the GPU against the tree trainer, every gradient within 1e-5); the rebased fork has never run on a GPU, so the gate comes first. Kernel strategies pin with `BEND_FT_STRAT=1` (one integer for every einsum kernel; 1 is the only value valid for every shape) when two GPU runs must agree.
 
-  They read right by eye: the User line is the prose before the code, then Context, Type and Term, and GHC's real `[exit 0]` or its error in a repair.
-- **`notes`:** every code file compiled whole, pass or fail. Haskell 4 of 10, Agda 1 of 4, Nix 1 of 1, each with the compiler's own words.
+### The run, for the user to approve (money)
 
-**Known weakness.** A minority language inside an *unnamed* block loses to "output". Recall on named blocks with names hidden is haskell 0 of 123 and code 0 of 90.
-- The line model does prefer Haskell, by 0.1–0.6 nats per byte (`explain`).
-- But the entry prior comes from stdout-dominated named blocks.
-- The next step is an entry prior split by authoring context: a tool block versus an assistant fence. In production, named blocks are forced by their cues, so this only matters for bare fences.
+- **Box:** one RTX 3090 or better on vast.ai, ≥ 64 GB RAM, `--gpu 48GB`; test the link first (`bend-push link`, done by `fp-stage.sh`).
+- **Setting** (`fp.sh`, overridable): `PRESET=fp100m` (115M, ctx 2048), the plan's batch 16 in micro-batches of 4 (the store is 1.77e9 floats; 8 does not fit one array), Muon at lr 3e-4, warmup 300 of 8,803 steps, weight decay 0.01, clip 1.0, tf32 (master's v3 manifest had lr 3e-4, Muon 0.95, wd 0.01, clip 1.0, tf32, warmup 100 of 358k). A save every 500 steps (18 files of 1.85 GB), validation every 250 steps on 128 shard windows.
+- **Cost:** `fp.sh time` measures it; at the hot start's 7,155 tok/s (ctx 256) the 288M tokens are 11 h; ctx 2048 at micro 4 will be slower per token (attention is quadratic and the micro-batch small), so plan on 12–20 h, a few dollars at 3090 prices, plus an hour of gates.
+- **Ranking checkpoints:** `fp.sh eval` gives bits per byte on `run/eval/transcript-fp.corpus` (5.6 MB of held-out transcripts); the repair-accuracy driver (200 held-out prefixes sampled and re-checked) is still unwritten and ranks them properly.
+- **Open hyperparameter question:** Muon's lr is the manifest's 3e-4 as in v3; the G3 speed benchmark used 0.02. Keep 3e-4 unless the user says otherwise.
 
-**For the user to decide:**
-1. Should failing session code become transcripts, as a "given code + compiler notes" shape? The existing rule drops it, so that no `## Term` answers with broken code. `notes.nul` keeps it either way.
-2. Should the Bend verdict lines be mixed? Bend checks made from now on say `ALL PROOFS CHECK`; the 81k older Bend transcripts say `All terms check.`.
+### legere's next round (so each batch of sessions becomes training data)
 
-Done today, besides legere:
-- **bend2 updated:** `hhefesto/bend2` `ft-kernels` = upstream 2.0.34+24 plus one port commit `14c97234`; the old head is the tag `ft-kernels-2.0.28`. It is locked at `7b05622`.
-- **`IO.args` fixed in all 15 tools** (`c5302ce`). Since 2.0.32 it leads with the program; the fix is held to identity.
+1. **Yield:** 10 transcripts from 3,172 docs. The losses, in order: the session converter elides long Write blocks (38 Haskell files lost: fix upstream in `~/src/llm-transcript`, export whole files); Edit calls (987 `.hs`) are diffs, not files (reconstruct by applying them to the Read'd original); project modules not on disk (check Write'd files inside their repository).
+2. **The model:** the context-conditioned line model above; then the entry prior by authoring context; then compiler acceptance as a likelihood.
+3. **Shape:** write the boundary posterior into `sections.nul` (Jev's second question); a `Ngram.spec` (exact counts in a `Map`) that the hashed table is held to on small corpora.
+4. **The loop:** a warm start of ana on a *new* plan (`TRAIN_INIT` plus a different `PLAN`: load the parameters and moments, write a new manifest with the new plan's identity and total). The plan start shares all the code it needs; it is the next trainer change once the first run exists.
 
-Upstream gave none of the fork's needs, as memory `project-bend2-fork-remotes` records.
+**Still for the user to decide** (unchanged): failing session code as "given code + compiler notes" transcripts; mixing Bend's new `ALL PROOFS CHECK` verdict with the 81k older `All terms check.` transcripts.
+
+Also today, before the review: legere v1 end to end (`docs/LEGERE.md` has the numbers: 0.593 bits/line vs 1.680 on named blocks with names hidden; 0.615 vs 2.322 with nothing forced; 51,368 sections, byte-exact; 15 code sections checked, 10 transcripts), bend2 rebased onto upstream 2.0.34 (`hhefesto/bend2` `14c97234`, locked at `7b05622`; upstream solved none of the fork's needs) and the `IO.args` fix in all 15 tools (`c5302ce`).
 
 ## The goal
 
@@ -64,12 +63,12 @@ The meaning is written in Bend, and the fast code refines it (Elliott; Goodman; 
   - `Nat`: how many segmentations?
   - `LogProb`: the posteriors (by forward-backward).
   - `Viterbi`: the best segmentation itself.
-- **Laws** are stated on meanings:
-  - the round trip `concat sections == text` holds byte for byte;
-  - `Bool` agrees with `Nat` on whether a text has any segmentation;
-  - the Viterbi score equals the max over the enumeration;
-  - every posterior sums to 1;
-  - the run is a monoid homomorphism.
+- **Laws**, stated on meanings and held in `bend/tests/legere.bend` unless marked proven:
+  - the round trip `flat (sections ps) == lines ps` (proven, `law roundtrip`);
+  - Forward equals Spec exactly in Bool and Nat, within 1e-4 in logp and maxp (score, marginals, boundaries, posteriors, Viterbi);
+  - `Bool` is `Nat`'s support (n ↦ n > 0 is a semiring homomorphism);
+  - every posterior row sums to 1.
+  (Forward's run over `u ++ v` is a fold by construction; no separate law is claimed.)
 
 ## Facts
 
@@ -102,6 +101,16 @@ The meaning is written in Bend, and the fast code refines it (Elliott; Goodman; 
 | 4 | `units`, then the existing check/clean/render on the sessions' code. Gate: transcripts read right by eye, and `bend-plan-windows` accepts them | **done** for check and render; `notes` added; plan-windows not yet run on them (only 10 transcripts) |
 | 5 | Flake: `bend-legere`, the deploy PATH, the `bend-tests` check | **done**; `Legere/Spec.bend` is in `Everything.bend` |
 
+**ana's training path** (the fp100m run):
+
+| step | what | state |
+|---|---|---|
+| T1 | the trainer starts from a plan (`PLAN`, fresh parameters, FTC2 saves) | **done** today; CPU round trip above |
+| T2 | the box staged: `fp-stage.sh`, `fp.sh`, the push env; C generation and CUDA compile checked locally | **done** today |
+| T3 | the box: G2 gate on the GPU, `fp.sh time`, then `fp.sh run` over the whole plan; checkpoints pulled and ranked | **needs a box: ask first** |
+| T4 | the repair-accuracy eval driver (200 held-out prefixes, `bend-generate` + `bend-check`) | not written |
+| T5 | warm start on a new plan, for legere's rounds | not written; designed above |
+
 Later, not v1:
 - compiler acceptance as a likelihood (top-2 check, Bayes update);
 - ana itself as `Λ_t`;
@@ -128,6 +137,8 @@ Later, not v1:
   - `~/src/conal-elliott`: `paper-2021-language-derivatives/Weighted.lagda` is the cleanest spec of weighted ν/δ; `weighted-derivatives/haskell/WeightedDerivatives.hs`; `NOTES-bradley-vs-elliott.md`.
   - `~/src/tai-danae-bradley`: use paper 10's composition *inequality*, not paper 06's equality.
 - **Flake:** `bendBinary pkgs NAME ENTRY` (`flake.nix:46-54`); packages at :67-111; the `deploy` app at :122-163; `bend-tests` at :427-470.
+- **The run on a box:** `bend/gpu/fp-stage.sh` (local: C generation, scp, `bend-push`), `bend/gpu/fp.sh` (box: `build`, `gate`, `time`, `run`, `eval`), `bend/gpu/fp100m-box.env`. The trainer's modes are in `docs/BEND-PORT.md` ("Hot start", "Plan start"). The fp100m corpus is `run/fp100m/` (36 shards, 0.64 GB, plan `plan-fp100m-b16-windows.tsv`); the eval corpus `run/eval/transcript-fp.corpus`.
+- **The v3 manifest's hyperparameters** (read from `run/pulled-vast-52365970/v3-bend-step28000.checkpoint` today): lr 3e-4, betas 0.9/0.999, eps 1e-8, wd 0.01, warmup 100, total 358,276, Muon 0.95, clip 1.0, tf32, batch 64.
 
 ## Bend pitfalls met
 

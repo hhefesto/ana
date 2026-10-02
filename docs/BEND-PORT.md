@@ -220,6 +220,19 @@ With `TRAIN_INIT=<ftc2>` the dense trainer continues master's run instead of sta
 
 Measured on a vast RTX 3090 (instance 52365970): validation at step 8000 is 3.627147 against master's 3.6271493 on the same windows, and the 19 steps master itself ran after that checkpoint (8001–8019, `run/train-cloud-v3-final.log`) agree with the Bend run's to ~5e-6 in the loss and ~1e-5 in the gradient norm, so the continuation is master's trainer step for step; 2,290 ms/step = 7,155 tok/s, 1.8× master's v3 run on a 3090. The 1,702 ms above was another card: the same cold benchmark on this one ran at 2,180 ms/step, so the hot path costs ~5% over it and the rest is the card (thermally limited; logs in `bend/gpu/hot-rtx3090-2026-09-24/`). The run went 8000 → 28000 in 12.7 h. enwik8 test split (6,184 windows): v3 step 8000 1.4903 bpb → best 1.4462 at step 22000, 1.4516 at 28000.
 
+### Plan start: a run from fresh parameters on a plan (2026-10-02)
+
+Until now a fresh run (`TRAIN_INIT` empty) read a text file (`CORPUS`), tokenized it in the process and wrote one BTC1 file at the end; only a hot start read a plan's shards or saved FTC2. The fp100m corpus is 36 prepared shards with a plan (`bend-plan-windows`), so the trainer gained a third mode, `PLAN` set with `TRAIN_INIT` empty:
+
+- parameters from `Train/Init.bend` for `PRESET`, as the text start;
+- the plan's shards, data order and schedule through the hot-start loop (`run.hot`), the schedule's total being the plan's global step count;
+- FTC2 saves every `SAVE_EVERY` steps and at the stop, to `OUT-step<N>.checkpoint` (`OUT` defaults to `RUN_DIR/ckpt`), which `TRAIN_INIT` continues as the same run at a later step;
+- the manifest is written here, by `Checkpoint.Save` (the inverse of `Load.manifest`, Data.Binary's encoding): the hyperparameters the environment gives (`TRAIN_LR` 3e-4, `TRAIN_WARMUP` 100, `TRAIN_WD` 0.01, `GRAD_CLIP` 1.0, Muon 0.95 under `TRAIN_OPT=muon`, Adam's 0.9/0.999/1e-8), the plan's identity string as the dataset's, and `numerics` 0. The tail master kept (best loss, PRNG) is a zero Double and 16 zero bytes; nothing here reads it.
+- `TRAIN_BATCH` must be the plan's batch (`batch=` in its identity): the schedule's steps assume it. `TRAIN_STEPS` defaults to the whole plan.
+- In every mode the micro-batch must now divide the batch; a remainder used to drop its windows silently.
+
+A CPU round trip holds it to the hot start: with `PRESET=fp-tiny` (fp100m's vocabulary and context at toy dimensions) on fp100m's own shard 0, two plan-start steps saving each step, then a hot start from the step-1 file for one step, must print the same step-2 line and write the same step-2 checkpoint. The result is recorded in HANDOFF.md.
+
 ### What the dense path does not do yet
 
 - **Generate** still runs the tree decoder on the CPU. That decoder is byte-identical to master.
