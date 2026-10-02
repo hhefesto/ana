@@ -23,7 +23,7 @@
 #   fp.sh next CKPT        continue CKPT's run on the next plan (TRAIN_NEXT; traind-next.c built from
 #                          the trainer that has it): run/next/plan-next-b16-windows.tsv and its shards
 #                          run/next/shard-K-next.corpus, saves out/next-step<N>.checkpoint, log next.log;
-#                          lr NLR (1e-4) after NWARM (100) steps of warmup, cosine to 0 over the plan
+#                          lr NLR (1e-4) after NWARM (5% of the plan's steps) of warmup, cosine to 0
 #
 # The run's setting (override in the environment): Muon at TRAIN_LR 3e-4
 # (master's v3 manifest: lr 3e-4, Muon 0.95, weight decay 0.01, clip 1.0,
@@ -85,6 +85,9 @@ case "${1:-}" in
     [ -x traind-next ] || $CC traind-next.c -lpthread -lm -o traind-next -lcuda -lnvrtc || exit 1
     ckpt="${2:?usage: fp.sh next CKPT}"
     mkdir -p out
+    # warmup: 5% of the plan's steps (at least 10) unless NWARM says otherwise
+    nsteps=$(head -1 run/next/plan-next-b16-windows.tsv | awk '{ print $3 }')
+    NWARM=${NWARM:-$(( nsteps / 20 > 10 ? nsteps / 20 : 10 ))}
     env TRAIN_INIT=$ckpt TRAIN_NEXT=1 PLAN=run/next/plan-next-b16-windows.tsv RUN_DIR=run/next SHARD_SIZE=next \
       TOKENIZER_FILE=$TOK TRAIN_BATCH=16 TRAIN_MICRO=${MICRO:-4} TRAIN_CHUNK=16 BEND_GEMM_NUMERICS=tf32 \
       TRAIN_LR=${NLR:-1e-4} TRAIN_WARMUP=${NWARM:-100} EVAL_EVERY=${EVAL:-250} EVAL_WINDOWS=${EVALW:-128} \
