@@ -17,7 +17,7 @@
 #   fp.sh build            compile traind and dense (once; the kernels JIT on first use)
 #   fp.sh gate             G2: the dense program on the GPU against the tree trainer on the CPU
 #   fp.sh time [STEPS]     STEPS (20) steps of the real run: ms/step, tok/s, memory
-#   fp.sh run              the whole plan, in the background: out/fp100m-step<N>.checkpoint, train.log
+#   fp.sh run              the whole plan (STEPS, 8803), in the background: out/fp100m-step<N>.checkpoint, train.log
 #   fp.sh eval [CKPT...]   bits per byte of each checkpoint (out/*.checkpoint) on the held-out transcripts
 #
 # The run's setting (override in the environment): Muon at TRAIN_LR 3e-4
@@ -73,7 +73,7 @@ case "${1:-}" in
     build
     mkdir -p out
     nohup nvidia-smi dmon -s pucm -d 30 > dmon.txt 2>&1 &
-    env $common $setting EVAL_EVERY=${EVAL:-250} EVAL_WINDOWS=${EVALW:-128} SAVE_EVERY=${SAVE:-500} OUT=out/fp100m \
+    env $common $setting TRAIN_STEPS=${STEPS:-8803} EVAL_EVERY=${EVAL:-250} EVAL_WINDOWS=${EVALW:-128} SAVE_EVERY=${SAVE:-500} OUT=out/fp100m \
       nohup stdbuf -oL ./traind --gpu $MEM > train.log 2>&1 &
     echo "trainer pid $!; tail -f train.log" ;;
   eval)

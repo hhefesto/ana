@@ -29,7 +29,8 @@ import ./Clock.bend as Ck
 # Plan start (PLAN set, TRAIN_INIT empty): fresh parameters from PRESET,
 # trained on the plan's shards and schedule (bend-plan-windows writes them),
 # saving FTC2 checkpoints TRAIN_INIT continues; TRAIN_BATCH must be the
-# plan's batch, TRAIN_STEPS defaults to the whole plan, OUT to RUN_DIR/ckpt.
+# plan's batch, TRAIN_STEPS defaults to the whole plan (the text and hot
+# starts default to 100 steps), OUT to RUN_DIR/ckpt.
 # Hot start (TRAIN_INIT set): continue a run from its FTC2 checkpoint
 # on its own data and schedule.
 #   TRAIN_INIT   the checkpoint (parameters, Adam moments, Muon momentum, step)
@@ -953,7 +954,7 @@ def main() -> IO(Unit):
     +corpus : String <- Tr.env("CORPUS", "README.md")
     +tokf : String <- Tr.env("TOKENIZER_FILE", "")
     +pre : String <- Tr.env("PRESET", "small4-v3")
-    +steps_s : String <- Tr.env("TRAIN_STEPS", "100")
+    +steps_s : String <- Tr.env("TRAIN_STEPS", "")
     +batch_s : String <- Tr.env("TRAIN_BATCH", "")
     +micro_s : String <- Tr.env("TRAIN_MICRO", "")
     +lr_s : String <- Tr.env("TRAIN_LR", "")
