@@ -281,6 +281,11 @@ def Src.mu(+s: Src) -> F32:
     case Src{h, t, st, mo, K.Manifest{v, c, n, l, lv, a, mu, mi, ti, di, cl, nu}}:
       Maybe.default(&2, F32, mu, 0.95)
 
+def Src.dataset(+s: Src) -> String:
+  match s:
+    case Src{h, t, st, mo, K.Manifest{v, c, n, l, lv, a, mu, mi, ti, di, cl, nu}}:
+      di
+
 def Src.clip(+s: Src) -> F32:
   match s:
     case Src{h, t, st, mo, K.Manifest{v, c, n, l, lv, a, mu, mi, ti, di, cl, nu}}:

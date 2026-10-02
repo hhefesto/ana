@@ -254,3 +254,16 @@ def kv(+ts: List<&2, List<&2, U32>>, +key: List<&2, U32>) -> Nat:
 # when the plan carries none)
 def batch(xs: List<&2, U32>) -> Nat:
   kv(cut(identity.bytes(xs), 58), [98, 97, 116, 99, 104, 61])
+
+def Seg.shift(+s: Seg, +k: Nat) -> Seg:
+  match s:
+    case Seg{i, o, d, t, a, e}:
+      Seg{i, o, d, t, Nat.add(a, k), Nat.add(e, k)}
+
+# the segments k global steps later (a plan continuing a run at step k)
+def shift(ss: List<&2, Seg>, +k: Nat) -> List<&2, Seg>:
+  match ss:
+    case Nil{}:
+      Nil{}
+    case s <> t:
+      Seg.shift(s, k) <> shift(t, k)

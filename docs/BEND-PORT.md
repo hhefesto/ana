@@ -233,6 +233,17 @@ Until now a fresh run (`TRAIN_INIT` empty) read a text file (`CORPUS`), tokenize
 
 A CPU round trip holds it to the hot start: with `PRESET=fp-tiny` (fp100m's vocabulary and context at toy dimensions) on fp100m's own shard 0, two plan-start steps saving each step, then a hot start from the step-1 file for one step, must print the same step-2 line and write the same step-2 checkpoint. The result is recorded in HANDOFF.md.
 
+### Next plan: a run continued on new data (2026-10-02)
+
+`TRAIN_INIT=<ftc2> TRAIN_NEXT=1 PLAN=<a new plan>` continues a run on a plan it was not started on, which is how ana takes in each new round of material (legere's rounds, new sources):
+
+- the parameters and the optimizer state (Adam's moments, Muon's momentum) carry over, and the step counter goes on, so Adam's bias correction stays global;
+- the new plan's segments are shifted to start at the checkpoint's step (`Plan.shift`), so its data order is the plan's own;
+- the schedule restarts there: `TRAIN_WARMUP` steps of warmup to `TRAIN_LR`, then cosine to zero over the new plan (`TRAIN_LR` and `TRAIN_WD` default to the checkpoint's);
+- the saves carry a new manifest: the new plan's identity as the dataset and the old step plus the plan's steps as the total. The schedule's origin is therefore *derived* (`base.of`: the manifest's total less the plan's), so a plain hot start from such a save (no `TRAIN_NEXT`) resumes the continuation where it stopped, and a run on its first plan gets 0 as before.
+
+The mix for a continuation is `bend-plan-windows` with the new languages read once and the old ones as `:cycle` replay (`haskell-new:H bend-new:B haskell:h lean:l agda:a nix:n bend:b:cycle ...`, each a directory under `OUT`), so the plan ends when the new material is used up and the per-round counts set the replay's share.
+
 ### What the dense path does not do yet
 
 - **Generate** still runs the tree decoder on the CPU. That decoder is byte-identical to master.

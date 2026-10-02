@@ -32,7 +32,15 @@ import ./Clock.bend as Ck
 # plan's batch, TRAIN_STEPS defaults to the whole plan (the text and hot
 # starts default to 100 steps), OUT to RUN_DIR/ckpt.
 # Hot start (TRAIN_INIT set): continue a run from its FTC2 checkpoint
-# on its own data and schedule.
+# on its own data and schedule. With TRAIN_NEXT=1 the checkpoint's run
+# continues on a NEW plan (PLAN): parameters and optimizer state carry over,
+# the step counter goes on (Adam's bias correction stays global), the plan's
+# segments start at the checkpoint's step, and the schedule restarts there
+# (TRAIN_WARMUP, then cosine to zero over the new plan; TRAIN_LR, TRAIN_WD
+# default to the checkpoint's); saves name the new plan as their dataset
+# and its total as the old step plus the plan's, so a plain hot start from
+# them (no TRAIN_NEXT) resumes the continuation where it was.
+# TRAIN_STEPS defaults to the whole new plan.
 #   TRAIN_INIT   the checkpoint (parameters, Adam moments, Muon momentum, step)
 #   PLAN         master's run plan (plan-*.tsv); RUN_DIR its shards,
 #                shard-<k>-<SHARD_SIZE>.corpus (default bpe100m)
@@ -463,52 +471,59 @@ def start(+tokf: String, +pre: String, +steps_s: String, +batch_s: String, +micr
 # Hot start ----------------------------------------------------------------
 
 type Hs is Data:
-  Hs{src: Dk.Src, out: String, every: Nat, stop: Nat, dir: String, size: String, evals: Nat, tok: Tr.Tok, ctx: Nat}
+  Hs{src: Dk.Src, out: String, every: Nat, stop: Nat, dir: String, size: String, evals: Nat, tok: Tr.Tok, ctx: Nat, base: Nat}
 
 def Hs.src(+h: Hs) -> Dk.Src:
   match h:
-    case Hs{a, b, c, d, e, f, g, t, x}:
+    case Hs{a, b, c, d, e, f, g, t, x, z}:
       a
 
 def Hs.out(+h: Hs) -> String:
   match h:
-    case Hs{a, b, c, d, e, f, g, t, x}:
+    case Hs{a, b, c, d, e, f, g, t, x, z}:
       b
 
 def Hs.every(+h: Hs) -> Nat:
   match h:
-    case Hs{a, b, c, d, e, f, g, t, x}:
+    case Hs{a, b, c, d, e, f, g, t, x, z}:
       c
 
 def Hs.stop(+h: Hs) -> Nat:
   match h:
-    case Hs{a, b, c, d, e, f, g, t, x}:
+    case Hs{a, b, c, d, e, f, g, t, x, z}:
       d
 
 def Hs.dir(+h: Hs) -> String:
   match h:
-    case Hs{a, b, c, d, e, f, g, t, x}:
+    case Hs{a, b, c, d, e, f, g, t, x, z}:
       e
 
 def Hs.size(+h: Hs) -> String:
   match h:
-    case Hs{a, b, c, d, e, f, g, t, x}:
+    case Hs{a, b, c, d, e, f, g, t, x, z}:
       f
 
 def Hs.evals(+h: Hs) -> Nat:
   match h:
-    case Hs{a, b, c, d, e, f, g, t, x}:
+    case Hs{a, b, c, d, e, f, g, t, x, z}:
       g
 
 def Hs.tok(+h: Hs) -> Tr.Tok:
   match h:
-    case Hs{a, b, c, d, e, f, g, t, x}:
+    case Hs{a, b, c, d, e, f, g, t, x, z}:
       t
 
 def Hs.ctx(+h: Hs) -> Nat:
   match h:
-    case Hs{a, b, c, d, e, f, g, t, x}:
+    case Hs{a, b, c, d, e, f, g, t, x, z}:
       x
+
+# the step the schedule counts from: 0, or the checkpoint's step when a run
+# continues on a new plan (TRAIN_NEXT)
+def Hs.base(+h: Hs) -> Nat:
+  match h:
+    case Hs{a, b, c, d, e, f, g, t, x, z}:
+      z
 
 def hot.path(+hs: Hs, +step: Nat) -> String:
   Hs.out(hs) ++ "-step" ++ Nat.show(step) ++ ".checkpoint"
@@ -583,7 +598,7 @@ def loop.hot(n: Nat, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, +head: List<&2, Li
       (bw, rest) = br
       (s, st) = r
       +step2 = {1n+step : Nat}
-      +lr = O.lr.at(Hp.lr(hp), step2, Hp.warm(hp), Hp.total(hp))
+      +lr = O.lr.at(Hp.lr(hp), Nat.sub(step2, Hs.base(hs)), Hp.warm(hp), Nat.sub(Hp.total(hp), Hs.base(hs)))
       do IO<Array<F32> & St>:
         +t0 : Nat <- IO.now()
         r2 : Array<F32> & St <- loop.print(hp, step2, lr, t0, st, train.step(rn, hp, bw, lr, step2, s))
@@ -675,7 +690,7 @@ def run.hot(+c: C.Config, +tok: Tr.Tok, +plan: List<&2, U32>, +hp: Hp, +muon: Bo
   +rn = {Run{m, ly, S.fwd(m, ly), S.bwd(m, ly, F32.div(1.0, F32.from_nat(Nat.div(Hp.batch(hp), Hp.mb(hp))))),
             S.update(muon, ly, S.Hy{Hp.b1(hp), Hp.b2(hp), Hp.eps(hp), wd, mu}, m, clip)} : Run}
   +step0 = Dk.Src.step(Hs.src(hs))
-  +ss = Pl.remaining(Pl.parse(plan), step0)
+  +ss = Pl.remaining(Pl.shift(Pl.parse(plan), Hs.base(hs)), step0)
   do IO<Unit>:
     say("train (dense, hot start): " ++ C.Config.model_id(c) ++ " from step " ++ Nat.show(step0) ++ " to " ++ Nat.show(Hs.stop(hs))
       ++ " of " ++ Nat.show(Hp.total(hp)) ++ "; lr " ++ F32.show(Hp.lr(hp)) ++ ", warmup " ++ Nat.show(Hp.warm(hp))
@@ -754,30 +769,83 @@ def eval.run(+c: C.Config, +tok: Tr.Tok, +mb: Nat, +chunk: Nat, +path: String, +
     say("evaluate (dense): step " ++ Nat.show(Dk.Src.step(src)) ++ " on " ++ path ++ " (" ++ Cc.Corpus.dataset(co) ++ ")")
     eval.fin(scale, List.length(&2, List<&2, U32>, ws), preds, bytes, eval.go(micros(mb, pad.to(mb, ws)), rn, (s, Ea{0.0, 0n})))
 
-# TRAIN_OPT unset: the checkpoint's optimizer (Muon when it carries momentum)
-def start.hot.go(+c: C.Config, +tok: Tr.Tok, +plan: List<&2, U32>, +steps: Nat, +batch: Nat, +mb: Nat, +lr_s: String,
-                 +wd_s: String, +warm_s: String, +opt: String, +mu_s: String, +clip_s: String, +every: Nat, +evals: Nat,
-                 +out: String, +save: Nat, +dir: String, +size: String, +chunk: Nat, r: Array<F32> & Dk.Src) -> IO(Unit):
-  (s, +src) = r
-  +stop = Nat.min(Nat.add(Dk.Src.step(src), steps), Dk.Src.total(src))
-  +clip = Tr.f32.or(clip_s, Dk.Src.clip(src))
+def batch.check.if(ok: Bool, +pb: Nat, +batch: Nat) -> IO(Unit):
+  match ok:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      IO.die(Unit, 1, "train (dense): the plan's schedule was made for batch " ++ Nat.show(pb) ++ ", TRAIN_BATCH says " ++ Nat.show(batch))
+
+# the plan's batch, when it records one
+def batch.check(+pb: Nat, +batch: Nat) -> IO(Unit):
+  batch.check.if(Bool.or(Nat.is_eq(pb, 0n), Nat.is_eq(pb, batch)), pb, batch)
+
+# TRAIN_OPT unset: the checkpoint's optimizer (Muon when it carries momentum).
+# src is the run the saves continue: the checkpoint's own, or (TRAIN_NEXT)
+# one whose manifest names the new plan; base is where the schedule starts.
+def start.hot.run(+c: C.Config, +tok: Tr.Tok, +plan: List<&2, U32>, +batch: Nat, +mb: Nat, +lr: F32, +warm: Nat,
+                  +opt: String, +mu_s: String, +clip: F32, +wd: F32, +every: Nat, +evals: Nat, +out: String, +save: Nat,
+                  +dir: String, +size: String, +chunk: Nat, +stop: Nat, +base: Nat, +src: Dk.Src, s: Array<F32>) -> IO(Unit):
   do IO<Unit>:
     u : Unit <- Dk.fail.if(Bool.pick(String, U32.is_eq(Dk.Manifest.version(Dk.Src.man(src)), 4), "",
       "training continues version-4 checkpoints only (this one can be evaluated)"))
     run.hot(c, tok, plan,
-      Hp{Tr.f32.or(lr_s, Dk.Src.lr(src)), Tr.nat.or(warm_s, Dk.Src.warm(src)), Dk.Src.total(src), batch, every, mb,
-         clip, Nat.mul(batch, C.Config.ctx(c)), Dk.Src.b1(src), Dk.Src.b2(src), Dk.Src.eps(src)},
+      Hp{lr, warm, Dk.Src.total(src), batch, every, mb, clip, Nat.mul(batch, C.Config.ctx(c)), Dk.Src.b1(src), Dk.Src.b2(src), Dk.Src.eps(src)},
       Bool.or(String.eq(opt, "muon"), Bool.and(String.is_empty(opt), Dk.Src.mom(src))),
-      Tr.f32.or(mu_s, Dk.Src.mu(src)), clip, Tr.f32.or(wd_s, Dk.Src.wd(src)),
-      Hs{src, out, save, stop, dir, size, evals, tok, C.Config.ctx(c)}, chunk, s)
+      Tr.f32.or(mu_s, Dk.Src.mu(src)), clip, wd,
+      Hs{src, out, save, stop, dir, size, evals, tok, C.Config.ctx(c), base}, chunk, s)
 
-def start.hot.pick(train: Bool, +c: C.Config, +tok: Tr.Tok, +plan: List<&2, U32>, +steps: Nat, +batch: Nat, +mb: Nat,
+# the checkpoint's manifest with a new schedule and dataset: lr, warmup and
+# weight decay as given, the total the old step plus the new plan's steps
+def next.man(+m: Km.Manifest, +lr: F32, +warm: Nat, +wd: F32, +total: Nat, +did: String) -> Km.Manifest:
+  match m:
+    case Km.Manifest{v, c, n, l, lv, Km.AdamW{lr0, b1, b2, e, wd0, w0, t0}, mu, mi, ti, di, cl, nu}:
+      Km.Manifest{v, c, n, l, lv, Km.AdamW{lr, b1, b2, e, wd, warm, total}, mu, mi, ti, did, cl, nu}
+
+# where a run's schedule starts on its plan: the manifest's total less the
+# plan's (0 for a run on its first plan, the step it moved at for a run that
+# went on to a next plan), so resuming a continued run needs no flag. A plan
+# with no total in its header gives 0.
+def base.of(+src: Dk.Src, +plan: List<&2, U32>) -> Nat:
+  +pt = Pl.total(plan)
+  Bool.pick(Nat, Nat.is_eq(pt, 0n), 0n, Nat.sub(Dk.Src.total(src), pt))
+
+def next.src(+src: Dk.Src, +man: Km.Manifest) -> Dk.Src:
+  Dk.Src{Km.Save.header(man), Dk.Src.tail(src), Dk.Src.step(src), Dk.Src.mom(src), man}
+
+def start.hot.next(next: Bool, +c: C.Config, +tok: Tr.Tok, +plan: List<&2, U32>, +steps_s: String, +batch: Nat, +mb: Nat,
+                   +lr: F32, +warm: Nat, +opt: String, +mu_s: String, +clip: F32, +wd: F32, +every: Nat, +evals: Nat,
+                   +out: String, +save: Nat, +dir: String, +size: String, +chunk: Nat, +src: Dk.Src, s: Array<F32>) -> IO(Unit):
+  match next:
+    case False{}:
+      start.hot.run(c, tok, plan, batch, mb, lr, warm, opt, mu_s, clip, wd, every, evals, out, save, dir, size, chunk,
+        Nat.min(Nat.add(Dk.Src.step(src), Tr.nat.or(steps_s, 100n)), Dk.Src.total(src)), base.of(src, plan), src, s)
+    case True{}:
+      +step0 = Dk.Src.step(src)
+      +total = Nat.add(step0, Pl.total(plan))
+      +src2 = next.src(src, next.man(Dk.Src.man(src), lr, warm, wd, total, Pl.identity(plan)))
+      do IO<Unit>:
+        batch.check(Pl.batch(plan), batch)
+        say("train (dense, next plan): from step " ++ Nat.show(step0) ++ " of " ++ Dk.Src.dataset(src) ++ " onto "
+          ++ Nat.show(Pl.total(plan)) ++ " steps of " ++ Pl.identity(plan) ++ "; the schedule restarts (warmup " ++ Nat.show(warm)
+          ++ ", lr " ++ F32.show(lr) ++ "), the optimizer state carries over")
+        start.hot.run(c, tok, plan, batch, mb, lr, warm, opt, mu_s, clip, wd, every, evals, out, save, dir, size, chunk,
+          Nat.min(Nat.add(step0, Tr.nat.or(steps_s, Pl.total(plan))), total), step0, src2, s)
+
+def start.hot.go(+next: Bool, +c: C.Config, +tok: Tr.Tok, +plan: List<&2, U32>, +steps_s: String, +batch: Nat, +mb: Nat, +lr_s: String,
+                 +wd_s: String, +warm_s: String, +opt: String, +mu_s: String, +clip_s: String, +every: Nat, +evals: Nat,
+                 +out: String, +save: Nat, +dir: String, +size: String, +chunk: Nat, r: Array<F32> & Dk.Src) -> IO(Unit):
+  (s, +src) = r
+  start.hot.next(next, c, tok, plan, steps_s, batch, mb, Tr.f32.or(lr_s, Dk.Src.lr(src)), Tr.nat.or(warm_s, Dk.Src.warm(src)), opt, mu_s,
+    Tr.f32.or(clip_s, Dk.Src.clip(src)), Tr.f32.or(wd_s, Dk.Src.wd(src)), every, evals, out, save, dir, size, chunk, src, s)
+
+def start.hot.pick(train: Bool, +next: Bool, +c: C.Config, +tok: Tr.Tok, +plan: List<&2, U32>, +steps_s: String, +batch: Nat, +mb: Nat,
                    +lr_s: String, +wd_s: String, +warm_s: String, +opt: String, +mu_s: String, +clip_s: String,
                    +every: Nat, +evals_s: String, +out: String, +save: Nat, +dir: String, +size: String, +chunk: Nat,
                    +evc: String, +xs: List<&2, U32>, r: Array<F32> & Dk.Src) -> IO(Unit):
   match train:
     case True{}:
-      start.hot.go(c, tok, plan, steps, batch, mb, lr_s, wd_s, warm_s, opt, mu_s, clip_s, every,
+      start.hot.go(next, c, tok, plan, steps_s, batch, mb, lr_s, wd_s, warm_s, opt, mu_s, clip_s, every,
         Tr.nat.or(evals_s, 256n), out, save, dir, size, chunk, r)
     case False{}:
       eval.run(c, tok, mb, chunk, evc, Tr.nat.or(evals_s, 0n), xs, r)
@@ -801,7 +869,8 @@ def start.hot.man(+init: String, +tokf: String, +steps_s: String, +batch_s: Stri
     r : Array<F32> & Dk.Src <- Dk.load(init, man, h, Tr.Tok.id(tok), ly, m, Array.new(F32, L.Lay.depth(ly), 0.0))
     +t1 : Nat <- IO.now()
     say("loaded " ++ init ++ " (" ++ Nat.show(Nat.sub(t1, t0)) ++ " ms)")
-    start.hot.pick(String.is_empty(evc), c, tok, plan, Tr.nat.or(steps_s, 100n), batch, mb, lr_s, wd_s, warm_s, opt,
+    +nx : String <- Tr.env("TRAIN_NEXT", "")
+    start.hot.pick(String.is_empty(evc), String.eq(nx, "1"), c, tok, plan, steps_s, batch, mb, lr_s, wd_s, warm_s, opt,
       mu_s, clip_s, Tr.nat.or(every_s, 0n), evals_s, out, Tr.nat.or(save_s, 1000n), dir, size, chunk, evc, xs, r)
 
 # the model is the checkpoint's (its manifest's Config; PRESET is not read)
@@ -830,17 +899,6 @@ def muon.of(muon: Bool, +mu: F32) -> Maybe<&2, F32>:
       Some{mu}
     case False{}:
       None{}
-
-def batch.check.if(ok: Bool, +pb: Nat, +batch: Nat) -> IO(Unit):
-  match ok:
-    case True{}:
-      IO.pure(Unit, Unit{})
-    case False{}:
-      IO.die(Unit, 1, "train (dense): the plan's schedule was made for batch " ++ Nat.show(pb) ++ ", TRAIN_BATCH says " ++ Nat.show(batch))
-
-# the plan's batch, when it records one
-def batch.check(+pb: Nat, +batch: Nat) -> IO(Unit):
-  batch.check.if(Bool.or(Nat.is_eq(pb, 0n), Nat.is_eq(pb, batch)), pb, batch)
 
 def start.plan(+tokf: String, +pre: String, +steps_s: String, +batch_s: String, +micro_s: String, +lr_s: String,
                +wd_s: String, +warm_s: String, +opt: String, +mu_s: String, +clip_s: String, +every_s: String,
@@ -873,7 +931,7 @@ def start.plan(+tokf: String, +pre: String, +steps_s: String, +batch_s: String, 
     run.hot(c, tok, plan,
       Hp{lr, warm, total, batch, Tr.nat.or(every_s, 0n), mb, clip, Nat.mul(batch, C.Config.ctx(c)), 0.9, 0.999, 1.0e-8},
       muon, mu, clip, wd,
-      Hs{src, out, Tr.nat.or(save_s, 1000n), Nat.min(Tr.nat.or(steps_s, total), total), dir, size, Tr.nat.or(evals_s, 256n), tok, C.Config.ctx(c)},
+      Hs{src, out, Tr.nat.or(save_s, 1000n), Nat.min(Tr.nat.or(steps_s, total), total), dir, size, Tr.nat.or(evals_s, 256n), tok, C.Config.ctx(c), 0n},
       chunk, Io.put(K.Weights.flat(I.init(c)), Array.new(F32, L.Lay.depth(ly), 0.0), 0))
 
 def or.str(empty: Bool, +s: String, +d: String) -> String:

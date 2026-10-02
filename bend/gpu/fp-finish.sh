@@ -2,7 +2,12 @@
 # Finish a box run without a person present: wait for the trainer to end,
 # score every checkpoint on the held-out transcripts, pull everything, and
 # DESTROY the instance (a box bills until it is destroyed; the rule is
-# destroy, never stop). Runs on this machine, outside any session:
+# destroy, never stop), unless a continuation takes the box over: a file
+# DEST/HOLD holding an epoch deadline makes it wait (until HOLD is removed or
+# the deadline passes); DEST/CONTINUED makes it exit without destroying (the
+# continuation starts a finisher of its own). While the run goes on it also
+# deletes, on the box, checkpoints that are neither a multiple of EVERY nor
+# the newest, to keep the box's disk for the continuation. Runs on this machine, outside any session:
 #   systemd-run --user --unit=ft-fp-finish bend/gpu/fp-finish.sh HOST PORT INSTANCE DEST
 # Every 5 minutes it looks at the box and pulls, while the run goes on, every
 # checkpoint whose step is a multiple of EVERY (1000) that it does not have
@@ -32,6 +37,9 @@ EVERY=${EVERY:-1000}
 wanted() { $SSH 'cd formalTransformer && grep -o "saved out/[^ ]*\.checkpoint" train.log 2>/dev/null' 2>/dev/null | sed -n 's#^saved out/\(.*-step\([0-9]*\)\.checkpoint\)$#\2 \1#p' | sort -n | awk -v e="$EVERY" '$1 % e == 0 { print $2 }'; }
 pull_one() { rsync -a --partial-dir=.partial -e "ssh -o StrictHostKeyChecking=no -p $port" "$host:formalTransformer/out/$1" "$dest/out/" >/dev/null 2>&1 && log "pulled $1"; }
 pull_new() { mkdir -p "$dest/out"; for f in $(wanted); do [ -f "$dest/out/$f" ] && [ ! -f "$dest/out/.partial/$f" ] || pull_one "$f"; done; }
+# on the box: delete saved checkpoints that are neither a multiple of EVERY
+# nor the newest saved one
+prune() { $SSH "cd formalTransformer && grep -o 'saved out/[^ ]*\\.checkpoint' train.log | sed -n 's#^saved out/\\(.*-step\\([0-9]*\\)\\.checkpoint\\)\$#\\2 \\1#p' | sort -n | head -n -1 | awk -v e=$EVERY '\$1 % e != 0 { print \"out/\" \$2 }' | xargs -r rm -f" 2>/dev/null; }
 last_size=0; quiet=0; state=running
 while [ $state = running ]; do
   sleep 300
@@ -45,6 +53,7 @@ while [ $state = running ]; do
   last_size=$size
   log "$state: log $size bytes, $procs trainer process(es); ${tail: -120}"
   pull_new
+  prune
 done
 log "trainer $state"
 [ $state = died ] && echo "the trainer died; see train.log" > "$dest/DIED"
@@ -64,6 +73,8 @@ if [ -n "$remote" ] && [ -s "$dest/sha256.txt" ] && [ -z "$(grep -vxF -f <(echo 
 else
   log "WARNING: the pulled checkpoints do not all match the box's; the box is NOT destroyed"; exit 1
 fi
+while [ -f "$dest/HOLD" ] && [ "$(date +%s)" -lt "$(cat "$dest/HOLD" 2>/dev/null || echo 0)" ] && [ ! -f "$dest/CONTINUED" ]; do sleep 30; done
+if [ -f "$dest/CONTINUED" ]; then log "a continuation took the box over; not destroying it"; exit 0; fi
 log "destroy instance $inst"
 $V destroy instance "$inst" -y 2>&1 | tee -a "$dest/finish.log"
 sleep 10
