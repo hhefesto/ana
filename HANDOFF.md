@@ -1,285 +1,118 @@
 # Session Handoff
 
-This file holds everything needed to continue this work from another machine and account. It was restarted from zero on 2026-09-25 for a new path. The previous handoff (the v3 hot start and the dense trainer) is in git at `41e1920:HANDOFF.md`, and master's Haskell-era trainer is at the tag `haskell-final`.
+This file holds everything needed to continue this work from another machine and account. It was restarted from zero on 2026-10-02 for a new path: **legere**, the Bend Jev. The previous handoff (the FP-agent transcript corpus: the checks, the Bend ×4 rebuild, the filler) is in git at `e9cce23:HANDOFF.md`. The one before it (the v3 hot start and the dense trainer) is at `41e1920:HANDOFF.md`, and master's Haskell-era trainer is at the tag `haskell-final`.
 
-## ▶ CONTINUE HERE (2026-09-26, 09:45 UTC-6): the checks run in the user's order: Bend first, then Haskell, then Lean, then Agda (the scratchpad's `sequencer.sh`, below)
+## ▶ CONTINUE HERE (2026-10-02, 09:49 UTC-6): Phase 1, the meaning
 
-### State of the run (all on this machine, free)
+The plan is `~/.claude/plans/do-research-on-jev-binary-stearns.md`. Phase 0 (this file) is done. Next is Phase 1:
+- `bend/Legere/Spec.bend` and `bend/Legere/Semiring.bend`;
+- the brute-force reference segmenter;
+- `bend/tests/legere.bend`.
 
-| language | files | units | check | kept | after `clean`: train (transcripts) / holdout |
-|---|---|---|---|---|---|
-| Haskell | 75,072 | 172,177 | 4 `bend-check` processes × 2 workers (`CHECK_PROCS=4 CHECK_JOBS=2 PKG_CAP=200`, `CPUWeight=250`), systemd user unit `ft-haskell`. Restarted 03:57 on the `:reload` checker (below), resumed from the 23:24 run's 1,147 kept units and its 2 finished hackage packages (`DONE=run/transcripts/haskell/done.ids`, 1,348 units decided; the scratchpad's `resume-keyed.py`; the 23:24 run's parts in `stopped-reload-20260926/`). Pass 1 of the dispatcher (grouping 172k units into packages) takes ~35 min on each shard's evaluator before GHCi starts; logs `run/transcripts/haskell/check.K.out` | running | |
-| Lean | 8,478 | 32,743 | resumed 23:30 as `ft-lean` (`bend-check lean`, 5 workers, `DONE=run/transcripts/lean/done.ids`): the shell run of 14:44–23:16 decided 18,014 units (16,615 kept, in `results.prev.nul`) | running | |
-| Agda | 8,528 | 34,271 | `ft-agda`: 12 workers (`TIMEOUT=300 CHECK_PROCS=6 CHECK_JOBS=2`, `CPUWeight=1500`), resumed 04:01 from 3,830 decided units (3,547 kept; `DONE=run/transcripts/agda/done.ids`, earlier sets in `resume-1/`, `resume-2/`; the scratchpad's `switch-agda.sh PROCS WEIGHT` does a resume). At weight 800 it got only ~8.3 threads (~50 h left); ~48 CPU-s a unit, ~400 CPU-h left: the long pole, ~38–40 h at ~10.5 threads. 12 workers once reached 14 GB (single agda runs up to 4.3 GB) | running | |
-| Nix | 23,300 | 13,256 | re-run on `bend-check`, done 19:34 (old results in `run/transcripts/nix/bash-20260925/`; they differ in the 12 shifted records and 3 temporary paths only) | 13,150 | 12,722 (24,694) / 249 (478); 109 contaminated, 70 near duplicates |
-| Bend | 1,694 | 9,041 | resumed 23:30 as `ft-bend` (3 workers, `CORPUS=run/code-bend-v3.jsonl MAX_HI=64`): the 20:44 run decided 2,673 (2,226 kept). Bend2 only: v3's Bend files with this repo's `bend/` refreshed (75 → 102 files), `MAX_HI=64` units per file. The 14:46 run is in `run/transcripts/bend/snapshot-1446/` | running | 14:46 run: 4,643 kept; 3,494 (6,260) / 61 (112); 918 exact and 161 near duplicates, 9 contaminated |
-
-- **The order (user, 2026-09-26 07:55): Bend first (own, community, the generated batches), then Haskell, then Lean, then Agda; a language further down runs only on the CPUs the ones above leave idle.** Done as follows:
-  - Weights keep the order among what runs: every Bend unit 1000, Haskell 100 (Lean 10, Agda 1 when they run again). Weight alone is not enough: a starved checker's wall-clock timeouts drop good units (Haskell's GHCi runs have 60 s a unit, Agda's and Lean's 300 s). So a language that is not to run yet is stopped:
-    - Haskell is frozen (`systemctl --user freeze ft-haskell`, 07:57), 2,964 kept / 4,552 decided of the capped set. A thaw times out the GHCi runs in flight; their batches are halved and run again, so nothing is lost but a unit alone in a run at that moment.
-    - Lean and Agda are paused by the scratchpad's `pause.sh LANG WHY` (07:56): killed, parts folded with the previous set into `resume-N/`, `results.prev.nul` and `done.ids` rewritten, a `PAUSED` marker left (the orchestrator counts it as running). Lean 22,505 decided of 32,743 (20,926 kept); Agda 7,491 of 34,271 (7,131 kept). Restart with the unit.sh line of the table and `DONE=run/transcripts/LANG/done.ids`; delete `PAUSED` first.
-  - Community Bend was resumed with 14 workers (`CHECK_PROCS=7 CHECK_JOBS=2`, 07:59): 3,072 decided (2,591 kept); it had 3 workers at ~0.5 CPU each (~100 h). Estimate ~8–10 h at full CPU (~12 CPU-s a unit, 36k units). Own Bend: ~900 units left at 07:55.
-  - bend-collections capped at 16 units a file (the user, 10:58): the slow stretch of community Bend (~1,200 units/h against ~6,000 before) was `Giulio2002__bend-collections/proofs`, long files of one-line proofs forwarding to a library lemma, ~40 CPU-s a unit. The scratchpad's `cap-files.py DIR PREFIX CAP` keeps CAP evenly spaced units a file, removes the rest from `results.prev.nul` (1,454 kept records) and adds them to `done.ids` (4,743 units out of 11,450). Every other repo keeps `MAX_HI=64`. Left at 11:00: 22,108 units (4,206 of bend-collections); the fold is in `stopped-cap-collections-20260926/`.
-  - **Done 21:44, corpus building PAUSED (the user's order).** Community Bend: 24,228 of 39,374 units kept; clean: 21,584 train / 470 holdout (1,128 exact and 1,045 near duplicates, 1 contaminated); rendered 37,031 train / 810 holdout transcripts (42.9 MB). The train render failed on `bend-transcript`'s 256 MB input cap (results.train.nul is 495 MB), so it was rendered in three parts of ~7,195 units (scratchpad `crender/`) and joined in order (a unit renders alone, so the output is the same). Since 23:40 `bend-transcript` streams its input (`Sys.Rd`, 1,000 units a batch appended to the output), so there is no input cap: the 495 MB file renders in one run (184 s, 1.8 GB peak), byte-identical to the three-part render, and the holdout too. Haskell paused by finish-bend: 8,989 kept, 16,834 decided (capped 200) of 172,177, in `stopped-pause-20260926/`, restart with DONE. Orchestrator and sequencer stopped; Lean and Agda still paused.
-  - **Community Bend2, round 2 (the user, 2026-09-27 00:30: new code recently published, no repeats), from 23:42, unit `ft-community2`:** 5,977 files of 60 GitHub repos (code search on Bend2 syntax, repo-name search, the awesome-bend list now; upstream bendlang/bend is at 2.0.31 against our 2.0.28: its 11 new tests and base), sources `run/code-sources-bend-new/curated` (.bend only, bench/ out), corpus `run/code-bend-community2.jsonl` (1,572 exact duplicates of our corpora out, forks after upstream; 139 Bend 1 or non-Bend2 out; aricarmo/godot-bend's generated godot/api capped at 200 files, 823 out), into `run/transcripts-community2/bend` (7 x 2 workers). Largest: Lulzx/gavel (3,822 task files: LAWS, prelude, solution; an RL environment on Bend's checker), godot-bend, i2cjak/backplane-bend, LucasGois1/bend-trace-context. Near duplicates across the two community sets are not removed (clean works within one set).
-  - Community round 2 done 01:30: 27,082 units, 13,523 kept (13,557 originals rejected by the 2.0.28 checker: newer syntax, imports), clean 11,335 train / 219 holdout (880 exact, 1,089 near duplicates), rendered 18,116 train / 357 holdout transcripts.
-  - **Generators, round 2 (the user: generate the rest), 23:35 to the session limit (~02:00):** 31 new files, 26 check (6 of them round 1's cut-off files, finished), moved to `claude-gen/THEME-2/` and batched as `ft-gen-THEME-2`: 1,661 train / 45 holdout transcripts. The 5 cut off are in `run/gen-orig/unfinished/THEME-2/`. **Round 3, 04:15 to the limit (~08:00):** 36 files into `claude-gen/THEME-3/` (a new batch directory per round, so `gen-batch.sh THEME-N` finds only that round's files); 32 check (round 2's 5 cut-off files among them), batched `ft-gen-THEME-3`: 1,979 train / 42 holdout transcripts; 4 cut off in `run/gen-orig/unfinished/THEME-3/`. **Round 4 from 09:20:** the 8 first themes again (arithmetic, data-structures, interpreters, algorithms, strings-parsing, algebra, dependent-types, state-machines) into `claude-gen/THEME-2/`.
-  - **Found 23:30, not fixed (the user: only the Bend work now): Haskell `## Context` misses names.** (1) GHCi runs with `-fno-code`, so its prompt scope is `import Unit` (exports), not `*Unit`: names Unit imports (`eof`, `embed`, constructors) answer `Variable not in scope`, and types print qualified (`Telomare.IR.Surface.PatternP`). (2) A long answer prints as `name` then `  :: type` on the next line, which `cx.line` (`bend/Check/Haskell.bend`) drops (a top line without ` :: `). Both drop real context (telomare's `parseLongExpr`, `locatedIdentifier`). Fix before Haskell's render if the Context turn should be complete: join the two-line form in `cx.line`; for (1), `:module + *Unit` needs bytecode (drop `-fno-code` for the context load only), or query `:type` with the imports added (`:module + M` per import).
-  - **Everything checked so far rendered (the user, 2026-09-27 10:15: stop generating, render all the training data):** round 4 wrote 2 files before the weekly limit (algebra-2, state-machines-2: 148 train transcripts). The paused checks' kept units rendered into `run/transcripts-partial/LANG/` (results.nul = the paused `results.prev.nul`; the check directories untouched, so the checks resume as before): Haskell 8,989 kept, 8,156 train after clean, 16,188 train / 335 holdout transcripts (Context gaps unfixed); Lean 20,926, 16,948 (3,566 near duplicates), 33,290 / 683; Agda 7,131, 6,885, 13,690 / 291. Train transcripts rendered now: Bend 81,016 (48%), Lean 33,290 (20%), Nix 24,694 (15%), Haskell 16,188 (10%), Agda 13,690 (8%): 168,878.
-  - **Checks resumed 2026-09-27 ~20:30 (the user: resume the paused checks and rebuild the shards):** `ft-lean` (3 workers, CPUWeight 100), `ft-agda` (4 x 2, 450, TIMEOUT=300), `ft-haskell` (4 x 2, 500, PKG_CAP=200) on deploy `mrdvhz1n…` with the Context fix (322c8b5: the unit's imports at the prompt, GHCi's wrapped answers kept; units decided before keep their old Context). ~33–39 h of CPU left. `ft-finish-all` (the scratchpad's `finish-all.sh`, log `run/transcripts/finish-all.log`) cleans and renders each as it ends, then gathers `run/transcripts-final`, rebuilds `run/fp100m` (natural shares from the final counts; the old plan in `run/fp100m/old-20260927/`) and the eval corpora, unattended.
-  - **2026-10-01: Bend at 4 copies (the user: the biggest Bend share; other languages once).** Checks all finished and `finish-all` rebuilt `run/fp100m` on 2026-09-29 17:58 (natural mix: 288,527 train transcripts, ~106M tokens; Bend 28%, Haskell 27%, Agda 19%, Lean 17%, Nix 9%; 68,392 windows, 3,861 steps at batch 16). telomare's Bend (52 files of ~/src/telomare, `run/code-sources-telomare/own/telomare`, `run/code-bend-telomare.jsonl`, 1,095 units) checks as `ft-telomare-bend` into `run/transcripts-telomare/bend`; then `ft-rebuild-bend4` (the scratchpad's `rebuild-bend4.sh`, log `run/transcripts/finish-all.log`) gathers Bend again with it and rebuilds `run/fp100m` with Bend cycled to 4 copies (`bend:4×N:cycle`, the others at their natural counts in thousands; about 61% of transcripts, 53% of tokens), the previous build in `run/fp100m/old-20260929/`. With copies a Bend transcript can sit in a training and a validation window, so the plan's validation loss flatters Bend; the `run/eval/transcript-fp-*.corpus` holdouts stay clean. Bend at 4 copies assumes one pass over the shards (about 4 views is where repeats stop helping).
-  - **2026-10-01 09:22: community Bend2, round 3 (the user: new, non-duplicated Bend code from the web), unit `ft-community3`.** Search: GitHub code search on Bend2 syntax (25 queries), repo search, `language:Bend` pushed since 2026-09-26, the awesome-bend list; 71 repos new to us with `.bend` files, and 70 known repos pushed since round 2, from which only paths new since our copy are taken (an edited file at an old path is left out as a near copy). A file is kept when it has no Bend 1 syntax (the filter is now stricter: `fold(`/`λ` in Bend2 code no longer count) and some Bend2 syntax, its text is in no Bend corpus or source tree, under 80% of its 25+-character lines are already in them (141 near copies out), and it has at most 8,000 lines (9 data tables out); `hhefesto/ana` (this repo) is out. 6,217 files of 95 repos (72 MB; largest mitschabaude-bot/pi-bend 1,566, Giulio2002/bend-collections, ericfode/knot, MavenRain/mechanism-lang, watzon/bendui, bkase/proofpack-state) in `run/code-sources-bend-new3/curated`, corpus `run/code-bend-community3.jsonl`, into `run/transcripts-community3/bend` (4 unit jobs, 7 x 2 check workers). `ft-rebuild-bend4c` (the scratchpad's `rebuild-bend4c.sh`) waits for it and for `ft-rebuild-bend4`, then rebuilds `run/fp100m` the same way with round 3 in Bend (the telomare build moves to `run/fp100m/old-20261001/`).
-  - **`ft-rebuild-bend4` FAILED 11:03: filler ran out.** bend-windows takes one filler file per window; Bend x4 made 536,167 transcripts, 27 shards of ~4,580 windows against 4,567 filler files a shard. `rebuild-bend4c.sh` now adds Bend's filler at 4 copies (`ID#c1..3`, holdout files left out by hand since plan-windows' filter matches the id before `#`) and runs the scratchpad's `filler-topup.py`: it estimates windows as transcripts / 4.0 and, under 1.3 x that, adds Hackage files of packages outside Haskell's 30% sample (no unit, so no holdout; 200 a package) to `transcripts-final/haskell/files-lo.nul` (pristine copy `files-lo.orig.nul`). `run/fp100m` holds the failed attempt's files until 4c moves them to `old-20261001/`; the last good build (natural mix) is `old-20260929/`. Round 3 at 16:30: ~55% of units decided (positions in the part files are global indexes into units.nul), 22,759 kept; pi-bend's 27k units are still ahead.
-  - **Training data built 2026-09-27 11:25 (the natural mix, every transcript once; the user asked for the render, the shares are still theirs to change):** `run/transcripts-final/LANG/` gathers every rendered set (Bend: own, community 1 and 2, every gen batch; Haskell, Lean, Agda from `transcripts-partial`; filler files deduplicated by id, 35 Bend repeats). `OUT=run/transcripts-final deploy plan-windows run/fp100m fp100m 16 bend:48 lean:20 nix:15 haskell:10 agda:8` wrote `run/fp100m/shard-{0..8}-fp100m.corpus` (160 MB) and `plan-fp100m-b16-windows.tsv`: 40,092 windows of 2,046 tokens (ctx 2048), 2,264 global steps at batch 16 (~9% of windows validation). For the target mix, rerun with other shares (it resumes; delete `mix.nul` and the shards first). Eval corpora from the holdouts: `run/eval/transcript-fp{,-haskell,-lean,-agda,-nix,-bend}.corpus` (335, 683, 291, 478, 1,714 transcripts).
-  - **More generated Bend2 (the user, 18:19: until the 5-hour session ends), from 21:45:** 8 Opus 5.5 writers, one theme each under `run/code-sources-gen/curated/claude-gen/`: list-laws, graphs, games-simulation, combinatorics, domain-modeling, higher-order, relations-orders, encodings. They ran until the session limit (~22:20): 36 files, 30 check (6 left mid-edit, in `run/gen-orig/unfinished/`; the scratchpad's `gen-sweep.sh THEME...` checks, moves, normalizes and re-checks). Batches done and rendered 23:18 (`ft-gen-THEME`, 0 exact duplicates): list-laws 4 files / 206 train / 8 holdout transcripts, graphs 3 / 212 / 6, games-simulation 3 / 212 / 13, combinatorics 3 / 197 / 6, domain-modeling 4 / 272 / 1, higher-order 6 / 284 / 3, relations-orders 4 / 219 / 2, encodings 3 / 181 / 5: 1,783 train / 44 holdout. All generated Bend2: 255 files, ~11,200 train transcripts.
-  - **Pause once Bend is done (the user, 11:50).** Community Bend's tail (3 shards of 2 workers, 1,415 units left) was restarted over 7 x 2 at 19:37 by the scratchpad's `reshard-community.sh` (lossless; the finished shards and parts in `run/transcripts-community/bend/stopped-reshard-20260926/`; a part holds the kept units as triples, so progress is the position every worker passed, not a count of part records). `run/transcripts/HOLD` stops every sequencer step but the Haskell thaw (from 17:40: Bend's tail leaves CPUs idle, and Haskell is the user's next language; it still renders community Bend). `ft-finish-bend` (the scratchpad's `finish-bend.sh`) waits for community Bend's render, then pauses Haskell without loss (kill, thaw, `resume-keyed.py` with the previous set into `stopped-pause-20260926/`, `PAUSED`), then stops `ft-orchestrate` and `ft-sequencer`. Community Bend's bend-collections units run at ~730 an hour (~70 CPU-s each): Bend should be done ~20:00–21:30. **To go on:** remove `run/transcripts/HOLD` and the three `PAUSED` markers' languages one at a time as their units restart (Haskell: `PROPS="CPUWeight=100" unit.sh ft-haskell 22G haskell check CHECK_PROCS=4 CHECK_JOBS=2 PKG_CAP=200 DONE=run/transcripts/haskell/done.ids`; Lean and Agda: the sequencer's `start_lean` / `start_agda` lines), then start `orchestrate.sh` and `sequencer.sh` again as `ft-orchestrate` / `ft-sequencer` (`systemd-run --user --unit=... -p WorkingDirectory=$PWD bash SCRIPT`).
-  - `ft-sequencer` (the scratchpad's `sequencer.sh`, log `run/transcripts/sequencer.log`, restarted 09:39) runs the order unattended: every minute it measures the idle CPUs, and after 10 minutes in a row with 2 or more idle it takes one step: thaw Haskell; else resume Lean (one worker per idle CPU, at most 5, `CPUWeight=10`); else resume Agda (2 workers per 2 idle CPUs, `CPUWeight=1`, `TIMEOUT=300`); else grow Agda (or Lean once Agda is done) by `pause.sh` and a restart with more workers (at most 16). A step waits for 4 GB of memory available plus 1.5 GB per new worker. When community Bend's check ends it cleans and renders it (`ft-community-render`). It logs the idle CPUs and each unit's CPUs every 10 minutes.
-  - `resume-keyed.py` now takes `prev:RESULTS,DONE` (an earlier resume's set, carried over whole) for the next Haskell restart.
-- **Haskell was ~9× slower than it needed to be (fixed 03:57).** Every GHCi `:load` forgets the loaded modules, so each of a unit's ~7 loads typechecked its package's modules again (~90 modules, ~6 s a load for amazonka-dms; ~29 CPU-s a kept unit; the amazonka-* packages took ~1 h each per worker, and the capped set would have taken weeks). `bend-check haskell` now `:load`s a GHCi run's first variant and `:reload`s the rest (only Unit.hs is typechecked again: ~1 s), ~3.3 CPU-s a kept unit. A unit whose `.t.hs` would equal its `.o.hs` (no signature line) first reloads a copy with one more newline, so the missing-signatures warning still comes. Gate: on the 44 units both the new checker and the live run kept, the records are identical except GHCi's `Failed, unloaded all modules.` line (after a `:load` of a module with no home imports), which the old filter left in 952 of 1,147 records; it is dropped now, and `resume-keyed.py` strips it from the carried-over records.
-- **The Term turn kept only its first line's indent trimmed (fixed 03:58, `bend-transcript`).** A Bend def body rendered as `match ds:` at column 0 over its cases at 4 (440 of 511 plain-def Terms of the arithmetic batch), and a Haskell or Agda unit inside an `instance` / `where` block had its first equation dedented and the others not. Haskell, Agda and Bend bodies now lose the first line's indent on every line; Lean keeps the old trim (its body starts after `:=`), Nix is unchanged (already rendered). Nothing but the Nix and the arithmetic batch had been rendered; the arithmetic batch was rendered again (first render in its `render-indent-bug/`). Test: `bend/tests/units.bend` (`ok term ...`).
-- **CPU shares.** A unit's `CPUWeight` splits the CPU between units, whatever their worker counts: under full load a weight-100 unit gets ~1.2 threads. Measured 07:40: Agda ~33 CPU-s a decided unit, ~250 CPU-h left; Haskell ~12 CPU-s a kept unit on the big packages (the gate's 3.3 was small packages; largest go first), ~230 CPU-h left; community Bend ~12 CPU-s a unit, ~115 CPU-h; Lean ~26 CPU-h. Weights since 07:40, set so they end together (~40–45 h): Agda 600, Haskell 550, community 300, the rest 100 (Agda at 1500 got ~9 threads and would have ended in ~27 h with Haskell and community days behind). Generated bindings are only 12% of the capped Haskell set (amazonka 14.6k units in 100 packages), so a lower cap for them buys little. Raise a share at runtime with `systemctl --user set-property --runtime ft-X CPUWeight=N`; community has only 3 workers, so resume it with more when own Bend ends.
-- **The Bend2 extras** (each its own directory, joined to the mix by hand at plan-windows):
-  - Community: `ft-community`, 2,675 files of the awesome-bend list's Bend 2 projects (`run/code-bend-community.jsonl`, sources `run/code-sources-bend/curated/`), 39,374 units, 3 workers, into `run/transcripts-community/bend` (~1,650 kept by 04:00; ~80 CPU-h left).
-  - Generated by Opus 5.5 subagents under `run/code-sources-gen/curated/claude-gen/THEME/` (brief: the scratchpad's `bendgen-brief.md`; every file must print `All terms check.`). Per batch: `deploy extract run/code-bend-gen-all.jsonl run/code-sources-gen`, keep the theme's ids, exact-dedup against `code-bend-v3`, `code-bend-community` and the earlier batches into `run/code-bend-gen-THEME.jsonl`, then `OUT=run/transcripts-gen-THEME unit.sh ft-gen-THEME 6G bend all CORPUS=… BEND_SRC=run/code-sources-gen/curated MAX_HI=64 CHUNK=25 UNIT_JOBS=2 CHECK_JOBS=2`.
-  - arithmetic: 42 files, 1,277 units, 858 kept, 1,627 train / 27 holdout transcripts (done; rendered again 03:58). data-structures: 35 files, 891 units, checking (`ft-gen-data-structures`, started on the old deploy: render it again when it ends). interpreters: 31 files, 815 units (`ft-gen-interpreters`, 05:14). algorithms: 30 files, 794 units (`ft-gen-algorithms`, 05:20). All four of those are done and rendered (5,547 train transcripts, 0 damaged terms). strings-parsing: 47 files, 664 laws, 1,201 units (`ft-gen-strings-parsing`, 07:48). The generators were paused by the user at 09:36 (to save tokens); the files they left all check: algebra 19, dependent-types 13, state-machines 8, each launched as its batch at 09:40 (`ft-gen-THEME`, `CPUWeight=1000`, rendered by its own `all` run). Own Bend is done and rendered (08:32): 10,900 train / 219 holdout transcripts; strings-parsing: 1,841 / 51. The brief now lists the 2.0.28 checker surprises the writers found (reserved `Kind`/`is`, match order, no destructuring of computed values). The scratchpad's `gen-batch.sh THEME` does the extract, dedup and launch (run `gen-normalize.py` on the theme's files first).
-  - **A law needs its proof def right after it, blank lines only between.** bend-units skips a law otherwise: the data-structures and strings-parsing agents put a `# PROOF:` comment above each proof def, so the first data-structures run cut 351 units, no laws (in `transcripts-gen-data-structures.stopped-nolaws/`). The scratchpad's `gen-normalize.py FILE...` removes such comments and `LAW:`/`PROOF:` prefixes (676 lines in data-structures; originals in `run/gen-orig/`; every file re-checked); the brief and the running agents have the rule now. Run it on every batch before extracting.
-- **The deploy the scratchpad scripts use** is the store path in the scratchpad's `deploy-current` (today `/nix/store/llj9i1zn83wc6bqx9x33as6f6qm4qvgi-deploy` (23:40: the streaming renderer; every other tool's code as in `pczh47jh…`, the one before)); `unit.sh` and `orchestrate.sh` read it. Lean, Agda, own Bend and community Bend still run on the earlier `9nq8q42x…-deploy` (the checkers they use are unchanged); the orchestrator renders with the new one.
-- **The 23:16 OOM, and how every long job runs now.** The community units stage (8 `bend-units` at once) on top of four checkers filled RAM and swap; the kernel killed one `bend-check`, and systemd then stopped the whole tmux scope (`OOMPolicy=stop`), which took every checker, the orchestrator, the generator agents and Claude Code with it (`setsid`/`nohup` do not leave the cgroup). Every long job is now its own transient user unit: `systemd-run --user --unit=ft-LANG -p MemoryMax=… -p OOMPolicy=continue -p Nice=10 …` (the scratchpad's `unit.sh NAME MEM LANG STAGE K=V…` does it; `systemctl --user list-units 'ft-*'` lists them; stop one with `systemctl --user kill -s KILL ft-LANG`, since a busy Bend process ignores SIGTERM). The caps are generous guards (16–24 G), not throttles (no `MemoryHigh`): an OOM now kills inside one unit only.
-- **Resuming a stopped check** (commit after `f830d40`): `bend-check` passes over the ids in `DONE` (a file, one id a line; after the shard test, after `PKG_CAP` for Haskell), and bend-transcripts puts `results.prev.nul` (+ `.stats`) in front of the new results when it cats them. Both files come from the dead run's worker parts (`/tmp/tmp.*/part.K`: triples position, id, record; the shell's `results.nul.tmp.partK`: pairs): every kept unit, plus, per process, every unit of its share up to the smallest last-kept position over its workers (the workers took the share in input order from one channel, so everything before that was kept or dropped). The scratchpad's `resume.py UNITS OUTDIR RUN...` computes them (`bash:J:parts` or `bend:S/N:parts`); the dropped units' reasons are lost (`resumed_dropped` in the stats).
-- Everything lands in `run/transcripts/<lang>/`; each language's `log` has its stages in UTC-6. Resume or continue a language with `nix run .#deploy -- transcripts STAGE LANG` (a stage whose output exists is skipped).
-- Lean's sources came from `code-train-v2.jsonl` (v3 did not exist yet): the v3-only own/curated Lean files (refl's three) are missing from it.
-- The stopped shell Haskell run's partial parts are in `run/transcripts/haskell/stopped-bash-20260925/` (useless; its keys were wrong).
-- **User decisions, 2026-09-25 night:** (1) the Haskell cap of 200 per package is final: the 22% left out is discarded (no `PKG_REST` pass). (2) Bend2 code only (Bend 1 / HVM2 code never). (3) Raise Bend2's share of the mix: more Bend2 from the web (the awesome-bend list's Bend 2 projects, `run/code-sources-bend/`) and generated by Opus 5.5 subagents, as much as possible while Agda is the last check running, checked by the local `bend` on at most 25% of Agda's workers (2). (4) Claude prose: Sonnet or Opus, either (still: ask before spending, with the cost). (5) Any public code may be trained on (no license gate needed for public repositories). (6) GPU: a 5090, or assess a vast.ai box with two GPUs (the Bend trainer has no data parallelism yet). (7, 2026-09-26 00:10) No rented CPU box for Agda: the checks finish locally (~2 days at full CPU; Agda is ~65% of the remaining work, so it runs at CPUWeight 800 against 100 for the others).
-- (Earlier) **Decision for the user:** generated API bindings dominate Haskell (stripeapi 2,070 units, amazonka-* up to 2,012 each, jsaddle-dom 1,920). A cap per package keeps 78% at 200, 66% at 100. Pass 1 checks the 200-capped set; the rest (22%, mostly those bindings, whose modules are the slowest to load) is a second pass (`PKG_REST=1 CHECK_PROCS=4 PKG_CAP=200`, into another directory) only if the answer is "uncapped"; a smaller cap can still be applied when mixing.
-- **A Bend process evaluates on one thread.** `IO.fork` gives concurrency for effects (a compiler run, a file read), not for pure work: all forked tasks' parsing runs on the main thread. The first 10-worker Haskell run (18:46–20:35) stalled on it: 7 of 10 workers waited on the one busy evaluator, 1.2k records in 100 minutes, the largest (generated) packages first. Parse-heavy drivers fan out as processes: `CHECK_PROCS` (commit `f5b65f5`), and their parsers must stay linear: never append to the end of an accumulator per line, never `+`-copy an accumulator for a strict `Bool.pick` (commit `9d877df`). A busy Bend process ignores SIGTERM: stop it with `kill -9`. Its partial output is in `run/transcripts/haskell/stopped-bend-20260925/`.
-- **Unattended from 23:32 (unit `ft-orchestrate`):** a scratchpad script (`orchestrate.sh`, log `run/transcripts/orchestrate.log`) runs `deploy transcripts all LANG` as each of the five checks ends, then builds the eval corpora below and exits; it stops at the first failure. The windows, shards and plan wait for the Bend extras (the community Bend2 code, unit `ft-community` into `run/transcripts-community/bend`, and the Opus-generated Bend2 in `run/code-sources-gen/curated/claude-gen/`) and are run by hand. If it is gone (reboot), the same steps by hand:
-- Next, in order: as each check ends, `deploy transcripts clean LANG` then `render LANG` (Lean: its results are the shell's, so run clean and render on them as they are); then `deploy plan-windows run/fp100m fp100m 16 haskell:35 lean:25 agda:20 nix:10 bend:10:cycle` (`bend/PlanWindows.bend`, tested on Nix + Bend: mixes the languages' `transcripts.train.nul`, packs them into exact 2,046-token windows with best-fit raw-file filler, writes the shards and the plan; the ratios and Bend's cycling are the user's to confirm); the route below from step 4. The holdouts (`transcripts.holdout.nul`) become the eval corpora `run/eval/transcript-fp-LANG.corpus` and `transcript-fp.corpus` (all five): `deploy pack HOLDOUT.nul PACKED.nul --target 131072 --prefix transcript-LANG` then `deploy prepare weights/code32k.bpe PACKED.nul OUT.corpus` (the M2-RUNBOOK §4 recipe; transcript tokens only; packing them into windows like the training ones fails: the held-out files are too few to fill the gaps, tried on Nix + Bend).
-
-### What happened on 2026-09-25, evening: deploy/ in Bend
-
-The shell in `deploy/` is gone, replaced by Bend programs gated byte-identical against it. Only `deploy/check/Harness.lean` (it must run inside Lean) and `deploy/check/ghc-packages.txt` (data the flake reads) stay. **Bend can spawn processes**: the fork's `Process.run` (posix_spawnp, no shell) runs under one `sh -c` line in `bend/Sys.bend` that gives a working directory, an environment, coreutils `timeout` and merged stderr. `nix run .#deploy -- TOOL ARGS` runs `bend-TOOL` with the toolchains on PATH.
-
-| commit | what | gate |
-|---|---|---|
-| `159d8e4` | the shell tooling exactly as the transcript run used it (v3 sources, Agda libraries, stages, windows), plus four bugs found while porting | kept in history |
-| `3cc71aa` | `Sys`, `Json`, `Cksum`, `Clock`; the tokenizer's UTF-8 decode was quadratic | `tests/{sys,json,cksum}.bend` in `bend-tests` |
-| `074cac9` | `bend-check` (the five checkers, `agda-libs`) | Nix 300, Bend 112, Lean 41, Haskell 138, Agda 69 units byte-identical |
-| `039e8da` | `bend-transcripts`, `bend-windows plan` | sources of all five languages and units of Nix and Bend byte-identical |
-| `74f3116` | `bend-extract`, `bend-plan-corpus`, `bend-code-evals`, `bend-mix`, `bend-push` (with `link`) | each byte-identical on its gate (the commit lists them) |
-| `54f160b` | flake: the packages, the `deploy` app, the tests | `nix build` of `bend-tests`, `bend-spec` |
-
-Bugs the port found and fixed (the shell carried them into the run): a unit record's trailing empty field (12 Nix records shifted, Haskell and Agda workers at risk); the keys files read whole by gawk (Haskell's package grouping never happened); CRs in a Windows `.cabal` (every GHCi of that package refused its flags); a write to a dead GHCi killed its worker silently (SIGPIPE); a package's own `.cabal` missed by one directory in the first port. Speed: `bend-check` is 2.5–3× the shell; `bend-mix` is 5–10× slower than awk (8 minutes for 2 GB); `sources` scans the 2 GB corpus in about 5 minutes (22 under full load) where jq took one.
-
-### Earlier on 2026-09-25
-
-Five commits between 12:18 and 13:59, all local, none pushed. Together they remove 161,723 lines and add 36,597.
-
-| commit | what | verified by |
-|---|---|---|
-| `0908864` | `bend-pack`, `bend-prepare`, `bend-plan-segment` in Bend | `cmp` against master's Haskell tools on a 20k-file plan, the five code evals and the transcript eval; sha256 pairs in `docs/BEND-CORPUS-TOOLS.md` |
-| `228bd06` | Haskell trainer, Futhark kernels, Agda spec, 22 deploy scripts and the bpe10m weights deleted; `flake.nix` 1,530 → 278 lines | tag `haskell-final` keeps them; `nix flake check` passes |
-| `5633395` | fork `hhefesto/bend2` `ft-kernels` rebased onto upstream 2.0.28; the repo takes it as a flake input | the fork's tests; `bend bend/Everything.bend` |
-| `41e1920` | dense store 26% smaller (the workspace was counted twice), exact size check, preset `fp100m` (ctx 2048) | `bend/tests/dense-identity.sh` goldens in the `bend-dense` check |
-| `8c699dd` | the transcript pipeline: `bend-units`, `deploy/check/*.sh` + `Harness.lean`, `bend-transcript`, `docs/TRANSCRIPT-FORMAT.md` | 2,087 pilot units rebuild their files byte for byte; `bend/tests/units.bend` in `bend-tests`; two real transcripts in the doc |
-
-At that point the repository was Bend 17,807 / shell 1,754 / Nix 300 / Lean 62 tracked source lines (89% Bend); the evening's port removed the shell (above).
-
-**What is proven.** Every stage of Phase 3 runs on real code with the real checkers and produces the agreed format. The trainer's memory at ctx 2048 is known exactly. The corpus tools are byte-identical to the old ones.
-
-**What was not proven then.** The pipeline had not run over the whole corpus (it is running now, above). No transcript has Claude prose yet. Nothing has trained at ctx 2048. The pilot's Haskell yield was 10%; the package-aware checker of the afternoon keeps 55 of a 138-unit sample (40%, where 51 of the rest import modules outside the harness GHC).
-
-### The pilot (samples, one 16-core machine)
-
-1,244 files → 2,087 units → 517 checked → 966 transcripts, 361,206 tokens (374 per transcript on average). Each tool is described in `docs/TRANSCRIPT-FORMAT.md`.
-
-| language | units | kept | why the rest fails | time |
-|---|---|---|---|---|
-| Haskell | 716 | 72 (10%) | 88 of 103 sampled failures import a module of the unit's own package; 3 `\case` without its extension; 1 `cbits/` FFI | 42 s per 716 units |
-| Lean (mathlib) | 115 | 104 (90%) | 11 elaboration errors | 9 s per unit per worker; 6 workers fit in 31 GB |
-| Agda (stdlib) | 60 | 52 (87%) | 8 check errors | |
-| Nix | 254 | 169 (67%) | 85 need an argument or a path | |
-| Bend | 159 | 120 (75%) | 39 are bend2's evals with deliberate holes | |
-
-Mutants that still check (so are dropped): Haskell 14 of 217, Lean 12 of 366, Agda 3 of 163, Nix 124 of 534, Bend 10 of 332.
-
-### The route from here (suggested order, with what each step costs)
-
-Steps 0–5 cost no money and run on this machine. Step 6 costs API money and step 9 a box; both wait for a yes.
-
-**0. The sources** (**done**: `run/code-train-v3.jsonl`, 2.0 GB; user's request, 2026-09-25: Conal Elliott's code, especially the Agda; `~/src/refl`; category theory in dependent types).
-
-What the corpus was made from (`run/code-sources/`, extracted by `extract-code.sh`, now `bend-extract`, into `run/code-train-v2.jsonl`):
-
-- `tarballs/`: 19,418 Hackage packages (permissive licenses only; 222,708 Haskell files).
-- `repos/`: mathlib4 (of which `Mathlib/CategoryTheory` is 1,109 files and 1,971 files mention it), lean4, batteries, agda-stdlib, cubical, 1lab, agda, idris2, nixpkgs.
-- `own/`: 23 of the user's repositories (never held out, no license gate).
-
-What is missing and goes in, with the license the extractor will see:
-
-| class | repositories | license | note |
-|---|---|---|---|
-| own (add) | `~/src/refl` (`languages/`: 11 Agda, 3 Lean, 1 Bend), `~/src/conal-elliott` = `hhefesto/conal-notes` (16 literate Agda, 8 Agda, 2 Bend, 3 Haskell), `~/src/telomare` (92 Haskell), `~/src/list-pointed-adjoint`, `~/src/agda-hello-world` | user's | `own/` treatment |
-| curated Agda, Conal | `conal/felix` (categorical linear algebra and hardware, his main Agda work), `felix-boolean`, `agda-cat-linear`, `agda-play`, `agda-puzzles`, `DependentTypesAtWork-exercises`, `equation-transfer`, `nim` | **no license file** | the gate would drop every one; a new `curated/` class takes them without the gate by the user's decision (private training use), never held out, ids `curated:NAME/path` |
-| curated Haskell, Conal | `compiling-to-categories/concat` (BSD-3), `lambda-ccc`, `circat`, `linear-map-gadt`, `shaped-types`, `generic-fft`, `ftree`, `Boolean`, `reification-rules`, `reify-core`, `data-treify`, `Fran`, `talk-2012-folds-and-unfolds`; the ones already on Hackage (`vector-space`, `MemoTrie`, `TypeCompose`, `total-map`, `functor-combo`, `unamb`, `lub`, `DeepArrow`, `TV`, `NumInstances`, `type-unary`, `uniform-pair`: 116 files already in v2) come in again from git and the exact dedup keeps one copy | BSD-3 text in most (`NOASSERTION` on GitHub); `shady-*` are AGPL and stay out | `curated/`, gate kept for these (their LICENSE files pass) |
-| category theory, Agda | `agda/agda-categories` (MIT), `UniMath/agda-unimath` (MIT; category theory in univalent style), `HoTT/HoTT-Agda` (MIT); `1lab` and `cubical` are already in | MIT | `repos/`; the ordinary gate |
-| category theory, Haskell | `sjoerdvisscher/data-category` (BSD-3), `ekmett/categories`, `ekmett/hask` (LICENSE text decides); `constrained-categories` is GPL and stays out | | `repos/` |
-| PLFA | `plfa/plfa.github.io` (`~/src/plfa` has a checkout): the book's `.lagda.md` chapters | CC-BY-4.0 | the gate's text match gains "Creative Commons Attribution"; literate Agda needs `bend-units` to treat everything outside ```` ```agda ```` fences as comment (Agda itself checks `.lagda.md` directly, so byte identity holds) |
-| Lean | nothing new: `Mathlib/CategoryTheory` is the category theory in Lean, already in | | raise its share by `MAX_PER_FILE` |
-
-- `bend-units` takes `MAX_PER_FILE` per run, so the curated and category-theory sources run with 16 instead of 4 and are represented despite being small next to Hackage.
-- The extraction becomes `run/code-train-v3.jsonl` beside v2 (v2 stays for the evals' sake); `extract-code.sh` gains the `curated/` class and the CC-BY text; `docs/TRANSCRIPT-FORMAT.md` records the per-source file counts the extractor prints.
-- Half a day, including the literate-Agda mask.
-
-**1. Haskell yield** (**done** in the afternoon, now in `bend/Check/Haskell.bend`: a package's units share its flags and one GHCi per batch; the text below was the plan).
-
-- The corpus already holds every file of every package under ids `hackage:PKG/path`, so a package's tree is rebuilt by writing its files into a work directory. The source root of a file is its path with the module name's directories removed; the set of roots of a package is its `-i` list.
-- Per package, typecheck the tree once with `ghc --make -fno-code -fwrite-interface -hidir HI -i…`, then check each unit with `-i` on the roots and `-hidir HI`, so a unit's check re-elaborates its own module only. Without that, 566K unit checks each re-typechecking their imports would multiply the 9 h.
-- Extensions: the tarballs are still in `run/code-sources/tarballs`, so a package's `default-extensions:` lines can be read from its `.cabal` file and passed as `-X` flags. This is the `\case` class.
-- Gate: re-run the same 716-unit sample and record the new kept rate in `docs/TRANSCRIPT-FORMAT.md`. Expected: the 10% rises to somewhere between 50% and 70% (the remaining failures are packages outside the 31 in `ghc-harness`, and CPP).
-
-**2. The full run on this machine** (**running**, see the table at the top; free; runs in the background under `nohup` and `stdbuf -oL`, logs in Mexico City time, outputs in `run/transcripts/<lang>.{units,results,transcripts}`).
-
-- Order: Lean first (longest, independent of step 1), then Agda, Nix and Bend, then Haskell once step 1 lands.
-- Sizes at `MAX_PER_FILE` 4: Haskell about 566K units, Lean about 60K (mathlib alone has 8,370 files), Agda about 30K, Nix about 100K, Bend about 300.
-- Times here: Lean about 25 h at 6 workers (memory-bound at 3 GB each); Haskell about 9 h before step 1, to be re-measured after; the others under an hour.
-- Expected transcripts after step 1: about 600K (Haskell around 500K, Lean about 100K, Agda about 25K, Nix about 60K, Bend under 1K), about 250M tokens. That is above the research's 100K–500K target, so the mix can afford to be strict.
-- A rented CPU box would only shorten the wait; the output is the same. Not needed.
-
-**3. Cleaning** (**done**: `bend/Clean.bend`, `bend-clean`, the `clean` stage of `bend-transcripts`; the text below was the plan, docs/TRANSCRIPT-FORMAT.md has what it does; runs on the units, before rendering, so every count is per unit).
-
-- Exact dedup by sha256 of signature plus body across all units (the file-level dedup misses a function copied between packages).
-- Decontamination: every 10-gram of a unit's body against the 10-grams of `run/code-eval-v2.jsonl`, the code eval corpora in `run/eval/` and the transcript holdout; any hit drops the unit.
-- MinHash near-dedup last (5-gram shingles, 128 hashes from `fnv32` with salts, Jaccard 0.7), because it is the costliest and the source is already file-deduped.
-- Record each rule's count in `docs/TRANSCRIPT-FORMAT.md` under Cleaning.
-
-**4. Packing** (the decision; recommended: token-exact best-fit in the packer plus padding and a loss mask in the trainer).
-
-- The trainer's rule (`bend/Train/Data.bend`) is whole windows only, so a 374-token document makes no window. Packing is unavoidable.
-- (a) `bend-pack` into 128 KB documents works today, but about one transcript in five straddles a window edge and is cut.
-- (b) Recommended: a `--tokens N` mode in `bend-pack` that counts tokens with `Tokenizer.bend` and fills each pack to at most N−2 tokens with whole transcripts (first-fit decreasing over a buffer of a few thousand documents). Packs are then 95%+ full. The trainer pads a short document to the window with EOS and masks the loss on the padding: a change in `Data.bend` and the loss, no kernel change. Cross-document attention inside a window stays; that is the common compromise and can be measured later.
-- The per-token loss weights the research suggests (response 1.0, prompt 0.2–0.3, tool output 0–0.1) ride on the same mask once it exists, with a weight per token written by the corpus writer. Later, not now.
-- Gate: `bend-pack` without `--tokens` stays byte-identical (the `bend-tests` check); with it, every pack decodes to whole transcripts and no pack exceeds N−2 tokens.
-
-**5. Term→type for Lean and Agda** (small). Today only the Haskell checker fills the type field, so term→type transcripts are Haskell only. Lean: a `#check @NAME` variant on the original in `Harness.lean`. Agda: `Cmd_infer_toplevel` on the unit's own name. Then `bend-transcript` already renders them.
-
-**6. Claude prose** (a Bend driver calling the Message Batches API through `curl` with `Sys.run`; write it now, **ask before submitting**).
-
-- Input: the results files. Output: `run/claude-prose/<unit id>` with one task line per kept unit and one diagnosis line per kept mutant. `bend-transcript` gets a prose directory argument and uses the line when present, and its current fallback ("Define `f`.") otherwise, so the corpus can be built with or without prose.
-- Requests are cached by sha256 of the request body, so a re-run costs nothing.
-- Cost: about $300 per 100K pairs on `claude-opus-5` through the Message Batches API; a cheaper model is the user's call. Suggested: a 200-pair pilot first (about $1), quality read by hand, then the decision on scale and model.
-
-**7. Mix, holdout and shards** (free; `bend-mix`, `bend-plan-corpus`).
-
-- Holdout: 2% of units by id hash, rendered as `run/eval/transcript-fp.corpus`; the eval projects in `code-eval-v2.jsonl` never enter.
-- Mix by transcript count: Haskell 35 / Lean 25 / Agda 20 / Nix 10 / Bend 10, plus 5% raw code windows as an anchor. The user's own sessions (`~/src/llm-transcript/corpus.jsonl`) need the renderer port to Bend before they join; do that after the run starts if time is short.
-- A 20K-document slice through `bend-plan-corpus` first, as the corpus-pipeline rule says (SIZE is a preset name: `fp100m`); then the full plan; then `bend-push` staging.
-- **Repair accuracy** eval before the run, not after: a Bend driver (to write) samples the model with `bend-generate` on 200 holdout prefixes (prompt, term, checker turn) at seed 0 and runs `bend-check` on the sampled repair. This number ranks checkpoints.
-
-**8. Phase 2b, the store split** (independent; about 400 lines in the fork, 300 here; do it while the checkers run).
-
-- Fork: `View`/`IxAt` gain an array slot, `Array.einsum4` and `Array.mm4` over four arrays, overlap checks per slot, GPU address codegen by slot. Conformance: `einsum4` with every view on slot 0 equals `einsum`.
-- Repo: `Layout.bend` (a `Lay` per array, fits check per array), `Op.bend` (store record, slots on `View`/`Mm`, per-slot tangent map), `Model.bend` view sites, `Step`, `Ckpt` (touches `st` only; file format unchanged), `TrainDense`, the tests and `Spec/Dense.bend`.
-- Gate: CPU identity against the `dense-identity.sh` goldens at `41e1920`; the 6-step sha in `bend-dense`.
-- Without it the run fits micro 5 in one array; with it micro 12 on a 3090. It is worth doing but it does not block the run.
-
-**9. Phase 2c and 4, the box** (**ask first**; rent only once shards, cubin and the hot-start script are staged).
-
-- One hour on a 3090: ms/step and tok/s at ctx 2048 for micro 4, 8, 12, 16 (12 and 16 only after step 8), `nvidia-smi` memory at each.
-- The run: `fp100m`, cold start, `code32k`, one epoch over the mix. At the measured 9,600 tok/s (ctx 256; attention adds about 8% at 2048) a 250M-token epoch is about 8 h on a 3090, a few dollars. Checkpoints ranked by repair accuracy.
-
-How to check a Bend file: run `bend FILE.bend` with the flake's `bend` (`nix build .#bend`). `bend Everything.bend` prints `All terms check.`. The Lean toolchain is the one mathlib pins, under `~/.elan/toolchains`; `bend-check lean` finds it by itself. The mathlib checkout with its cache is `run/harness/mathlib4`. The pilot's intermediate files are in this session's scratchpad only and can be regenerated in minutes.
+Nothing is running.
 
 ## The goal
 
-The goal is training data for a **functional-programming coding agent** in Haskell, Lean, Agda, Nix and Bend, with bash only for running those. The repository itself is Bend: 28,101 of 28,920 tracked source lines are Bend (97%), with the rest in Nix 582 (the flake), shell 175 (the GPU box scripts in `bend/gpu/` and `bend/tests/dense-identity.sh`) and Lean 62 (`deploy/check/Harness.lean`).
+**What Jev is.** Jev (TypeSafe AI, "System One") is a *decision model*: evidence plus a typed question gives a typed answer with a probability, never prose. legere is ours, in Bend2. It does four things:
 
-Decisions taken with the user on 2026-09-25 (plan: `~/.claude/plans/assess-and-start-the-snug-eich.md`):
+1. It reads raw text. The first source is the user's Claude Code sessions, `~/src/llm-transcript/corpus.jsonl`.
+2. It cuts the text into sections and tags each one with ana's tags (prose, or code in `haskell agda lean bend nix`, or other), each with a posterior.
+3. It checks runnable code with the real compiler.
+4. It emits units that the existing pipeline (`bend-check`, `bend-clean`, `bend-transcript`, `bend-plan-windows`) turns into ana transcripts unchanged.
 
-1. **Delete the Haskell, Agda and Futhark code, and port the missing corpus tools to Bend.** Done.
-2. **Data: real code checked by real compilers, plus Claude-written prose** (the task line and a one-sentence repair diagnosis). Code and compiler output are never generated.
-3. **Cold start under `code32k`.** The embedding is tied to the vocabulary, so no v3 weights carry over.
-4. **Lean from the start.**
-5. **Context 2048, after the store split.**
-6. **Types/propositions and terms/proofs are separate turns.**
-   - `## Type` carries a flag line, `proposition` or `type`, then the fence. `## Term` holds the program or proof.
-   - `## Context` holds `name : type` lines printed by the checker. Holes show goal states.
-   - There are three task shapes: type→term 60%, hole 25%, term→type 15%.
-   - Agda's flag comes from a heuristic, and the rule is recorded.
+Decisions taken with the user on 2026-10-02:
+
+1. **Name `legere`.** Latin for both "to read" and "to pick out, gather". Binary `bend-legere`, module `bend/Legere.bend`.
+2. **Prose maps onto transcript turns.** The prose before a code block becomes `## User`, signatures `## Type`, definitions `## Term`, and the checker turn follows.
+3. **First input: the sessions corpus.**
+
+## The meaning
+
+The meaning is written in Bend, and the fast code refines it (Elliott; Goodman; Bradley).
+
+- **Tags:** `Prose | Code{lang} | Other{name}`.
+- **Typed questions:** `classify(section) : Dist Tag`, `boundary(line) : Dist Bool` and `check(L, code) : Check`. The compiler is the decider.
+- **Calibration** is a measured property, never assumed. The ideal legere is the true `P(tag | text)`, the unique minimiser of the log-score.
+- **The segmenter is a weighted language over a semiring:** `D = (Σ_t s_t · (Λ_t)⁺)⁺` over lines, where `Λ_t` scores one line under tag t. The carrier chosen answers each question:
+  - `Bool`: is the text well formed?
+  - `Nat`: how many segmentations?
+  - `LogProb`: the posteriors (by forward-backward).
+  - `Viterbi`: the best segmentation itself.
+- **Laws** are stated on meanings:
+  - the round trip `concat sections == text` holds byte for byte;
+  - `Bool` agrees with `Nat` on whether a text has any segmentation;
+  - the Viterbi score equals the max over the enumeration;
+  - every posterior sums to 1;
+  - the run is a monoid homomorphism.
 
 ## Facts
 
-**Context window.** Every trained checkpoint so far has ctx 256 (v1, v2, v3 and the Bend continuation to 28k). The architecture does not fix the context: the softmax layers have no positional embedding and the GLA layers are recurrent, so ctx is a cost choice. The new preset `fp100m` (`bend/Config.bend`, `bend/Train.bend`) is the 115M `bpe100m-v3` layout with ctx 2048 and vocab 32768.
+**The FP-agent corpus is built.** The Bend ×4 rebuild finished on 2026-10-01 at 21:31: `run/fp100m/plan-fp100m-b16-windows.tsv`, 156,067 windows of 2,046 tokens, 8,803 global steps at batch 16, `shard-{0..35}-fp100m.corpus`. Two things remain on that path: the store split (2b) and the run itself, which needs a box (ask first); see `e9cce23:HANDOFF.md`, Phases.
 
-**How much code fits.** Bytes per token under `code32k`: Haskell 4.06, Nix 3.80, Lean 3.59, Agda 3.16. So:
+**The sessions corpus** (`~/src/llm-transcript/`):
+- `corpus.jsonl` holds 3,172 docs (11 MB, `{"id","text"}`) from 26 sessions. `corpus.jsonl.holdout.jsonl` holds 273 docs from 4 sessions.
+- The turns are `## User` / `## Assistant`.
+- Tool calls appear as `### Write — \`path\``, `### Edit — \`path\`` (followed by a ```` ```diff ```` fence) and `### Read — \`path\``.
+- Command output appears under `**stdout:**` / `**stderr:**` (4,483 / 237).
+- Fences: 18,112 bare, 5,045 `sh`, 1,865 `diff`, 8 `haskell`, 4 `agda`, 1 `nix`.
+- Write calls by extension: 54 `.hs`, 140 `.md`, 29 `.sh`, 15 `.tel2`. Edit calls: 987 `.hs`, 78 `.nix`, 66 `.agda`.
+- These cues are free labels: hide them and predict them back.
 
-- **256 tokens** hold about 1 KB of Haskell or about 800 B of Agda: one function.
-- **2048 tokens** hold about 8 KB: a small module plus its compiler output and a repair.
-
-**Memory.** Exact, from `Lay.floats` at `bend/Dense/Layout.bend` (bpe100m layout, chunk 16):
-
-| ctx | floats/window | max micro in one 2³¹ array | 3090 (24 GB) after the split | 5090 (32 GB) |
-|---|---|---|---|---|
-| 256 | 19M | 64 | ~250 | ~330 |
-| 1024 | 104M | 15 | ~50 | ~70 |
-| 2048 | 309M | **5** (8.2 GB) | **12 safe (17 GB), 16 tight (22 GB)** | ~20 |
-| 4096 | 1,020M | 1 | ~5 | ~7 |
-
-The binding limit today is the single `Array<F32>` store (2³¹ floats), not the card. `TrainDense` now refuses a store over 2³¹ with a message that names `TRAIN_MICRO`, where before `Lay.of`'s U32 sums wrapped silently. At ctx 2048 the two `[b,h,t,t]` score buffers are most of the workspace; they are the next wall.
-
-**Data on disk** (nothing needs re-collecting):
-
-- `run/code-train-v2.jsonl`: 1.87 GB, 270,054 files. Haskell 88%, Lean 8%, Nix 3%, Agda 1%. Its sources are in `run/code-sources/` (Hackage tarballs, the cloned `repos/`, the user's `own/`); the additions in route step 0 make `code-train-v3.jsonl`.
-- `run/code-eval-v2.jsonl`: whole-project holdouts.
-- The tokenizers `weights/code32k.bpe` and `weights/enwiki-fineweb-32k.bpe` (sha256 in `weights/SHA256SUMS`).
-- The eval corpora in `run/eval/`.
-- The user's own Claude Code sessions: `~/src/llm-transcript/corpus.jsonl`.
-
-**Research** (for the data recipe, summarized in `docs/TRANSCRIPT-FORMAT.md`):
-
-- Keep only checker-verified output; verified data does not collapse a model the way unverified self-generated data does.
-- Mutation-repair in the APRIL style.
-- Near-duplicates: MinHash on 5-grams at Jaccard 0.7. Contamination: 10-gram overlap with the evals.
-- Loss weights: response 1.0, prompt 0.2–0.3, tool output 0–0.1.
-- Best-fit packing without cross-document attention.
-- Size: 100K–500K verified transcripts.
-- No public Agda dataset exists.
+**Research** (deep-research run, 2026-10-02):
+- DocJev (github.com/jerryjliu/docjev, the only verified view of Jev segmenting) asks a category `Choice` and a boundary `Noul` per page. It claims **no** calibration; a segment's score is a plain mean.
+- NLoN (arXiv 1803.07292) separates prose from code per line (AUC 0.98 within one source) but does not name the language.
+- Guesslang lacks Agda, Lean, Nix and Bend.
+- StarCoder2's notebook format (merged same-kind blocks, text/code/output sentinels, `<empty_output>`) is the precedent for the output shape.
+- APRIL (arXiv 2602.02990, Lean diagnostics with error, line, column and goal) supports compiler notes for *repair fine-tuning*. No verified evidence shows they help in pretraining, so that is an ablation for later.
 
 ## Phases
 
 | phase | what | state |
 |---|---|---|
-| 0 | Bend-only repo: `backend/`, `FormalTransformer/`, the Futhark kernels, 22 deploy scripts and the bpe10m weights deleted (all in `haskell-final`); `flake.nix` 1,530 → 278 lines | **done** (`228bd06`) |
-| 1 | Corpus tools in Bend (`bend-pack`, `bend-prepare`, `bend-plan-segment`), byte-identical to master's on a 20k-file plan, the five code evals and the transcript eval (`docs/BEND-CORPUS-TOOLS.md`) | **done** (`0908864`) |
-| — | Fork `hhefesto/bend2` `ft-kernels` rebased onto upstream 2.0.28; its flake's `default` builds from source; the repo takes it as a flake input | **done** (`5633395`) |
-| 2a | Dense store: the workspace counted once (the old layout counted it twice, 26% of the store), exact size check, `fp100m`, byte-identity harness `bend/tests/dense-identity.sh` with goldens in the `bend-dense` check | **done** (`41e1920`) |
-| 2b | Four-array store split (st, act, ws, gws) so ctx 2048 runs at micro 12–16: a fork `einsum4`/`mm4` with array slots, then Layout/Op/Model/Step/Ckpt; the gate is CPU identity against the goldens | not started |
-| 2c | GPU identity plus one hour on a 3090 timing ctx 2048 at micro 4/8/12/16 | **needs a box: ask first** |
-| 3 | Transcript corpus: units → checker → prose → transcripts → pack/prepare | **full run checking** (table at the top); the tools are Bend (`074cac9`–`54f160b`); route steps 3–7 above: cleaning, packing, Lean/Agda term→type, prose (ask), mix + holdout + repair eval |
-| 4 | The run: `fp100m`, cold start, `code32k`, one epoch over the mix; checkpoints ranked by repair accuracy on 200 held-out prefixes, not by bpb | **needs a box: ask first** |
+| 0 | HANDOFF.md restarted | **done** |
+| 1 | `Legere/Spec.bend` + `Semiring.bend` + brute-force reference + `tests/legere.bend` | next |
+| 2 | `Ngram`, `Lines`, `Forward`; `train`, `segment`. Gate: Forward/Viterbi equal the reference; the round trip is byte-identical on all 3,172 docs | |
+| 3 | Calibration + `eval`. Gate: on the holdout, beat both the prior-only and the cue-rules-only baselines on log-score | |
+| 4 | `units`, then the existing check/clean/render on the sessions' code. Gate: transcripts read right by eye, and `bend-plan-windows` accepts them | |
+| 5 | Flake: `bend-legere`, the deploy PATH, the `bend-tests` check | |
 
-Phase 2b and Phase 3 are independent. The run can start at micro 5 without 2b.
+Later, not v1:
+- compiler acceptance as a likelihood (top-2 check, Bayes update);
+- ana itself as `Λ_t`;
+- Edit-diff reconstruction;
+- checking Write'd files inside their source repo;
+- the compiler-notes-in-pretraining ablation (needs a box: ask first).
 
 ## Where things are
 
-- **Trainers:**
-  - `bend/Train.bend` is the tree trainer. `bend/TrainDense.bend` is the dense GPU trainer.
-  - `bend/Dense/*` holds the dense trainer's modules. `bend/Spec/*` holds the laws (`bend bend/Everything.bend`).
-- **Corpus tools** (all Bend; `nix run .#deploy -- TOOL` runs `bend-TOOL` with the toolchains on PATH):
-  - Libraries: `bend/{Sys,Json,Cksum,Clock,Nul,Ftcc,Tokenizer,Corpus}.bend`. `Sys.run` spawns programs (the fork's `Process.run` under one `sh -c` line for the working directory, environment, `timeout` and stderr).
-  - `bend-extract` (`Extract.bend`) builds the code corpus from `run/code-sources`.
-  - `bend-plan-corpus` (`PlanCorpus.bend`) shards and plans a JSONL corpus, running `bend-pack`, `bend-prepare` and `bend-plan-segment` once per shard (the runtime scales allocation-heavy work to only about 2 cores in one process).
-  - `bend-code-evals` builds the code eval corpora; `bend-mix` interleaves sources; `bend-push` stages shards on a box (`bend-push link` measures the link).
-- **Transcript tools:** `bend-transcripts STAGE LANG` (`Transcripts.bend`) runs sources, units, check and render; `bend-units` (`Units.bend`) cuts units; `bend-check` (`Check.bend`, `Check/*.bend`) runs the checkers, and `bend-check agda-libs [precompile]` sets up the Agda libraries; `bend-transcript` (`Transcript.bend`) renders; `bend-windows` (`Windows.bend`) plans and builds one-context windows. `deploy/check/Harness.lean` is the one non-Bend program, because only Lean itself can keep an elaborated environment in memory; `deploy/check/ghc-packages.txt` lists the harness GHC's packages.
-- **Flake:**
-  - Packages: `bend`, `bend-train`, `bend-train-dense`, `bend-evaluate`, `bend-generate`, `bend-pack`, `bend-prepare`, `bend-plan-segment`, `bend-units`, `bend-transcript`, `bend-windows`, `bend-check`, `bend-transcripts`, `bend-extract`, `bend-plan-corpus`, `bend-code-evals`, `bend-mix`, `bend-push`, `ghc-harness`, `deploy`, `ana`.
-  - Apps: `ana` (also the default app; `ana-bend` is an alias) is the Haskell-era `ana` on the Bend decoder: no flags means the newest local checkpoint by write time under `run/` (today `run/pulled-vast-52365970/v3-bend-step28000.checkpoint`), `--list`, `--checkpoint`, `--tokens`, `--pull --host` as before; `ana-bend-train`; `bend`; `deploy` (the corpus tools).
-  - Checks: `bend-spec`, `bend-tests`, `bend-train`, `bend-dense`. All pass at `41e1920`; `bend-spec` and `bend-tests` (with the corpus tools' tests) pass at `54f160b`.
-- **Fork:** `~/src/bend2`. Remote `origin` is upstream `bendlang/bend`, so never push there; the fork is remote `hhefesto`, branch `ft-kernels` = upstream 2.0.28 + one squashed commit `1b877d3f`. Old heads are tagged `ft-kernels-2.0.27` and `ft-kernels-2.0.4`. The rebase recipe is in memory `project-bend2-fork-remotes`.
-- **Docs:**
-  - `docs/TRANSCRIPT-FORMAT.md`: the transcript format and pipeline.
-  - `docs/BEND-CORPUS-TOOLS.md`: the byte-identity record.
-  - `docs/BEND-PORT.md`: the dense trainer and GPU work.
-  - `docs/haskell-era/`: everything older.
+- **legere** (new): `bend/Legere.bend`, `bend/Legere/*.bend`, `bend/tests/legere.bend`, `docs/LEGERE.md`. Outputs go to `run/legere/`.
+- **What legere reuses:**
+  - `bend/Sys.bend`: text helpers, `run` for spawning, `env`, `slurp`, `emit`, `Rd.lines`.
+  - `bend/Units.bend`: `lines` (:197); the fence logic `md.opens`/`md.go` (:255-286); the per-language declaration cutters; the unit record (:16-27).
+  - `bend/Json.bend`, `bend/Nul.bend`, `bend/Clock.bend` (`say`, UTC-6).
+  - `bend/Check.bend` and `bend/Check/*.bend`: the checkers.
+  - `bend/Transcript.bend`: the renderer. Its User line is field 3, `doc`.
+  - `bend/PlanWindows.bend`: it reads `OUT/LANG/transcripts.train.nul` and the filler `files-{hi,lo}.nul`.
+- **Transcript pipeline:** `docs/TRANSCRIPT-FORMAT.md`; `nix run .#deploy -- transcripts STAGE LANG`; `nix run .#deploy -- check LANG UNITS.nul RESULTS.nul [JOBS]`.
+- **Bend2:**
+  - The fork is `~/src/bend2`: remote `hhefesto`, branch `ft-kernels`. Never push to `origin`.
+  - The guide is `~/src/bend2/guide/GUIDE.md`; Base is `~/src/bend2/bend2/base.bend`. Base has `Map` keyed by String (:84, :3039).
+  - F32 only (no F64).
+- **References:**
+  - `~/src/conal-elliott`: `paper-2021-language-derivatives/Weighted.lagda` is the cleanest spec of weighted ν/δ; `weighted-derivatives/haskell/WeightedDerivatives.hs`; `NOTES-bradley-vs-elliott.md`.
+  - `~/src/tai-danae-bradley`: use paper 10's composition *inequality*, not paper 06's equality.
+- **Flake:** `bendBinary pkgs NAME ENTRY` (`flake.nix:46-54`); packages at :67-111; the `deploy` app at :122-163; `bend-tests` at :427-470.
+
+## Bend pitfalls met
+
+- **A Bend process evaluates on one thread.** `IO.fork` gives concurrency for effects only, so parse-heavy work fans out as processes (`SHARD/SHARDS`, `Transcripts.bend:600-612`).
+- **Parsers must stay linear.** Never append to the end of an accumulator per line, and never `+`-copy an accumulator for a strict `Bool.pick`.
+- **A busy Bend process ignores SIGTERM**: use `kill -9`.
+- **`IO.print` never flushes.** Log to stderr (`Clock.say`) or run under `stdbuf -oL`.
+- **Large Nat literals (1000n+) overflow the compiler**: write `U32.to_nat(1000)`.
+- **`Done` is a reserved constructor name.**
+- **Nix sees only git-tracked files**: `git add` a new `.bend` before any nix build.
+- **Long jobs run as transient systemd user units:** `systemd-run --user --unit=ft-NAME -p MemoryMax=… -p OOMPolicy=continue`. Caps are generous guards, not throttles.
 
 ## Rules
 
