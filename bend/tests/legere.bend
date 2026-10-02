@@ -2,6 +2,9 @@ import Base
 import ../Legere/Semiring.bend as R
 import ../Legere/Spec.bend as Sp
 import ../Legere/Forward.bend as F
+import ../Legere/Lines.bend as Li
+import ../Legere/Ngram.bend as Ng
+import ../Sys.bend as S
 
 # legere's forward-backward and Viterbi (Legere/Forward.bend) against the
 # meaning (Legere/Spec.bend), which enumerates every labelling.  Toy models
@@ -226,9 +229,68 @@ def show(ns: List<&2, String>, bs: List<&2, Bool>) -> IO(Unit):
 def sec.case() -> List<&2, Sp.Ln<U32>>:
   [Sp.Ln{0n, 10}, Sp.Ln{0n, 11}, Sp.Ln{2n, 12}, Sp.Ln{1n, 13}, Sp.Ln{1n, 14}, Sp.Ln{0n, 15}]
 
+# a session's cues: a Write header names its block, **stdout:** names
+# output, a ```` block holds ``` lines, an info string names its block, a
+# bare fence with no cue is unknown (99); fence lines are open (10) and
+# close (11); outside fences gold is prose and nothing is forced
+def cue.text() -> String:
+  "## Assistant\n\nSome prose.\n\n### Write — `/x/Foo.hs`\n\n```\nmodule Foo where\nx = 1\n```\n\n**stdout:**\n\n```\nhello\n```\n\n````\n# md\n```haskell\ninner\n```\n````\n\n```haskell\ny = 2\n```\n\n```\nmystery\n```\n"
+
+def cue.gold() -> List<&2, Nat>:
+  [0n, 0n, 0n, 0n, 0n, 0n, 10n, 1n, 1n, 11n, 0n, 0n, 0n, 10n, 8n, 11n, 0n, 10n, 99n, 99n, 99n, 99n, 11n, 0n, 10n, 1n, 11n, 0n, 10n, 99n, 11n]
+
+def cue.mask() -> List<&2, Nat>:
+  [99n, 99n, 99n, 99n, 99n, 99n, 10n, 1n, 1n, 11n, 99n, 99n, 99n, 10n, 8n, 11n, 99n, 10n, 99n, 99n, 99n, 99n, 11n, 99n, 10n, 1n, 11n, 99n, 10n, 99n, 11n]
+
+def golds(ls: List<&2, Li.Lab>) -> List<&2, Nat>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case l <> t:
+      Li.Lab.gold(l) <> golds(t)
+
+def masks(ls: List<&2, Li.Lab>) -> List<&2, Nat>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case l <> t:
+      Li.Lab.mask(l) <> masks(t)
+
+# Λ_t is a distribution at every context: Σ_b P_t(b | h) = 1 (exact
+# counts: a small model in a table with room to spare)
+def ng.sum.fin(q: Array<F32> & F32, +s: F32) -> Array<F32> & F32:
+  (a, p) = q
+  (a, F32.add(s, p))
+
+def ng.sum.step(r: Array<F32> & F32, +c1: U32, +c2: U32, +c3: U32, +b: U32) -> Array<F32> & F32:
+  (a, s) = r
+  ng.sum.fin(Ng.prob(a, 1, c1, c2, c3, b), s)
+
+def ng.sum.go(bs: List<&2, Nat>, r: Array<F32> & F32, +c1: U32, +c2: U32, +c3: U32) -> Array<F32> & F32:
+  match bs:
+    case Nil{}:
+      r
+    case +b <> t:
+      ng.sum.go(t, ng.sum.step(r, c1, c2, c3, U32.from_nat(b)), c1, c2, c3)
+
+def ng.one(r: Array<F32> & F32) -> Bool:
+  (a, s) = r
+  near(s, 1.0)
+
+def ng.model() -> Array<F32>:
+  Ng.see.line(Ng.see.line(Ng.see.line(Ng.table.of(20n), S.b("abc\n"), 1n), S.b("abd\n"), 1n), S.b("x = 1\n"), 1n)
+
+def ng.ok() -> Bool:
+  Bool.and(ng.one(ng.sum.go(List.range(256n), (ng.model(), 0.0), Ng.bos(), Ng.bos(), Ng.bos())),
+    Bool.and(ng.one(ng.sum.go(List.range(256n), (ng.model(), 0.0), 98, 97, Ng.bos())),
+      ng.one(ng.sum.go(List.range(256n), (ng.model(), 0.0), 122, 121, 120))))
+
 def main() -> IO(Unit):
   +ns = List.range(7n)
   +r = and.rows(and.rows(all.cases(ns, 3n, 0n), all.cases(ns, 3n, 5n)), and.rows(all.cases(ns, 3n, 11n), all.cases(ns, 2n, 17n)))
   do IO<Unit>:
     show(names(), r)
+    +labs : List<&2, Li.Lab> = Li.labs(Li.lines(S.b(cue.text())))
+    IO.print(verdict("cues", Bool.and(nats.eq(golds(labs), cue.gold()), nats.eq(masks(labs), cue.mask()))))
+    IO.print(verdict("ngram", ng.ok()))
     IO.print(verdict("roundtrip", Bool.and(sec.lines(sec.case()), Nat.is_eq(List.length(&2, Sp.Sec<U32>, Sp.sections(U32, sec.case())), 4n))))

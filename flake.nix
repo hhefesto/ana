@@ -109,6 +109,10 @@
           # languages' files as filler) and cut into training shards with
           # their plan: `deploy plan-windows RUN_DIR SIZE BATCH LANG:PER ...`
           bend-plan-windows = bendBinary pkgs "bend-plan-windows" "PlanWindows.bend";
+          # legere, a Bend Jev (docs/LEGERE.md): raw text cut into sections
+          # tagged with ana's tags, with calibrated posteriors; its code goes
+          # on to bend-units, bend-check and bend-transcript
+          bend-legere = bendBinary pkgs "bend-legere" "Legere.bend";
           # the GHC `bend-check haskell` drives: the common Hackage
           # packages, so a module importing only these checks on its own
           ghc-harness = ghcHarness pkgs;
@@ -138,6 +142,7 @@
                 "bend-code-evals"
                 "bend-mix"
                 "bend-push"
+                "bend-legere"
               ])
               ++ [
                 (bendFor pkgs)
@@ -154,7 +159,7 @@
               ];
             text = ''
               if [ "$#" -eq 0 ]; then
-                echo "usage: deploy TOOL [ARGS...]   (TOOL: extract, plan-corpus, code-evals, mix, push, transcripts, check, units, clean, transcript, windows, plan-windows, pack, prepare, plan-segment)" >&2
+                echo "usage: deploy TOOL [ARGS...]   (TOOL: extract, plan-corpus, code-evals, mix, push, transcripts, check, units, clean, transcript, windows, plan-windows, pack, prepare, plan-segment, legere)" >&2
                 exit 2
               fi
               tool=$1
@@ -464,6 +469,12 @@
             # the cleaner's MinHash: one word apart agrees in 90+ of 128
             bend clean.bend > clean.out
             printf 'ok %s\n' near far self grams short key | diff - clean.out
+            # legere: forward-backward and Viterbi equal the enumeration
+            # (Legere/Spec.bend) in Nat and Bool, within 1e-4 in logp and
+            # maxp; the cues' gold and mask; Σ_b P(b | h) = 1; sections give
+            # the lines back
+            bend legere.bend > legere.out
+            printf 'ok %s\n' score bool marginals boundaries logp posteriors bposteriors viterbi cues ngram roundtrip | diff - legere.out
             touch $out
           '';
           # the training stack: the hand-written pullbacks agree with central

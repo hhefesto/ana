@@ -32,3 +32,4 @@ import ./Train.bend as Train
 import ./Evaluate.bend as Evaluate
 import ./Spec/Dense.bend as SDense
 import ./TrainDense.bend as TrainDense
+import ./Legere/Spec.bend as SLegere
