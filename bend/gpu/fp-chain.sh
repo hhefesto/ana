@@ -8,6 +8,9 @@
 #
 # STAGES is a file, one stage a line, in order:
 #   NAME BINARY EVERY [PLAN RUN_DIR SHARD_SIZE]
+# EVERY 0 marks a stage none of whose checkpoints are pulled (raw code): only
+# its newest stays on the box, deleted once the next stage has loaded it; the
+# chain's very last checkpoint is scored and pulled whatever its stage.
 # A stage's log is NAME.log on the box (the first stage's may be named by
 # LOG0, default train.log) and its saves out/NAME-step<N>.checkpoint. A stage
 # whose log is not on the box is started with `fp.sh again` from the last
@@ -44,8 +47,10 @@ log() { echo "[$(TZ=Etc/GMT+6 date '+%Y-%m-%d %H:%M:%S') UTC-6] $*" | tee -a "$d
 saved() { $SSH "cd formalTransformer && grep -o 'saved out/[^ ]*\\.checkpoint' $1 2>/dev/null" 2>/dev/null | sed -n 's#^saved out/\(.*-step\([0-9]*\)\.checkpoint\)$#\2 \1#p' | sort -n; }
 pull_one() { rsync -a --partial-dir=.partial -e "ssh -o StrictHostKeyChecking=no -p $port" "$host:formalTransformer/out/$1" "$dest/out/" >/dev/null 2>&1 && log "pulled $1"; }
 have() { [ -f "$dest/out/$1" ] && [ ! -f "$dest/out/.partial/$1" ]; }
-pull_new() { for f in $(saved "$1" | awk -v e="$2" '$1 % e == 0 { print $2 }'); do have "$f" || pull_one "$f"; done; }
-prune() { for f in $(saved "$1" | head -n -1 | awk -v e="$2" '$1 % e != 0 { print $2 }'); do $SSH "rm -f formalTransformer/out/$f" 2>/dev/null; done; }
+# EVERY 0: a stage whose checkpoints are never pulled (raw code): only its
+# newest stays on the box, and that one goes once the next stage has loaded it
+pull_new() { [ "$2" = 0 ] && return 0; for f in $(saved "$1" | awk -v e="$2" '$1 % e == 0 { print $2 }'); do have "$f" || pull_one "$f"; done; }
+prune() { for f in $(saved "$1" | head -n -1 | awk -v e="$2" 'e == 0 || $1 % e != 0 { print $2 }'); do $SSH "rm -f formalTransformer/out/$f" 2>/dev/null; done; }
 last_of() { saved "$1" | tail -1 | cut -d' ' -f2; }
 on_box() { [ "$($SSH "[ -f formalTransformer/$1 ] && echo yes" 2>/dev/null)" = yes ]; }
 
@@ -75,7 +80,7 @@ stage_at() { grep -v '^[[:space:]]*\(#\|$\)' "$stages" | sed -n "${1}p"; }
 wait_for() { local until_t=$(( $(date +%s) + ${WAIT:-7200} )); while ! "$@"; do [ "$(date +%s)" -ge $until_t ] && return 1; sleep 60; done; }
 has_stage() { [ -n "$(stage_at "$1")" ]; }
 
-prev=""; logs=""; lasts=""; k=1; ok=1
+prev=""; prev_every=1; logs=""; lasts=""; k=1; ok=1; last_every=1
 while [ $ok = 1 ]; do
   # a stage appended to STAGES while the chain runs is taken up; at the end
   # of the list the chain waits WAIT for another before it goes to the scores
@@ -95,15 +100,20 @@ while [ $ok = 1 ]; do
     log "stage $name: from out/$prev on $plan"
     $SSH "cd formalTransformer && ./fp.sh again out/$prev $plan $rdir $ssz $name" 2>&1 | tail -1 | tee -a "$dest/chain.log"
     sleep 60
+    # a raw stage's last save has been loaded by now: it can go
+    [ "$prev_every" = 0 ] && $SSH "rm -f formalTransformer/out/$prev" 2>/dev/null && log "deleted out/$prev on the box (a raw stage's, loaded by $name)"
   fi
   logs="$logs $lg:$every"
   follow "$lg" "$bin" "$every" || { echo "$lg: the trainer died" >> "$dest/DIED"; ok=0; }
-  l=$(last_of "$lg"); [ -n "$l" ] && { prev=$l; lasts="$lasts $l"; }
+  l=$(last_of "$lg"); [ -n "$l" ] && { prev=$l; [ "$every" != 0 ] && lasts="$lasts $l"; }
+  prev_every=$every; last_every=$every
 done
+# the chain's last checkpoint is scored and pulled whatever its stage
+[ -n "$prev" ] && [ "$last_every" = 0 ] && lasts="$lasts $prev"
 
 # scores
 evals=""
-for le in $logs; do lg=${le%%:*}; ev=${le##*:}; evals="$evals $(saved "$lg" | awk -v e="$ev" '$1 % e == 0 { print "out/" $2 }' | tr '\n' ' ')"; done
+for le in $logs; do lg=${le%%:*}; ev=${le##*:}; [ "$ev" = 0 ] && continue; evals="$evals $(saved "$lg" | awk -v e="$ev" '$1 % e == 0 { print "out/" $2 }' | tr '\n' ' ')"; done
 for l in $lasts; do case " $evals " in *" out/$l "*) ;; *) evals="$evals out/$l";; esac; done
 log "eval:$evals"
 $SSH "cd formalTransformer && ./fp.sh eval $evals > eval.log 2>&1; [ -f run/eval/transcript-next.corpus ] && ECORPUS=run/eval/transcript-next.corpus ./fp.sh eval $evals > eval-next.log 2>&1; grep -E '^==|bits_per_byte' eval.log; echo next:; grep -E '^==|bits_per_byte' eval-next.log 2>/dev/null" | tee -a "$dest/chain.log"
