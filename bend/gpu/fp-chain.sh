@@ -32,6 +32,7 @@
 # the box's sha256 (a mismatch leaves the box up and exits 1), and the box is
 # destroyed: after DEST/HOLD's epoch deadline if that file exists, never if
 # DEST/CONTINUED exists (someone took the box over).
+# EXTRA_EVAL lists more checkpoints already on the box to score first.
 set -u
 host="${1:?usage: fp-chain.sh HOST PORT INSTANCE DEST STAGES}"
 port="${2:?}"
@@ -115,6 +116,9 @@ done
 evals=""
 for le in $logs; do lg=${le%%:*}; ev=${le##*:}; [ "$ev" = 0 ] && continue; evals="$evals $(saved "$lg" | awk -v e="$ev" '$1 % e == 0 { print "out/" $2 }' | tr '\n' ' ')"; done
 for l in $lasts; do case " $evals " in *" out/$l "*) ;; *) evals="$evals out/$l";; esac; done
+# EXTRA_EVAL: more checkpoints on the box (out/NAME.checkpoint ...) scored alongside, e.g. earlier
+# stages' put there from a previous box, so one table covers the whole run
+evals="${EXTRA_EVAL:+$EXTRA_EVAL }$evals"
 log "eval:$evals"
 $SSH "cd formalTransformer && ./fp.sh eval $evals > eval.log 2>&1; [ -f run/eval/transcript-next.corpus ] && ECORPUS=run/eval/transcript-next.corpus ./fp.sh eval $evals > eval-next.log 2>&1; grep -E '^==|bits_per_byte' eval.log; echo next:; grep -E '^==|bits_per_byte' eval-next.log 2>/dev/null" | tee -a "$dest/chain.log"
 

@@ -1,0 +1,8 @@
+# box 2 (vast 54027515, from 2026-10-03 09:00): the chain after box 1 (53909778) stopped in raw4 at step 25500
+raw4 traind-next 0
+w2 traind-next 1000 run/w2/plan-w2-b16-windows.tsv run/w2 w2
+raw5 traind-next 0 run/raw5/plan-raw5-b16-windows.tsv run/raw5 raw5
+raw6 traind-next 0 run/raw6/plan-raw6-b16-windows.tsv run/raw6 raw6
+raw7 traind-next 0 run/raw7/plan-raw7-b16-windows.tsv run/raw7 raw7
+raw8 traind-next 0 run/raw8/plan-raw8-b16-windows.tsv run/raw8 raw8
+raw9 traind-next 0 run/raw9/plan-raw9-b16-windows.tsv run/raw9 raw9

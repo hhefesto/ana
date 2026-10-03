@@ -22,6 +22,8 @@
 #                          (ECORPUS: another eval corpus)
 #   fp.sh again CKPT PLAN RUN_DIR SHARD_SIZE NAME   continue CKPT's run on PLAN (TRAIN_NEXT), saves
 #                          out/NAME-step<N>.checkpoint, log NAME.log (as `next` below)
+#   fp.sh resume CKPT PLAN RUN_DIR SHARD_SIZE NAME STEPS   a save of NAME (from another box) on its own
+#                          plan and schedule, STEPS steps (a plain hot start), appended to NAME.log
 #   fp.sh next CKPT        continue CKPT's run on the next plan (TRAIN_NEXT; traind-next.c built from
 #                          the trainer that has it): run/next/plan-next-b16-windows.tsv and its shards
 #                          run/next/shard-K-next.corpus, saves out/next-step<N>.checkpoint, log next.log;
@@ -99,6 +101,19 @@ case "${1:-}" in
       TRAIN_LR=${NLR:-1e-4} TRAIN_WARMUP=$NWARM EVAL_EVERY=${EVAL:-250} EVAL_WINDOWS=${EVALW:-128} \
       SAVE_EVERY=${SAVE:-500} OUT=out/$name \
       nohup stdbuf -oL ./traind-next --gpu $MEM > $name.log 2>&1 &
+    echo "trainer pid $!; tail -f $name.log" ;;
+  resume)
+    # resume CKPT PLAN RUN_DIR SHARD_SIZE NAME STEPS: a save of NAME's continuation, on
+    # another box, goes on with its own plan and schedule (a plain hot start: the
+    # trainer derives where the plan began from the checkpoint's manifest, and lr,
+    # warmup and Muon come from it) for STEPS steps; the log is appended to NAME.log
+    [ -x traind-next ] || $CC traind-next.c -lpthread -lm -o traind-next -lcuda -lnvrtc || exit 1
+    ckpt="${2:?usage: fp.sh resume CKPT PLAN RUN_DIR SHARD_SIZE NAME STEPS}"; plan="${3:?}"; rdir="${4:?}"; ssz="${5:?}"; name="${6:?}"; steps="${7:?}"
+    mkdir -p out
+    env TRAIN_INIT=$ckpt PLAN=$plan RUN_DIR=$rdir SHARD_SIZE=$ssz TRAIN_STEPS=$steps \
+      TOKENIZER_FILE=$TOK TRAIN_BATCH=16 TRAIN_MICRO=${MICRO:-4} TRAIN_CHUNK=16 BEND_GEMM_NUMERICS=tf32 \
+      EVAL_EVERY=${EVAL:-250} EVAL_WINDOWS=${EVALW:-128} SAVE_EVERY=${SAVE:-500} OUT=out/$name \
+      nohup stdbuf -oL ./traind-next --gpu $MEM >> $name.log 2>&1 &
     echo "trainer pid $!; tail -f $name.log" ;;
   eval)
     build
