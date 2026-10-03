@@ -2,7 +2,13 @@
 
 This file holds everything needed to continue this work from another machine and account. It was restarted from zero on 2026-10-02 for a new path: **legere**, the Bend Jev. The previous handoff (the FP-agent transcript corpus: the checks, the Bend ×4 rebuild, the filler) is in git at `e9cce23:HANDOFF.md`. The one before it (the v3 hot start and the dense trainer) is at `41e1920:HANDOFF.md`, and master's Haskell-era trainer is at the tag `haskell-final`.
 
-## ▶ CONTINUE HERE (2026-10-02, 12:30 UTC-6): legere reviewed; the trainer can now start ana from the fp100m plan; the box waits for a yes
+## ▶ CONTINUE HERE (2026-10-03, 05:55 UTC-6): the box is STOPPED: vast.ai credit ran out at ~05:40 ($7.74 spent); the chain is stopped; the user decides whether to add credit
+
+**State:** vast instance 53909778 (RTX 5090, Korea) is `stopped` by vast (balance −$0.03 under the −$0.01 threshold), its disk intact. Training stopped inside raw slice 4 (about step 25,500 of the chain's global count). `ft-fp-chain4` was stopped by hand so a restarted box is not mistaken for a dead stage (which would score, pull and destroy). Wave 2 (8,525 Haskell, 11,261 Lean, 9,039 Agda transcripts) is being rebuilt locally into `run/w2/` (`ft-w2-build`; its first two builds failed on filler: too little, then duplicate ids, both fixed in `next-stage.sh`); it is not pushed.
+**Here:** fp100m-step1000..8803, e2-step10000..18000 (every 2000), next-step9000, w1-step19000 (`run/pulled-vast-53909778/out/`). **Only on the stopped box:** e2-step18125 (end of the 2nd epoch), next-step9322, n2-step18644, w1-step19080 (end of wave 1), raw slice 4's newest save; raw 1–3's were deleted as designed.
+**To resume (needs credit):** `vastai start instance 53909778`; when it answers ssh, check `out/` and the logs, push wave 2 (`NAME=w2 bend/gpu/next-stage.sh push HOST PORT`, the address may change: `vastai ssh-url 53909778`), restart the trainer from raw4's newest save (`fp.sh again out/raw4-stepN.checkpoint run/raw4/plan-raw4-b16-windows.tsv run/raw4 raw4 raw4b` resumes the plan only if it is a plain hot start: use `TRAIN_INIT=... PLAN=run/raw4/plan-raw4-b16-windows.tsv RUN_DIR=run/raw4 SHARD_SIZE=raw4` without TRAIN_NEXT), then a fresh chain over the remaining stages. Remaining work at the 5090's rate: w2 (~?) + raw 5–9 (10,580 steps ≈ 5.8 h) + scores ≈ 7 h ≈ $3.5. **To salvage only:** start it, pull the four checkpoints above (~7.4 GB at 3 MB/s ≈ 45 min, ≈ $0.40), destroy.
+
+## ▶ EARLIER (2026-10-02) (2026-10-02, 12:30 UTC-6): legere reviewed; the trainer can now start ana from the fp100m plan; the box waits for a yes
 
 **The user's direction (2026-10-02 afternoon):** legere is the next generation of ana's data path, meant to feed ana new training material continuously; ana's Bend trainer should start training on our dataset on a rented GPU box; and legere improves iteratively so each round of sessions becomes transcripts.
 
