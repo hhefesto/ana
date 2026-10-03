@@ -48,7 +48,23 @@ build() {
     # (with FILL capping a shard's filler files), for a wave whose own filler
     # is too small for its windows
     if [ "${REPLAY_FILLER:-0}" = 1 ]; then
-      ln -s "$PWD/run/transcripts-final/$l/files-hi.nul" "$d/files-hi.nul"; ln -s "$PWD/run/transcripts-final/$l/files-lo.nul" "$d/files-lo.nul"
+      # less every file the new languages' filler already holds (bend-mix refuses a duplicate id)
+      python3 - "$d" "run/transcripts-final/$l" $(for e in $NEW; do echo "${e#*=}"; done) <<'PY'
+import sys, os
+d, src, news = sys.argv[1], sys.argv[2], sys.argv[3:]
+def recs(p):
+    if not os.path.exists(p): return
+    x = open(p, "rb").read().split(b"\0")
+    for i in range(0, len(x) - 1, 2): yield x[i], x[i + 1]
+taken = {k for n in news for f in ("files-hi.nul", "files-lo.nul") for k, _ in recs(f"{n}/{f}")}
+for f in ("files-hi.nul", "files-lo.nul"):
+    kept = 0
+    with open(f"{d}/{f}", "wb") as o:
+        for k, v in recs(f"{src}/{f}"):
+            if k in taken: continue
+            o.write(k + b"\0" + v + b"\0"); kept += 1
+    print(d, f, kept, "files")
+PY
     else : > "$d/files-hi.nul"; : > "$d/files-lo.nul"; fi
   done
   # per round: the new languages in their sizes' ratio, 20 a round in all,
