@@ -20,6 +20,8 @@
 #   fp.sh run              the whole plan (STEPS, 8803), in the background: out/fp100m-step<N>.checkpoint, train.log
 #   fp.sh eval [CKPT...]   bits per byte of each checkpoint (out/*.checkpoint) on the held-out transcripts
 #                          (ECORPUS: another eval corpus)
+#   fp.sh again CKPT PLAN RUN_DIR SHARD_SIZE NAME   continue CKPT's run on PLAN (TRAIN_NEXT), saves
+#                          out/NAME-step<N>.checkpoint, log NAME.log (as `next` below)
 #   fp.sh next CKPT        continue CKPT's run on the next plan (TRAIN_NEXT; traind-next.c built from
 #                          the trainer that has it): run/next/plan-next-b16-windows.tsv and its shards
 #                          run/next/shard-K-next.corpus, saves out/next-step<N>.checkpoint, log next.log;
@@ -81,19 +83,23 @@ case "${1:-}" in
     env $common $setting TRAIN_STEPS=${STEPS:-8803} EVAL_EVERY=${EVAL:-250} EVAL_WINDOWS=${EVALW:-128} SAVE_EVERY=${SAVE:-500} OUT=out/fp100m \
       nohup stdbuf -oL ./traind --gpu $MEM > train.log 2>&1 &
     echo "trainer pid $!; tail -f train.log" ;;
-  next)
+  next|again)
+    # again CKPT PLAN RUN_DIR SHARD_SIZE NAME: continue CKPT's run on PLAN (TRAIN_NEXT),
+    # saves out/NAME-step<N>.checkpoint, log NAME.log; next CKPT is the next plan
     [ -x traind-next ] || $CC traind-next.c -lpthread -lm -o traind-next -lcuda -lnvrtc || exit 1
-    ckpt="${2:?usage: fp.sh next CKPT}"
+    ckpt="${2:?usage: fp.sh next CKPT | fp.sh again CKPT PLAN RUN_DIR SHARD_SIZE NAME}"
+    if [ "$1" = next ]; then plan=run/next/plan-next-b16-windows.tsv; rdir=run/next; ssz=next; name=next
+    else plan="${3:?}"; rdir="${4:?}"; ssz="${5:?}"; name="${6:?}"; fi
     mkdir -p out
     # warmup: 5% of the plan's steps (at least 10) unless NWARM says otherwise
-    nsteps=$(head -1 run/next/plan-next-b16-windows.tsv | awk '{ print $3 }')
+    nsteps=$(head -1 "$plan" | awk '{ print $3 }')
     NWARM=${NWARM:-$(( nsteps / 20 > 10 ? nsteps / 20 : 10 ))}
-    env TRAIN_INIT=$ckpt TRAIN_NEXT=1 PLAN=run/next/plan-next-b16-windows.tsv RUN_DIR=run/next SHARD_SIZE=next \
+    env TRAIN_INIT=$ckpt TRAIN_NEXT=1 PLAN=$plan RUN_DIR=$rdir SHARD_SIZE=$ssz \
       TOKENIZER_FILE=$TOK TRAIN_BATCH=16 TRAIN_MICRO=${MICRO:-4} TRAIN_CHUNK=16 BEND_GEMM_NUMERICS=tf32 \
-      TRAIN_LR=${NLR:-1e-4} TRAIN_WARMUP=${NWARM:-100} EVAL_EVERY=${EVAL:-250} EVAL_WINDOWS=${EVALW:-128} \
-      SAVE_EVERY=${SAVE:-500} OUT=out/next \
-      nohup stdbuf -oL ./traind-next --gpu $MEM > next.log 2>&1 &
-    echo "trainer pid $!; tail -f next.log" ;;
+      TRAIN_LR=${NLR:-1e-4} TRAIN_WARMUP=$NWARM EVAL_EVERY=${EVAL:-250} EVAL_WINDOWS=${EVALW:-128} \
+      SAVE_EVERY=${SAVE:-500} OUT=out/$name \
+      nohup stdbuf -oL ./traind-next --gpu $MEM > $name.log 2>&1 &
+    echo "trainer pid $!; tail -f $name.log" ;;
   eval)
     build
     shift

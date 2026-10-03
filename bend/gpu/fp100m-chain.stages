@@ -1,0 +1,7 @@
+# fp-chain.sh's stages for 2026-10-02 (the user: "Both, in that order"):
+# fp100m (running), the new-code continuation, fp100m's second epoch, the
+# new-code continuation again. NAME BINARY EVERY [PLAN RUN_DIR SHARD_SIZE]
+fp100m traind 1000
+next traind-next 1000 run/next/plan-next-b16-windows.tsv run/next next
+e2 traind-next 2000 run/fp100m/plan-fp100m-b16-windows.tsv run/fp100m fp100m
+n2 traind-next 1000 run/next/plan-next-b16-windows.tsv run/next next
