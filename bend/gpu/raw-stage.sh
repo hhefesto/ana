@@ -7,6 +7,13 @@
 #   bend/gpu/raw-stage.sh push K HOST PORT     to the box as run/rawK (plan last, after every shard's sha)
 # then append to the chain's stages:  rawK traind-next 0 run/rawK/plan-rawK-b16-windows.tsv run/rawK rawK
 #
+# New raw code (code ana has not been fed, run/raw-new/LANG*.jsonl from the
+# 2026-10-03 agents, deduplicated against code-train-v3) goes through the same
+# steps under another mix and prefix (R the mix's directory, P the stages' prefix):
+#   R=run/rawnew1 bend/gpu/raw-stage.sh mixnew FILE.jsonl...   the files interleaved by language
+#   R=run/rawnew1 P=nr bend/gpu/raw-stage.sh build K           slice K as run/nrK
+#   P=nr bend/gpu/raw-stage.sh push K HOST PORT                stage nrK
+#
 # The mix: ana's five languages from the extracted code (Haskell .hs/.lhs,
 # Lean, Agda .agda/.lagda, Nix, Bend; Idris and Markdown left out), PER
 # documents a round in proportion to their counts, so they run dry together;
@@ -16,7 +23,8 @@
 # tokenizing (PACK_TARGET), since the trainer makes no window from a shorter
 # document. SIZE fp100m (ctx 2048), batch 16.
 set -euo pipefail
-R=run/raw
+R=${R:-run/raw}
+P=${P:-raw}
 SLICE=${SLICE:-300000000}
 
 mix() {
@@ -52,9 +60,59 @@ PY
   ls -la "$R/mix.jsonl"
 }
 
+# mixnew FILE...: each file's language from its name (haskell*, lean*, agda*,
+# bend*), per round documents in proportion to each language's count so they run
+# dry together, and fp100m's transcripts cycling at ~20% of the bytes as in mix
+mixnew() {
+  mkdir -p "$R/src"
+  # fp100m's transcripts as JSONL, for the replay (as in mix)
+  python3 - "$R/src" <<'PY'
+import sys, json
+out = sys.argv[1]
+for l in ["haskell", "lean", "agda", "nix", "bend"]:
+    d = open(f"run/transcripts-final/{l}/transcripts.train.nul", "rb").read().split(b"\0")
+    with open(f"{out}/tr-{l}.jsonl", "w") as o:
+        for i in range(0, len(d) - 1, 2):
+            o.write(json.dumps({"id": d[i].decode("utf-8", "replace"), "text": d[i + 1].decode("utf-8", "replace")}, ensure_ascii=False) + "\n")
+PY
+  specs=$(python3 - "$R/src" "$@" <<'PY'
+import sys, os, json
+out, files = sys.argv[1], sys.argv[2:]
+by = {}
+for f in files:
+    l = os.path.basename(f).split("-")[0].split(".")[0]
+    by.setdefault(l, []).append(f)
+stat = {}
+for l, fs in by.items():
+    n = b = 0
+    for f in fs:
+        for line in open(f, "rb"): n += 1; b += len(line)
+    dst = f"{out}/{l}.jsonl"
+    if os.path.lexists(dst): os.remove(dst)
+    if len(fs) == 1: os.symlink(os.path.abspath(fs[0]), dst)   # no copy of a large file
+    else:
+        with open(dst, "wb") as o:
+            for f in fs: o.write(open(f, "rb").read())
+    stat[l] = (n, b)
+top = max(stat, key=lambda l: stat[l][0])
+per = {l: max(1, round(100 * n / stat[top][0])) for l, (n, b) in stat.items()}
+code = sum(per[l] * stat[l][1] / stat[l][0] for l in stat)   # bytes of code a round
+tr = 0.25 * code / 1200                                      # transcripts ~20% of all bytes, ~1.2 KB each
+w = {"haskell": 79075, "lean": 50079, "agda": 53663, "nix": 24694, "bend": 126763}
+specs = [f"{out}/{l}.jsonl:{per[l]}" for l in stat] + \
+        [f"{out}/tr-{k}.jsonl:{max(1, round(tr * v / sum(w.values())))}:cycle" for k, v in w.items()]
+print(" ".join(specs))
+print({l: (n, round(b / 1e6, 1)) for l, (n, b) in stat.items()}, file=sys.stderr)
+PY
+)
+  echo "per round: $specs"
+  nix run .#deploy -- mix "$R/mix.jsonl" $specs
+  ls -la "$R/mix.jsonl"
+}
+
 build() {
   k="${1:?usage: raw-stage.sh build K}"
-  d="run/raw$k"; mkdir -p "$d"
+  d="run/$P$k"; mkdir -p "$d"
   # slice k: the k-th SLICE bytes of the mix, cut at line ends
   python3 - "$R/mix.jsonl" "$d/slice.jsonl" "$k" "$SLICE" <<'PY'
 import sys
@@ -83,11 +141,12 @@ PY
 
 push() {
   k="${1:?usage: raw-stage.sh push K HOST PORT}"
-  NAME="raw$k" RUN="run/raw$k" EVALC=run/eval/transcript-next.corpus bend/gpu/next-stage.sh push "$2" "$3"
+  NAME="$P$k" RUN="run/$P$k" EVALC=run/eval/transcript-next.corpus bend/gpu/next-stage.sh push "$2" "$3"
 }
 
 case "${1:-}" in
   mix) mix ;;
+  mixnew) shift; mixnew "$@" ;;
   build) shift; build "$@" ;;
   push) shift; push "$@" ;;
   *) sed -n 2,20p "$0"; exit 2 ;;
