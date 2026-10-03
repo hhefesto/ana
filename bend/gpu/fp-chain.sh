@@ -15,6 +15,9 @@
 # schedule restarts on PLAN), so the relay can be restarted at any point.
 # The first stage must already be running (it has no PLAN).
 #
+# Stages may be appended to STAGES while the chain runs: at the end of the
+# list it waits WAIT seconds (7200) for another line, and a stage whose PLAN
+# is not on the box yet waits WAIT for it, before going on to the scores.
 # Every POLL seconds (120) it looks at the running stage, pulls its saved checkpoints
 # whose step is a multiple of the stage's EVERY (only once the log says
 # `saved`: a save writes in place) and deletes, on the box, its others but
@@ -66,28 +69,37 @@ follow() {
   [ $state = done ]
 }
 
-prev=""; logs=""; lasts=""; n=0; ok=1
-while read -r name bin every plan rdir ssz <&3; do
-  [ -z "${name:-}" ] && continue
-  case "$name" in \#*) continue;; esac
-  lg="$name.log"; [ $n = 0 ] && lg="${LOG0:-train.log}"
-  n=$((n + 1))
-  if [ $ok = 1 ] && ! on_box "$lg"; then
-    if [ -z "$prev" ] || [ -z "${plan:-}" ]; then log "stage $name: nothing to start from"; ok=0
-    elif ! on_box "$plan"; then log "stage $name: $plan is not on the box"; ok=0
-    else
-      log "stage $name: from out/$prev on $plan"
-      $SSH "cd formalTransformer && ./fp.sh again out/$prev $plan $rdir $ssz $name" 2>&1 | tail -1 | tee -a "$dest/chain.log"
-      sleep 60
+# the k-th stage line of the file (comments and blank lines skipped), empty past the end
+stage_at() { grep -v '^[[:space:]]*\(#\|$\)' "$stages" | sed -n "${1}p"; }
+# wait up to WAIT seconds (7200) for a condition, polling every minute
+wait_for() { local until_t=$(( $(date +%s) + ${WAIT:-7200} )); while ! "$@"; do [ "$(date +%s)" -ge $until_t ] && return 1; sleep 60; done; }
+has_stage() { [ -n "$(stage_at "$1")" ]; }
+
+prev=""; logs=""; lasts=""; k=1; ok=1
+while [ $ok = 1 ]; do
+  # a stage appended to STAGES while the chain runs is taken up; at the end
+  # of the list the chain waits WAIT for another before it goes to the scores
+  if ! has_stage $k; then
+    log "no stage $k yet; waiting up to ${WAIT:-7200} s for one to be appended to $stages"
+    wait_for has_stage $k || { log "no more stages"; break; }
+  fi
+  read -r name bin every plan rdir ssz <<< "$(stage_at $k)"
+  lg="$name.log"; [ $k = 1 ] && lg="${LOG0:-train.log}"
+  k=$((k + 1))
+  if ! on_box "$lg"; then
+    if [ -z "$prev" ] || [ -z "${plan:-}" ]; then log "stage $name: nothing to start from"; ok=0; break; fi
+    if ! on_box "$plan"; then
+      log "stage $name: waiting up to ${WAIT:-7200} s for $plan on the box"
+      wait_for on_box "$plan" || { log "stage $name: $plan never came"; ok=0; break; }
     fi
+    log "stage $name: from out/$prev on $plan"
+    $SSH "cd formalTransformer && ./fp.sh again out/$prev $plan $rdir $ssz $name" 2>&1 | tail -1 | tee -a "$dest/chain.log"
+    sleep 60
   fi
-  if [ $ok = 1 ] || on_box "$lg"; then
-    logs="$logs $lg:$every"
-    if [ $ok = 1 ]; then follow "$lg" "$bin" "$every" || { echo "$lg: the trainer died" >> "$dest/DIED"; ok=0; }; fi
-    # the next stage starts first; every stage's last save is pulled at the end
-    l=$(last_of "$lg"); [ -n "$l" ] && { prev=$l; lasts="$lasts $l"; }
-  fi
-done 3< "$stages"
+  logs="$logs $lg:$every"
+  follow "$lg" "$bin" "$every" || { echo "$lg: the trainer died" >> "$dest/DIED"; ok=0; }
+  l=$(last_of "$lg"); [ -n "$l" ] && { prev=$l; lasts="$lasts $l"; }
+done
 
 # scores
 evals=""
