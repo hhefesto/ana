@@ -60,14 +60,21 @@ build() {
 import sys
 src, dst, k, size = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
 lo, hi = (k - 1) * size, k * size
-pos = 0; w = 0
-with open(src, "rb") as f, open(dst, "wb") as o:
+pos = 0; lines = []
+with open(src, "rb") as f:
     for line in f:
-        if pos >= lo and pos < hi: o.write(line); w += 1
+        if pos >= lo and pos < hi: lines.append(line)
         pos += len(line)
         if pos >= hi: break
-print("slice", k, w, "documents")
+    last = pos < hi  # the mix ran out inside this slice
+# plan-corpus cuts a slice into 2000-document parts; the mix's final short
+# part can be too small for one window (plan-segment refuses it), so the last
+# slice keeps whole parts only
+if last and len(lines) % 2000: lines = lines[:len(lines) - len(lines) % 2000]
+with open(dst, "wb") as o: o.writelines(lines)
+print("slice", k, len(lines), "documents", "(the last)" if last else "")
 PY
+  [ -s "$d/slice.jsonl" ] || { echo "slice $k is empty"; exit 1; }
   TOKENIZER=weights/code32k.bpe PACK_TARGET=131072 JOBS=${JOBS:-3} nix run .#deploy -- plan-corpus "$d/slice.jsonl" "$d" fp100m 16 2000
   cp "$d"/plan-fp100m-b16-s2000.tsv "$d/plan-fp100m-b16-windows.tsv"
   head -1 "$d/plan-fp100m-b16-windows.tsv" | cut -c1-160
