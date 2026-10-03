@@ -40,7 +40,13 @@ inst="${3:?}"
 dest="${4:?}"
 stages="${5:?}"
 V=$HOME/.local/share/vastai-venv/bin/vastai
-SSH="ssh -n -o StrictHostKeyChecking=no -o ConnectTimeout=30 -p $port $host"
+SSH1="ssh -n -o StrictHostKeyChecking=no -o ConnectTimeout=30 -p $port $host"
+# the box's link can drop for minutes at a time: a command whose connection
+# fails (ssh's exit 255) is tried again, up to 10 times 30 s apart, so a drop
+# never reads as "no saves" or "no plan" (on 2026-10-03 one did, and raw6
+# started from w2's last checkpoint instead of raw5's)
+rsh() { local i rc; for i in 1 2 3 4 5 6 7 8 9 10; do $SSH1 "$@"; rc=$?; [ $rc = 255 ] || return $rc; sleep 30; done; return 255; }
+SSH=rsh
 mkdir -p "$dest/out"
 log() { echo "[$(TZ=Etc/GMT+6 date '+%Y-%m-%d %H:%M:%S') UTC-6] $*" | tee -a "$dest/chain.log"; }
 
@@ -80,8 +86,20 @@ stage_at() { grep -v '^[[:space:]]*\(#\|$\)' "$stages" | sed -n "${1}p"; }
 # wait up to WAIT seconds (7200) for a condition, polling every minute
 wait_for() { local until_t=$(( $(date +%s) + ${WAIT:-7200} )); while ! "$@"; do [ "$(date +%s)" -ge $until_t ] && return 1; sleep 60; done; }
 has_stage() { [ -n "$(stage_at "$1")" ]; }
+# start a stage once: a retry only when its log never appeared (a start whose
+# connection dropped after the launch must not launch a second trainer)
+start_stage() {
+  local i
+  for i in 1 2 3 4 5; do
+    $SSH1 "cd formalTransformer && ./fp.sh again out/$1 $2 $3 $4 $5" 2>&1 | tail -1 | tee -a "$dest/chain.log"
+    sleep 20
+    on_box "$5.log" && return 0
+    log "stage $5: no log on the box after the start; trying again"
+  done
+  return 1
+}
 
-prev=""; prev_every=1; logs=""; lasts=""; k=1; ok=1; last_every=1
+prev=""; prev_name=""; prev_every=1; logs=""; lasts=""; k=1; ok=1; last_every=1
 while [ $ok = 1 ]; do
   # a stage appended to STAGES while the chain runs is taken up; at the end
   # of the list the chain waits WAIT for another before it goes to the scores
@@ -99,15 +117,20 @@ while [ $ok = 1 ]; do
       wait_for on_box "$plan" || { log "stage $name: $plan never came"; ok=0; break; }
     fi
     log "stage $name: from out/$prev on $plan"
-    $SSH "cd formalTransformer && ./fp.sh again out/$prev $plan $rdir $ssz $name" 2>&1 | tail -1 | tee -a "$dest/chain.log"
-    sleep 60
-    # a raw stage's last save has been loaded by now: it can go
-    [ "$prev_every" = 0 ] && $SSH "rm -f formalTransformer/out/$prev" 2>/dev/null && log "deleted out/$prev on the box (a raw stage's, loaded by $name)"
+    start_stage "$prev" "$plan" "$rdir" "$ssz" "$name" || { log "stage $name: could not be started"; ok=0; break; }
+    sleep 40
+    # a raw stage's last save has been loaded by now: it can go (only ever the
+    # stage before's own save)
+    case "$prev" in "$prev_name"-step*) [ "$prev_every" = 0 ] && $SSH "rm -f formalTransformer/out/$prev" 2>/dev/null && log "deleted out/$prev on the box (a raw stage's, loaded by $name)";; esac
   fi
   logs="$logs $lg:$every"
   follow "$lg" "$bin" "$every" || { echo "$lg: the trainer died" >> "$dest/DIED"; ok=0; }
-  l=$(last_of "$lg"); [ -n "$l" ] && { prev=$l; [ "$every" != 0 ] && lasts="$lasts $l"; }
-  prev_every=$every; last_every=$every
+  # a finished stage has a save; none found means the box did not answer, and
+  # going on would start the next stage from an older checkpoint
+  l=$(last_of "$lg")
+  if [ -z "$l" ]; then log "$lg: no save found; the chain stops here"; ok=0; break; fi
+  prev=$l; [ "$every" != 0 ] && lasts="$lasts $l"
+  prev_name=$name; prev_every=$every; last_every=$every
 done
 # the chain's last checkpoint is scored and pulled whatever its stage
 [ -n "$prev" ] && [ "$last_every" = 0 ] && lasts="$lasts $prev"
