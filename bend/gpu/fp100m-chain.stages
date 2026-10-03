@@ -5,3 +5,4 @@ fp100m traind 1000
 next traind-next 1000 run/next/plan-next-b16-windows.tsv run/next next
 e2 traind-next 2000 run/fp100m/plan-fp100m-b16-windows.tsv run/fp100m fp100m
 n2 traind-next 1000 run/next/plan-next-b16-windows.tsv run/next next
+w1 traind-next 1000 run/w1/plan-w1-b16-windows.tsv run/w1 w1
