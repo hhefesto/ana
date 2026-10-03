@@ -15,7 +15,7 @@
 # schedule restarts on PLAN), so the relay can be restarted at any point.
 # The first stage must already be running (it has no PLAN).
 #
-# Every 5 minutes it looks at the running stage, pulls its saved checkpoints
+# Every POLL seconds (120) it looks at the running stage, pulls its saved checkpoints
 # whose step is a multiple of the stage's EVERY (only once the log says
 # `saved`: a save writes in place) and deletes, on the box, its others but
 # the newest. A stage is dead when no trainer runs and its log has been still
@@ -50,12 +50,12 @@ on_box() { [ "$($SSH "[ -f formalTransformer/$1 ] && echo yes" 2>/dev/null)" = y
 follow() {
   local lg=$1 bin=$2 every=$3 last_size=0 quiet=0 state=running r size procs tail
   while [ $state = running ]; do
-    sleep 300
+    sleep ${POLL:-120}
     r=$($SSH "cd formalTransformer && stat -c %s $lg 2>/dev/null; pgrep -c -x '$bin'; tail -c 200 $lg 2>/dev/null | tr '\n' ' '" 2>/dev/null) || { log "ssh failed; retrying"; continue; }
     size=$(echo "$r" | sed -n 1p); procs=$(echo "$r" | sed -n 2p); tail=$(echo "$r" | sed -n 3p)
     if echo "$tail" | grep -q "done at step"; then state=done
     elif [ "${procs:-0}" = 0 ]; then
-      if [ "$size" = "$last_size" ]; then quiet=$((quiet + 300)); else quiet=0; fi
+      if [ "$size" = "$last_size" ]; then quiet=$((quiet + ${POLL:-120})); else quiet=0; fi
       [ $quiet -ge 1200 ] && state=died
     else quiet=0; fi
     last_size=$size
@@ -84,7 +84,8 @@ while read -r name bin every plan rdir ssz <&3; do
   if [ $ok = 1 ] || on_box "$lg"; then
     logs="$logs $lg:$every"
     if [ $ok = 1 ]; then follow "$lg" "$bin" "$every" || { echo "$lg: the trainer died" >> "$dest/DIED"; ok=0; }; fi
-    l=$(last_of "$lg"); [ -n "$l" ] && { prev=$l; lasts="$lasts $l"; have "$l" || pull_one "$l"; }
+    # the next stage starts first; every stage's last save is pulled at the end
+    l=$(last_of "$lg"); [ -n "$l" ] && { prev=$l; lasts="$lasts $l"; }
   fi
 done 3< "$stages"
 
