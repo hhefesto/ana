@@ -44,7 +44,12 @@ build() {
     d="$OUT/$l"; mkdir -p "$d"
     ln -s "$PWD/run/transcripts-final/$l/transcripts.train.nul" "$d/transcripts.train.nul"
     ln -s "$PWD/run/transcripts-final/$l/results.holdout.nul" "$d/results.holdout.nul"
-    : > "$d/files-hi.nul"; : > "$d/files-lo.nul"
+    # REPLAY_FILLER=1: the replayed languages' source files fill windows too
+    # (with FILL capping a shard's filler files), for a wave whose own filler
+    # is too small for its windows
+    if [ "${REPLAY_FILLER:-0}" = 1 ]; then
+      ln -s "$PWD/run/transcripts-final/$l/files-hi.nul" "$d/files-hi.nul"; ln -s "$PWD/run/transcripts-final/$l/files-lo.nul" "$d/files-lo.nul"
+    else : > "$d/files-hi.nul"; : > "$d/files-lo.nul"; fi
   done
   # per round: the new languages in their sizes' ratio, 20 a round in all,
   # and REPLAY (1.0) times as many replayed in fp100m's proportions
