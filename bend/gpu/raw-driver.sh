@@ -56,7 +56,12 @@ for k in $(seq "$first" "$last"); do
     done
   fi
   log "pushing slice $k"
-  bend/gpu/raw-stage.sh push "$k" "$host" "$port" > "run/$P-push$k.log" 2>&1 || { log "slice $k did not push; stopping"; exit 1; }
+  # the box's link drops now and then: a push resumes (rsync --partial) up to 6 times
+  ok=0; for t in 1 2 3 4 5 6; do
+    bend/gpu/raw-stage.sh push "$k" "$host" "$port" >> "run/$P-push$k.log" 2>&1 && { ok=1; break; }
+    log "slice $k push try $t failed; again in a minute"; sleep 60
+  done
+  [ $ok = 1 ] || { log "slice $k did not push after 6 tries; stopping"; exit 1; }
   echo "$P$k traind-next 0 run/$P$k/plan-$P$k-b16-windows.tsv run/$P$k $P$k" >> "$stages"
   log "slice $k staged and appended ($n steps)"
 done
