@@ -30,6 +30,11 @@ import ./Sys.bend as S
 # `## lean`, `## bend`, `## nix`): its output verbatim, at most 40 lines
 # (a longer output ends with a line saying how many were left out), then
 # `[exit N]`. A goal display from Agda's interaction mode has no exit line.
+#
+# That is format 1. TRANSCRIPT_FORMAT=2 renders format 2 (docs/CORPUS-V2.md,
+# C1 and C2; below, "Format 2"): the Term is only ever the original, and a
+# term given to the assistant (a mutant, the hole, a term to judge) is an
+# `## Attempt`; COPIES (2) transcripts a unit, each a different presentation.
 
 # Bytes -------------------------------------------------------------------------
 
@@ -275,6 +280,177 @@ def all(+b: Tk.Bpe, +limit: Nat, rs: List<&2, Ns.Doc>) -> List<&2, Ns.Doc>:
     case Ns.Doc{+i, +t} <> more:
       unit(b, limit, i, split(t, 30), all(b, limit, more))
 
+# Format 2 -----------------------------------------------------------------------
+#
+# Run 1 (format 1) taught ana that its first Term is usually wrong (a mutant
+# or a hole, then the error, then the original), that its own answer fails,
+# and Nix files from nothing. Format 2 never puts a wrong term under `## Term`:
+#
+#   0 direct        User, Context, Type, Term (the original), the verdict
+#   1 repair (m)    User (the ask, then "This attempt fails. Fix it."),
+#                   Context, Type, Attempt (mutant m), its error, Term, the verdict
+#   2 term to type  as format 1 (where the checker gave the type: ghc)
+#   3 fill          User (the ask, then "Fill the hole."), Context, Type,
+#                   Attempt (the hole), the goal, Term, the verdict
+#   4 verify        User "Does this check?", Context, Type, Attempt (the
+#                   original), the checker's turn: the transcript's end
+#   5 verify (m)    the same with mutant m and its error
+#
+# Each shape opens with its own User line, so after an ask and its Type the
+# next turn is always the Term. A unit's first presentation comes from a hash
+# of its id: direct 50, repair 25, fill 10, verify 5 (4 or 5, half each), term
+# to type 10; Nix (a whole file: nothing to write it from) repair 80, verify
+# 20, never direct. One the unit cannot give (no failing mutant, no hole, no
+# type) becomes direct (Nix: verify 4). Then up to COPIES - 1 more, the first
+# of these the unit can give and has not given (m1, m2: the next mutants; V
+# the unit's verify, 4 or 5 m1 by its hash, and W the other, so a verify
+# passes half the time): direct, repair m, fill, term to type, repair m1, V,
+# W, repair m2 (Nix: repair m, V, repair m1, W, repair m2). They are
+# `ID/SHAPE`, then `ID+1/SHAPE`, ...
+
+def attempt(+fs: List<&2, List<&2, U32>>, +body: List<&2, U32>) -> List<&2, U32>:
+  turn(U.b("Attempt"), fence(field(fs, 0n), tidy.term(field(fs, 0n), body)))
+
+def ask2(+fs: List<&2, List<&2, U32>>, +shape: Nat) -> List<&2, U32>:
+  match shape:
+    case 0n:
+      ask(fs, 0n)
+    case 1n:
+      cat([ask(fs, 0n), U.b("\n\nThis attempt fails. Fix it.")])
+    case 2n:
+      ask(fs, 2n)
+    case 3n:
+      cat([ask(fs, 0n), U.b("\n\nFill the hole.")])
+    case _:
+      U.b("Does this check?")
+
+def user2(+fs: List<&2, List<&2, U32>>, +shape: Nat) -> List<&2, U32>:
+  turn(U.b("User"), U.append(ask2(fs, shape), nl()))
+
+def mutant(+fs: List<&2, List<&2, U32>>, +m: Nat) -> List<&2, U32>:
+  field(fs, Nat.add(15n, Nat.mul(2n, m)))
+
+def mutant.check(+fs: List<&2, List<&2, U32>>, +m: Nat) -> List<&2, U32>:
+  field(fs, Nat.add(16n, Nat.mul(2n, m)))
+
+def render2(+shape: Nat, +fs: List<&2, List<&2, U32>>, +m: Nat) -> List<&2, U32>:
+  match shape:
+    case 0n:
+      cat([user2(fs, 0n), context(fs), typ(fs), answer(fs)])
+    case 1n:
+      cat([user2(fs, 1n), context(fs), typ(fs), attempt(fs, mutant(fs, m)), check.turn(fs, mutant.check(fs, m)), answer(fs)])
+    case 2n:
+      render(2n, fs, m)
+    case 3n:
+      cat([user2(fs, 3n), context(fs), typ(fs), attempt(fs, field(fs, 10n)), check.turn(fs, field(fs, 13n)), answer(fs)])
+    case 4n:
+      cat([user2(fs, 4n), context(fs), typ(fs), attempt(fs, field(fs, 7n)), check.turn(fs, field(fs, 11n))])
+    case _:
+      cat([user2(fs, 5n), context(fs), typ(fs), attempt(fs, mutant(fs, m)), check.turn(fs, mutant.check(fs, m))])
+
+def shape2.name(+shape: Nat) -> List<&2, U32>:
+  U.nth([U.b("direct"), U.b("repair"), U.b("term-to-type"), U.b("fill"), U.b("verify"), U.b("verify")], shape)
+
+# whether the unit can give presentation p
+def can(+fs: List<&2, List<&2, U32>>, +p: Plan) -> Bool:
+  match p:
+    case Plan{+shape, +m}:
+      match shape:
+        case 0n:
+          Bool.not(is.nix(field(fs, 0n)))
+        case 1n:
+          Nat.is_lt(m, mutant.count(fs))
+        case 2n:
+          Bool.not(empty(field(fs, 14n)))
+        case 3n:
+          Bool.not(empty(field(fs, 13n)))
+        case 4n:
+          True{}
+        case _:
+          Nat.is_lt(m, mutant.count(fs))
+
+def plan.eq(+a: Plan, +b: Plan) -> Bool:
+  match a b:
+    case Plan{+s, +m} Plan{+t, +n}:
+      Bool.and(Nat.is_eq(s, t), Nat.is_eq(m, n))
+
+def has(+p: Plan, xs: List<&2, Plan>) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case +x <> more:
+      Bool.or(plan.eq(p, x), has(p, more))
+
+# the next mutant after m (m itself when there are none)
+def next.m(+m: Nat, +k: Nat, +nm: Nat) -> Nat:
+  Nat.mod(Nat.add(m, k), Nat.add(nm, Bool.pick(Nat, Nat.is_eq(nm, 0n), 1n, 0n)))
+
+# the unit's verify (pass: 4; fail: 5 with mutant m1) and the other one
+def ver(+id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +other: Bool) -> Plan:
+  +nm = mutant.count(fs)
+  +pass = Bool.xor(Nat.is_eq(roll(id, 10n, 2n), 0n), other)
+  Bool.pick(Plan, pass, Plan{4n, 0n}, Plan{5n, next.m(roll(id, 9n, nm), 1n, nm)})
+
+# the first presentation
+def plan2(+id: List<&2, U32>, +fs: List<&2, List<&2, U32>>) -> Plan:
+  +r = roll(id, 7n, 100n)
+  +m = roll(id, 9n, mutant.count(fs))
+  +nix = is.nix(field(fs, 0n))
+  +ver = ver(id, fs, False{})
+  +want = Bool.pick(Plan, nix, Bool.pick(Plan, Nat.is_lt(r, 80n), Plan{1n, m}, ver),
+    Bool.pick(Plan, Nat.is_lt(r, 50n), Plan{0n, 0n}, Bool.pick(Plan, Nat.is_lt(r, 75n), Plan{1n, m},
+      Bool.pick(Plan, Nat.is_lt(r, 85n), Plan{3n, 0n}, Bool.pick(Plan, Nat.is_lt(r, 90n), ver, Plan{2n, 0n})))))
+  Bool.pick(Plan, can(fs, want), want, Bool.pick(Plan, nix, Plan{4n, 0n}, Plan{0n, 0n}))
+
+# the presentations after the first, in the order they are taken
+def more2(+id: List<&2, U32>, +fs: List<&2, List<&2, U32>>) -> List<&2, Plan>:
+  +nm = mutant.count(fs)
+  +m = roll(id, 9n, nm)
+  +m1 = next.m(m, 1n, nm)
+  +m2 = next.m(m, 2n, nm)
+  Bool.pick(List<&2, Plan>, is.nix(field(fs, 0n)),
+    [Plan{1n, m}, ver(id, fs, False{}), Plan{1n, m1}, ver(id, fs, True{}), Plan{1n, m2}],
+    [Plan{0n, 0n}, Plan{1n, m}, Plan{3n, 0n}, Plan{2n, 0n}, Plan{1n, m1}, ver(id, fs, False{}), ver(id, fs, True{}), Plan{1n, m2}])
+
+# up to k presentations of cs, each one the unit can give and none twice
+def choose(+fs: List<&2, List<&2, U32>>, cs: List<&2, Plan>, +chosen: List<&2, Plan>, +k: Nat) -> List<&2, Plan>:
+  match cs:
+    case Nil{}:
+      List.reverse(&2, Plan, chosen)
+    case +c <> more:
+      +take = Bool.and(Nat.is_lt(List.length(&2, Plan, chosen), k), Bool.and(can(fs, c), Bool.not(has(c, chosen))))
+      choose(fs, more, Bool.pick(List<&2, Plan>, take, c <> chosen, chosen), k)
+
+def doc2(+b: Tk.Bpe, +limit: Nat, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +shape: Nat, +m: Nat, rest: List<&2, Ns.Doc>) -> List<&2, Ns.Doc>:
+  +text = render2(shape, fs, m)
+  emit.if(fits(b, limit, text), Ns.Doc{cat([id, U.b("/"), shape2.name(shape)]), text}, rest)
+
+def docs2(+b: Tk.Bpe, +limit: Nat, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, ps: List<&2, Plan>, +i: Nat, rest: List<&2, Ns.Doc>) -> List<&2, Ns.Doc>:
+  match ps:
+    case Nil{}:
+      rest
+    case Plan{+shape, +m} <> more:
+      +pid = Bool.pick(List<&2, U32>, Nat.is_eq(i, 0n), id, cat([id, U.b("+"), U.b(Nat.show(i))]))
+      doc2(b, limit, pid, fs, shape, m, docs2(b, limit, id, fs, more, 1n+i, rest))
+
+def unit2(+b: Tk.Bpe, +limit: Nat, +k: Nat, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, rest: List<&2, Ns.Doc>) -> List<&2, Ns.Doc>:
+  docs2(b, limit, id, fs, choose(fs, plan2(id, fs) <> more2(id, fs), Nil{}, k), 0n, rest)
+
+def all2(+b: Tk.Bpe, +limit: Nat, +k: Nat, rs: List<&2, Ns.Doc>) -> List<&2, Ns.Doc>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case Ns.Doc{+i, +t} <> more:
+      unit2(b, limit, k, i, split(t, 30), all2(b, limit, k, more))
+
+# fmt 0: format 1; k > 0: format 2 with k presentations a unit
+def all.fmt(+fmt: Nat, +b: Tk.Bpe, +limit: Nat, rs: List<&2, Ns.Doc>) -> List<&2, Ns.Doc>:
+  match fmt:
+    case 0n:
+      all(b, limit, rs)
+    case _:
+      all2(b, limit, fmt, rs)
+
 # Main ---------------------------------------------------------------------------
 
 # The input streams a unit at a time (Sys.Rd: memory is a chunk plus the
@@ -338,27 +514,27 @@ def bt.go(fuel: Nat, b: Bt) -> IO(Bt):
 type Ps is Type:
   Ps{rd: S.Rd, n: Nat, m: Nat, eof: Bool}
 
-def ps.batch(+out: String, +b: Tk.Bpe, +limit: Nat, +n: Nat, +m: Nat, bt: Bt) -> IO(Ps):
+def ps.batch(+fmt: Nat, +out: String, +b: Tk.Bpe, +limit: Nat, +n: Nat, +m: Nat, bt: Bt) -> IO(Ps):
   match bt:
     case Bt{rd, us, e}:
       +rs = List.reverse(&2, Ns.Doc, us)
-      +ts = all(b, limit, rs)
+      +ts = all.fmt(fmt, b, limit, rs)
       do IO<Ps>:
         S.add(out, Ns.put(ts, Nil{}))
         return Ps{rd, Nat.add(n, List.length(&2, Ns.Doc, rs)), Nat.add(m, List.length(&2, Ns.Doc, ts)), e}
 
-def ps.step(+out: String, +b: Tk.Bpe, +limit: Nat, p: Ps) -> IO(Ps):
+def ps.step(+fmt: Nat, +out: String, +b: Tk.Bpe, +limit: Nat, p: Ps) -> IO(Ps):
   match p:
     case Ps{rd, +n, +m, e}:
       do IO<Ps>:
         bt : Bt <- bt.go(batch(), Bt{rd, Nil{}, False{}})
-        ps.batch(out, b, limit, n, m, bt)
+        ps.batch(fmt, out, b, limit, n, m, bt)
 
 # batches until the stream ends
-def ps.go(fuel: Nat, +out: String, +b: Tk.Bpe, +limit: Nat, p: Ps) -> IO(Ps):
+def ps.go(fuel: Nat, +fmt: Nat, +out: String, +b: Tk.Bpe, +limit: Nat, p: Ps) -> IO(Ps):
   match fuel p:
     case 1n+q Ps{rd, n, m, False{}}:
-      IO.bind(Ps, Ps, ps.step(out, b, limit, Ps{rd, n, m, False{}}), ps.go(q, out, b, limit))
+      IO.bind(Ps, Ps, ps.step(fmt, out, b, limit, Ps{rd, n, m, False{}}), ps.go(q, fmt, out, b, limit))
     case _ Ps{rd, n, m, e}:
       IO.pure(Ps, Ps{rd, n, m, e})
 
@@ -373,7 +549,7 @@ def done(p: Ps) -> IO(Unit):
         S.Rd.close(rd)
         IO.die(Unit, 1, "transcript: out of fuel before the input ended (a bug)")
 
-def tokenizer(+inp: String, +out: String, +limit: Nat, m: Maybe<&2, Tk.Bpe>) -> IO(Unit):
+def tokenizer(+fmt: Nat, +inp: String, +out: String, +limit: Nat, m: Maybe<&2, Tk.Bpe>) -> IO(Unit):
   match m:
     case None{}:
       IO.die(Unit, 1, "transcript: the tokenizer did not parse")
@@ -381,13 +557,19 @@ def tokenizer(+inp: String, +out: String, +limit: Nat, m: Maybe<&2, Tk.Bpe>) -> 
       do IO<Unit>:
         rd : S.Rd <- S.Rd.open(inp)
         S.write(out, Nil{})
-        p : Ps <- ps.go(big(), out, b, limit, Ps{rd, 0n, 0n, False{}})
+        p : Ps <- ps.go(big(), fmt, out, b, limit, Ps{rd, 0n, 0n, False{}})
         done(p)
+
+# TRANSCRIPT_FORMAT (1) and, for format 2, COPIES (2, at least 1): all.fmt's fmt
+def fmt.of(+f: String, +k: Nat) -> Nat:
+  Bool.pick(Nat, String.eq(f, "2"), Bool.pick(Nat, Nat.is_eq(k, 0n), 1n, k), 0n)
 
 def run(tok: String, inp: String, +out: String, +window: Nat) -> IO(Unit):
   do IO<Unit>:
     tx : List<&2, U32> <- B.Bytes.read_all(tok)
-    tokenizer(inp, out, Nat.sub(window, 64n), Tk.Bpe.parse(tx))
+    +f : String <- S.env("TRANSCRIPT_FORMAT", "1")
+    +k : Nat <- S.env.nat("COPIES", 2n)
+    tokenizer(fmt.of(f, k), inp, out, Nat.sub(window, 64n), Tk.Bpe.parse(tx))
 
 def window.of(xs: List<String>) -> Nat:
   match xs:

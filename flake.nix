@@ -449,6 +449,11 @@
             # rebuilds its file byte for byte; the Term turn's indentation
             bend units.bend > units.out
             printf '%s\n' "ok term bend" "ok term haskell-instance" "ok term haskell" "ok term lean" "ok haskell 2" "ok agda 1" "ok lean 2" "ok bend 2" "ok nix 1" "ok lagda 1" | diff - units.out
+            # the transcript renderer's format 2 (docs/CORPUS-V2.md): each
+            # shape's turns, the direct shape byte for byte, every Term the
+            # original, a unit's presentations distinct, Nix never direct
+            bend transcript.bend > transcript.out
+            printf '%s\n' "ok direct" "ok turns 0" "ok turns 1" "ok turns 2" "ok turns 3" "ok turns 4" "ok turns 5" "ok terms" "ok copies repo:x/A.hs#twice@1" "ok copies repo:x/a.nix#file@1" | diff - transcript.out
             # the corpus tools' libraries: processes and text (Sys), JSON
             # strings as jq decodes and writes them (Json), POSIX cksum
             bend sys.bend > sys.out
