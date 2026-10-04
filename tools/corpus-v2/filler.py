@@ -1,7 +1,7 @@
 # filler.py: the filler of corpus v2's transcript windows (docs/CORPUS-V2.md, C4):
 # the source files run 1's units were cut from (files-{hi,lo}.nul of every wave it
 # trained: final, next, w1-w4), each file once (run 1 copied Bend's three times
-# more, `#cN`), less every held-out file (by unit, path or content, as exclude.py),
+# more, `#cN`; a path in two waves with two versions: the first), less every held-out file (by unit, path or content, as exclude.py),
 # next to format 2's transcripts so bend-plan-windows finds them:
 #   run/v2/transcripts/LANG/files-{hi,lo}.nul    (a file in both: hi)
 #   run/v2/transcripts/LANG/results.holdout.nul  (pool.py's holdout: plan-windows
@@ -32,7 +32,7 @@ def pairs(p):
 keys = set(); out = []
 for l in LANGS:
     os.makedirs(f"{O}/{l}", exist_ok=True)
-    st = collections.Counter(); seen = set()
+    st = collections.Counter(); seen = set(); ids = set()
     for tier in ["hi", "lo"]:
         with open(f"{O}/{l}/files-{tier}.nul", "wb") as o:
             for w in WAVES:
@@ -41,8 +41,8 @@ for l in LANGS:
                 for i, t in pairs(p):
                     s = re.sub(r"#c\d+$", "", i.decode("utf-8", "replace"))
                     k = key(t.decode("utf-8", "replace"))
-                    if k in seen: st["copy"] += 1; continue
-                    seen.add(k)
+                    if k in seen or s in ids: st["copy"] += 1; continue
+                    seen.add(k); ids.add(s)
                     if held(s, k): st["held out"] += 1; continue
                     o.write(s.encode() + b"\0" + t + b"\0"); st[tier] += 1; keys.add(k)
     shutil.copyfile(f"run/v2/results/{l}.holdout.nul", f"{O}/{l}/results.holdout.nul")
