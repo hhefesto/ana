@@ -101,8 +101,10 @@ from `meta.description`, pname and version.
   sha256("corpus-v2 holdout\0" + unit) mod 1000 < 20, a rule so later sources
   split the same way. A unit is a repository / Hackage package (folded:
   `owner__repo` → `repo`, `tools/corpus-v2/names.py`); a repository with more than
-  300 files is split by directory (its first two path components), so a giant
-  library (mathlib4, agda-unimath) is never all in or all out; a dataset of
+  300 files is split by each file's own directory (its full parent path:
+  `Mathlib/RingTheory/Ideal`, a nixpkgs package's directory; two components
+  held out all of `Mathlib/RingTheory` at once), so a giant library is never
+  all in or all out and a module family stays together; a dataset of
   one-file records (`hf:goedel-workbook`, ...) by record. Every unit, filler
   file and raw file from them is out of training; `tools/corpus-v2/exclude.py IN OUT`
   filters any JSONL or NUL stream.
