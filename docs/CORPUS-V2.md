@@ -41,6 +41,13 @@ and on ana's answers to 10 held-out prompts × 5 checkpoints (`run/anatest-20261
 8. **The test measured the wrong thing.** Cutting at the first Term asks for
    the answer where the corpus taught a wrong one, and 10 prompts cannot rank
    checkpoints.
+9. **Letting ana go on does not rescue it.** Given 300 tokens, raw9-37000
+   writes its own predicted error and a second Term: still 1/10 (the same
+   Lean proof); the second Term repeats the first or is another wrong guess
+   (after a hole: `GLenum . fromIntegral`). On these prompts knowledge is the
+   limit as much as the format: C1 should remove holes and make the verdict
+   informative, not by itself raise pass@1. The evaluation, not the 10
+   prompts, decides.
 
 ## Principles
 
@@ -90,19 +97,37 @@ from `meta.description`, pname and version.
 
 ### C3. Holdout by repository, one exclusion list (`run/v2/holdout/`)
 
-- **Split:** 2% of repositories / Hackage packages by a hash of the
-  repository name (forks and owner prefixes folded: `owner__repo` → `repo`).
-  Every unit, filler file and raw file from them is out of training.
+- **Split** (built: `tools/corpus-v2/holdout.py`): 2.0% of holdout units by
+  sha256("corpus-v2 holdout\0" + unit) mod 1000 < 20, a rule so later sources
+  split the same way. A unit is a repository / Hackage package (folded:
+  `owner__repo` → `repo`, `tools/corpus-v2/names.py`); a repository with more than
+  300 files is split by directory (its first two path components), so a giant
+  library (mathlib4, agda-unimath) is never all in or all out; a dataset of
+  one-file records (`hf:goedel-workbook`, ...) by record. Every unit, filler
+  file and raw file from them is out of training; `tools/corpus-v2/exclude.py IN OUT`
+  filters any JSONL or NUL stream.
+- **Built 2026-10-03 23:40** (`run/v2/holdout/`: `units.tsv`, `exclude.paths`,
+  `exclude.sha256`, `summary.txt`; tools in `tools/corpus-v2/`): 3,977 split
+  units and the 450 vault repositories; 55,253 paths, 56,169 content keys
+  (every version's). Held out, distinct files (the vault included): Agda 7.3%,
+  Lean 4.7%, Haskell 3.0%, Nix 2.6%, Bend 0.6% (Bend's code sits in a few big
+  repositories). Checked: the Agda vault is dropped whole; a 30,000-file
+  sample of code-train-v3 loses 1.94% (579 by unit, 3 copies by content); of
+  v1's 1,050 Lean holdout transcripts only 39 are in v2's holdout, so v2
+  renders its own.
 - **Exclusion everywhere:** `exclude.paths` (repo/path, all versions) and
-  `exclude.sha256` (`run/raw-new/norm_hash.py` keys) filter transcripts,
+  `exclude.sha256` (`tools/corpus-v2/norm_hash.py` keys) filter transcripts,
   filler, code-train-v3, raw-new and every later delivery (legere's too).
-- **A vault** for the evaluation: ~150 repositories per language that no
-  stream of run 1 or run 2 ever held, so run 1 can be scored clean. Today's
-  candidates: `run/raw-new/agda-2f.jsonl` (mix 2, not yet trained), the ~2 GB
-  of Lean not delivered (`run/raw-new/.rawla/stage`), the Haskell pool
-  `run/raw-new/work/pool/hf-ghcode.jsonl.gz`; Bend has no untrained source
-  left (take new repos as they appear). Take the vault out of mix 2 before
-  its first slice is built.
+- **The vault** (built 2026-10-03 23:27, `tools/corpus-v2/vault.py`): 150
+  repositories per language with ≥ 3 files that no training stream of run 1
+  holds (`run/v2/holdout/stream-index.json`: code-train-v3, every raw-new
+  delivery, every wave's transcripts and filler), chosen by sha256 of the name:
+  Agda from mix 2's agda-2f (5,670 files, 40 MB; taken out of mix 2 and
+  ns1–ns4 rebuilt before any trained, `tools/corpus-v2/restage-ns.sh`), Lean from the
+  undelivered pool (13,930 files, 170 MB), Haskell from the leftover HF pool
+  (5,322 files, 16 MB). Files in `run/v2/vault/LANG.jsonl`, names in
+  `run/v2/holdout/vault.tsv`. Bend has no untrained source: its vault takes
+  new repositories as they appear. Run 1 can be scored clean on the vault.
 
 ### C4. Repetition budget
 
