@@ -243,18 +243,34 @@ checkpoints (fp100m-8803, e2-18125, w1-19080, the last) and run 2's:
 `run/anatest-20261003/check2.py` does (the Term is the body dedented) and
 sets `BEND_SRC` per class tree.
 
+**Built 2026-10-04** (CPU generation is ~2.5 min an answer, so the set is
+smaller than 200 a language for now): `tools/corpus-v2/evalset.py` cuts 280
+prompts from the held-out format 2 transcripts, 40 direct and 20 repair per
+language (Nix: 40 repair): the direct prompt is the same text in format 1 and
+2, so both runs answer one question; a repair prompt has a format 1 version
+for run 1 (the ask alone, the mutant under `## Term`). `evalrun.py gen CKPT
+DIR FORMAT` answers (greedy, 100 tokens, bend-generate on the CPU) and
+`evalrun.py check DIR` lifts each answer into its held-out unit and runs the
+real checker (Bend per source tree). E3: `tools/corpus-v2/evals.sh` builds
+`run/eval/v2-tr-LANG.corpus` (held-out format 2 transcripts) and
+`run/eval/v2-vault-LANG.corpus` (~2 MB of each vault language, up to 5 files a
+repository); run 1's fp100m-8803, w1-19080, w3-40731 and last checkpoint are
+scored on them on box 2 before it is destroyed (`box-baseline.sh`).
+E4 (verdict calibration) is not built: it needs the probability of `[exit 0]`
+after a verify prompt, which the trainer's eval does not print.
+
 ## Order
 
-| # | step | where | cost |
-|---|---|---|---|
-| 0 | take the vault out of mix 2 (before ns1 is built) | local | – |
-| 1 | holdout split + exclusion list | local | hours |
-| 2 | evaluation driver (E1–E4) + run 1 baselines | local CPU (generation) or the box | hours |
-| 3 | Transcript.bend shapes (C1, C2) + goldens; re-render every wave (final, next, w1–w4) | local | a day |
-| 4 | repetition budget, filters, mix (C4–C6) | local | hours |
-| 5 | pilots (C5) | one 5090 | ~$1.30 |
-| 6 | run 2 from scratch, fp100m (115M), same trainer | one 5090 | ~$10–15, ask first |
-| 7 | yield work (C7), legere feed | local | ongoing |
+| # | step | where | cost | status |
+|---|---|---|---|---|
+| 0 | take the vault out of mix 2 (before ns1 is built) | local | – | done 10-03 |
+| 1 | holdout split + exclusion list | local | hours | done 10-03 |
+| 2 | evaluation driver (E1–E4) + run 1 baselines | local CPU (generation) or the box | hours | E1–E3 built 10-04; baselines running |
+| 3 | Transcript.bend shapes (C1, C2) + goldens; re-render every wave (final, next, w1–w4) | local | a day | done 10-04 |
+| 4 | repetition budget, filters, mix (C4–C6) | local | hours | built 10-04 |
+| 5 | pilots (C5) | one 5090 | ~$1.30 | ask first |
+| 6 | run 2 from scratch, fp100m (115M), same trainer | one 5090 | ~$3–5 at the v2 size, ask first | |
+| 7 | yield work (C7), legere feed | local | ongoing | |
 
 **From scratch, not a continuation:** run 1 learned the mutant-first habit
 over ~50k steps; a fresh start on v2 gives a clean comparison with run 1 on

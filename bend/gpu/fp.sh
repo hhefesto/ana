@@ -41,9 +41,13 @@ CLANG=$(for c in clang-19 clang-18 clang-17 clang-16 clang-15 clang-14 clang; do
 CC="$CLANG -DBEND_CUDA=1 -DBEND_NO_SRC -I$CU/include -L$CU/lib64 -std=c11 -O2"
 export LD_LIBRARY_PATH=$CU/lib64:${LD_LIBRARY_PATH:-}
 MEM=${MEM:-48GB}
-PLAN=run/fp100m/plan-fp100m-b16-windows.tsv
+# PLAN, RUN (its shards) and NAME (out/NAME-step<N>.checkpoint) default to run 1's fp100m;
+# corpus v2's run 2 sets them (docs/CORPUS-V2.md)
+PLAN=${PLAN:-run/fp100m/plan-fp100m-b16-windows.tsv}
+RUN=${RUN:-run/fp100m}
+NAME=${NAME:-fp100m}
 TOK=weights/code32k.bpe
-common="PLAN=$PLAN RUN_DIR=run/fp100m SHARD_SIZE=fp100m TOKENIZER_FILE=$TOK PRESET=fp100m TRAIN_BATCH=16 TRAIN_MICRO=${MICRO:-4} TRAIN_CHUNK=16 BEND_GEMM_NUMERICS=tf32"
+common="PLAN=$PLAN RUN_DIR=$RUN SHARD_SIZE=fp100m TOKENIZER_FILE=$TOK PRESET=fp100m TRAIN_BATCH=16 TRAIN_MICRO=${MICRO:-4} TRAIN_CHUNK=16 BEND_GEMM_NUMERICS=tf32"
 setting="TRAIN_OPT=muon TRAIN_LR=${LR:-3e-4} TRAIN_WARMUP=${WARM:-300} TRAIN_WD=0.01 GRAD_CLIP=1.0"
 
 build() {
@@ -82,7 +86,7 @@ case "${1:-}" in
     build
     mkdir -p out
     nohup nvidia-smi dmon -s pucm -d 30 > dmon.txt 2>&1 &
-    env $common $setting TRAIN_STEPS=${STEPS:-8803} EVAL_EVERY=${EVAL:-250} EVAL_WINDOWS=${EVALW:-128} SAVE_EVERY=${SAVE:-500} OUT=out/fp100m \
+    env $common $setting TRAIN_STEPS=${STEPS:-8803} EVAL_EVERY=${EVAL:-250} EVAL_WINDOWS=${EVALW:-128} SAVE_EVERY=${SAVE:-500} OUT=out/$NAME \
       nohup stdbuf -oL ./traind --gpu $MEM > train.log 2>&1 &
     echo "trainer pid $!; tail -f train.log" ;;
   next|again)
