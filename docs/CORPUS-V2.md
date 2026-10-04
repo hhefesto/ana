@@ -256,6 +256,25 @@ real checker (Bend per source tree). E3: `tools/corpus-v2/evals.sh` builds
 `run/eval/v2-vault-LANG.corpus` (~2 MB of each vault language, up to 5 files a
 repository); run 1's fp100m-8803, w1-19080, w3-40731 and last checkpoint are
 scored on them on box 2 before it is destroyed (`box-baseline.sh`).
+**Run 1's E3 baseline (2026-10-04 13:14–13:23, box 2, bits per byte):**
+
+| corpus | fp100m-8803 | w1-19080 | w3-40731 | nr9-67717 |
+|---|---|---|---|---|
+| v2-tr Agda | 0.446 | 0.410 | 0.344 | 0.265 |
+| v2-tr Bend | 0.397 | 0.389 | 0.322 | 0.223 |
+| v2-tr Haskell | 0.394 | 0.378 | 0.331 | 0.243 |
+| v2-tr Lean | 0.478 | 0.442 | 0.391 | 0.311 |
+| v2-tr Nix | 0.497 | 0.474 | 0.403 | 0.347 |
+| vault Agda | 1.443 | 1.402 | 1.129 | 0.852 |
+| vault Haskell | 1.057 | 1.070 | 0.799 | 0.720 |
+| vault Lean | 1.146 | 1.147 | 0.913 | 0.675 |
+
+Only the vault is clean for run 1: its raw stages fed the held-out units'
+files (finding 5), so its v2-tr numbers are optimistic. On the vault the raw
+stages cut bits per byte by 30–40% (w1 → nr9): run 1's code knowledge comes
+mostly from raw code. nr9-step67717 itself was lost with the box (a failed
+pull); its numbers above were taken on the box.
+
 E4 (verdict calibration) is not built: it needs the probability of `[exit 0]`
 after a verify prompt, which the trainer's eval does not print.
 
