@@ -52,7 +52,16 @@ log() { echo "[$(TZ=Etc/GMT+6 date '+%Y-%m-%d %H:%M:%S') UTC-6] $*" | tee -a "$d
 
 # the saved checkpoints of a log, oldest first, as "STEP FILE"
 saved() { $SSH "cd formalTransformer && grep -o 'saved out/[^ ]*\\.checkpoint' $1 2>/dev/null" 2>/dev/null | sed -n 's#^saved out/\(.*-step\([0-9]*\)\.checkpoint\)$#\2 \1#p' | sort -n; }
-pull_one() { rsync -a --partial-dir=.partial -e "ssh -o StrictHostKeyChecking=no -p $port" "$host:formalTransformer/out/$1" "$dest/out/" >/dev/null 2>&1 && log "pulled $1"; }
+# a pull the link drops resumes (--partial-dir), up to 10 times 60 s apart (2026-10-04: one
+# failed attempt lost run 1's last checkpoint, since nothing checked it had arrived)
+pull_one() {
+  local t
+  for t in 1 2 3 4 5 6 7 8 9 10; do
+    rsync -a --partial-dir=.partial -e "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -p $port" "$host:formalTransformer/out/$1" "$dest/out/" >/dev/null 2>&1 && { log "pulled $1"; return 0; }
+    sleep 60
+  done
+  log "could not pull $1"; return 1
+}
 have() { [ -f "$dest/out/$1" ] && [ ! -f "$dest/out/.partial/$1" ]; }
 # EVERY 0: a stage whose checkpoints are never pulled (raw code): only its
 # newest stays on the box, and that one goes once the next stage has loaded it
@@ -152,8 +161,16 @@ rsync -a -e "ssh -o StrictHostKeyChecking=no -p $port" --include='*.log*' --incl
 remote=$($SSH 'cd formalTransformer/out && sha256sum *.checkpoint' 2>/dev/null)
 echo "$remote" > "$dest/sha256.box.txt"
 (cd "$dest/out" && sha256sum *.checkpoint) > "$dest/sha256.txt" 2>/dev/null
-if [ -n "$remote" ] && [ -s "$dest/sha256.txt" ] && [ -z "$(grep -vxF -f <(echo "$remote") "$dest/sha256.txt")" ]; then
-  log "pulled: $(wc -l < "$dest/sha256.txt") checkpoints, each matching the box's sha256"
+# every checkpoint that was to be pulled (the multiples of each stage's EVERY, every last)
+# must be here, whole: a pulled set that merely matches is not enough
+want=""
+for le in $logs; do [ "${le##*:}" = 0 ] && continue; want="$want $(saved "${le%%:*}" | awk -v e="${le##*:}" '$1 % e == 0 { print $2 }' | tr '\n' ' ')"; done
+want="$want $lasts"; missing=""
+for f in $want; do have "$f" && grep -q "  $f\$" "$dest/sha256.txt" || missing="$missing $f"; done
+if [ -n "$remote" ] && [ -s "$dest/sha256.txt" ] && [ -z "$(grep -vxF -f <(echo "$remote") "$dest/sha256.txt")" ] && [ -z "$missing" ]; then
+  log "pulled: $(wc -l < "$dest/sha256.txt") checkpoints, each matching the box's sha256; none of the $(echo $want | wc -w) wanted missing"
+elif [ -n "$missing" ]; then
+  log "WARNING: not pulled:$missing; the box is NOT destroyed"; exit 1
 else
   log "WARNING: the pulled checkpoints do not all match the box's; the box is NOT destroyed"; exit 1
 fi

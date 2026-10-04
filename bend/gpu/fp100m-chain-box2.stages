@@ -6,3 +6,21 @@ raw6 traind-next 0 run/raw6/plan-raw6-b16-windows.tsv run/raw6 raw6
 raw7 traind-next 0 run/raw7/plan-raw7-b16-windows.tsv run/raw7 raw7
 raw8 traind-next 0 run/raw8/plan-raw8-b16-windows.tsv run/raw8 raw8
 raw9 traind-next 0 run/raw9/plan-raw9-b16-windows.tsv run/raw9 raw9
+nr1 traind-next 0 run/nr1/plan-nr1-b16-windows.tsv run/nr1 nr1
+w3 traind-next 1000 run/w3/plan-w3-b16-windows.tsv run/w3 w3
+w4 traind-next 0 run/w4/plan-w4-b16-windows.tsv run/w4 w4
+nr2 traind-next 0 run/nr2/plan-nr2-b16-windows.tsv run/nr2 nr2
+nr3 traind-next 0 run/nr3/plan-nr3-b16-windows.tsv run/nr3 nr3
+nr4 traind-next 0 run/nr4/plan-nr4-b16-windows.tsv run/nr4 nr4
+nr5 traind-next 0 run/nr5/plan-nr5-b16-windows.tsv run/nr5 nr5
+nr6 traind-next 0 run/nr6/plan-nr6-b16-windows.tsv run/nr6 nr6
+ns1 traind-next 0 run/ns1/plan-ns1-b16-windows.tsv run/ns1 ns1
+ns2 traind-next 0 run/ns2/plan-ns2-b16-windows.tsv run/ns2 ns2
+ns3 traind-next 0 run/ns3/plan-ns3-b16-windows.tsv run/ns3 ns3
+ns4 traind-next 0 run/ns4/plan-ns4-b16-windows.tsv run/ns4 ns4
+nr7 traind-next 0 run/nr7/plan-nr7-b16-windows.tsv run/nr7 nr7
+nr8 traind-next 0 run/nr8/plan-nr8-b16-windows.tsv run/nr8 nr8
+nr9 traind-next 0 run/nr9/plan-nr9-b16-windows.tsv run/nr9 nr9
+# 2026-10-04 12:55: no more stages (the slice driver is stopped; the user: destroy once everything finishes).
+# A line with no plan ends the chain at once ("nothing to start from") instead of after WAIT (2 h).
+end
