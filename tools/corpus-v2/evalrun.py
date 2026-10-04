@@ -10,7 +10,7 @@
 #                                        change that maps the reference to the stored body
 #                                        maps ana's term), bend-check per language (Bend per
 #                                        source tree, BEND_SRC), then DIR/report.txt
-import sys, os, json, subprocess, time, glob, collections, concurrent.futures
+import sys, os, json, subprocess, time, glob, hashlib, collections, concurrent.futures
 G = "run/gcroot-bend-generate/bin/bend-generate"
 LANGS = ["haskell", "agda", "lean", "nix", "bend"]
 
@@ -45,11 +45,18 @@ def lift(ref, body, term):
     if ref.strip() == body.strip(): return body.replace(body.strip(), term.strip())
     return None
 
-def bend_src(uid):
-    cls, rest = uid.split(":", 1); repo = rest.split("/", 1)[0]
-    for root in sorted(glob.glob("run/code-sources*/")):
-        if os.path.isdir(os.path.join(root, cls, repo)): return os.path.join(root, cls)
-    return os.path.expanduser("~/src")
+# the class tree (BEND_SRC) whose copy of the unit's file holds the unit's body: a repository
+# can sit in several run/code-sources* trees, in different versions
+def bend_src(uid, body=""):
+    cls, rest = uid.split(":", 1); path = rest.split("#", 1)[0]
+    roots = [os.path.join(r, cls) for r in sorted(glob.glob("run/code-sources*/"))] + [os.path.expanduser("~/src")]
+    have = [r for r in roots if os.path.isfile(os.path.join(r, path))]
+    pick = have[0] if have else os.path.expanduser("~/src")
+    for r in have:
+        if body.strip() and body.strip() in open(os.path.join(r, path), encoding="utf-8", errors="replace").read(): pick = r; break
+    # a repository linked into a tree (refl -> ../../code-sources/own/refl): the checker copies the
+    # link, so the tree is where the repository really is
+    return os.path.dirname(os.path.realpath(os.path.join(pick, path.split("/", 1)[0])))
 
 def check(d):
     ps = json.load(open(f"{d}/results.json"))
@@ -62,18 +69,19 @@ def check(d):
         f = rec[p["id"]].split(b"\x1e"); body = f[7].decode("utf-8", "replace")
         t = lift(p["ref"], body, p["term"]); p["lifted"] = t is not None
         if t is None: continue
-        g = p["lang"] if p["lang"] != "bend" else "bend=" + bend_src(p["id"])
+        g = p["lang"] if p["lang"] != "bend" else "bend=" + bend_src(p["id"], body)
         # one unit a prompt: the id carries the prompt's number (a unit can be asked twice)
         groups[g].append((f"{p['id']}~{n}", b"\x1e".join(f[:7] + [t.encode()] + f[8:10] + [b""])))
     verdict = {}
     for g, us in groups.items():
         lang, _, src = g.partition("=")
-        name = lang if not src else "bend-" + str(abs(hash(src)) % 10**6)
+        name = lang if not src else "bend-" + hashlib.sha256(src.encode()).hexdigest()[:8]
         with open(f"{d}/ans.{name}.nul", "wb") as o:
             for i, u in us: o.write(i.encode() + b"\0" + u + b"\0")
         env = dict(os.environ, **({"BEND_SRC": src} if src else {}), KEEP_WORK="")
         subprocess.run(["nix", "run", ".#deploy", "--", "check", lang, f"{d}/ans.{name}.nul", f"{d}/r.{name}.nul", "4"],
                        env=env, stdout=open(f"{d}/log.{name}", "w"), stderr=subprocess.STDOUT, timeout=3600)
+        if not os.path.exists(f"{d}/r.{name}.nul"): continue   # the checker found no tree: those units fail
         x = open(f"{d}/r.{name}.nul", "rb").read().split(b"\0")
         for i in range(0, len(x) - 1, 2):
             verdict[x[i].decode("utf-8", "replace")] = x[i + 1].split(b"\x1e")[11].split(b"\x1f")[0].decode()

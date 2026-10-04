@@ -6,7 +6,10 @@
 #           format 1's version for run 1 (the ask alone, the mutant under `## Term`).
 # Up to N_DIRECT (40) direct and N_REPAIR (20) repair prompts a language (Nix: repair only,
 # 2 x N_REPAIR), one per unit, units in hash order. Each prompt carries the unit's id and
-# reference Term. Writes run/v2/evalset/prompts.json.
+# reference Term. Writes run/v2/evalset/prompts.json. The control (every reference answered,
+# `evalrun.py check` on it: 275/280 passed on 2026-10-04) then drops the prompts whose own
+# reference fails the harness (run/v2/evalset/dropped-by-control.txt: 5 Bend units whose file's
+# version is in no source tree).
 import sys, os, json, hashlib, collections
 LANGS = ["haskell", "agda", "lean", "nix", "bend"]
 nd = int(sys.argv[1]) if len(sys.argv) > 1 else 40
