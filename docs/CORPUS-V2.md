@@ -49,6 +49,28 @@ and on ana's answers to 10 held-out prompts × 5 checkpoints (`run/anatest-20261
    informative, not by itself raise pass@1. The evaluation, not the 10
    prompts, decides.
 
+10. **2026-10-04, nr7-step61000: 0/10.** It takes the right names from the
+    Context and the right outer structure (Lean: one rewrite too many; Bend:
+    the right helper, wrong arguments; Agda: both lemmas, applied instead of
+    paired), and still answers with mutant shapes, holes, clause loops and the
+    same invented Nix package for both Nix prompts.
+
+## Same data, presented to reduce the errors (the user, 2026-10-04)
+
+Run 2 trains on the units, files and raw code run 1 was fed; only how they
+are presented changes:
+
+| run 1's error | the presentation that answers it |
+|---|---|
+| a wrong first Term (mutant-shaped answers) | a mutant is only ever a given `## Attempt`; the Term is always the original (C1) |
+| holes as answers | the hole is a given Attempt with its goal (fill); the Term fills it (C1) |
+| its verdict predicts failure | after a Term the verdict is the original's; `verify` judges given attempts, half passing (C1) |
+| a direct ask read as a repair | each shape opens with its own User line, so after an ask and its Type comes the Term (C1) |
+| invented Nix packages | Nix is never asked from nothing: repair and verify only (C2) |
+| loops and memorised copies | no transcript twice: Bend's 4 identical copies become 4 different presentations; filler once (C4) |
+| drift in the raw phase | one mix of transcripts and raw code from step 0 (C5) |
+| a contaminated test | the repository holdout and the vault (C3) |
+
 ## Principles
 
 - **The assistant's turns are its best effort.** A wrong attempt the model
@@ -87,13 +109,30 @@ Term` is only ever the assistant's best answer.
   per shape, 5 transcripts per language read by eye; the share table
   measured on the rendered set; `nix flake check` with new goldens for
   Transcript.bend (the old ones change on purpose).
+- **Built 2026-10-04** (commit 79ca7e1): `TRANSCRIPT_FORMAT=2` in
+  `bend/Transcript.bend` (format 1 stays the default and re-renders w4's Bend
+  byte for byte). User lines: the ask (doc or `Define`/`Prove`), the ask then
+  "This attempt fails. Fix it." (repair), the ask then "Fill the hole."
+  (fill), "Does this check?" (verify). A unit gives COPIES presentations
+  (Bend 4, the rest 2), its first by the shares above, then the first it can
+  give and has not given of: direct, repair m, fill, term to type, repair m1,
+  its verify, the other verify, repair m2. `bend/tests/transcript.bend` (in
+  `bend-tests`): each shape's turns, the direct shape byte for byte, every
+  Term the original, distinct presentations, Nix never direct.
+  Rendered (`tools/corpus-v2/render.sh` from `pool.py`'s units, train):
+  Bend 300,759 transcripts from 80,748 units (263 MB), Haskell 115,698 from
+  57,858 (123 MB), Agda 67,512 from 33,770 (66 MB), Lean 65,644 from 32,856
+  (82 MB), Nix 25,016 from 12,572 (36 MB); no text twice. Measured on 600
+  units a language at COPIES 2: every unit gives a direct transcript and most
+  a repair; fill and verify 3–5% each; verify passes 41–54% (Nix 300/600).
 
 ### C2. Nix
 
 Drop the direct shape for Nix (whole files from nothing are unanswerable).
 Nix keeps repair, fill and verify (the attempt says what the file is) and
 stays in the raw stream. Later: units by top-level attribute with a User line
-from `meta.description`, pname and version.
+from `meta.description`, pname and version. Built: Nix has no holes, so its
+first presentation is repair 80, verify 20; its second the other.
 
 ### C3. Holdout by repository, one exclusion list (`run/v2/holdout/`)
 
@@ -140,6 +179,19 @@ from `meta.description`, pname and version.
 - Raw code: one pass per epoch; near-duplicates (MinHash, the clean stage's
   settings) across code-train-v3 and raw-new.
 - Report per language: tokens, distinct source files, exposures per file.
+- **Built 2026-10-04:** the units (`tools/corpus-v2/pool.py`): every unit
+  run 1's transcripts came from (final, next, w1–w4, train and holdout), its
+  record from whichever wave's results hold it, one per declaration (807 Bend
+  duplicates dropped), split by the repository holdout: train Haskell 57,858,
+  Agda 33,770, Lean 32,856, Nix 12,572, Bend 80,748; holdout 1,175, 332, 857,
+  398, 84 (Bend's code sits in few repositories). No identical transcript:
+  Bend's ×4 is four different presentations (above), not four copies. The
+  filler (`filler.py`): the waves' source files once (17,056 Agda and 47,222
+  Bend copies dropped), held-out files out. The raw code (`raw.py`):
+  code-train-v3 and every raw-new delivery (mix 1 and mix 2), each file once,
+  held-out and filler files out, the C6 filters, shuffled by id hash: Haskell
+  1.84 GB, Lean 1.24 GB, Agda 517 MB (Bend and Nix files are nearly all
+  filler already: 2.3 MB and 0.9 MB left).
 
 ### C5. One mix
 
