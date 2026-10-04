@@ -20,6 +20,8 @@ corpus v2-tr "$W/v2-tr.nul"
 for l in haskell agda lean; do
   python3 - "run/v2/vault/$l.jsonl" "$W/vault-$l.nul" <<'PY'
 import sys, json, hashlib, collections
+sys.path.insert(0, "tools/corpus-v2")
+from names import repo_of
 src, dst = sys.argv[1], sys.argv[2]
 xs = []
 for line in open(src, encoding="utf-8"):
@@ -27,7 +29,7 @@ for line in open(src, encoding="utf-8"):
 xs.sort(); per = collections.Counter(); n = 0
 with open(dst, "wb") as o:
     for _, i, t in xs:
-        r = i.split("/")[0]
+        r = repo_of(i)
         if per[r] >= 5 or len(t) > 100000: continue
         per[r] += 1; o.write(i.encode() + b"\0" + t.encode() + b"\0"); n += len(t)
         if n > 2_000_000: break
