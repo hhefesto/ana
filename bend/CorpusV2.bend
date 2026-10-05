@@ -8,6 +8,7 @@ import ./CorpusV2/Raw.bend as R
 import ./CorpusV2/Combine.bend as Cb
 import ./CorpusV2/Eval.bend as Ev
 import ./CorpusV2/Steps.bend as St
+import ./CorpusV2/Agent.bend as Ea
 
 # bend-corpus-v2: corpus v2's tools (docs/CORPUS-V2.md), one subcommand each,
 # ported from the Python they replaced, each byte-identical to it on the
@@ -120,7 +121,7 @@ def c2.code(+c: String) -> Nat:
   Bool.pick(Nat, String.eq(c, "credit"), 16n, Bool.pick(Nat, String.eq(c, "credit-ok"), 17n, Bool.pick(Nat, String.eq(c, "split-lang"), 18n,
   Bool.pick(Nat, String.eq(c, "nul-jsonl"), 19n, Bool.pick(Nat, String.eq(c, "per"), 20n, Bool.pick(Nat, String.eq(c, "specs-mixnew"), 21n,
   Bool.pick(Nat, String.eq(c, "specs-next"), 22n, Bool.pick(Nat, String.eq(c, "replay-filler"), 23n, Bool.pick(Nat, String.eq(c, "drop-repos"), 24n,
-  Bool.pick(Nat, String.eq(c, "insert-stage"), 25n, Bool.pick(Nat, String.eq(c, "vault-sample"), 26n, 0n))))))))))))))))))))))))))
+  Bool.pick(Nat, String.eq(c, "insert-stage"), 25n, Bool.pick(Nat, String.eq(c, "vault-sample"), 26n, Bool.pick(Nat, String.eq(c, "agent-tool"), 27n, Bool.pick(Nat, String.eq(c, "agent-eval"), 28n, 0n))))))))))))))))))))))))))))
 
 def c2.keys.cmd(xs: List<String>) -> IO(Unit):
   match xs:
@@ -183,6 +184,10 @@ def c2.run(k: Nat, +c: String, xs: List<String>) -> IO(Unit):
       St.st.insert.stage(xs)
     case 26n:
       St.st.vault.sample(xs)
+    case 27n:
+      Ea.ea.tool(xs)
+    case 28n:
+      Ea.ea.eval(xs)
     case _:
       c2.usage()
 

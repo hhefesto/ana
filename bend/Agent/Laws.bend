@@ -4,6 +4,7 @@ import ../Tokenizer.bend as Tk
 import ../Sys.bend as S
 import ./Spec.bend as A
 import ../Mask.bend as Ms
+import ../Transcript.bend as Tr
 
 # bend-agent-laws TOKENIZER TRANSCRIPTS.nul: Agent/Spec.bend's laws on every
 # transcript of a NUL file (`id\0text\0` pairs, ids ending in /SHAPE), and
@@ -16,6 +17,12 @@ import ../Mask.bend as Ms
 #              and verify, none for direct and term-to-type; the User first
 #   tokens     the tokens read back to the same tokens, as a transcript
 #   agree      each token's role is the role of every one of its bytes
+#
+#
+#   bend-agent-laws echo TOKENIZER RESULTS.nul: each checked unit's every check (the
+#   original's, the hole's, the type's, each kept mutant's), the tool's turn
+#   as Transcript.bend's `checker` renders it, against `## TOOL\n` then
+#   Spec's `ag.echo`: the echo the loop's tools write is the trained layout.
 #
 # A failing transcript prints `FAIL ID: LAWS`; the last line counts them.
 # SHARD and SHARDS (environment, 0 and 1) check the documents whose index is
@@ -102,6 +109,37 @@ def la.doc(+b: Tk.Bpe, +ids: Ms.Ids, +id: List<&2, U32>, +text: List<&2, U32>) -
         la.if(tok, "tokens",
           la.if(agree, "agree", Nil{})))))
 
+# the echo law on one checked unit: its fields 11, 13, 14 (when there) and
+# 16, 18, ... (each kept mutant's check)
+def la.checks(fs: List<&2, List<&2, U32>>, +i: Nat) -> List<&2, List<&2, U32>>:
+  match fs:
+    case Nil{}:
+      Nil{}
+    case +f <> t:
+      +keep = Bool.or(Nat.is_eq(i, 11n), Bool.or(Bool.and(Bool.or(Nat.is_eq(i, 13n), Nat.is_eq(i, 14n)), Bool.not(Nat.is_eq(List.length(&2, U32, f), 0n))),
+        Bool.and(Nat.is_lt(15n, i), Nat.is_eq(Nat.mod(i, 2n), 0n))))
+      +rest = la.checks(t, 1n+i)
+      Bool.pick(List<&2, List<&2, U32>>, keep, f <> rest, rest)
+
+def la.echo.ok(cs: List<&2, List<&2, U32>>, +tool: List<&2, U32>) -> Bool:
+  match cs:
+    case Nil{}:
+      True{}
+    case +c <> t:
+      Bool.and(A.ag.eq(Tr.checker(tool, c), List.concat(&2, U32, [A.ag.ascii("## "), tool, [10], A.ag.echo(c)])), la.echo.ok(t, tool))
+
+def la.echo.doc(+rec: List<&2, U32>) -> List<&2, String>:
+  +fs = S.split(rec, 30)
+  la.if(la.echo.ok(la.checks(fs, 0n), Tr.tool(Tr.field(fs, 0n))), "echo", Nil{})
+
+# the laws a document fails under a mode (0 transcripts, 1 checked units)
+def la.fails(+mode: Nat, +b: Tk.Bpe, +ids: Ms.Ids, +id: List<&2, U32>, +text: List<&2, U32>) -> List<&2, String>:
+  match mode:
+    case 0n:
+      la.doc(b, ids, id, text)
+    case _:
+      la.echo.doc(text)
+
 def la.names(xs: List<&2, String>) -> String:
   match xs:
     case Nil{}:
@@ -128,25 +166,25 @@ def la.bad(fs: List<&2, String>) -> Nat:
 type Lw is Type:
   Lw{rd: S.Rd, i: Nat, n: Nat, bad: Nat, eof: Bool}
 
-def la.check(mine: Bool, +b: Tk.Bpe, +ids: Ms.Ids, rd: S.Rd, +i: Nat, +n: Nat, +bad: Nat, +id: List<&2, U32>, +text: List<&2, U32>) -> IO(Lw):
+def la.check(mine: Bool, +mode: Nat, +b: Tk.Bpe, +ids: Ms.Ids, rd: S.Rd, +i: Nat, +n: Nat, +bad: Nat, +id: List<&2, U32>, +text: List<&2, U32>) -> IO(Lw):
   match mine:
     case False{}:
       IO.pure(Lw, Lw{rd, 1n+i, n, bad, False{}})
     case True{}:
-      +fs = la.doc(b, ids, id, text)
+      +fs = la.fails(mode, b, ids, id, text)
       do IO<Lw>:
         la.report(id, fs)
         return Lw{rd, 1n+i, 1n+n, Nat.add(bad, la.bad(fs)), False{}}
 
-def la.text(+b: Tk.Bpe, +ids: Ms.Ids, +sh: Nat, +shs: Nat, +i: Nat, +n: Nat, +bad: Nat, +id: List<&2, U32>, r: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(Lw):
+def la.text(+mode: Nat, +b: Tk.Bpe, +ids: Ms.Ids, +sh: Nat, +shs: Nat, +i: Nat, +n: Nat, +bad: Nat, +id: List<&2, U32>, r: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(Lw):
   (rd, m) = r
   match m:
     case None{}:
       IO.die(Lw, 1, "agent-laws: an id without its text")
     case Some{+t}:
-      la.check(Nat.is_eq(Nat.mod(i, shs), sh), b, ids, rd, i, n, bad, id, t)
+      la.check(Nat.is_eq(Nat.mod(i, shs), sh), mode, b, ids, rd, i, n, bad, id, t)
 
-def la.id(+b: Tk.Bpe, +ids: Ms.Ids, +sh: Nat, +shs: Nat, +i: Nat, +n: Nat, +bad: Nat, r: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(Lw):
+def la.id(+mode: Nat, +b: Tk.Bpe, +ids: Ms.Ids, +sh: Nat, +shs: Nat, +i: Nat, +n: Nat, +bad: Nat, r: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(Lw):
   (rd, m) = r
   match m:
     case None{}:
@@ -154,19 +192,19 @@ def la.id(+b: Tk.Bpe, +ids: Ms.Ids, +sh: Nat, +shs: Nat, +i: Nat, +n: Nat, +bad:
     case Some{+id}:
       do IO<Lw>:
         r2 : S.Rd & Maybe<&2, List<&2, U32>> <- S.Rd.next(rd)
-        la.text(b, ids, sh, shs, i, n, bad, id, r2)
+        la.text(mode, b, ids, sh, shs, i, n, bad, id, r2)
 
-def la.step(+b: Tk.Bpe, +ids: Ms.Ids, +sh: Nat, +shs: Nat, s: Lw) -> IO(Lw):
+def la.step(+mode: Nat, +b: Tk.Bpe, +ids: Ms.Ids, +sh: Nat, +shs: Nat, s: Lw) -> IO(Lw):
   match s:
     case Lw{rd, i, n, bad, e}:
       do IO<Lw>:
         r : S.Rd & Maybe<&2, List<&2, U32>> <- S.Rd.next(rd)
-        la.id(b, ids, sh, shs, i, n, bad, r)
+        la.id(mode, b, ids, sh, shs, i, n, bad, r)
 
-def la.go(fuel: Nat, +b: Tk.Bpe, +ids: Ms.Ids, +sh: Nat, +shs: Nat, s: Lw) -> IO(Lw):
+def la.go(fuel: Nat, +mode: Nat, +b: Tk.Bpe, +ids: Ms.Ids, +sh: Nat, +shs: Nat, s: Lw) -> IO(Lw):
   match fuel s:
     case 1n+p Lw{rd, i, n, bad, False{}}:
-      IO.bind(Lw, Lw, la.step(b, ids, sh, shs, Lw{rd, i, n, bad, False{}}), la.go(p, b, ids, sh, shs))
+      IO.bind(Lw, Lw, la.step(mode, b, ids, sh, shs, Lw{rd, i, n, bad, False{}}), la.go(p, mode, b, ids, sh, shs))
     case _ Lw{rd, i, n, bad, e}:
       IO.pure(Lw, Lw{rd, i, n, bad, e})
 
@@ -185,14 +223,14 @@ def la.need(ok: Bool, +why: String) -> IO(Unit):
     case False{}:
       IO.die(Unit, 1, why)
 
-def la.start(+path: String, +b: Tk.Bpe, +sh: Nat, +shs: Nat) -> IO(Unit):
+def la.start(+mode: Nat, +path: String, +b: Tk.Bpe, +sh: Nat, +shs: Nat) -> IO(Unit):
   do IO<Unit>:
     u : Unit <- la.need(Ms.ms.ids.ok(b), "agent-laws: the tokenizer's newline is not one token")
     rd : S.Rd <- S.Rd.open(path)
-    s : Lw <- la.go(U32.to_nat(4294967295), b, Ms.ms.ids(b), sh, shs, Lw{rd, 0n, 0n, 0n, False{}})
+    s : Lw <- la.go(U32.to_nat(4294967295), mode, b, Ms.ms.ids(b), sh, shs, Lw{rd, 0n, 0n, 0n, False{}})
     la.done(path, sh, shs, s)
 
-def la.run(+path: String, m: Maybe<&2, Tk.Bpe>) -> IO(Unit):
+def la.run(+mode: Nat, +path: String, m: Maybe<&2, Tk.Bpe>) -> IO(Unit):
   match m:
     case None{}:
       IO.die(Unit, 1, "agent-laws: the tokenizer did not parse")
@@ -200,16 +238,20 @@ def la.run(+path: String, m: Maybe<&2, Tk.Bpe>) -> IO(Unit):
       do IO<Unit>:
         +sh : Nat <- S.env.nat("SHARD", 0n)
         +shs : Nat <- S.env.nat("SHARDS", 1n)
-        la.start(path, b, sh, Nat.max(shs, 1n))
+        la.start(mode, path, b, sh, Nat.max(shs, 1n))
 
 def la.args(xs: List<String>) -> IO(Unit):
   match xs:
+    case "echo" <> tok <> path <> Nil{}:
+      do IO<Unit>:
+        tx : List<&2, U32> <- B.Bytes.read_all(tok)
+        la.run(1n, path, Tk.Bpe.parse(tx))
     case tok <> path <> Nil{}:
       do IO<Unit>:
         tx : List<&2, U32> <- B.Bytes.read_all(tok)
-        la.run(path, Tk.Bpe.parse(tx))
+        la.run(0n, path, Tk.Bpe.parse(tx))
     case _:
-      IO.die(Unit, 2, "usage: bend-agent-laws TOKENIZER TRANSCRIPTS.nul")
+      IO.die(Unit, 2, "usage: bend-agent-laws [echo] TOKENIZER FILE.nul")
 
 def main() -> IO(Unit):
   do IO<Unit>:

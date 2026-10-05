@@ -1,6 +1,5 @@
 import Base
 import ../Sys.bend as S
-import ../Transcript.bend as Tr
 import ./Spec.bend as A
 
 # bend-agent-tool: the tools ana's loop calls (bend/Agent/Loop.bend).
@@ -20,37 +19,11 @@ import ./Spec.bend as A
 #   nix   nix-instantiate --eval --strict (NIX_PATH empty)
 #
 # Standard output is the echo: the rest of the tool's turn after its
-# heading line, rendered by Transcript.bend's own `checker` (40 lines, then
-# `[N more lines]`, then `[exit N]`), so ana reads the tool in the layout it
-# was trained on.  The exit status is 0 when the check passed, 1 when it
+# heading line, rendered by Agent/Spec.bend's `ag.echo` (40 lines, then
+# `[N more lines]`, then `[exit N]`), which bend-agent-laws holds to
+# Transcript.bend's `checker` on every check of the corpus: ana reads the
+# tool in the layout it was trained on.  The exit status is 0 when the check passed, 1 when it
 # failed, 2 when the tool could not run.
-
-def at.fence.open(+l: List<&2, U32>) -> Bool:
-  A.ag.prefix(l, [96, 96, 96])
-
-def at.fence.close(+l: List<&2, U32>) -> Bool:
-  Bool.or(A.ag.eq(l, [96, 96, 96, 10]), A.ag.eq(l, [96, 96, 96]))
-
-# the lines inside a turn's first fence (to its closing fence or the end)
-def at.inside(ls: List<&2, List<&2, U32>>, in: Bool, +acc: List<&2, List<&2, U32>>) -> List<&2, U32>:
-  match ls in:
-    case Nil{} _:
-      List.concat(&2, U32, List.reverse(&2, List<&2, U32>, acc))
-    case +l <> t False{}:
-      at.inside(t, at.fence.open(l), acc)
-    case +l <> t True{}:
-      Bool.pick(List<&2, U32>, at.fence.close(l), List.concat(&2, U32, List.reverse(&2, List<&2, U32>, acc)), at.inside(t, True{}, l <> acc))
-
-def at.code(+x: List<&2, U32>) -> List<&2, U32>:
-  at.inside(A.ag.lines(10, x), False{}, Nil{})
-
-# the text of the last turn of role `code` whose text opens with `head`
-def at.last(e: List<&2, A.Turn>, +code: Nat, +head: List<&2, U32>, +best: List<&2, U32>) -> List<&2, U32>:
-  match e:
-    case Nil{}:
-      best
-    case A.Turn{+r, +x} <> t:
-      at.last(t, code, head, Bool.pick(List<&2, U32>, Bool.and(Nat.is_eq(A.ag.role.code(r), code), A.ag.prefix(x, head)), x, best))
 
 def at.nl(+xs: List<&2, U32>) -> List<&2, U32>:
   Bool.pick(List<&2, U32>, Nat.is_eq(List.length(&2, U32, xs), 0n), Nil{}, List.append(&2, U32, xs, [10]))
@@ -58,8 +31,8 @@ def at.nl(+xs: List<&2, U32>) -> List<&2, U32>:
 # the file: the given Type's code, then the answer's (a Lean answer to a
 # Type is its proof: `:=` between them, unless the answer opens with it)
 def at.file(+tool: String, +e: List<&2, A.Turn>) -> List<&2, U32>:
-  +ty = at.code(at.last(e, 1n, A.ag.ascii("## Type\n"), Nil{}))
-  +te = at.code(at.last(e, 3n, Nil{}, Nil{}))
+  +ty = A.ag.type.code(e)
+  +te = A.ag.answer.code(e)
   +lean = Bool.and(String.eq(tool, "lean"), Bool.not(Nat.is_eq(List.length(&2, U32, ty), 0n)))
   +join = Bool.pick(List<&2, U32>, Bool.and(lean, Bool.not(A.ag.prefix(te, A.ag.ascii(":=")))), A.ag.ascii(" :=\n"), [10])
   +hs = Bool.pick(List<&2, U32>, String.eq(tool, "ghc"), A.ag.ascii("module Unit where\n\n"), Nil{})
@@ -86,8 +59,7 @@ def at.env(+tool: String, +lp: String) -> List<String>:
 
 # the echo: the checker's turn after its heading line
 def at.echo(+tool: String, +dir: String, +o: S.Out) -> List<&2, U32>:
-  +check = List.append(&2, U32, S.b(U32.show(S.Out.status(o))), 31 <> S.clean(dir, 100n, S.Out.text(o)))
-  List.drop(&2, U32, Tr.checker(S.b(tool), check), Nat.add(4n, String.length(tool)))
+  A.ag.echo(List.append(&2, U32, S.b(U32.show(S.Out.status(o))), 31 <> S.clean(dir, 100n, S.Out.text(o))))
 
 # exit 0 when the check passed; else 1 (IO.die flushes the echo first)
 def at.done(ok: Bool, +tool: String, +st: U32) -> IO(Unit):

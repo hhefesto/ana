@@ -365,3 +365,144 @@ def ag.count(e: List<&2, Turn>, +code: Nat) -> Nat:
       0n
     case Turn{r, x} <> t:
       Nat.add(Bool.pick(Nat, Nat.is_eq(ag.role.code(r), code), 1n, 0n), ag.count(t, code))
+
+# The echo -------------------------------------------------------------------
+#
+# A tool's turn as the transcripts render it (Transcript.bend `checker`):
+# `## TOOL`, an empty line, then a fence holding the output (leading
+# newlines, or else a first line's leading blanks, and all trailing
+# whitespace trimmed; at most 40 lines, then `[N more lines]`) and the exit
+# line `[exit STATUS]` (none for an interactive session's `-`).  The call is
+# the heading line; the echo is the rest: `ag.echo`.  A check is STATUS,
+# the byte 0x1F, then the output.  bend-agent-laws holds `ag.echo` to
+# Transcript.bend's `checker` on every check of the corpus.
+
+def ag.is.blank(+c: U32) -> Bool:
+  Bool.or(Bool.or(U32.is_eq(c, 32), U32.is_eq(c, 9)), Bool.or(U32.is_eq(c, 10), U32.is_eq(c, 13)))
+
+def ag.head.blank(+xs: List<&2, U32>) -> Bool:
+  match xs:
+    case h <> t:
+      ag.is.blank(h)
+    case Nil{}:
+      False{}
+
+# whether the head is to drop: a newline (nl), else a blank that is not one
+def ag.drop.head(+xs: List<&2, U32>, +nl: Bool) -> Bool:
+  match xs:
+    case h <> t:
+      Bool.pick(Bool, nl, U32.is_eq(h, 10), Bool.and(ag.is.blank(h), Bool.not(U32.is_eq(h, 10))))
+    case Nil{}:
+      False{}
+
+def ag.drop.go(+xs: List<&2, U32>, +nl: Bool, go: Bool) -> List<&2, U32>:
+  match xs go:
+    case h <> +t True{}:
+      ag.drop.go(t, nl, ag.drop.head(t, nl))
+    case _ _:
+      xs
+
+# leading newlines, or else the first line's leading blanks
+def ag.lead.trim(+xs: List<&2, U32>) -> List<&2, U32>:
+  +nl = ag.head.is(xs, 10)
+  ag.drop.go(xs, nl, ag.drop.head(xs, nl))
+
+def ag.drop.blank(+xs: List<&2, U32>, go: Bool) -> List<&2, U32>:
+  match xs go:
+    case h <> +t True{}:
+      ag.drop.blank(t, ag.head.blank(t))
+    case _ _:
+      xs
+
+def ag.trim.right(+xs: List<&2, U32>) -> List<&2, U32>:
+  +r = List.reverse(&2, U32, xs)
+  List.reverse(&2, U32, ag.drop.blank(r, ag.head.blank(r)))
+
+def ag.tidy(+xs: List<&2, U32>) -> List<&2, U32>:
+  ag.trim.right(ag.lead.trim(xs))
+
+# at most 40 lines, then a line for the rest
+def ag.capped(+out: List<&2, U32>) -> List<&2, U32>:
+  +ls = ag.lines(10, ag.tidy(out))
+  +n = List.length(&2, List<&2, U32>, ls)
+  +more = Bool.pick(List<&2, U32>, Nat.is_le(n, 40n), Nil{}, ag.ascii("\n[" ++ Nat.show(Nat.sub(n, 40n)) ++ " more lines]"))
+  List.append(&2, U32, ag.trim.right(List.concat(&2, U32, List.take(&2, List<&2, U32>, ls, 40n))), more)
+
+# a check's status (before its first 0x1F) and output (after it)
+def ag.before.us(+xs: List<&2, U32>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case h <> t:
+      Bool.pick(List<&2, U32>, U32.is_eq(h, 31), Nil{}, h <> ag.before.us(t))
+
+def ag.after.us(+xs: List<&2, U32>) -> List<&2, U32>:
+  List.drop(&2, U32, xs, Nat.add(List.length(&2, U32, ag.before.us(xs)), 1n))
+
+# the echo of a check: the tool's turn after its heading line
+def ag.echo(+c: List<&2, U32>) -> List<&2, U32>:
+  +st = ag.before.us(c)
+  +o = ag.capped(ag.after.us(c))
+  +body = Bool.pick(List<&2, U32>, Nat.is_eq(List.length(&2, U32, o), 0n), Nil{}, List.append(&2, U32, o, [10]))
+  +ex = Bool.pick(List<&2, U32>, ag.eq(st, [45]), Nil{}, List.append(&2, U32, ag.ascii("[exit "), List.append(&2, U32, st, [93, 10])))
+  List.concat(&2, U32, [[10, 96, 96, 96, 10], body, ex, [96, 96, 96, 10, 10]])
+
+# The answer's code --------------------------------------------------------------
+#
+# What a tool checks: the code inside the fence of the episode's answer (its
+# act turn), and of its given Type when there is one: each turn's first
+# fence, up to its closing fence (or the turn's end, when ana never closed
+# it), every line with its newline.
+
+def ag.fence.open(+l: List<&2, U32>) -> Bool:
+  ag.prefix(l, [96, 96, 96])
+
+def ag.fence.close(+l: List<&2, U32>) -> Bool:
+  Bool.or(ag.eq(l, [96, 96, 96, 10]), ag.eq(l, [96, 96, 96]))
+
+def ag.inside(ls: List<&2, List<&2, U32>>, in: Bool, +acc: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  match ls in:
+    case Nil{} _:
+      List.concat(&2, U32, List.reverse(&2, List<&2, U32>, acc))
+    case +l <> t False{}:
+      ag.inside(t, ag.fence.open(l), acc)
+    case +l <> t True{}:
+      Bool.pick(List<&2, U32>, ag.fence.close(l), List.concat(&2, U32, List.reverse(&2, List<&2, U32>, acc)), ag.inside(t, True{}, l <> acc))
+
+# a turn's fenced code
+def ag.code(+x: List<&2, U32>) -> List<&2, U32>:
+  ag.inside(ag.lines(10, x), False{}, Nil{})
+
+# the text of the last turn of role `code` whose text opens with `head`
+def ag.last.turn(e: List<&2, Turn>, +code: Nat, +head: List<&2, U32>, +best: List<&2, U32>) -> List<&2, U32>:
+  match e:
+    case Nil{}:
+      best
+    case Turn{+r, +x} <> t:
+      ag.last.turn(t, code, head, Bool.pick(List<&2, U32>, Bool.and(Nat.is_eq(ag.role.code(r), code), ag.prefix(x, head)), x, best))
+
+def ag.answer.code(+e: List<&2, Turn>) -> List<&2, U32>:
+  ag.code(ag.last.turn(e, 3n, Nil{}, Nil{}))
+
+def ag.type.code(+e: List<&2, Turn>) -> List<&2, U32>:
+  ag.code(ag.last.turn(e, 1n, ag.ascii("## Type\n"), Nil{}))
+
+# The episode's outcome, read from its text: solved when its last turn is an
+# echo whose exit line is `[exit 0]`; its calls, the call turns answered.
+def ag.ends.with(+xs: List<&2, U32>, +p: List<&2, U32>) -> Bool:
+  ag.prefix(List.reverse(&2, U32, xs), List.reverse(&2, U32, p))
+
+def ag.last.of(e: List<&2, Turn>, +best: Turn) -> Turn:
+  match e:
+    case Nil{}:
+      best
+    case +x <> t:
+      ag.last.of(t, x)
+
+def ag.passed(+t: Turn) -> Bool:
+  match t:
+    case Turn{+r, +x}:
+      Bool.and(Nat.is_eq(ag.role.code(r), 5n), ag.ends.with(x, ag.ascii("[exit 0]\n```\n\n")))
+
+def ag.solved(+e: List<&2, Turn>) -> Bool:
+  ag.passed(ag.last.of(e, Turn{RoUser{}, Nil{}}))

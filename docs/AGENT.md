@@ -128,8 +128,10 @@ Type's code and the act's code in one file `Unit.<ext>` (Haskell under
 (ghc -fno-code -w from run/check-cache/ghc-harness; lean; agda; bend
 --check-only; nix-instantiate --eval --strict), and prints the echo with
 `Transcript.bend`'s own `checker` (40 lines, `[N more lines]`, `[exit N]`): the
-layout ana was trained on, by construction. Standalone: a unit whose code
-needs its repository's context fails on scope. The faithful tool for the
+layout ana was trained on. The layout is Spec's `ag.echo`, which
+`bend-agent-laws echo` holds to Transcript.bend's `checker` on every check of
+every checked unit (the original's, the hole's, the type's, each mutant's).
+Standalone: a unit whose code needs its repository's context fails on scope. The faithful tool for the
 evaluation prompts is the unit's own checker (`bend-check`), with ana's term
 as the unit's mutant: the way every training echo after an `## Attempt` was
 made (next).
@@ -142,11 +144,15 @@ errors, not to read them.
 
 ## Next
 
-1. **The unit tool and E5.** `bend-corpus-v2 tool`: the eval prompt's unit with
-   ana's term lifted (Eval.bend `ev.lift`) as its one mutant, through
-   `bend-check LANG`; a kept mutant is a failure with its check, none kept is a
-   pass. E5 = solved within k calls on `prompts-both.nul` (99), then all 275,
-   beside E1's one-shot.
+1. **E5 on the held-out units (built 2026-10-05, bend/CorpusV2/Agent.bend).**
+   `bend-corpus-v2 agent-tool TASK TOOL`: the unit with ana's term lifted
+   (`ev.lift`) as its one mutant, through `bend-check LANG`; a kept mutant is a
+   failure with its check, none kept a pass (the unit's own verdict). Tested on
+   a held-out amazonka unit: its reference passes (`[2 of 2] Compiling Unit`,
+   `[exit 0]`), a broken name fails with GHC's own error in the unit's real
+   module. `bend-corpus-v2 agent-eval CKPT DIR FORMAT [K]` runs `ana --agent`
+   on every EVALSET prompt and reports solved within 1..AGENT_CALLS calls
+   (the outcome read from the episode's text, Spec `ag.solved`).
 2. **The repair view.** Format 2's repair shape relabels a failed Term as
    `## Attempt` (and the User line says "This attempt fails. Fix it."); for a
    format-2 checkpoint the loop should rebuild that view after a failure.
