@@ -26,7 +26,9 @@ import ../Agent/Spec.bend as A
 #       repairs with prompt1, as `gen`) as an episode: `ana --agent`
 #       (run/gcroot-bend-generate-agent's bend-generate, --threads THREADS
 #       (5)) with CKPT, TEMPERATURE=0, TOKENS (160) a stretch, AGENT_CALLS (4)
-#       and agent-tool on the prompt's task, PROCS (3) at a time; K: only
+#       and agent-tool on the prompt's task (run as AGENT_DEPLOY, default
+#       `nix run .#deploy --`, then `corpus-v2 agent-tool TASK`: a built
+#       deploy pins the tools for a long run), PROCS (3) at a time; K: only
 #       the first K prompts of each language and shape.  The outcome is read
 #       from the episode's text (Spec `ag.solved`: its last turn an echo
 #       ending `[exit 0]`; its calls, the echoes).  Writes DIR/task.N.nul and
@@ -146,7 +148,7 @@ def ea.units(qs: List<&2, Ev.EvQ>) -> List<&2, String>:
       S.str(u) <> ea.units(more)
 
 def ea.prep.one(+i: Nat, +fmt1: Bool, +dir: String, +recs: List<&2, Ev.EvKv>, +roots: List<&2, String>, +home: String,
-                +env0: List<&2, String>, +threads: String, q: Ev.EvQ) -> IO(C.CbJob):
+                +env0: List<&2, String>, +threads: String, +dep: String, q: Ev.EvQ) -> IO(C.CbJob):
   match q:
     case Ev.EvQ{id, +l, +u, s, +p, +p1, +r}:
       +asked = Bool.pick(List<&2, U32>, Bool.and(fmt1, Nat.is_lt(0n, S.len(p1))), p1, p)
@@ -157,18 +159,18 @@ def ea.prep.one(+i: Nat, +fmt1: Bool, +dir: String, +recs: List<&2, Ev.EvKv>, +r
         +src : String <- Ev.ev.src.if(S.eq(l, S.b("bend")), roots, home, u, Ev.ev.nth(Ev.ev.split(rec, 30), 7n))
         S.write(task, ea.task.bytes(u, l, src, r, rec))
         S.write(pf, asked)
-        return C.CbJob{i, List.append(&2, String, env0, {["AGENT_TOOL=nix run .#deploy -- corpus-v2 agent-tool " ++ task] : List<&2, String>}), ea.bin(),
+        return C.CbJob{i, List.append(&2, String, env0, {["AGENT_TOOL=" ++ dep ++ " corpus-v2 agent-tool " ++ task] : List<&2, String>}), ea.bin(),
           {["--threads", threads, "--agent", "--prompt-file", pf] : List<&2, String>}}
 
 def ea.prep(qs: List<&2, Ev.EvQ>, +i: Nat, +fmt1: Bool, +dir: String, +recs: List<&2, Ev.EvKv>, +roots: List<&2, String>, +home: String,
-            +env0: List<&2, String>, +threads: String, acc: List<&2, C.CbJob>) -> IO(List<&2, C.CbJob>):
+            +env0: List<&2, String>, +threads: String, +dep: String, acc: List<&2, C.CbJob>) -> IO(List<&2, C.CbJob>):
   match qs:
     case Nil{}:
       IO.pure(List<&2, C.CbJob>, List.reverse(&2, C.CbJob, acc))
     case +q <> more:
       do IO<List<&2, C.CbJob>>:
-        j : C.CbJob <- ea.prep.one(i, fmt1, dir, recs, roots, home, env0, threads, q)
-        ea.prep(more, 1n+i, fmt1, dir, recs, roots, home, env0, threads, j <> acc)
+        j : C.CbJob <- ea.prep.one(i, fmt1, dir, recs, roots, home, env0, threads, dep, q)
+        ea.prep(more, 1n+i, fmt1, dir, recs, roots, home, env0, threads, dep, j <> acc)
 
 # an episode's outcome
 type EaR is Data:
@@ -288,12 +290,13 @@ def ea.eval.run(+ckpt: String, +dir: String, +fmt1: Bool, +k: Nat) -> IO(Unit):
     +calls : String <- S.env("AGENT_CALLS", "4")
     +threads : String <- S.env("THREADS", "5")
     +procs : Nat <- S.env.nat("PROCS", 3n)
+    +dep : String <- S.env("AGENT_DEPLOY", "nix run .#deploy --")
     S.mkdir(dir)
     S.write(dir ++ "/episodes.nul", Nil{})
     S.write(dir ++ "/agent.nul", Nil{})
     Ck.log("agent-eval: " ++ Nat.show(List.length(&2, Ev.EvQ, qs)) ++ " prompts of " ++ es ++ ", " ++ Nat.show(procs) ++ " at a time, " ++ calls ++ " calls, " ++ tokens ++ " tokens a stretch")
     +env0 : List<&2, String> = {["CKPT=" ++ ckpt, "TOKENS=" ++ tokens, "AGENT_CALLS=" ++ calls, "TEMPERATURE=0", "TOKENIZER_FILE=weights/code32k.bpe"] : List<&2, String>}
-    js : List<&2, C.CbJob> <- ea.prep(qs, 0n, fmt1, dir, List.reverse(&2, Ev.EvKv, recs), roots, C.cb.path(home, "src"), env0, threads, Nil{})
+    js : List<&2, C.CbJob> <- ea.prep(qs, 0n, fmt1, dir, List.reverse(&2, Ev.EvKv, recs), roots, C.cb.path(home, "src"), env0, threads, dep, Nil{})
     p : C.CbPool <- C.cb.pool.open(procs, js)
     ea.fin(List.length(&2, Ev.EvQ, qs), qs, dir, C.cb.nat(S.b(calls)), C.cb.pool.res(p))
 
