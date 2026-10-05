@@ -104,6 +104,47 @@ def report(+name: String, +c: C.Config, +cc: U32, +flat: List<&2, F32>, +ws: Lis
     IO.print(name ++ ": dense loss " ++ F32.show(DOut.loss(o)))
     IO.print(name ++ ": gradient " ++ Err.show(err.go(tgrad, DOut.grads(o), Err{0.0, 0.0})))
 
+# Weighted targets (bend/Mask.bend): a weight per prediction, zeros
+# included; the dense program's Σ loss·w / Σ w against the tree's
+# loss_grad.w with scale 1 / Σ w over the micro-batch.
+def wts(n: Nat, +i: Nat) -> List<&2, F32>:
+  match n:
+    case 0n:
+      Nil{}
+    case 1n+p:
+      Bool.pick(F32, Nat.is_eq(Nat.mod(Nat.add(i, Nat.div(i, 7n)), 3n), 0n), 0.0, 1.0) <> wts(p, 1n+i)
+
+def fsum(xs: List<&2, F32>) -> F32:
+  match xs:
+    case Nil{}:
+      0.0
+    case h <> t:
+      F32.add(h, fsum(t))
+
+def tree.grad.w(ws: List<&2, List<&2, U32>>, wt: List<&2, List<&2, F32>>, +dm: Md.Dims, +w: Md.Weights, +scale: F32) -> G.LossGrad:
+  match ws wt:
+    case +x <> rest +y <> wrest:
+      tree.add(G.loss_grad.w(dm, w, inputs(x), targets(x), y, scale), tree.grad.w(rest, wrest, dm, w, scale))
+    case _ _:
+      G.LossGrad{0.0, O.W.zero()}
+
+def dense.w(+ly: L.Lay, +m: L.Dm, +w: List<&2, F32>, +ws: List<&2, List<&2, U32>>, +wt: List<&2, List<&2, F32>>) -> DOut:
+  dense.back(ly, m, Io.get1(P.run(S.fwd(m, ly), Io.put.windows.w(ws, wt, Io.put(w, Array.new(F32, L.Lay.depth(ly), 0.0), 0),
+    L.Lay.tin(ly), L.Lay.ttg(ly), L.Lay.tw(ly), L.Dm.t(m))), L.Lay.lmean(ly)))
+
+def masked(+c: C.Config, +cc: U32, +ws: List<&2, List<&2, U32>>) -> IO(Unit):
+  +dm = Md.Dims.of(c)
+  +w = I.init(c)
+  +wt = {[wts(63n, 0n), wts(63n, 5n)] : List<&2, List<&2, F32>>}
+  +scale = F32.div(1.0, F32.add(fsum(wts(63n, 0n)), fsum(wts(63n, 5n))))
+  +tg = tree.grad.w(ws, wt, dm, w, scale)
+  +m = L.Dm.of.cc(c, 2n, cc)
+  +ly = L.Lay.of(c, m)
+  +o = dense.w(ly, m, K.Weights.flat(w), ws, wt)
+  do IO<Unit>:
+    IO.print("masked tree loss " ++ F32.show(LG.loss(tg)) ++ ", dense loss " ++ F32.show(DOut.loss(o)))
+    IO.print("masked: gradient " ++ Err.show(err.go(K.Weights.flat(LG.w(tg)), DOut.grads(o), Err{0.0, 0.0})))
+
 # small4: sigmoid gates, softmax without qk-norm or sinks
 def plain(+ws: List<&2, List<&2, U32>>) -> IO(Unit):
   +c = {C.Config{U32.to_nat(258), 64n, 64n, U32.to_nat(192), 4n, 4n, False{}, False{}, False{}, True{}} : C.Config}
@@ -127,4 +168,5 @@ def main() -> IO(Unit):
     IO.print("tree loss  " ++ F32.show(tl))
     report("chunk 64 (one per window)", c, 64, flat, ws, tgrad)
     report("chunk 16 (four per window)", c, 16, flat, ws, tgrad)
+    masked(c, 16, ws)
     plain(ws)

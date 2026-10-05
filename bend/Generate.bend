@@ -8,6 +8,8 @@ import ./Model.bend as Md
 import ./Sample.bend as S
 import ./Tensor.bend as T
 import ./Tokenizer.bend as Tk
+import ./Decode.bend as D
+import ./Agent/Loop.bend as L
 
 # generate (the `ana` app): master's `formal-transformer-* generate CKPT
 # PROMPT N`, with the same environment (TEMPERATURE, TOP_K, TOP_P,
@@ -19,354 +21,107 @@ import ./Tokenizer.bend as Tk
 # The prompt is BOS then its encoding, fed one token at a time through the
 # incremental decoder (the cache-run law executed); every sampled token is
 # fed back until EOS or the budget.  Output streams as it is decoded.
-# Environment ------------------------------------------------------------
-def env.or(r: Result<&1, &1, U32 & String, String>, d: String) -> String:
-  match r:
-    case Done{v}:
-      v
-    case Fail{e}:
-      d
 
-def env(name: String, d: String) -> IO(String):
-  do IO<String>:
-    r : Result<&1, &1, U32 & String, String> <- IO.get_env(name)
-    return env.or(r, d)
-
-def f32.or(m: Maybe<&2, F32>, d: F32) -> F32:
-  Maybe.default(&2, F32, m, d)
-
-def nat.or(m: Maybe<&2, U32>, d: Nat) -> Nat:
-  match m:
-    case Some{x}:
-      U32.to_nat(x)
-    case None{}:
-      d
-
-# Tokenizer discovery ----------------------------------------------------
-#
-# The checkpoint names its tokenizer by identity (a digest over the merge
-# list), so the artifact is found, never assumed: TOKENIZER_FILE if set,
-# else the first candidate whose identity matches.  Bend has no directory
-# listing, so the candidates are the artifacts this repository ships.
-
-def candidates() -> List<&2, String>:
-  ["weights/enwiki-fineweb-32k.bpe", "run/enwiki-fineweb-32k.bpe",
-   "weights/code32k.bpe", "run/code32k.bpe", "run/enwiki-c4-32k.bpe"]
-
-def open.try(r: Result<&1, &1, U32 & String, File>) -> IO(List<&2, U32>):
-  match r:
-    case Fail{e}:
-      IO.pure(List<&2, U32>, Nil{})
-    case Done{f}:
-      do IO<List<&2, U32>>:
-        fr : B.Chunk() <- File.read_bytes(f, 268435456)
-        B.Bytes.all.fin(fr)
-
-# a file's bytes, or nothing if it cannot be opened
-def read.maybe(path: String) -> IO(List<&2, U32>):
-  do IO<List<&2, U32>>:
-    r : Result<&1, &1, U32 & String, File> <- File.open(path, "r")
-    open.try(r)
-
-def tok.check.if(ok: Bool, +path: String, +b: Tk.Bpe) -> Maybe<&2, Tk.Bpe>:
-  match ok:
-    case True{}:
-      Some{b}
-    case False{}:
-      None{}
-
-def tok.check(+want: String, +path: String, m: Maybe<&2, Tk.Bpe>) -> Maybe<&2, Tk.Bpe>:
-  match m:
-    case Some{+b}:
-      tok.check.if(String.eq(Tk.Bpe.identity(b), want), path, b)
-    case None{}:
-      None{}
-
-def first.some(a: Maybe<&2, Tk.Bpe>, b: Maybe<&2, Tk.Bpe>) -> Maybe<&2, Tk.Bpe>:
-  match a:
-    case Some{x}:
-      Some{x}
-    case None{}:
-      b
-
-# candidates are read in order until one matches (the flag carries the
-# answer, so the recursion stops reading once it has one)
-def tok.search(cs: List<&2, String>, +want: String, found: Maybe<&2, Tk.Bpe>) -> IO(Maybe<&2, Tk.Bpe>):
-  match cs found:
-    case _ Some{b}:
-      IO.pure(Maybe<&2, Tk.Bpe>, Some{b})
-    case +p <> t None{}:
-      do IO<Maybe<&2, Tk.Bpe>>:
-        xs : List<&2, U32> <- read.maybe(p)
-        tok.search(t, want, tok.check(want, p, Tk.Bpe.parse(xs)))
-    case Nil{} None{}:
-      IO.pure(Maybe<&2, Tk.Bpe>, None{})
-
-def tok.found(m: Maybe<&2, Tk.Bpe>, +want: String) -> IO(Tk.Bpe):
-  match m:
-    case Some{b}:
-      IO.pure(Tk.Bpe, b)
-    case None{}:
-      IO.die(Tk.Bpe, 1, "checkpoint uses BPE and no candidate tokenizer matches its identity\n  checkpoint: " ++ want ++ "\n  set TOKENIZER_FILE to the matching .bpe artifact")
-
-def tok.pinned(m: Maybe<&2, Tk.Bpe>, +want: String) -> IO(Tk.Bpe):
-  match m:
-    case Some{b}:
-      IO.pure(Tk.Bpe, b)
-    case None{}:
-      IO.die(Tk.Bpe, 1, "TOKENIZER_FILE identity does not match the checkpoint\n  checkpoint: " ++ want)
-
-def tok.of.if(empty: Bool, +pinned: String, +want: String) -> IO(Tk.Bpe):
-  match empty:
-    case True{}:
-      do IO<Tk.Bpe>:
-        m : Maybe<&2, Tk.Bpe> <- tok.search(candidates(), want, None{})
-        tok.found(m, want)
-    case False{}:
-      do IO<Tk.Bpe>:
-        xs : List<&2, U32> <- B.Bytes.read_all(pinned)
-        tok.pinned(tok.check(want, pinned, Tk.Bpe.parse(xs)), want)
-
-# The decode loop --------------------------------------------------------
-
-def tok.of(+pinned: String, +want: String) -> IO(Tk.Bpe):
-  tok.of.if(String.is_empty(pinned), pinned, want)
-
-type Settings is Data:
-  Settings{temp: F32, topk: Nat, topp: F32}
-
-def Out.logits(o: Md.Out) -> T.V:
-  match o:
-    case Md.Out{l, s}:
-      l
-
-def Out.sts(o: Md.Out) -> List<&2, Md.LState>:
-  match o:
-    case Md.Out{l, s}:
-      s
-
-def Pick.token(p: S.Pick) -> U32:
-  match p:
-    case S.Pick{t, r}:
-      t
-
-def Pick.rng(p: S.Pick) -> S.Rng:
-  match p:
-    case S.Pick{t, r}:
-      r
-
-# feed the prompt; answer the output after its last token
-def prefill(xs: List<&2, U32>, +dm: Md.Dims, +w: Md.Weights, +o: Md.Out, +pos: Nat) -> Md.Out:
-  match xs:
-    case Nil{}:
-      o
-    case t <> rest:
-      prefill(rest, dm, w, Md.decode(dm, w, Out.sts(o), pos, t), 1n+pos)
-
-def pick(+dm: Md.Dims, +st: Settings, +vocab: Nat, +logits: T.V, r: S.Rng) -> S.Pick:
-  match st:
-    case Settings{+t, +k, +p}:
-      S.pick(Md.Dims.dv(dm), t, k, p, vocab, logits, r)
-
-def bytes.str(xs: List<&2, U32>) -> String:
-  match xs:
-    case Nil{}:
-      SNil{}
-    case h <> t:
-      SCon{Chr{h}, bytes.str(t)}
-
-def Dec.text(d: Tk.Dec) -> String:
-  match d:
-    case Tk.Dec{s, p}:
-      s
-
-def Dec.pending(d: Tk.Dec) -> List<&2, U32>:
-  match d:
-    case Tk.Dec{s, p}:
-      p
-
-def emit.bytes(skip: Bool, +b: Tk.Bpe, +t: U32) -> List<&2, U32>:
-  match skip:
-    case True{}:
-      Nil{}
-    case False{}:
-      Tk.Bpe.decode(b, t)
-
-# the text a token's bytes complete, beside the bytes still pending
-def emit(+b: Tk.Bpe, +pending: List<&2, U32>, +t: U32) -> Tk.Dec:
-  +xs = List.append(&2, U32, pending, emit.bytes(U32.is_eq(t, Tk.bos()), b, t))
-  Tk.utf8.decode(Nat.add(List.length(&2, U32, xs), 1n), xs, Tk.utf8.mode(xs))
-
-# The model's own probability of the chosen token (temperature 1, no
-# truncation), the quantity master's SAMPLE_STATS reports as prob=.
-def prob.of(+dv: Nat, +logits: T.V, +t: U32) -> F32:
-  +m = T.V.max(logits)
-  F32.div(F32.exp(F32.sub(T.V.at(dv, logits, t), m)), T.V.sum_exp(m, logits))
-
-def stats.line(on: Bool, +pos: Nat, +t: U32, +p: F32) -> IO(Unit):
-  match on:
-    case True{}:
-      IO.print_err("sample pos=" ++ Nat.show(pos) ++ " token=" ++ U32.show(t) ++ " prob=" ++ F32.show(p))
-    case False{}:
-      IO.pure(Unit, Unit{})
-
-def gen(n: Nat, stop: Bool, +pk: S.Pick, +dm: Md.Dims, +w: Md.Weights, +b: Tk.Bpe, +st: Settings,
+def gen(n: Nat, stop: Bool, +pk: S.Pick, +dm: Md.Dims, +w: Md.Weights, +b: Tk.Bpe, +st: D.Settings,
         +vocab: Nat, +sts: List<&2, Md.LState>, +pos: Nat, +pending: List<&2, U32>, +count: Nat,
         +stats: Bool, +lg: T.V) -> IO(Nat):
   match n stop:
     case 1n+p False{}:
-      +t = Pick.token(pk)
-      +d = emit(b, pending, t)
+      +t = D.dc.Pick.token(pk)
+      +d = D.dc.emit(b, pending, t)
       +o = Md.decode(dm, w, sts, pos, t)
-      +pk2 = pick(dm, st, vocab, Out.logits(o), Pick.rng(pk))
+      +pk2 = D.dc.pick(dm, st, vocab, D.dc.Out.logits(o), D.dc.Pick.rng(pk))
       do IO<Nat>:
-        stats.line(stats, pos, t, prob.of(Md.Dims.dv(dm), lg, t))
-        IO.write(Dec.text(d))
-        gen(p, U32.is_eq(Pick.token(pk2), Tk.eos()), pk2, dm, w, b, st, vocab, Out.sts(o), 1n+pos, Dec.pending(d), 1n+count, stats, Out.logits(o))
+        D.dc.stats.line(stats, pos, t, D.dc.prob.of(Md.Dims.dv(dm), lg, t))
+        IO.write(D.dc.Dec.text(d))
+        gen(p, U32.is_eq(D.dc.Pick.token(pk2), Tk.eos()), pk2, dm, w, b, st, vocab, D.dc.Out.sts(o), 1n+pos, D.dc.Dec.pending(d), 1n+count, stats, D.dc.Out.logits(o))
     case _ _:
       IO.pure(Nat, count)
 
 # Main -------------------------------------------------------------------
 
-def strip.if(v1: Bool, s: String) -> String:
-  match v1:
-    case True{}:
-      String.trim_end(s)
-    case False{}:
-      s
-
-# printf "%.3f" of 100 * done / total, in exact integer arithmetic
-def pad3(+n: Nat) -> String:
-  String.drop(Nat.show(Nat.add(U32.to_nat(1000), n)), 1n)
-
-def pct.milli(+m: Nat) -> String:
-  Nat.show(Nat.div(m, U32.to_nat(1000))) ++ "." ++ pad3(Nat.mod(m, U32.to_nat(1000)))
-
 def pct(+done: Nat, +total: Nat) -> String:
-  pct.milli(Nat.div(Nat.add(Nat.mul(U32.to_nat(200000), done), total), Nat.mul(2n, total)))
-
-type Run is Data:
-  Run{w: Md.Weights, step: Nat}
-
-def Load.run(+c: C.Config) -> B.Load(Run):
-  do B.Load<Run>:
-    w : Md.Weights <- Md.Load.weights(c)
-    step : Nat <- B.Load.nat()
-    return Run{w, step}
-
-def Run.w(r: Run) -> Md.Weights:
-  match r:
-    case Run{w, s}:
-      w
-
-def Run.step(r: Run) -> Nat:
-  match r:
-    case Run{w, s}:
-      s
-
-def rng.of.m(m: Maybe<&2, N.U64>) -> S.Rng:
-  match m:
-    case Some{seed}:
-      S.Rng.seeded(seed)
-    case None{}:
-      S.Rng.seeded(N.U64{0, 0})
-
-def rng.of(s: String) -> S.Rng:
-  rng.of.m(N.U64.read(s))
-
-def ms(+t0: Nat, +t1: Nat) -> String:
-  Nat.show(Nat.sub(t1, t0))
+  D.dc.pct(done, total)
 
 def go(+c: C.Config, +total: Nat, +b: Tk.Bpe, +w: Md.Weights, +step: Nat, +prompt: String, +budget: Nat,
-       +st: Settings, +seed: String, +t0: Nat, +stats: Bool) -> IO(Unit):
+       +st: D.Settings, +seed: String, +t0: Nat, +stats: Bool) -> IO(Unit):
   +dm = Md.Dims.of(c)
   +vocab = C.Config.vocab(c)
-  +text = strip.if(Bool.not(Tk.Bpe.v2(b)), prompt)
+  +text = D.dc.strip.if(Bool.not(Tk.Bpe.v2(b)), prompt)
   +bytes = Tk.utf8.bytes(text)
   +ids = List.append(&2, U32, [Tk.bos()], Tk.Bpe.encode(b, bytes))
   +start = {Md.Out{T.VZ{}, Md.states.zero(C.Config.layers(c), dm, 0n)} : Md.Out}
-  +o = prefill(ids, dm, w, start, 0n)
-  +pk = pick(dm, st, vocab, Out.logits(o), rng.of(seed))
+  +o = D.dc.prefill(ids, dm, w, start, 0n)
+  +pk = D.dc.pick(dm, st, vocab, D.dc.Out.logits(o), D.dc.rng.of(seed))
   do IO<Unit>:
     +t1 : Nat <- IO.now()
-    IO.print_err("generate: loaded in " ++ ms(t0, t1) ++ " ms; prompt_tokens=" ++ Nat.show(List.length(&2, U32, ids)))
+    IO.print_err("generate: loaded in " ++ D.dc.ms(t0, t1) ++ " ms; prompt_tokens=" ++ Nat.show(List.length(&2, U32, ids)))
     IO.print("=== ana: step " ++ Nat.show(step) ++ " of " ++ Nat.show(total) ++ " (" ++ pct(step, Nat.max(total, 1n)) ++ "% of its plan) ===")
-    IO.write(bytes.str(Nil{}) ++ text)
+    IO.write(D.dc.bytes.str(Nil{}) ++ text)
     +t2 : Nat <- IO.now()
-    n : Nat <- gen(budget, U32.is_eq(Pick.token(pk), Tk.eos()), pk, dm, w, b, st, vocab, Out.sts(o), List.length(&2, U32, ids), Nil{}, 0n, stats, Out.logits(o))
+    n : Nat <- gen(budget, U32.is_eq(D.dc.Pick.token(pk), Tk.eos()), pk, dm, w, b, st, vocab, D.dc.Out.sts(o), List.length(&2, U32, ids), Nil{}, 0n, stats, D.dc.Out.logits(o))
     +t3 : Nat <- IO.now()
     IO.print("")
-    IO.print_err("generate: prefill " ++ ms(t1, t2) ++ " ms; " ++ Nat.show(n) ++ " tokens in " ++ ms(t2, t3) ++ " ms")
+    IO.print_err("generate: prefill " ++ D.dc.ms(t1, t2) ++ " ms; " ++ Nat.show(n) ++ " tokens in " ++ D.dc.ms(t2, t3) ++ " ms")
 
-def problem(p: String) -> IO(Unit):
-  match p:
-    case SNil{}:
-      IO.pure(Unit, Unit{})
-    case SCon{c, t}:
-      IO.die(Unit, 1, "generate: " ++ SCon{c, t})
 
-def after.run(+m: K.Manifest, +b: Tk.Bpe, rw: B.Cur & Run, +prompt: String, +budget: Nat,
-              +st: Settings, +seed: String, +t0: Nat, +stats: Bool) -> IO(Unit):
-  (cur, +run) = rw
-  do IO<Unit>:
-    B.Bytes.close(cur)
-    go(K.Manifest.cfg(m), K.Manifest.total_steps(m), b, Run.w(run), Run.step(run), prompt, budget, st, seed, t0, stats)
+def open.model(+prompt: String, +budget: Nat, +st: D.Settings, +seed: String, +t0: Nat, +stats: Bool, m: D.Model) -> IO(Unit):
+  match m:
+    case D.Model{+c, +total, +step, +w, +b}:
+      go(c, total, b, w, step, prompt, budget, st, seed, t0, stats)
 
-def after(r: B.Cur & K.Manifest, +prompt: String, +budget: Nat, +st: Settings, +seed: String, +pinned: String, +t0: Nat, +stats: Bool) -> IO(Unit):
-  (cur, +m) = r
-  do IO<Unit>:
-    problem(K.Manifest.problem(m))
-    b : Tk.Bpe <- tok.of(pinned, K.Manifest.tokenizer_id(m))
-    rw : B.Cur & Run <- Load.run(K.Manifest.cfg(m))(cur)
-    after.run(m, b, rw, prompt, budget, st, seed, t0, stats)
-
-def byte.identity() -> String:
-  "lossless-byte-v1:bos=0:eos=1:bytes=2..257"
-
-# the byte tokenizer is a BPE with no merges (V1 whitespace off)
-def tok.btc(bytes: Bool, +pinned: String, +want: String) -> IO(Tk.Bpe):
-  match bytes:
-    case True{}:
-      IO.pure(Tk.Bpe, Tk.Bpe{258, True{}, Nil{}, Tk.LZ{}, Tk.LZ{}})
-    case False{}:
-      tok.of(pinned, want)
-
-# a BTC1 checkpoint (the Bend trainer's): parsed whole, trained to 100%
-def after.btc(+l: TC.Loaded, +prompt: String, +budget: Nat, +st: Settings, +seed: String, +pinned: String, +t0: Nat, +stats: Bool) -> IO(Unit):
-  match l:
-    case TC.Loaded{+c, +tok, +step, +w}:
-      do IO<Unit>:
-        b : Tk.Bpe <- tok.btc(String.eq(tok, byte.identity()), pinned, tok)
-        go(c, step, b, w, step, prompt, budget, st, seed, t0, stats)
-
-def open.fmt(btc: Bool, +path: String, +prompt: String, +budget: Nat, +st: Settings, +seed: String, +pinned: String, +t0: Nat, +stats: Bool) -> IO(Unit):
-  match btc:
-    case True{}:
-      do IO<Unit>:
-        +xs : List<&2, U32> <- B.Bytes.read_all(path)
-        after.btc(TC.parse(xs), prompt, budget, st, seed, pinned, t0, stats)
-    case False{}:
-      do IO<Unit>:
-        c : B.Cur <- B.Bytes.open(path)
-        r : B.Cur & K.Manifest <- K.Load.header()(c)
-        after(r, prompt, budget, st, seed, pinned, t0, stats)
-
-# the decoding settings from the environment, then the checkpoint's format
+# the decoding settings from the environment, then the checkpoint
 def generate(+path: String, +prompt: String, +tokens: String, +pinned: String, +t0: Nat) -> IO(Unit):
   do IO<Unit>:
-    +temp : String <- env("TEMPERATURE", "0.8")
-    +topk : String <- env("TOP_K", "")
-    +topp : String <- env("TOP_P", "0.95")
-    +seed : String <- env("SAMPLE_SEED", "0")
-    sflag : String <- env("SAMPLE_STATS", "")
-    +st : Settings = Settings{f32.or(F32.read(temp), 0.8), nat.or(U32.read(topk), U32.to_nat(4294967295)), f32.or(F32.read(topp), 0.95)}
+    +temp : String <- D.dc.env("TEMPERATURE", "0.8")
+    +topk : String <- D.dc.env("TOP_K", "")
+    +topp : String <- D.dc.env("TOP_P", "0.95")
+    +seed : String <- D.dc.env("SAMPLE_SEED", "0")
+    sflag : String <- D.dc.env("SAMPLE_STATS", "")
+    +st : D.Settings = D.dc.settings(temp, topk, topp)
     IO.print_err("generate: temperature=" ++ temp ++ " top_k=" ++ topk ++ " top_p=" ++ topp ++ " seed=" ++ seed)
-    open.fmt(String.ends_with(path, ".btc"), path, prompt, nat.or(U32.read(tokens), 128n), st, seed, pinned, t0, String.eq(sflag, "1"))
+    m : D.Model <- D.dc.load(path, pinned)
+    open.model(prompt, D.dc.nat.or(U32.read(tokens), 128n), st, seed, t0, String.eq(sflag, "1"), m)
+
+# --agent: the tool loop (Agent/Loop.bend).  ana stops at each call line
+# (`## ghc` ...), the tool command answers (AGENT_TOOL, default
+# `bend-agent-tool snippet`; its standard output is the echo), and ana goes
+# on, at most AGENT_CALLS calls (4); TOKENS is each stretch's budget.
+def agent.fin(+t1: Nat, ep: L.AlEp) -> IO(Unit):
+  match ep:
+    case L.AlEp{ss, +c, +k, +f}:
+      do IO<Unit>:
+        +t2 : Nat <- IO.now()
+        IO.print("")
+        IO.print_err("agent: " ++ f ++ "; " ++ Nat.show(c) ++ " calls, " ++ Nat.show(k) ++ " tokens in " ++ D.dc.ms(t1, t2) ++ " ms")
+
+def agent.go(+tool: String, +calls: Nat, +budget: Nat, +st: D.Settings, +seed: String, +prompt: String, +t0: Nat, m: D.Model) -> IO(Unit):
+  match m:
+    case D.Model{+c, +total, +step, +w, +b}:
+      do IO<Unit>:
+        +t1 : Nat <- IO.now()
+        IO.print_err("agent: loaded in " ++ D.dc.ms(t0, t1) ++ " ms")
+        IO.print("=== ana: step " ++ Nat.show(step) ++ " of " ++ Nat.show(total) ++ " (" ++ pct(step, Nat.max(total, 1n)) ++ "% of its plan) ===")
+        ep : L.AlEp <- L.al.episode(D.Model{c, total, step, w, b}, st, seed, tool, calls, budget, Tk.utf8.bytes(prompt))
+        agent.fin(t1, ep)
+
+def agent(+path: String, +prompt: String, +tokens: String, +pinned: String, +t0: Nat) -> IO(Unit):
+  do IO<Unit>:
+    +temp : String <- D.dc.env("TEMPERATURE", "0.8")
+    +topk : String <- D.dc.env("TOP_K", "")
+    +topp : String <- D.dc.env("TOP_P", "0.95")
+    +seed : String <- D.dc.env("SAMPLE_SEED", "0")
+    +tool : String <- D.dc.env("AGENT_TOOL", "bend-agent-tool snippet")
+    +calls : String <- D.dc.env("AGENT_CALLS", "4")
+    +st : D.Settings = D.dc.settings(temp, topk, topp)
+    IO.print_err("agent: temperature=" ++ temp ++ " top_k=" ++ topk ++ " top_p=" ++ topp ++ " seed=" ++ seed ++ "; tool `" ++ tool ++ "`, at most " ++ calls ++ " calls")
+    m : D.Model <- D.dc.load(path, pinned)
+    agent.go(tool, D.dc.nat.or(U32.read(calls), 4n), D.dc.nat.or(U32.read(tokens), 128n), st, seed, prompt, t0, m)
 
 # Command line -----------------------------------------------------------
 #
 #   ana [--checkpoint PATH] [--tokenizer PATH] [--tokens N]
-#       [--prompt TEXT | --prompt-file PATH] [--list] [-h] [PROMPT...]
+#       [--prompt TEXT | --prompt-file PATH] [--list] [--agent] [-h] [PROMPT...]
 #
 # Meaning.  Each setting is the first of: its flag, its WIKI_ variable
 # (WIKI_CHECKPOINT, WIKI_TOKENIZER, WIKI_TOKENS, WIKI_PROMPT), the
@@ -409,6 +164,9 @@ def cli.usage() -> String:
     "  --prompt-file PATH       read the prompt from PATH byte for byte, trailing",
     "                           newlines kept (- reads standard input)",
     "  --list                   list local checkpoints, newest first, then exit",
+    "  --agent                  stop at each tool call ana writes (## ghc, ## lean,",
+    "                           ## agda, ## bend, ## nix), run the real tool and",
+    "                           go on from its answer (AGENT_TOOL, AGENT_CALLS)",
     "  --threads N              decoder threads (default: all cores)",
     "  -h, --help               this message",
     "",
@@ -422,7 +180,9 @@ def cli.usage() -> String:
     "WIKI_PROMPT, then CKPT, TOKENIZER_FILE, TOKENS, PROMPT.  TEMPERATURE,",
     "TOP_P, TOP_K and SAMPLE_SEED shape decoding (defaults: temperature 0.8,",
     "nucleus top-p 0.95, top-k off, seed 0); SAMPLE_STATS=1 prints each step's",
-    "probability."
+    "probability.  AGENT_TOOL is the tool command (default: bend-agent-tool",
+    "snippet; the tool's name is its last argument, the episode its input)",
+    "and AGENT_CALLS the most calls an --agent episode makes (default 4)."
   ] : List<&2, String>}, "\n")
 
 def cli.strs(xs: List<String>) -> List<&2, String>:
@@ -433,13 +193,14 @@ def cli.strs(xs: List<String>) -> List<&2, String>:
       x <> cli.strs(more)
 
 # a word's part: 0 a prompt word, 1 --checkpoint, 2 --tokenizer, 3 --tokens,
-# 4 --prompt, 5 --prompt-file, 6 --list, 7 -h/--help, 8 --, 9 another option
+# 4 --prompt, 5 --prompt-file, 6 --list, 7 -h/--help, 8 --, 9 another option,
+# 10 --agent
 def cli.flag(+x: String) -> Nat:
   Bool.pick(Nat, String.eq(x, "--checkpoint"), 1n, Bool.pick(Nat, String.eq(x, "--tokenizer"), 2n,
   Bool.pick(Nat, String.eq(x, "--tokens"), 3n, Bool.pick(Nat, String.eq(x, "--prompt"), 4n,
   Bool.pick(Nat, String.eq(x, "--prompt-file"), 5n, Bool.pick(Nat, String.eq(x, "--list"), 6n,
   Bool.pick(Nat, Bool.or(String.eq(x, "-h"), String.eq(x, "--help")), 7n,
-  Bool.pick(Nat, String.eq(x, "--"), 8n, Bool.pick(Nat, String.starts_with(x, "-"), 9n, 0n)))))))))
+  Bool.pick(Nat, String.eq(x, "--"), 8n, Bool.pick(Nat, String.eq(x, "--agent"), 10n, Bool.pick(Nat, String.starts_with(x, "-"), 9n, 0n))))))))))
 
 def cli.flag.of(+xs: List<&2, String>) -> Nat:
   match xs:
@@ -451,45 +212,47 @@ def cli.flag.of(+xs: List<&2, String>) -> Nat:
 # the parsed line: a setting is "" when not given; bad, when not "", stops
 # the run (with the usage when usage is set)
 type Cli is Data:
-  Cli{ckpt: String, tok: String, tokens: String, prompt: String, has: Bool, file: String, list: Bool, help: Bool, bad: String, usage: Bool}
+  Cli{ckpt: String, tok: String, tokens: String, prompt: String, has: Bool, file: String, list: Bool, help: Bool, bad: String, usage: Bool, agent: Bool}
 
 def cli.join(+prompt: String, +has: Bool, +x: String) -> String:
   Bool.pick(String, has, prompt ++ " " ++ x, x)
 
 # after a second `--`: every word is the prompt's
-def cli.words(xs: List<&2, String>, +ckpt: String, +tok: String, +tokens: String, +prompt: String, +has: Bool, +file: String, +list: Bool) -> Cli:
+def cli.words(xs: List<&2, String>, +ckpt: String, +tok: String, +tokens: String, +prompt: String, +has: Bool, +file: String, +list: Bool, +agent: Bool) -> Cli:
   match xs:
     case Nil{}:
-      Cli{ckpt, tok, tokens, prompt, has, file, list, False{}, "", False{}}
+      Cli{ckpt, tok, tokens, prompt, has, file, list, False{}, "", False{}, agent}
     case +x <> more:
-      cli.words(more, ckpt, tok, tokens, cli.join(prompt, has, x), True{}, file, list)
+      cli.words(more, ckpt, tok, tokens, cli.join(prompt, has, x), True{}, file, list, agent)
 
-def cli.go(xs: List<&2, String>, +k: Nat, +ckpt: String, +tok: String, +tokens: String, +prompt: String, +has: Bool, +file: String, +list: Bool) -> Cli:
+def cli.go(xs: List<&2, String>, +k: Nat, +ckpt: String, +tok: String, +tokens: String, +prompt: String, +has: Bool, +file: String, +list: Bool, +agent: Bool) -> Cli:
   match xs k:
     case x <> y <> +more 1n:
-      cli.go(more, cli.flag.of(more), y, tok, tokens, prompt, has, file, list)
+      cli.go(more, cli.flag.of(more), y, tok, tokens, prompt, has, file, list, agent)
     case x <> y <> +more 2n:
-      cli.go(more, cli.flag.of(more), ckpt, y, tokens, prompt, has, file, list)
+      cli.go(more, cli.flag.of(more), ckpt, y, tokens, prompt, has, file, list, agent)
     case x <> y <> +more 3n:
-      cli.go(more, cli.flag.of(more), ckpt, tok, y, prompt, has, file, list)
+      cli.go(more, cli.flag.of(more), ckpt, tok, y, prompt, has, file, list, agent)
     case x <> y <> +more 4n:
-      cli.go(more, cli.flag.of(more), ckpt, tok, tokens, y, True{}, file, list)
+      cli.go(more, cli.flag.of(more), ckpt, tok, tokens, y, True{}, file, list, agent)
     case x <> y <> +more 5n:
-      cli.go(more, cli.flag.of(more), ckpt, tok, tokens, prompt, has, y, list)
+      cli.go(more, cli.flag.of(more), ckpt, tok, tokens, prompt, has, y, list, agent)
     case x <> +more 6n:
-      cli.go(more, cli.flag.of(more), ckpt, tok, tokens, prompt, has, file, True{})
+      cli.go(more, cli.flag.of(more), ckpt, tok, tokens, prompt, has, file, True{}, agent)
     case x <> more 7n:
-      Cli{ckpt, tok, tokens, prompt, has, file, list, True{}, "", False{}}
+      Cli{ckpt, tok, tokens, prompt, has, file, list, True{}, "", False{}, agent}
     case x <> more 8n:
-      cli.words(more, ckpt, tok, tokens, prompt, has, file, list)
+      cli.words(more, ckpt, tok, tokens, prompt, has, file, list, agent)
+    case x <> +more 10n:
+      cli.go(more, cli.flag.of(more), ckpt, tok, tokens, prompt, has, file, list, True{})
     case x <> more 9n:
-      Cli{ckpt, tok, tokens, prompt, has, file, list, False{}, "unknown option " ++ x, True{}}
+      Cli{ckpt, tok, tokens, prompt, has, file, list, False{}, "unknown option " ++ x, True{}, agent}
     case x <> +more 0n:
-      cli.go(more, cli.flag.of(more), ckpt, tok, tokens, cli.join(prompt, has, x), True{}, file, list)
+      cli.go(more, cli.flag.of(more), ckpt, tok, tokens, cli.join(prompt, has, x), True{}, file, list, agent)
     case x <> more _:
-      Cli{ckpt, tok, tokens, prompt, has, file, list, False{}, x ++ " needs a value", False{}}
+      Cli{ckpt, tok, tokens, prompt, has, file, list, False{}, x ++ " needs a value", False{}, agent}
     case _ _:
-      Cli{ckpt, tok, tokens, prompt, has, file, list, False{}, "", False{}}
+      Cli{ckpt, tok, tokens, prompt, has, file, list, False{}, "", False{}, agent}
 
 def cli.or(+a: String, +b: String) -> String:
   Bool.pick(String, String.eq(a, ""), b, a)
@@ -560,7 +323,7 @@ def cli.rd.fin(s: Rd) -> IO(List<&2, U32>):
         return acc
 
 def cli.text(+xs: List<&2, U32>) -> String:
-  Dec.text(Tk.utf8.decode(Nat.add(List.length(&2, U32, xs), 1n), xs, Tk.utf8.mode(xs)))
+  D.dc.Dec.text(Tk.utf8.decode(Nat.add(List.length(&2, U32, xs), 1n), xs, Tk.utf8.mode(xs)))
 
 # a whole file, or its first line, as text
 def cli.rd(f: File, +line: Bool) -> IO(String):
@@ -655,7 +418,7 @@ def cli.magic.str(+s: String) -> String:
 def cli.magic.res(r: Result<&1, &1, U32 & String, List<&2, U32>>) -> String:
   match r:
     case Done{xs}:
-      cli.magic.str(bytes.str(xs))
+      cli.magic.str(D.dc.bytes.str(xs))
     case Fail{e}:
       "unreadable"
 
@@ -838,17 +601,24 @@ def cli.say(on: Bool, +ckpt: String) -> IO(Unit):
     case False{}:
       IO.pure(Unit, Unit{})
 
+def cli.run(ag: Bool, +ckpt: String, +text: String, +tokens: String, +pinned: String, +t0: Nat) -> IO(Unit):
+  match ag:
+    case True{}:
+      agent(ckpt, text, tokens, pinned, t0)
+    case False{}:
+      generate(ckpt, text, tokens, pinned, t0)
+
 def cli.gen(+c: Cli, +ckpt: String, +named: Bool, +t0: Nat) -> IO(Unit):
   match c:
-    case Cli{ck, +tok, +tokens, +prompt, +has, +file, l, h, b, u}:
+    case Cli{ck, +tok, +tokens, +prompt, +has, +file, l, h, b, u, ag}:
       do IO<Unit>:
-        +wp : String <- env("WIKI_PROMPT", "")
-        +pe : String <- env("PROMPT", "")
-        +wt : String <- env("WIKI_TOKENIZER", "")
-        +tf : String <- env("TOKENIZER_FILE", "")
+        +wp : String <- D.dc.env("WIKI_PROMPT", "")
+        +pe : String <- D.dc.env("PROMPT", "")
+        +wt : String <- D.dc.env("WIKI_TOKENIZER", "")
+        +tf : String <- D.dc.env("TOKENIZER_FILE", "")
         +text : String <- cli.prompt.if(Bool.not(String.eq(file, "")), has, Bool.not(String.eq(cli.or(wp, pe), "")), file, Bool.pick(String, has, prompt, cli.or(wp, pe)), ckpt)
         cli.say(named, ckpt)
-        generate(ckpt, text, tokens, cli.or(tok, cli.or(wt, tf)), t0)
+        cli.run(ag, ckpt, text, tokens, cli.or(tok, cli.or(wt, tf)), t0)
 
 def cli.ckpt.found(ok: Bool, +c: Cli, +ckpt: String, +named: Bool, +t0: Nat) -> IO(Unit):
   match ok:
@@ -885,14 +655,14 @@ def cli.listed(list: Bool, +c: Cli, +ck: String, +t0: Nat) -> IO(Unit):
       cli.list()
     case False{}:
       do IO<Unit>:
-        +wc : String <- env("WIKI_CHECKPOINT", "")
-        +ce : String <- env("CKPT", "")
+        +wc : String <- D.dc.env("WIKI_CHECKPOINT", "")
+        +ce : String <- D.dc.env("CKPT", "")
         cli.ckpt(Bool.not(String.eq(cli.or(ck, cli.or(wc, ce)), "")), c, cli.or(ck, wc), ce, t0)
 
 def cli.counted.c(+c: Cli, +tokens: String, +t0: Nat) -> IO(Unit):
   match c:
-    case Cli{+ck, tok, t, +prompt, +has, +file, +list, h, b, u}:
-      cli.listed(list, Cli{ck, tok, tokens, prompt, has, file, list, False{}, "", False{}}, ck, t0)
+    case Cli{+ck, tok, t, +prompt, +has, +file, +list, h, b, u, +ag}:
+      cli.listed(list, Cli{ck, tok, tokens, prompt, has, file, list, False{}, "", False{}, ag}, ck, t0)
 
 def cli.counted(ok: Bool, +c: Cli, +tokens: String, +t0: Nat) -> IO(Unit):
   match ok:
@@ -903,12 +673,12 @@ def cli.counted(ok: Bool, +c: Cli, +tokens: String, +t0: Nat) -> IO(Unit):
 
 def cli.tokens(+c: Cli, +t0: Nat) -> IO(Unit):
   match c:
-    case Cli{ck, tok, +tokens, prompt, has, file, list, h, b, u}:
+    case Cli{ck, tok, +tokens, prompt, has, file, list, h, b, u, ag}:
       do IO<Unit>:
-        +wt : String <- env("WIKI_TOKENS", "")
-        +te : String <- env("TOKENS", "")
+        +wt : String <- D.dc.env("WIKI_TOKENS", "")
+        +te : String <- D.dc.env("TOKENS", "")
         +n : String = cli.or(tokens, cli.or(wt, cli.or(te, "128")))
-        cli.counted(cli.count.ok(n), Cli{ck, tok, tokens, prompt, has, file, list, h, b, u}, n, t0)
+        cli.counted(cli.count.ok(n), Cli{ck, tok, tokens, prompt, has, file, list, h, b, u, ag}, n, t0)
 
 def cli.file.there(ok: Bool, +c: Cli, +file: String, +t0: Nat) -> IO(Unit):
   match ok:
@@ -931,9 +701,9 @@ def cli.file.check(both: Bool, look: Bool, +c: Cli, +file: String, +t0: Nat) -> 
 # a prompt file: there, and not beside another prompt
 def cli.file.ok(+c: Cli, +t0: Nat) -> IO(Unit):
   match c:
-    case Cli{+ck, +tok, +tokens, +prompt, +has, +file, +list, h, b, u}:
+    case Cli{+ck, +tok, +tokens, +prompt, +has, +file, +list, h, b, u, +ag}:
       cli.file.check(Bool.and(Bool.not(String.eq(file, "")), has), Bool.and(Bool.not(String.eq(file, "")), Bool.not(String.eq(file, "-"))),
-        Cli{ck, tok, tokens, prompt, has, file, list, False{}, "", False{}}, file, t0)
+        Cli{ck, tok, tokens, prompt, has, file, list, False{}, "", False{}, ag}, file, t0)
 
 def cli.bad(+msg: String, usage: Bool) -> IO(Unit):
   match usage:
@@ -955,12 +725,12 @@ def cli.start.if(ok: Bool, help: Bool, +c: Cli, +bad: String, +usage: Bool, +t0:
 
 def cli.start(+c: Cli, +t0: Nat) -> IO(Unit):
   match c:
-    case Cli{+ck, +tok, +tokens, +prompt, +has, +file, +list, +help, +bad, +usage}:
-      cli.start.if(String.eq(bad, ""), help, Cli{ck, tok, tokens, prompt, has, file, list, help, bad, usage}, bad, usage, t0)
+    case Cli{+ck, +tok, +tokens, +prompt, +has, +file, +list, +help, +bad, +usage, +ag}:
+      cli.start.if(String.eq(bad, ""), help, Cli{ck, tok, tokens, prompt, has, file, list, help, bad, usage, ag}, bad, usage, t0)
 
 def main() -> IO(Unit):
   do IO<Unit>:
     +t0 : Nat <- IO.now()
     argv : List<String> <- IO.args()
     +xs : List<&2, String> = cli.strs(List.tail(&1, String, argv))
-    cli.start(cli.go(xs, cli.flag.of(xs), "", "", "", "", False{}, "", False{}), t0)
+    cli.start(cli.go(xs, cli.flag.of(xs), "", "", "", "", False{}, "", False{}, False{}), t0)

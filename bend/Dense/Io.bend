@@ -69,3 +69,16 @@ def put.windows(ws: List<&2, List<&2, U32>>, s: Array<F32>, +tin: U32, +ttg: U32
       put.windows(rest,
         put(padf(tn, ones(k)), put.u32(pad(tn, List.drop(&2, U32, w, 1n)), put.u32(pad(tn, List.take(&2, U32, w, k)), s, tin), ttg), tw),
         U32.add(tin, t), U32.add(ttg, t), U32.add(tw, t), t)
+
+# put.windows with each window's weights given (bend/Mask.bend): k per
+# window of k + 1 tokens, then padding (weight 0) to t positions
+def put.windows.w(ws: List<&2, List<&2, U32>>, wts: List<&2, List<&2, F32>>, s: Array<F32>, +tin: U32, +ttg: U32, +tw: U32, +t: U32) -> Array<F32>:
+  match ws wts:
+    case +w <> rest +wt <> wrest:
+      +k = Nat.sub(List.length(&2, U32, w), 1n)
+      +tn = U32.to_nat(t)
+      put.windows.w(rest, wrest,
+        put(padf(tn, wt), put.u32(pad(tn, List.drop(&2, U32, w, 1n)), put.u32(pad(tn, List.take(&2, U32, w, k)), s, tin), ttg), tw),
+        U32.add(tin, t), U32.add(ttg, t), U32.add(tw, t), t)
+    case _ _:
+      s

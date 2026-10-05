@@ -81,6 +81,26 @@ reports), and the Python is deleted. The port found one stale output:
 `run/v2/raw/bend.jsonl` was written before filler.py's one-version-a-path fix,
 so 153 Bend files were in neither the filler nor the raw stream (rebuilt).
 
+**Raw only from here (the user, 2026-10-05):** "Let's stop the checked
+transcripts. Let's just feed it raw code. The checked transcripts we already
+have should be kept, but new additions to our corpus should be raw /
+un-checked." The additions go through `bend-corpus-v2 raw` (C6's filters, the
+holdout by id and path) into `run/v2/raw-*/` and the one mix (C5): the Lean
+proof sets STP and NuminaMath-LEAN (`run/v2/raw-hf/lean.jsonl`, 688,251
+files, 498 MB) and The Stack v1's deduplicated Agda, Haskell, Lean and Nix
+(`run/v2/raw-stack/`: Haskell 370,236 files / 1,577 MB, Nix 109,107 / 245 MB,
+Agda 6,801 / 36 MB, Lean 7,659 / 27 MB after the filters).
+
+**A tool's output carries no loss (2026-10-05, docs/AGENT.md).** ana is never
+trained to write a checker's turn: with `TRAIN_MASK=kinds` a target's weight
+is its role's (0 on a tool's echo and on a given `## Attempt`), read from the
+window's own tokens, so the transcripts are kept as they are and every
+checker turn is still the checker's own output, as context. The `verify`
+shape, whose target was the checker's verdict, is dropped from the transcript
+windows (46,806 of 585,060 train transcripts). This replaces C1's "its verdict
+predicts failure" answer and E4's calibration target below: a calibrated
+"will this check?" belongs to a decision model, never to ana's text.
+
 ## Principles
 
 - **The assistant's turns are its best effort.** A wrong attempt the model
@@ -132,7 +152,15 @@ Term` is only ever the assistant's best answer.
   Rendered (`tools/corpus-v2/render.sh` from `bend-corpus-v2 pool`'s units, train):
   Bend 300,759 transcripts from 80,748 units (263 MB), Haskell 115,698 from
   57,858 (123 MB), Agda 67,512 from 33,770 (66 MB), Lean 65,644 from 32,856
-  (82 MB), Nix 25,016 from 12,572 (36 MB); no text twice. Measured on 600
+  (82 MB), Nix 25,016 from 12,572 (36 MB); no text twice.
+  Added 2026-10-05 (`tools/corpus-v2/py2bend.sh`; the user: "Translate them
+  to bend and add them to the corpus, then delete"): `own:py2bend`, the Bend
+  translations of the project's 58 one-off Python scripts (24,436 lines; the
+  Python is deleted), not held out (its unit scores 764): 3,086 units, every
+  one checked, 2,743 after clean (23 exact and 320 near duplicates), 10,431
+  transcripts appended to Bend's train (now 311,190), its files to the
+  filler. `windows.sh` interleaves `bend:124` (was 120) so the five
+  languages still run dry together (~2,510 rounds each). Measured on 600
   units a language at COPIES 2: every unit gives a direct transcript and most
   a repair; fill and verify 3–5% each; verify passes 41–54% (Nix 300/600).
 
@@ -210,6 +238,14 @@ token ratio, languages by tokens (start: Haskell 35, Lean 25, Agda 15, Bend
 15, Nix 10). The transcript:raw ratio is not guessed: two 1,000-step pilots
 from the same fresh start (30% and 60% raw), judged by E1–E3 below (~$1.30 on a
 5090).
+
+The raw mix (2026-10-05) is run/v2/raw's languages plus every run/v2/raw-*
+ file, each weighted by its document count against run/v2/raw's Haskell
+(`tools/corpus-v2/rawshards.sh mix`). Its sources must not share an id:
+`run/v2/dedupe-ids.sh` drops a Stack v1 file whose repository path is already
+in run/v2/raw (1,104: older versions of files the pool has; identical content
+was dropped at the build) or earlier in the Stack (6), and renames the 15
+NuminaMath problems with a second human proof `ID#2`.
 
 ### C6. Raw quality (the 2026-10-03 agents' filters, made shared)
 

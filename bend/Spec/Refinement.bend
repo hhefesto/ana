@@ -3,7 +3,7 @@ import ../Tensor.bend as T
 import ../Model.bend as Md
 import ./Order.bend as O
 import ./Nat.bend as NL
-import ../Generate.bend as G
+import ../Decode.bend as G
 
 # The executable model refines the specification.
 #
@@ -273,16 +273,16 @@ law prefill_chunks:
   for +w: Md.Weights
   for +o: Md.Out
   for +pos: Nat
-  {G.prefill(List.append(&2, U32, xs, ys), dm, w, o, pos)
-    == G.prefill(ys, dm, w, G.prefill(xs, dm, w, o, pos), Nat.add(pos, List.length(&2, U32, xs))) : Md.Out}
+  {G.dc.prefill(List.append(&2, U32, xs, ys), dm, w, o, pos)
+    == G.dc.prefill(ys, dm, w, G.dc.prefill(xs, dm, w, o, pos), Nat.add(pos, List.length(&2, U32, xs))) : Md.Out}
 
 def prefill_chunks(xs, ys, dm, w, o, pos):
   match xs:
     case Nil{}:
-      %Equal.sym(Nat, Nat.add(pos, 0n), pos, NL.Nat.add_zero_r(pos)) : {G.prefill(ys, dm, w, o, pos) == G.prefill(ys, dm, w, o, _) : Md.Out}
+      %Equal.sym(Nat, Nat.add(pos, 0n), pos, NL.Nat.add_zero_r(pos)) : {G.dc.prefill(ys, dm, w, o, pos) == G.dc.prefill(ys, dm, w, o, _) : Md.Out}
       {==}
     case +t <> +rest:
       %Equal.sym(Nat, Nat.add(pos, 1n+List.length(&2, U32, rest)), 1n+Nat.add(pos, List.length(&2, U32, rest)), NL.Nat.add_succ_r(pos, List.length(&2, U32, rest)))
-        : {G.prefill(List.append(&2, U32, rest, ys), dm, w, Md.decode(dm, w, G.Out.sts(o), pos, t), 1n+pos)
-            == G.prefill(ys, dm, w, G.prefill(rest, dm, w, Md.decode(dm, w, G.Out.sts(o), pos, t), 1n+pos), _) : Md.Out}
-      prefill_chunks(rest, ys, dm, w, Md.decode(dm, w, G.Out.sts(o), pos, t), 1n+pos)
+        : {G.dc.prefill(List.append(&2, U32, rest, ys), dm, w, Md.decode(dm, w, G.dc.Out.sts(o), pos, t), 1n+pos)
+            == G.dc.prefill(ys, dm, w, G.dc.prefill(rest, dm, w, Md.decode(dm, w, G.dc.Out.sts(o), pos, t), 1n+pos), _) : Md.Out}
+      prefill_chunks(rest, ys, dm, w, Md.decode(dm, w, G.dc.Out.sts(o), pos, t), 1n+pos)

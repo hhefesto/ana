@@ -944,3 +944,28 @@ def loss_grad(+dm: Md.Dims, +w: Md.Weights, +inputs: List<&2, U32>, +targets: Li
       +back = stack.bwd(bs, Fwd.tapes(f), dm, Head.dxs(h))
       LossGrad{F32.mul(Head.loss(h), inv_n),
         Md.Weights{embed.bwd(inputs, Back.dxs(back), Md.Dims.dv(dm), Head.dE(h)), Back.grads(back), Head.dfin(h), T.MZ{}}}
+
+# The loss with a weight per target (bend/Mask.bend): Σᵢ wᵢ·CEᵢ · scale.
+# A micro-batch's scale is 1 / Σ w over all its windows, so summing its
+# windows' results gives the dense program's weighted mean
+# (Dense/Model.bend `head.loss`: Σ loss·w / Σ w).  With every weight 1 and
+# scale 1/n it is `loss_grad`.
+def head.fbw(xs: List<&2, T.V>, ts: List<&2, U32>, ws: List<&2, F32>, +dm: Md.Dims, +emb: T.M, +fin: T.V, +scale: F32) -> Head:
+  match xs ts ws:
+    case +x <> xt +t <> tt +wi <> wt:
+      +n = F32.from_nat(Md.Dims.d(dm))
+      +xf = O.rms_norm(n, x, fin)
+      +c = ce(Md.Dims.dv(dm), T.M.matvec(emb, xf), t, F32.mul(wi, scale))
+      +rg = G.rms.bwd(n, x, fin, T.M.vecmat(CeOut.dl(c), emb))
+      Head.cons(F32.mul(CeOut.loss(c), wi), G.RmsGrad.dx(rg), T.M.outer(CeOut.dl(c), xf), G.RmsGrad.dg(rg), head.fbw(xt, tt, wt, dm, emb, fin, scale))
+    case _ _ _:
+      Head{0.0, Nil{}, T.MZ{}, T.VZ{}}
+
+def loss_grad.w(+dm: Md.Dims, +w: Md.Weights, +inputs: List<&2, U32>, +targets: List<&2, U32>, +weights: List<&2, F32>, +scale: F32) -> LossGrad:
+  match w:
+    case Md.Weights{+emb, +bs, +fin, un}:
+      +f = stack.fwd(bs, dm, embed(inputs, Md.Dims.dv(dm), emb))
+      +h = head.fbw(Fwd.top(f), targets, weights, dm, emb, fin, scale)
+      +back = stack.bwd(bs, Fwd.tapes(f), dm, Head.dxs(h))
+      LossGrad{F32.mul(Head.loss(h), scale),
+        Md.Weights{embed.bwd(inputs, Back.dxs(back), Md.Dims.dv(dm), Head.dE(h)), Back.grads(back), Head.dfin(h), T.MZ{}}}

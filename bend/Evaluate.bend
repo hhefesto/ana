@@ -7,7 +7,7 @@ import ./Config.bend as C
 import ./Checkpoint.bend as K
 import ./Model.bend as Md
 import ./Tokenizer.bend as Tk
-import ./Generate.bend as Gen
+import ./Decode.bend as Gen
 import ./Train/Grad.bend as G
 import ./Train/Data.bend as D
 import ./Corpus.bend as Cc
@@ -33,8 +33,8 @@ def window.go(xs: List<&2, U32>, ys: List<&2, U32>, +dm: Md.Dims, +w: Md.Weights
   match xs ys:
     case +x <> xt +y <> yt:
       +o = Md.decode(dm, w, sts, pos, x)
-      window.go(xt, yt, dm, w, Gen.Out.sts(o), 1n+pos,
-        F32.add(acc, F32.sub(G.lse(Gen.Out.logits(o)), T.V.at(Md.Dims.dv(dm), Gen.Out.logits(o), y))))
+      window.go(xt, yt, dm, w, Gen.dc.Out.sts(o), 1n+pos,
+        F32.add(acc, F32.sub(G.lse(Gen.dc.Out.logits(o)), T.V.at(Md.Dims.dv(dm), Gen.dc.Out.logits(o), y))))
     case _ _:
       acc
 
@@ -114,14 +114,14 @@ def limit.if(all: Bool, +n: Nat, +ws: List<&2, List<&2, U32>>) -> List<&2, List<
     case False{}:
       List.take(&2, List<&2, U32>, ws, n)
 
-def go(+m: K.Manifest, +b: Tk.Bpe, rw: B.Cur & Gen.Run, +cp: String, +cpath: String, +co: Cc.Corpus, +limit: String) -> IO(Unit):
+def go(+m: K.Manifest, +b: Tk.Bpe, rw: B.Cur & Gen.Wts, +cp: String, +cpath: String, +co: Cc.Corpus, +limit: String) -> IO(Unit):
   (cur, +run) = rw
   +c = K.Manifest.cfg(m)
   +dm = Md.Dims.of(c)
-  +w = Gen.Run.w(run)
+  +w = Gen.dc.Wts.w(run)
   +ds = Cc.Corpus.docs(co)
   +all = D.all.windows(C.Config.ctx(c), ds)
-  +ws = limit.if(String.is_empty(limit), Gen.nat.or(U32.read(limit), 0n), all)
+  +ws = limit.if(String.is_empty(limit), Gen.dc.nat.or(U32.read(limit), 0n), all)
   +preds = all.predictions(ws)
   +scale = F32.div(F32.from_nat(preds), F32.mul(F32.from_nat(all.bytes(b, ws)), F32.log(2.0)))
   do IO<Unit>:
@@ -129,8 +129,8 @@ def go(+m: K.Manifest, +b: Tk.Bpe, rw: B.Cur & Gen.Run, +cp: String, +cpath: Str
     IO.print_err("evaluate: " ++ Nat.show(List.length(&2, List<&2, U32>, ws)) ++ " of " ++ Nat.show(List.length(&2, List<&2, U32>, all)) ++ " windows")
     +a : Acc <- score(ws, dm, w, C.Config.layers(c), Acc{0n, 0.0, 0.0})
     IO.print("=== evaluation: " ++ cp ++ " on " ++ cpath ++ " ===")
-    IO.print("checkpoint step: " ++ Nat.show(Gen.Run.step(run)) ++ "/" ++ Nat.show(K.Manifest.total_steps(m))
-      ++ " (" ++ Gen.pct(Gen.Run.step(run), K.Manifest.total_steps(m)) ++ "% of the scheduled run)")
+    IO.print("checkpoint step: " ++ Nat.show(Gen.dc.Wts.step(run)) ++ "/" ++ Nat.show(K.Manifest.total_steps(m))
+      ++ " (" ++ Gen.dc.pct(Gen.dc.Wts.step(run), K.Manifest.total_steps(m)) ++ "% of the scheduled run)")
     IO.print("config: " ++ C.Config.show(c))
     IO.print("dataset fingerprint: " ++ Cc.Corpus.dataset(co))
     IO.print("documents: " ++ Nat.show(List.length(&2, List<&2, U32>, ds)) ++ "  windows: " ++ Nat.show(Acc.n(a)) ++ "  predictions: " ++ Nat.show(preds))
@@ -139,17 +139,17 @@ def go(+m: K.Manifest, +b: Tk.Bpe, rw: B.Cur & Gen.Run, +cp: String, +cpath: Str
 def after(r: B.Cur & K.Manifest, +cp: String, +cpath: String, +co: Cc.Corpus, +limit: String) -> IO(Unit):
   (cur, +m) = r
   do IO<Unit>:
-    Gen.problem(K.Manifest.problem(m))
-    Gen.problem(Cc.Corpus.problem(co, K.Manifest.tokenizer_id(m)))
-    b : Tk.Bpe <- Gen.tok.of("", K.Manifest.tokenizer_id(m))
-    rw : B.Cur & Gen.Run <- Gen.Load.run(K.Manifest.cfg(m))(cur)
+    Gen.dc.problem(K.Manifest.problem(m))
+    Gen.dc.problem(Cc.Corpus.problem(co, K.Manifest.tokenizer_id(m)))
+    b : Tk.Bpe <- Gen.dc.tok.of("", K.Manifest.tokenizer_id(m))
+    rw : B.Cur & Gen.Wts <- Gen.dc.Load.run(K.Manifest.cfg(m))(cur)
     go(m, b, rw, cp, cpath, co, limit)
 
 def main() -> IO(Unit):
   do IO<Unit>:
-    +cp : String <- Gen.env("CKPT", "run/last-checkpoint")
-    +cpath : String <- Gen.env("CORPUS", "run/eval/enwik8-test-fw32k.corpus")
-    +limit : String <- Gen.env("EVAL_WINDOWS", "")
+    +cp : String <- Gen.dc.env("CKPT", "run/last-checkpoint")
+    +cpath : String <- Gen.dc.env("CORPUS", "run/eval/enwik8-test-fw32k.corpus")
+    +limit : String <- Gen.dc.env("EVAL_WINDOWS", "")
     +xs : List<&2, U32> <- B.Bytes.read_all(cpath)
     c : B.Cur <- B.Bytes.open(cp)
     r : B.Cur & K.Manifest <- K.Load.header()(c)

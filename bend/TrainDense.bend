@@ -18,6 +18,7 @@ import ./Checkpoint.bend as Km
 import ./Evaluate.bend as Ev
 import ./Tokenizer.bend as Tk
 import ./Clock.bend as Ck
+import ./Mask.bend as Ms
 
 # train, dense: master's trainer on the Bend2 port at GPU speed. The same
 # environment and log as Train.bend (the tree trainer, kept as the
@@ -75,32 +76,38 @@ def micros(+mb: Nat, +ws: List<&2, List<&2, U32>>) -> List<&2, List<&2, List<&2,
   micros.go(Nat.div(List.length(&2, List<&2, U32>, ws), Nat.max(mb, 1n)), mb, ws)
 
 type Run is Data:
-  Run{m: L.Dm, ly: L.Lay, fwd: List<&2, P.Op>, bwd: List<&2, P.Op>, upd: List<&2, P.Op>}
+  Run{m: L.Dm, ly: L.Lay, fwd: List<&2, P.Op>, bwd: List<&2, P.Op>, upd: List<&2, P.Op>, mask: Ms.Mask}
 
 def Run.m(+r: Run) -> L.Dm:
   match r:
-    case Run{m, ly, f, b, u}:
+    case Run{m, ly, f, b, u, k}:
       m
 
 def Run.ly(+r: Run) -> L.Lay:
   match r:
-    case Run{m, ly, f, b, u}:
+    case Run{m, ly, f, b, u, k}:
       ly
 
 def Run.fwd(+r: Run) -> List<&2, P.Op>:
   match r:
-    case Run{m, ly, f, b, u}:
+    case Run{m, ly, f, b, u, k}:
       f
 
 def Run.bwd(+r: Run) -> List<&2, P.Op>:
   match r:
-    case Run{m, ly, f, b, u}:
+    case Run{m, ly, f, b, u, k}:
       b
 
 def Run.upd(+r: Run) -> List<&2, P.Op>:
   match r:
-    case Run{m, ly, f, b, u}:
+    case Run{m, ly, f, b, u, k}:
       u
+
+# the training targets' weights (TRAIN_MASK, bend/Mask.bend)
+def Run.mask(+r: Run) -> Ms.Mask:
+  match r:
+    case Run{m, ly, f, b, u, k}:
+      k
 
 def SL.add(+l0: F32, r: Array<F32> & F32) -> Array<F32> & F32:
   (s, l) = r
@@ -113,9 +120,21 @@ def micro.back(+rn: Run, +l0: F32, r: Array<F32> & F32) -> Array<F32> & F32:
 def put(mw: List<&2, List<&2, U32>>, +rn: Run, s: Array<F32>) -> Array<F32>:
   Io.put.windows(mw, s, L.Lay.tin(Run.ly(rn)), L.Lay.ttg(Run.ly(rn)), L.Lay.tw(Run.ly(rn)), L.Dm.t(Run.m(rn)))
 
+def put.mask(+mw: List<&2, List<&2, U32>>, +rn: Run, mk: Ms.Mask, s: Array<F32>) -> Array<F32>:
+  match mk:
+    case Ms.MsOff{}:
+      put(mw, rn, s)
+    case Ms.MsOn{+ids}:
+      Io.put.windows.w(mw, Ms.ms.weights.all(ids, mw), s,
+        L.Lay.tin(Run.ly(rn)), L.Lay.ttg(Run.ly(rn)), L.Lay.tw(Run.ly(rn)), L.Dm.t(Run.m(rn)))
+
+# a training micro-batch: its targets weighed as TRAIN_MASK says
+def put.train(mw: List<&2, List<&2, U32>>, +rn: Run, s: Array<F32>) -> Array<F32>:
+  put.mask(mw, rn, Run.mask(rn), s)
+
 def micro.one(mw: List<&2, List<&2, U32>>, +rn: Run, r: Array<F32> & F32) -> Array<F32> & F32:
   (s, l0) = r
-  micro.back(rn, l0, Io.get1(P.run(Run.fwd(rn), put(mw, rn, s)), L.Lay.lmean(Run.ly(rn))))
+  micro.back(rn, l0, Io.get1(P.run(Run.fwd(rn), put.train(mw, rn, s)), L.Lay.lmean(Run.ly(rn))))
 
 # forward then backward over each micro-batch; the losses summed
 def micro.go(ms: List<&2, List<&2, List<&2, U32>>>, +rn: Run, r: Array<F32> & F32) -> Array<F32> & F32:
@@ -441,7 +460,7 @@ def run(+c: C.Config, +tok: Tr.Tok, +text: List<&2, U32>, +hp: Hp, +muon: Bool, 
   +m = L.Dm.of.cc(c, Hp.mb(hp), U32.from_nat(chunk))
   +ly = L.Lay.of(c, m)
   +rn = {Run{m, ly, S.fwd(m, ly), S.bwd(m, ly, F32.div(1.0, F32.from_nat(Nat.div(Hp.batch(hp), Hp.mb(hp))))),
-            S.update(muon, ly, S.Hy{Hp.b1(hp), Hp.b2(hp), Hp.eps(hp), wd, mu}, m, clip)} : Run}
+            S.update(muon, ly, S.Hy{Hp.b1(hp), Hp.b2(hp), Hp.eps(hp), wd, mu}, m, clip), Ms.MsOff{}} : Run}
   +scale = bpb.scale(Tr.Tok.b(tok), vw)
   do IO<Unit>:
     micro.check(Hp.batch(hp), Hp.mb(hp))
@@ -683,12 +702,12 @@ def hot.fin(r: Array<F32> & St & Nat) -> IO(Unit):
   (s, st, step) = r
   say("done at step " ++ Nat.show(step))
 
-def run.hot(+c: C.Config, +tok: Tr.Tok, +plan: List<&2, U32>, +hp: Hp, +muon: Bool, +mu: F32, +clip: F32, +wd: F32,
-            +hs: Hs, +chunk: Nat, s: Array<F32>) -> IO(Unit):
+def run.hot.mk(+c: C.Config, +tok: Tr.Tok, +plan: List<&2, U32>, +hp: Hp, +muon: Bool, +mu: F32, +clip: F32, +wd: F32,
+               +hs: Hs, +chunk: Nat, +mk: Ms.Mask, s: Array<F32>) -> IO(Unit):
   +m = L.Dm.of.cc(c, Hp.mb(hp), U32.from_nat(chunk))
   +ly = L.Lay.of(c, m)
   +rn = {Run{m, ly, S.fwd(m, ly), S.bwd(m, ly, F32.div(1.0, F32.from_nat(Nat.div(Hp.batch(hp), Hp.mb(hp))))),
-            S.update(muon, ly, S.Hy{Hp.b1(hp), Hp.b2(hp), Hp.eps(hp), wd, mu}, m, clip)} : Run}
+            S.update(muon, ly, S.Hy{Hp.b1(hp), Hp.b2(hp), Hp.eps(hp), wd, mu}, m, clip), mk} : Run}
   +step0 = Dk.Src.step(Hs.src(hs))
   +ss = Pl.remaining(Pl.shift(Pl.parse(plan), Hs.base(hs)), step0)
   do IO<Unit>:
@@ -698,6 +717,32 @@ def run.hot(+c: C.Config, +tok: Tr.Tok, +plan: List<&2, U32>, +hp: Hp, +muon: Bo
       ++ ", micro-batch " ++ Nat.show(Hp.mb(hp)) ++ ", " ++ Nat.show(List.length(&2, Pl.Seg, ss)) ++ " segments left")
     r : Array<F32> & St & Nat <- segs.go(ss, rn, hp, hs, muon, True{}, {(s, St.init(), step0) : Array<F32> & St & Nat})
     hot.fin(r)
+
+# announced when on, so a run without it logs as before
+def mask.say(+mk: Ms.Mask) -> IO(Unit):
+  match mk:
+    case Ms.MsOff{}:
+      IO.pure(Unit, Unit{})
+    case Ms.MsOn{ids}:
+      say("training targets: " ++ Ms.ms.name(mk))
+
+# TRAIN_MASK (bend/Mask.bend): unset, every target weighs 1; `kinds`, a
+# tool's echo and a given attempt weigh 0
+def run.hot.mask(+c: C.Config, +tok: Tr.Tok, +plan: List<&2, U32>, +hp: Hp, +muon: Bool, +mu: F32, +clip: F32, +wd: F32,
+                 +hs: Hs, +chunk: Nat, m: Maybe<&2, Ms.Mask>, s: Array<F32>) -> IO(Unit):
+  match m:
+    case None{}:
+      IO.die(Unit, 1, "train (dense): TRAIN_MASK is unset or `kinds` (and `kinds` needs a tokenizer whose newline is one token)")
+    case Some{+mk}:
+      do IO<Unit>:
+        mask.say(mk)
+        run.hot.mk(c, tok, plan, hp, muon, mu, clip, wd, hs, chunk, mk, s)
+
+def run.hot(+c: C.Config, +tok: Tr.Tok, +plan: List<&2, U32>, +hp: Hp, +muon: Bool, +mu: F32, +clip: F32, +wd: F32,
+            +hs: Hs, +chunk: Nat, s: Array<F32>) -> IO(Unit):
+  do IO<Unit>:
+    +mk : String <- Tr.env("TRAIN_MASK", "")
+    run.hot.mask(c, tok, plan, hp, muon, mu, clip, wd, hs, chunk, Ms.ms.of(mk, Tr.Tok.b(tok)), s)
 
 # Evaluate (EVAL_CORPUS set): master's `evaluate` on the dense forward. Every
 # document's full windows (no split) are scored; the loss is the mean over
@@ -757,7 +802,7 @@ def eval.run(+c: C.Config, +tok: Tr.Tok, +mb: Nat, +chunk: Nat, +path: String, +
   (s, +src) = r
   +m = L.Dm.of.cc(c, mb, U32.from_nat(chunk))
   +ly = L.Lay.of(c, m)
-  +rn = {Run{m, ly, S.fwd(m, ly), Nil{}, Nil{}} : Run}
+  +rn = {Run{m, ly, S.fwd(m, ly), Nil{}, Nil{}, Ms.MsOff{}} : Run}
   +co = Cc.corpus(xs)
   +all = D.all.windows(C.Config.ctx(c), Cc.Corpus.docs(co))
   +ws = Bool.pick(List<&2, List<&2, U32>>, Nat.is_eq(limit, 0n), all, List.take(&2, List<&2, U32>, all, limit))

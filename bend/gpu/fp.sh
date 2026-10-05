@@ -35,6 +35,9 @@
 # ctx 2048 is 1.77e9 floats at 4; 8 does not fit one array), a save every
 # SAVE (500) steps and a validation every EVAL (250) on EVALW (128) of the
 # shard's validation windows.
+# Every training mode weighs each target by its role (TRAIN_MASK=kinds,
+# docs/AGENT.md: a tool's echo and a given attempt weigh 0); MASK= (empty)
+# trains every target, as run 1 did.
 set -u
 CU=/usr/local/cuda
 CLANG=$(for c in clang-19 clang-18 clang-17 clang-16 clang-15 clang-14 clang; do command -v $c && break; done | head -1)
@@ -47,7 +50,7 @@ PLAN=${PLAN:-run/fp100m/plan-fp100m-b16-windows.tsv}
 RUN=${RUN:-run/fp100m}
 NAME=${NAME:-fp100m}
 TOK=weights/code32k.bpe
-common="PLAN=$PLAN RUN_DIR=$RUN SHARD_SIZE=fp100m TOKENIZER_FILE=$TOK PRESET=fp100m TRAIN_BATCH=16 TRAIN_MICRO=${MICRO:-4} TRAIN_CHUNK=16 BEND_GEMM_NUMERICS=tf32"
+common="PLAN=$PLAN RUN_DIR=$RUN SHARD_SIZE=fp100m TOKENIZER_FILE=$TOK PRESET=fp100m TRAIN_BATCH=16 TRAIN_MICRO=${MICRO:-4} TRAIN_CHUNK=16 BEND_GEMM_NUMERICS=tf32 TRAIN_MASK=${MASK-kinds}"
 setting="TRAIN_OPT=muon TRAIN_LR=${LR:-3e-4} TRAIN_WARMUP=${WARM:-300} TRAIN_WD=0.01 GRAD_CLIP=1.0"
 
 build() {
@@ -67,7 +70,7 @@ case "${1:-}" in
     echo "== G2: the dense program on the GPU against the tree trainer on the CPU (every gradient within 1e-5 relative)"
     BEND_PROFILE=1 ./dense --gpu $MEM 2>&1 | tee gate.log | tail -12
     awk '/gradient max/ { r = $(NF); gsub(/[()]/, "", r); k++; if (r + 0 > 1e-5) { print "gradient differs: " $0; bad = 1 } }
-         END { if (k != 3) { print "expected 3 gradient checks, got " k; bad = 1 } exit bad }' gate.log && echo "G2: PASS" || echo "G2: MISS" ;;
+         END { if (k != 4) { print "expected 4 gradient checks (3 plain, 1 masked), got " k; bad = 1 } exit bad }' gate.log && echo "G2: PASS" || echo "G2: MISS" ;;
   time)
     build
     STEPS=${2:-20}
@@ -101,6 +104,7 @@ case "${1:-}" in
     nsteps=$(head -1 "$plan" | awk '{ print $3 }')
     NWARM=${NWARM:-$(( nsteps / 20 > 10 ? nsteps / 20 : 10 ))}
     env TRAIN_INIT=$ckpt TRAIN_NEXT=1 PLAN=$plan RUN_DIR=$rdir SHARD_SIZE=$ssz \
+      TRAIN_MASK=${MASK-kinds} \
       TOKENIZER_FILE=$TOK TRAIN_BATCH=16 TRAIN_MICRO=${MICRO:-4} TRAIN_CHUNK=16 BEND_GEMM_NUMERICS=tf32 \
       TRAIN_LR=${NLR:-1e-4} TRAIN_WARMUP=$NWARM EVAL_EVERY=${EVAL:-250} EVAL_WINDOWS=${EVALW:-128} \
       SAVE_EVERY=${SAVE:-500} OUT=out/$name \
@@ -115,6 +119,7 @@ case "${1:-}" in
     ckpt="${2:?usage: fp.sh resume CKPT PLAN RUN_DIR SHARD_SIZE NAME STEPS}"; plan="${3:?}"; rdir="${4:?}"; ssz="${5:?}"; name="${6:?}"; steps="${7:?}"
     mkdir -p out
     env TRAIN_INIT=$ckpt PLAN=$plan RUN_DIR=$rdir SHARD_SIZE=$ssz TRAIN_STEPS=$steps \
+      TRAIN_MASK=${MASK-kinds} \
       TOKENIZER_FILE=$TOK TRAIN_BATCH=16 TRAIN_MICRO=${MICRO:-4} TRAIN_CHUNK=16 BEND_GEMM_NUMERICS=tf32 \
       EVAL_EVERY=${EVAL:-250} EVAL_WINDOWS=${EVALW:-128} SAVE_EVERY=${SAVE:-500} OUT=out/$name \
       nohup stdbuf -oL ./traind-next --gpu $MEM >> $name.log 2>&1 &

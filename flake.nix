@@ -117,6 +117,12 @@
           # pooled and split, the filler, the raw code, the one mix, the
           # evaluation, and the steps the run scripts take (Python before)
           bend-corpus-v2 = bendBinary pkgs "bend-corpus-v2" "CorpusV2.bend";
+          # ana's tool loop (docs/AGENT.md): the tools `ana --agent` calls
+          # (the episode on stdin, the echo on stdout), and Agent/Spec.bend's
+          # laws over a transcript file (the trainer's token reading against
+          # the byte reading)
+          bend-agent-tool = bendBinary pkgs "bend-agent-tool" "Agent/Tools.bend";
+          bend-agent-laws = bendBinary pkgs "bend-agent-laws" "Agent/Laws.bend";
           # the GHC `bend-check haskell` drives: the common Hackage
           # packages, so a module importing only these checks on its own
           ghc-harness = ghcHarness pkgs;
@@ -180,7 +186,7 @@
           # repository root so run/ and the tokenizers under weights/ resolve.
           ana = pkgs.runCommand "ana" { nativeBuildInputs = [ pkgs.makeWrapper ]; } ''
             makeWrapper ${self.packages.${system}.bend-generate}/bin/bend-generate $out/bin/ana \
-              --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.findutils ]}
+              --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.findutils self.packages.${system}.bend-agent-tool (bendFor pkgs) (agdaFor pkgs) ]}
           '';
           ana-bend = self.packages.${system}.ana;
           default = self.packages.${system}.bend;
@@ -258,6 +264,16 @@
             # the lines back
             bend legere.bend > legere.out
             printf 'ok %s\n' score bool marginals boundaries logp posteriors bposteriors viterbi cues ngram roundtrip | diff - legere.out
+            # ana's episodes (Agent/Spec.bend): each shape's roles, reading's
+            # round trip, every call answered, weight 0 exactly on attempts and
+            # echoes, the loop's unfold, and a code32k window's weights
+            # (compiled: the interpreter's stack is too small for the
+            # tokenizer's parse)
+            mkdir -p weights && cp ${./weights/code32k.bpe} weights/code32k.bpe
+            bend agent.bend -o agent-test && ./agent-test > agent.out
+            head -8 agent.out > agent8.out
+            printf 'ok %s\n' direct repair term-to-type verify trap "weights direct" "weights repair" unfold | diff - agent8.out
+            grep -q '^ok window' agent.out
             touch $out
           '';
           # the training stack: the hand-written pullbacks agree with central
@@ -293,7 +309,7 @@
             chmod -R u+w src
             (cd src && bend tests/dense.bend -o $TMPDIR/dense) && $TMPDIR/dense --threads 4 | tee dense.out
             awk '/gradient max/ { r = $(NF); gsub(/[()]/, "", r); k++; if (r + 0 > 1e-5) { print "gradient differs: " $0; bad = 1 } }
-                 END { if (k != 3) { print "expected 3 gradient checks, got " k; bad = 1 } exit bad }' dense.out
+                 END { if (k != 4) { print "expected 4 gradient checks (3 plain, 1 masked), got " k; bad = 1 } exit bad }' dense.out
             cat src/*.bend src/Spec/*.bend > corpus.txt
             CORPUS=corpus.txt PRESET=tiny-v3 TRAIN_STEPS=30 TRAIN_BATCH=8 TRAIN_LR=3e-3 TRAIN_WARMUP=5 \
               OUT=tiny.btc ${self.packages.${system}.bend-train-dense}/bin/bend-train-dense --threads 4 | tee run.out

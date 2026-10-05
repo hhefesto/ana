@@ -13,9 +13,16 @@ CV2=${CV2:-nix run .#deploy -- corpus-v2}
 case "${1:-}" in
   mix)
     mkdir -p "$R"
-    # documents a round ∝ token share / mean document size (Haskell 4.2 KB, Lean 7.2, Agda 6.9)
+    # documents a round ∝ token share / mean document size (Haskell 4.2 KB, Lean 7.2, Agda 6.9);
+    # the raw added since (2026-10-05, `bend-corpus-v2 raw`'s output dirs run/v2/raw-*: the Lean
+    # proof sets STP and NuminaMath-LEAN, The Stack v1) ∝ each file's document count against
+    # run/v2/raw's Haskell, so every one runs through the whole mix
+    hs=$(wc -l < run/v2/raw/haskell.jsonl); extra=()
+    for f in run/v2/raw-*/*.jsonl; do [ -s "$f" ] || continue
+      w=$(( 84 * $(wc -l < "$f") / hs )); extra+=("$f:$(( w > 0 ? w : 1 ))"); done
+    echo "mix: added ${extra[*]:-none}"
     nix run .#deploy -- mix "$R/mix.jsonl" run/v2/raw/haskell.jsonl:84 run/v2/raw/lean.jsonl:35 run/v2/raw/agda.jsonl:22 \
-      run/v2/raw/bend.jsonl:1 run/v2/raw/nix.jsonl:1
+      run/v2/raw/bend.jsonl:1 run/v2/raw/nix.jsonl:1 "${extra[@]}"
     ls -la "$R/mix.jsonl" ;;
   build)
     k="${2:?usage: rawshards.sh build K}"; d="$R/$k"; mkdir -p "$d"
