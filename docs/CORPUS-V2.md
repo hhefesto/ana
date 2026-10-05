@@ -285,6 +285,23 @@ stages cut bits per byte by 30–40% (w1 → nr9): run 1's code knowledge comes
 mostly from raw code. nr9-step67717 itself was lost with the box (a failed
 pull); its numbers above were taken on the box.
 
+**Run 1's E1/E2 baseline (2026-10-05, `bend-corpus-v2 gen/check`, CPU,
+greedy, 100 tokens, format 1 prompts).** Only units held out by BOTH v1's
+per-declaration split and v2's repository split are fair to run 1: about 98% of
+v2's holdout units were in run 1's training transcripts. There are 59 such
+units, 99 prompts (`evalset --both`; control 99/99):
+
+| checkpoint | direct | repair | all |
+|---|---|---|---|
+| fp100m-8803 (transcripts only) | 5/50 | 9/49 | 14/99 |
+| w1-19080 (all transcript waves) | 4/50 | 14/49 | 18/99 |
+
+By language, w1: Agda direct 1/4 repair 3/3, Bend 0/4 and 2/2, Haskell 3/17
+and 7/14, Lean 0/25 and 2/21, Nix repair 0/9 (it never closes the fence
+within 100 tokens: a whole file). Repair is ana's strength; direct answering is
+what format 2 targets. The post-raw checkpoints are not fair on these units
+(the raw stages fed v1's held-out files).
+
 E4 (verdict calibration) is not built: it needs the probability of `[exit 0]`
 after a verify prompt, which the trainer's eval does not print.
 
