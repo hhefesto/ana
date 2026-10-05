@@ -26,32 +26,17 @@ set -euo pipefail
 R=${R:-run/raw}
 P=${P:-raw}
 SLICE=${SLICE:-300000000}
+CV2=${CV2:-nix run .#deploy -- corpus-v2}
 
 mix() {
   mkdir -p "$R/src"
-  python3 - "$R/src" <<'PY'
-import sys, json
-out = sys.argv[1]
-lang = {"hs": "haskell", "lhs": "haskell", "lean": "lean", "agda": "agda", "lagda": "agda", "nix": "nix", "bend": "bend"}
-fs = {l: open(f"{out}/{l}.jsonl", "wb") for l in set(lang.values())}
-n = {l: 0 for l in fs}
-with open("run/code-train-v3.jsonl", "rb") as f:
-    for line in f:
-        i = line.find(b'"id":"'); j = line.find(b'"', i + 6)
-        name = line[i + 6:j].decode("utf-8", "replace").rsplit("/", 1)[-1]
-        ext = name.rsplit(".", 1)[-1] if "." in name else ""
-        l = lang.get(ext)
-        if l: fs[l].write(line); n[l] += 1
-print(n)
-# fp100m's transcripts as JSONL, for the replay
-for l in ["haskell", "lean", "agda", "nix", "bend"]:
-    d = open(f"run/transcripts-final/{l}/transcripts.train.nul", "rb").read().split(b"\0")
-    with open(f"{out}/tr-{l}.jsonl", "w") as o:
-        for i in range(0, len(d) - 1, 2):
-            o.write(json.dumps({"id": d[i].decode("utf-8", "replace"), "text": d[i + 1].decode("utf-8", "replace")}, ensure_ascii=False) + "\n")
-PY
+  $CV2 split-lang run/code-train-v3.jsonl "$R/src"
+  # fp100m's transcripts as JSONL, for the replay
+  for l in haskell lean agda nix bend; do
+    $CV2 nul-jsonl "run/transcripts-final/$l/transcripts.train.nul" "$R/src/tr-$l.jsonl"
+  done
   hs=$(wc -l < "$R/src/haskell.jsonl"); le=$(wc -l < "$R/src/lean.jsonl"); ag=$(wc -l < "$R/src/agda.jsonl"); nx=$(wc -l < "$R/src/nix.jsonl"); be=$(wc -l < "$R/src/bend.jsonl")
-  per() { python3 -c "import sys; print(max(1, round(100 * $1 / $hs)))"; }
+  per() { $CV2 per "$1" "$hs"; }
   # transcripts: about 20% of the bytes; code documents average ~7 KB, transcripts ~1.2 KB
   nix run .#deploy -- mix "$R/mix.jsonl" \
     "$R/src/haskell.jsonl:100" "$R/src/lean.jsonl:$(per $le)" "$R/src/agda.jsonl:$(per $ag)" "$R/src/nix.jsonl:$(per $nx)" "$R/src/bend.jsonl:$(per $be)" \
@@ -66,45 +51,10 @@ PY
 mixnew() {
   mkdir -p "$R/src"
   # fp100m's transcripts as JSONL, for the replay (as in mix)
-  python3 - "$R/src" <<'PY'
-import sys, json
-out = sys.argv[1]
-for l in ["haskell", "lean", "agda", "nix", "bend"]:
-    d = open(f"run/transcripts-final/{l}/transcripts.train.nul", "rb").read().split(b"\0")
-    with open(f"{out}/tr-{l}.jsonl", "w") as o:
-        for i in range(0, len(d) - 1, 2):
-            o.write(json.dumps({"id": d[i].decode("utf-8", "replace"), "text": d[i + 1].decode("utf-8", "replace")}, ensure_ascii=False) + "\n")
-PY
-  specs=$(python3 - "$R/src" "$@" <<'PY'
-import sys, os, json
-out, files = sys.argv[1], sys.argv[2:]
-by = {}
-for f in files:
-    l = os.path.basename(f).split("-")[0].split(".")[0]
-    by.setdefault(l, []).append(f)
-stat = {}
-for l, fs in by.items():
-    n = b = 0
-    for f in fs:
-        for line in open(f, "rb"): n += 1; b += len(line)
-    dst = f"{out}/{l}.jsonl"
-    if os.path.lexists(dst): os.remove(dst)
-    if len(fs) == 1: os.symlink(os.path.abspath(fs[0]), dst)   # no copy of a large file
-    else:
-        with open(dst, "wb") as o:
-            for f in fs: o.write(open(f, "rb").read())
-    stat[l] = (n, b)
-top = max(stat, key=lambda l: stat[l][0])
-per = {l: max(1, round(100 * n / stat[top][0])) for l, (n, b) in stat.items()}
-code = sum(per[l] * stat[l][1] / stat[l][0] for l in stat)   # bytes of code a round
-tr = 0.25 * code / 1200                                      # transcripts ~20% of all bytes, ~1.2 KB each
-w = {"haskell": 79075, "lean": 50079, "agda": 53663, "nix": 24694, "bend": 126763}
-specs = [f"{out}/{l}.jsonl:{per[l]}" for l in stat] + \
-        [f"{out}/tr-{k}.jsonl:{max(1, round(tr * v / sum(w.values())))}:cycle" for k, v in w.items()]
-print(" ".join(specs))
-print({l: (n, round(b / 1e6, 1)) for l, (n, b) in stat.items()}, file=sys.stderr)
-PY
-)
+  for l in haskell lean agda nix bend; do
+    $CV2 nul-jsonl "run/transcripts-final/$l/transcripts.train.nul" "$R/src/tr-$l.jsonl"
+  done
+  specs=$($CV2 specs-mixnew "$R/src" "$@")
   echo "per round: $specs"
   nix run .#deploy -- mix "$R/mix.jsonl" $specs
   ls -la "$R/mix.jsonl"
@@ -113,25 +63,10 @@ PY
 build() {
   k="${1:?usage: raw-stage.sh build K}"
   d="run/$P$k"; mkdir -p "$d"
-  # slice k: the k-th SLICE bytes of the mix, cut at line ends
-  python3 - "$R/mix.jsonl" "$d/slice.jsonl" "$k" "$SLICE" <<'PY'
-import sys
-src, dst, k, size = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
-lo, hi = (k - 1) * size, k * size
-pos = 0; lines = []
-with open(src, "rb") as f:
-    for line in f:
-        if pos >= lo and pos < hi: lines.append(line)
-        pos += len(line)
-        if pos >= hi: break
-    last = pos < hi  # the mix ran out inside this slice
-# plan-corpus cuts a slice into 2000-document parts; the mix's final short
-# part can be too small for one window (plan-segment refuses it), so the last
-# slice keeps whole parts only
-if last and len(lines) % 2000: lines = lines[:len(lines) - len(lines) % 2000]
-with open(dst, "wb") as o: o.writelines(lines)
-print("slice", k, len(lines), "documents", "(the last)" if last else "")
-PY
+  # slice k: the k-th SLICE bytes of the mix, cut at line ends; the mix's
+  # final short part can be too small for one window (plan-segment refuses
+  # it), so the last slice keeps whole 2000-document parts only
+  $CV2 slice "$R/mix.jsonl" "$d/slice.jsonl" "$k" "$SLICE"
   [ -s "$d/slice.jsonl" ] || { echo "slice $k is empty"; exit 1; }
   TOKENIZER=weights/code32k.bpe PACK_TARGET=131072 JOBS=${JOBS:-3} nix run .#deploy -- plan-corpus "$d/slice.jsonl" "$d" fp100m 16 2000
   cp "$d"/plan-fp100m-b16-s2000.tsv "$d/plan-fp100m-b16-windows.tsv"

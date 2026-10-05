@@ -71,6 +71,16 @@ are presented changes:
 | drift in the raw phase | one mix of transcripts and raw code from step 0 (C5) |
 | a contaminated test | the repository holdout and the vault (C3) |
 
+**Tools (2026-10-04): Bend only.** The user: "ana and all my projects are
+Functional Programming, no python is allowed." Corpus v2 was first built with
+Python scripts; every one is ported to `bend-corpus-v2` (`bend/CorpusV2.bend`
+and `bend/CorpusV2/`: Lib, Holdout, Pool, Raw, Combine, Eval, Steps; `nix run
+.#deploy -- corpus-v2 SUBCOMMAND`), each proven byte-identical to the Python on
+the outputs in `run/v2/` (holdout, vault, units, filler, raw, plans, prompts,
+reports), and the Python is deleted. The port found one stale output:
+`run/v2/raw/bend.jsonl` was written before filler.py's one-version-a-path fix,
+so 153 Bend files were in neither the filler nor the raw stream (rebuilt).
+
 ## Principles
 
 - **The assistant's turns are its best effort.** A wrong attempt the model
@@ -119,7 +129,7 @@ Term` is only ever the assistant's best answer.
   its verify, the other verify, repair m2. `bend/tests/transcript.bend` (in
   `bend-tests`): each shape's turns, the direct shape byte for byte, every
   Term the original, distinct presentations, Nix never direct.
-  Rendered (`tools/corpus-v2/render.sh` from `pool.py`'s units, train):
+  Rendered (`tools/corpus-v2/render.sh` from `bend-corpus-v2 pool`'s units, train):
   Bend 300,759 transcripts from 80,748 units (263 MB), Haskell 115,698 from
   57,858 (123 MB), Agda 67,512 from 33,770 (66 MB), Lean 65,644 from 32,856
   (82 MB), Nix 25,016 from 12,572 (36 MB); no text twice. Measured on 600
@@ -136,16 +146,16 @@ first presentation is repair 80, verify 20; its second the other.
 
 ### C3. Holdout by repository, one exclusion list (`run/v2/holdout/`)
 
-- **Split** (built: `tools/corpus-v2/holdout.py`): 2.0% of holdout units by
+- **Split** (built: `bend-corpus-v2 holdout`): 2.0% of holdout units by
   sha256("corpus-v2 holdout\0" + unit) mod 1000 < 20, a rule so later sources
   split the same way. A unit is a repository / Hackage package (folded:
-  `owner__repo` → `repo`, `tools/corpus-v2/names.py`); a repository with more than
+  `owner__repo` → `repo`, `v2.repo.of` in `bend/CorpusV2/Lib.bend`); a repository with more than
   300 files is split by each file's own directory (its full parent path:
   `Mathlib/RingTheory/Ideal`, a nixpkgs package's directory; two components
   held out all of `Mathlib/RingTheory` at once), so a giant library is never
   all in or all out and a module family stays together; a dataset of
   one-file records (`hf:goedel-workbook`, ...) by record. Every unit, filler
-  file and raw file from them is out of training; `tools/corpus-v2/exclude.py IN OUT`
+  file and raw file from them is out of training; `bend-corpus-v2 exclude IN OUT`
   filters any JSONL or NUL stream.
 - **Built 2026-10-03 23:40** (`run/v2/holdout/`: `units.tsv`, `exclude.paths`,
   `exclude.sha256`, `summary.txt`; tools in `tools/corpus-v2/`): 3,977 split
@@ -157,9 +167,9 @@ first presentation is repair 80, verify 20; its second the other.
   v1's 1,050 Lean holdout transcripts only 39 are in v2's holdout, so v2
   renders its own.
 - **Exclusion everywhere:** `exclude.paths` (repo/path, all versions) and
-  `exclude.sha256` (`tools/corpus-v2/norm_hash.py` keys) filter transcripts,
+  `exclude.sha256` (`v2.key` keys, `bend/CorpusV2/Lib.bend`) filter transcripts,
   filler, code-train-v3, raw-new and every later delivery (legere's too).
-- **The vault** (built 2026-10-03 23:27, `tools/corpus-v2/vault.py`): 150
+- **The vault** (built 2026-10-03 23:27, `bend-corpus-v2 vault`): 150
   repositories per language with ≥ 3 files that no training stream of run 1
   holds (`run/v2/holdout/stream-index.json`: code-train-v3, every raw-new
   delivery, every wave's transcripts and filler), chosen by sha256 of the name:
@@ -179,15 +189,15 @@ first presentation is repair 80, verify 20; its second the other.
 - Raw code: one pass per epoch; near-duplicates (MinHash, the clean stage's
   settings) across code-train-v3 and raw-new.
 - Report per language: tokens, distinct source files, exposures per file.
-- **Built 2026-10-04:** the units (`tools/corpus-v2/pool.py`): every unit
+- **Built 2026-10-04:** the units (`bend-corpus-v2 pool`): every unit
   run 1's transcripts came from (final, next, w1–w4, train and holdout), its
   record from whichever wave's results hold it, one per declaration (807 Bend
   duplicates dropped), split by the repository holdout: train Haskell 57,858,
   Agda 33,770, Lean 32,856, Nix 12,572, Bend 80,748; holdout 1,175, 332, 857,
   398, 84 (Bend's code sits in few repositories). No identical transcript:
   Bend's ×4 is four different presentations (above), not four copies. The
-  filler (`filler.py`): the waves' source files once (17,056 Agda and 47,222
-  Bend copies dropped), held-out files out. The raw code (`raw.py`):
+  filler (`bend-corpus-v2 filler`): the waves' source files once (17,056 Agda and 47,222
+  Bend copies dropped), held-out files out. The raw code (`bend-corpus-v2 raw`):
   code-train-v3 and every raw-new delivery (mix 1 and mix 2), each file once,
   held-out and filler files out, the C6 filters, shuffled by id hash: Haskell
   1.84 GB, Lean 1.24 GB, Agda 517 MB (Bend and Nix files are nearly all
@@ -207,7 +217,7 @@ Generated files (headers, gen/ dirs, bindings), data tables, lines > 2,000
 characters, vendored copies and backups, Lean 3, Bend files the Bend2 parser
 rejects, per-repository caps (8 MB Haskell, 15 MB Lean, 10 MB Agda), the two
 synthetic Agda repos, Hackage files' other versions. One script,
-`run/v2/filter.py`, over every raw source.
+`bend-corpus-v2 raw`'s filters, over every raw source.
 
 ### C7. Yield (more checked units)
 
@@ -240,17 +250,17 @@ checkpoints (fp100m-8803, e2-18125, w1-19080, the last) and run 2's:
 - **E4 verdict calibration:** P(`[exit 0]`) against the real verdict.
 
 200 prompts per language minimum; the driver re-indents answers as
-`run/anatest-20261003/check2.py` does (the Term is the body dedented) and
+`bend-corpus-v2 check` does (the Term is the body dedented) and
 sets `BEND_SRC` per class tree.
 
 **Built 2026-10-04** (CPU generation is ~2.5 min an answer, so the set is
-smaller than 200 a language for now): `tools/corpus-v2/evalset.py` cuts 280
+smaller than 200 a language for now): `bend-corpus-v2 evalset` cuts 280
 prompts from the held-out format 2 transcripts, 40 direct and 20 repair per
 language (Nix: 40 repair): the direct prompt is the same text in format 1 and
 2, so both runs answer one question; a repair prompt has a format 1 version
-for run 1 (the ask alone, the mutant under `## Term`). `evalrun.py gen CKPT
+for run 1 (the ask alone, the mutant under `## Term`). `bend-corpus-v2 gen CKPT
 DIR FORMAT` answers (greedy, 100 tokens, bend-generate on the CPU) and
-`evalrun.py check DIR` lifts each answer into its held-out unit and runs the
+`bend-corpus-v2 check DIR` lifts each answer into its held-out unit and runs the
 real checker (Bend per source tree). E3: `tools/corpus-v2/evals.sh` builds
 `run/eval/v2-tr-LANG.corpus` (held-out format 2 transcripts) and
 `run/eval/v2-vault-LANG.corpus` (~2 MB of each vault language, up to 5 files a

@@ -17,29 +17,16 @@ host="${1:?usage: raw-driver.sh HOST PORT STAGES [FIRST] [LAST]}"; port="${2:?}"
 first=${4:-1}; last=${5:-9}
 P=${P:-raw}
 V=$HOME/.local/share/vastai-venv/bin/vastai
+CV2=${CV2:-nix run .#deploy -- corpus-v2}
 log() { echo "[$(TZ=Etc/GMT+6 date '+%Y-%m-%d %H:%M:%S') UTC-6] raw-driver: $*"; }
 
 # 0 when the credit covers the queue plus slice $1's steps
 credit_ok() {
   local credit cur
-  credit=$($V show user --raw 2>/dev/null | python3 -c "import json,sys; print(json.loads(sys.stdin.read(), strict=False)['credit'])") || return 1
+  credit=$($V show user --raw 2>/dev/null | $CV2 credit) || return 1
   cur=$(ssh -n -o StrictHostKeyChecking=no -o ConnectTimeout=30 -p "$port" "$host" 'cd formalTransformer && l=$(ls -t *.log | grep -v "^eval" | head -1) && echo "${l%.log} $(grep -o "step=[0-9]*/[0-9]*" $l | tail -1)"' 2>/dev/null) || return 1
-  python3 - "$stages" "$credit" "$cur" "$1" <<'PY'
-import sys, os
-stages, credit, cur, add = sys.argv[1], float(sys.argv[2]), sys.argv[3].split(), int(sys.argv[4])
-name, pos = cur[0], cur[1].split("=")[1].split("/")
-left = int(pos[1]) - int(pos[0])
-lines = [l.split() for l in open(stages) if l.strip() and not l.lstrip().startswith("#")]
-names = [l[0] for l in lines]
-after = lines[names.index(name) + 1:] if name in names else []
-for l in after:
-    plan = os.path.join(l[4], "plan-fp100m-b16-windows.tsv") if len(l) > 4 else ""
-    left += int(open(plan).readline().split()[2]) if os.path.exists(plan) else 2200
-spd, dph = float(os.environ.get("SECS_PER_STEP", 2.16)), float(os.environ.get("DPH", 0.494))
-need = (left + add) * spd / 3600 * dph + float(os.environ.get("END_COST", 0.6)) + float(os.environ.get("MARGIN", 1.0))
-print(f"credit ${credit:.2f}; queued {left} steps after {name} + {add} = ${need:.2f} with the end and margin", file=sys.stderr)
-sys.exit(0 if credit >= need else 1)
-PY
+  # the message on stderr; 0 when the credit covers it
+  $CV2 credit-ok "$stages" "$credit" "$cur" "$1"
 }
 
 # slice 1 is built by the mix unit

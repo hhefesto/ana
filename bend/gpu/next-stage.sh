@@ -27,6 +27,7 @@ OUT=${OUT:-run/transcripts-mix-$NAME}
 RUN=${RUN:-run/$NAME}
 NEW=${NEW:-haskell-new=run/transcripts-next/haskell bend-new=run/transcripts-next/bend}
 EVALC=${EVALC:-run/eval/transcript-$NAME.corpus}
+CV2=${CV2:-nix run .#deploy -- corpus-v2}
 
 counts() { echo $(( $(tr -cd '\0' < "$1" | wc -c) / 2 )); }
 
@@ -49,36 +50,12 @@ build() {
     # is too small for its windows
     if [ "${REPLAY_FILLER:-0}" = 1 ]; then
       # less every file the new languages' filler already holds (bend-mix refuses a duplicate id)
-      python3 - "$d" "run/transcripts-final/$l" $(for e in $NEW; do echo "${e#*=}"; done) <<'PY'
-import sys, os
-d, src, news = sys.argv[1], sys.argv[2], sys.argv[3:]
-def recs(p):
-    if not os.path.exists(p): return
-    x = open(p, "rb").read().split(b"\0")
-    for i in range(0, len(x) - 1, 2): yield x[i], x[i + 1]
-taken = {k for n in news for f in ("files-hi.nul", "files-lo.nul") for k, _ in recs(f"{n}/{f}")}
-for f in ("files-hi.nul", "files-lo.nul"):
-    kept = 0
-    with open(f"{d}/{f}", "wb") as o:
-        for k, v in recs(f"{src}/{f}"):
-            if k in taken: continue
-            o.write(k + b"\0" + v + b"\0"); kept += 1
-    print(d, f, kept, "files")
-PY
+      $CV2 replay-filler "$d" "run/transcripts-final/$l" $(for e in $NEW; do echo "${e#*=}"; done)
     else : > "$d/files-hi.nul"; : > "$d/files-lo.nul"; fi
   done
   # per round: the new languages in their sizes' ratio, 20 a round in all,
   # and REPLAY (1.0) times as many replayed in fp100m's proportions
-  specs=$(python3 - "${REPLAY:-1.0}" $counts_list <<'PY'
-import sys
-rep = float(sys.argv[1]); cs = [(a.rsplit(":", 1)[0], int(a.rsplit(":", 1)[1])) for a in sys.argv[2:]]
-tot = sum(c for _, c in cs) or 1
-new = [(l, max(1, round(20 * c / tot))) for l, c in cs if c > 0]
-w = {"haskell": 79075, "lean": 50079, "agda": 53663, "nix": 24694, "bend": 126763}
-s = sum(w.values()); r = rep * sum(p for _, p in new)
-print(" ".join([f"{l}:{p}" for l, p in new] + [f"{k}:{max(1, round(r * v / s))}:cycle" for k, v in w.items()]))
-PY
-)
+  specs=$($CV2 specs-next "${REPLAY:-1.0}" $counts_list)
   echo "new transcripts:$counts_list; per round: $specs"
   OUT="$OUT" nix run .#deploy -- plan-windows "$RUN" fp100m 16 $specs
   # the held-out new transcripts as an eval corpus (M2-RUNBOOK section 4)

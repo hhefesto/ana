@@ -113,6 +113,10 @@
           # tagged with ana's tags, with calibrated posteriors; its code goes
           # on to bend-units, bend-check and bend-transcript
           bend-legere = bendBinary pkgs "bend-legere" "Legere.bend";
+          # corpus v2's tools (docs/CORPUS-V2.md): the holdout, the units
+          # pooled and split, the filler, the raw code, the one mix, the
+          # evaluation, and the steps the run scripts take (Python before)
+          bend-corpus-v2 = bendBinary pkgs "bend-corpus-v2" "CorpusV2.bend";
           # the GHC `bend-check haskell` drives: the common Hackage
           # packages, so a module importing only these checks on its own
           ghc-harness = ghcHarness pkgs;
@@ -143,6 +147,7 @@
                 "bend-mix"
                 "bend-push"
                 "bend-legere"
+                "bend-corpus-v2"
               ])
               ++ [
                 (bendFor pkgs)
@@ -159,7 +164,7 @@
               ];
             text = ''
               if [ "$#" -eq 0 ]; then
-                echo "usage: deploy TOOL [ARGS...]   (TOOL: extract, plan-corpus, code-evals, mix, push, transcripts, check, units, clean, transcript, windows, plan-windows, pack, prepare, plan-segment, legere)" >&2
+                echo "usage: deploy TOOL [ARGS...]   (TOOL: extract, plan-corpus, code-evals, mix, push, transcripts, check, units, clean, transcript, windows, plan-windows, pack, prepare, plan-segment, legere, corpus-v2)" >&2
                 exit 2
               fi
               tool=$1

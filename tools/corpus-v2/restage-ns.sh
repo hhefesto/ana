@@ -3,19 +3,8 @@
 set -u
 log() { echo "[$(TZ=Etc/GMT+6 date '+%Y-%m-%d %H:%M:%S') UTC-6] restage-ns: $*"; }
 H=root@137.175.22.196; PT=50891
-python3 - <<'PY'
-import sys, json
-sys.path.insert(0, "tools/corpus-v2")
-from names import repo_of
-vault = {l.split("\t")[1] for l in open("run/v2/holdout/vault.tsv").read().splitlines()[1:]}
-n = drop = 0
-with open("run/rawnew2/mix.jsonl", "rb") as f, open("run/rawnew2/mix.jsonl.tmp", "wb") as o:
-    for line in f:
-        i = line.find(b'"id":'); i = line.find(b'"', i + 5) + 1; j = line.find(b'"', i)
-        if repo_of(line[i:j].decode("utf-8", "replace")) in vault: drop += 1; continue
-        o.write(line); n += 1
-print(f"mix 2: kept {n} documents, dropped {drop} from the vault")
-PY
+CV2=${CV2:-nix run .#deploy -- corpus-v2}
+echo "mix 2: $($CV2 drop-repos run/v2/holdout/vault.tsv run/rawnew2/mix.jsonl run/rawnew2/mix.jsonl.tmp)"
 mv run/rawnew2/mix.jsonl run/rawnew2/mix.with-vault.jsonl && mv run/rawnew2/mix.jsonl.tmp run/rawnew2/mix.jsonl
 built=0
 for k in 1 2 3 4 5; do
