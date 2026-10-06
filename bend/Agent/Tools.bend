@@ -28,15 +28,31 @@ import ./Spec.bend as A
 def at.nl(+xs: List<&2, U32>) -> List<&2, U32>:
   Bool.pick(List<&2, U32>, Nat.is_eq(List.length(&2, U32, xs), 0n), Nil{}, List.append(&2, U32, xs, [10]))
 
+# xs with two spaces before each of its lines (nl: the byte before xs ended
+# a line)
+def at.ind(xs: List<&2, U32>, nl: Bool) -> List<&2, U32>:
+  match xs nl:
+    case Nil{} _:
+      Nil{}
+    case +h <> t True{}:
+      32 <> 32 <> h <> at.ind(t, U32.is_eq(h, 10))
+    case +h <> t False{}:
+      h <> at.ind(t, U32.is_eq(h, 10))
+
 # the file: the given Type's code, then the answer's (a Lean answer to a
-# Type is its proof: `:=` between them, unless the answer opens with it)
+# Type is its proof: `:=` between them, unless the answer opens with it; a
+# Bend answer to a Type is its def's body, indented under it, and a Bend file
+# names Base itself, or True{}, Nil{} and U32 are unknown)
 def at.file(+tool: String, +e: List<&2, A.Turn>) -> List<&2, U32>:
   +ty = A.ag.type.code(e)
   +te = A.ag.answer.code(e)
-  +lean = Bool.and(String.eq(tool, "lean"), Bool.not(Nat.is_eq(List.length(&2, U32, ty), 0n)))
+  +typed = Bool.not(Nat.is_eq(List.length(&2, U32, ty), 0n))
+  +lean = Bool.and(String.eq(tool, "lean"), typed)
+  +bend = String.eq(tool, "bend")
   +join = Bool.pick(List<&2, U32>, Bool.and(lean, Bool.not(A.ag.prefix(te, A.ag.ascii(":=")))), A.ag.ascii(" :=\n"), [10])
-  +hs = Bool.pick(List<&2, U32>, String.eq(tool, "ghc"), A.ag.ascii("module Unit where\n\n"), Nil{})
-  List.append(&2, U32, hs, List.append(&2, U32, ty, List.append(&2, U32, Bool.pick(List<&2, U32>, Nat.is_eq(List.length(&2, U32, ty), 0n), Nil{}, join), at.nl(te))))
+  +hd = Bool.pick(List<&2, U32>, String.eq(tool, "ghc"), A.ag.ascii("module Unit where\n\n"), Bool.pick(List<&2, U32>, bend, A.ag.ascii("import Base\n\n"), Nil{}))
+  +body = Bool.pick(List<&2, U32>, Bool.and(bend, typed), at.ind(te, True{}), te)
+  List.append(&2, U32, hd, List.append(&2, U32, ty, List.append(&2, U32, Bool.pick(List<&2, U32>, typed, join, Nil{}), at.nl(body))))
 
 def at.ext(+tool: String) -> String:
   Bool.pick(String, String.eq(tool, "ghc"), "hs", Bool.pick(String, String.eq(tool, "lean"), "lean",
