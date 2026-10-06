@@ -262,7 +262,8 @@ synthetic Agda repos, Hackage files' other versions. One script,
   times v1's 79k transcripts from the same Hackage files.
 - **Bend2:** 46% of community originals fail the 2.0.34 loader (Base name
   clashes, typed arithmetic); upstream 2.0.35 (bendlang/bend) addresses the
-  name clashes. A 2.0.35 checker is separate from the trainer's fork.
+  name clashes. Since 2026-10-06 the fork is on 2.0.35+, so bend-check
+  runs on it: re-measure this yield.
 - **legere:** session code with its real compiler errors is natural repair
   data (a failing attempt and its fix); legere's units go through the same
   shapes and exclusion list.
