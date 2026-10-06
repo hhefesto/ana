@@ -164,7 +164,11 @@ def ea.prep.one(+i: Nat, +fmt1: Bool, +dir: String, +recs: List<&2, Ev.EvKv>, +r
         +src : String <- Ev.ev.src.if(S.eq(l, S.b("bend")), roots, home, u, Ev.ev.nth(Ev.ev.split(rec, 30), 7n))
         S.write(task, ea.task.bytes(u, l, src, r, rec))
         S.write(pf, asked)
-        return C.CbJob{i, List.append(&2, String, env0, {["AGENT_TOOL=" ++ dep ++ " corpus-v2 agent-tool " ++ task] : List<&2, String>}), ea.bin(),
+        # CHECK_TAG: episode i's checks name their files outside bend-check's
+        # work directory (Agda's FTUnit<tag>.agda) apart from the episodes
+        # running beside it (ana's environment passes to the tool, the tool's
+        # to bend-check)
+        return C.CbJob{i, List.append(&2, String, env0, {["AGENT_TOOL=" ++ dep ++ " corpus-v2 agent-tool " ++ task, "CHECK_TAG=" ++ Nat.show(Nat.add(100000n, i))] : List<&2, String>}), ea.bin(),
           {["--threads", threads, "--agent", "--prompt-file", pf] : List<&2, String>}}
 
 def ea.has(xs: List<&2, Nat>, +i: Nat) -> Bool:

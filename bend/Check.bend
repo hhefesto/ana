@@ -915,7 +915,12 @@ def check(+c: Cfg, +units: String, +out: String, +jobs: Nat) -> IO(Unit):
     Ck.log("bend-check " ++ Cfg.name(c) ++ ": " ++ units ++ " with " ++ Nat.show(jobs) ++ " workers in " ++ work)
     +q : Chan(Job) <- Chan.new(Job, U32.from_nat(jobs))
     +sk : Nat <- S.env.nat("SHARD", 0n)
-    chs : List<Chan(List<&2, L.Stat>)> <- fork.all(jobs, 0n, Nat.mul(sk, jobs), c, work, q)
+    # CHECK_TAG: the workers' first tag when separate bend-check processes
+    # run at once on one tree (E5's agent-tool: one process a call, each
+    # worker 0, so every concurrent Agda check wrote the same FTUnit0.agda
+    # in a shared library and they read each other's files)
+    +tb : Nat <- S.env.nat("CHECK_TAG", Nat.mul(sk, jobs))
+    chs : List<Chan(List<&2, L.Stat>)> <- fork.all(jobs, 0n, tb, c, work, q)
     dispatch(c, units, q)
     Chan.close(Job, q)
     +st : List<&2, L.Stat> <- join.all(chs, Nil{})
