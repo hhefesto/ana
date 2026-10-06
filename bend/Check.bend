@@ -234,7 +234,7 @@ def dp.send(+jobs: Chan(Job), grp: List<&2, L.U>, gn: Nat) -> IO(Unit):
       IO.pure(Unit, Unit{})
     case 1n+m:
       do IO<Unit>:
-        ok : Bool <- Chan.send(Job, jobs, Job{List.reverse(&2, L.U, grp)})
+        ok : Result<&1, &1, Job, Unit> <- Chan.send(Job, jobs, Job{List.reverse(&2, L.U, grp)})
         return Unit{}
 
 def dp.place(same: Bool, +jobs: Chan(Job), rd: S.Rd, +i: Nat, key: List<&2, U32>, grp: List<&2, L.U>, +gn: Nat, +u: L.U, +k: List<&2, U32>) -> IO(Dp):
@@ -506,7 +506,7 @@ def send.grps(+q: Chan(Job), gs: List<&2, Grp>) -> IO(Unit):
       IO.pure(Unit, Unit{})
     case Grp{n, ids, locs} <> more:
       do IO<Unit>:
-        ok : Bool <- Chan.send(Job, q, Keyed{ids, locs})
+        ok : Result<&1, &1, Job, Unit> <- Chan.send(Job, q, Keyed{ids, locs})
         send.grps(q, more)
 
 def Grp.sum(gs: List<&2, Grp>) -> Nat:

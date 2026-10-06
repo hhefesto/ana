@@ -270,7 +270,7 @@ def cb.wk.got(+res: Chan(CbRes), m: Maybe<&1, CbJob>) -> IO(Bool):
     case Some{j}:
       do IO<Bool>:
         r : CbRes <- cb.job.run(j)
-        ok : Bool <- Chan.send(CbRes, res, r)
+        ok : Result<&1, &1, CbRes, Unit> <- Chan.send(CbRes, res, r)
         return True{}
 
 def cb.wk.step(+jobs: Chan(CbJob), +res: Chan(CbRes)) -> IO(Bool):
@@ -304,7 +304,7 @@ def cb.send(+jobs: Chan(CbJob), js: List<&2, CbJob>) -> IO(Unit):
       Chan.close(CbJob, jobs)
     case j <> more:
       do IO<Unit>:
-        ok : Bool <- Chan.send(CbJob, jobs, j)
+        ok : Result<&1, &1, CbJob, Unit> <- Chan.send(CbJob, jobs, j)
         cb.send(jobs, more)
 
 def cb.join.all(chs: List<Chan(Unit)>) -> IO(Unit):

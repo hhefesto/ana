@@ -665,7 +665,7 @@ def ho.pool.send(+q: Chan(List<String>), jobs: List<List<String>>) -> IO(Unit):
       IO.pure(Unit, Unit{})
     case jb <> more:
       do IO<Unit>:
-        ok : Bool <- Chan.send(List<String>, q, jb)
+        ok : Result<&1, &1, List<String>, Unit> <- Chan.send(List<String>, q, jb)
         ho.pool.send(q, more)
 
 def ho.pool.join(chs: List<Chan(Unit)>) -> IO(Unit):

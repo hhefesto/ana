@@ -542,7 +542,7 @@ def sj.send(n: Nat, +q: Chan(Sj), +k: Nat) -> IO(Unit):
       IO.pure(Unit, Unit{})
     case 1n+m:
       do IO<Unit>:
-        ok : Bool <- Chan.send(Sj, q, Sj{k})
+        ok : Result<&1, &1, Sj, Unit> <- Chan.send(Sj, q, Sj{k})
         sj.send(m, q, 1n+k)
 
 def pool(+c: Pc, +shards: Nat, +jobs: Nat) -> IO(Nat):

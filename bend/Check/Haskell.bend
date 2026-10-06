@@ -1237,11 +1237,11 @@ def halves.join(b: IO(List<&2, L.Got>), a: List<&2, L.Got>) -> IO(List<&2, L.Got
 # of its placement
 type Prep is Data:
   Skip{g: L.Got}
-  Ready{x: Pu, keys: List<&2, String>}
+  HsReady{x: Pu, keys: List<&2, String>}
 
 def prep.pkg(+u: L.U, +i: Nat, +k: Pkg) -> Prep:
   +mode = Pkg.mode(k)
-  Ready{Pu{u, k, head.unit(L.U.at(u, 5n)), "u" ++ Nat.show(i)}, Bool.pick(List<&2, String>, String.eq(mode, "none"), ["placed_no_source", "mode_none"], ["mode_" ++ mode])}
+  HsReady{Pu{u, k, head.unit(L.U.at(u, 5n)), "u" ++ Nat.show(i)}, Bool.pick(List<&2, String>, String.eq(mode, "none"), ["placed_no_source", "mode_none"], ["mode_" ++ mode])}
 
 def prep(+c: Hc, +ids: List<&2, List<&2, U32>>, +i: Nat, +u: L.U) -> IO(Prep):
   Bool.pick(IO(Prep), has.module.line(S.split.lines(L.U.at(u, 5n))),
@@ -1264,14 +1264,14 @@ def batch.max() -> Nat:
 # the run of ready units with the package key, at most n of them
 def same.run(ps: List<&2, Prep>, +key: String, n: Nat) -> List<&2, Pu>:
   match ps n:
-    case Ready{+x, ks} <> more 1n+m:
+    case HsReady{+x, ks} <> more 1n+m:
       Bool.pick(List<&2, Pu>, String.eq(Pkg.key(Pu.pkg(x)), key), x <> same.run(more, key, m), Nil{})
     case _ _:
       Nil{}
 
 def keys.run(ps: List<&2, Prep>, n: Nat) -> List<&2, List<&2, String>>:
   match ps n:
-    case Ready{x, ks} <> more 1n+m:
+    case HsReady{x, ks} <> more 1n+m:
       ks <> keys.run(more, m)
     case _ _:
       Nil{}
@@ -1360,7 +1360,7 @@ def process(fuel: Nat, +c: Hc, +dir: String, ps: List<&2, Prep>) -> IO(List<&2, 
       do IO<List<&2, L.Got>>:
         gs : List<&2, L.Got> <- process(f, c, dir, more)
         return g <> gs
-    case 1n+f Ready{+x, +ks} <> +more:
+    case 1n+f HsReady{+x, +ks} <> +more:
       +xs = {x <> same.run(more, Pkg.key(Pu.pkg(x)), Nat.sub(batch.max(), 1n)) : List<&2, Pu>}
       +n = List.length(&2, Pu, xs)
       +kss = {ks <> keys.run(more, Nat.sub(n, 1n)) : List<&2, List<&2, String>>}

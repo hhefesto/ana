@@ -444,7 +444,7 @@ def uj.send(+q: Chan(Uj), ps: List<&2, String>, +m: Nat) -> IO(Unit):
       IO.pure(Unit, Unit{})
     case +p <> more:
       do IO<Unit>:
-        ok : Bool <- Chan.send(Uj, q, Uj{p, m})
+        ok : Result<&1, &1, Uj, Unit> <- Chan.send(Uj, q, Uj{p, m})
         uj.send(q, more, m)
 
 # a failed chunk stops the stage, with its output

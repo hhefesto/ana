@@ -568,7 +568,7 @@ def sends(n: Nat, +k: Nat, +q: Chan(Nat)) -> IO(Unit):
       IO.pure(Unit, Unit{})
     case 1n+m:
       do IO<Unit>:
-        ok : Bool <- Chan.send(Nat, q, k)
+        ok : Result<&1, &1, Nat, Unit> <- Chan.send(Nat, q, k)
         sends(m, 1n+k, q)
 
 def lines(es: List<&2, String>) -> String:

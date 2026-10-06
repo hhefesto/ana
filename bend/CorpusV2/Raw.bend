@@ -1224,7 +1224,7 @@ def rw.pw.send(js: List<RwJ>, +q: Chan(RwJ)) -> IO(Unit):
       IO.pure(Unit, Unit{})
     case j <> more:
       do IO<Unit>:
-        ok : Bool <- Chan.send(RwJ, q, j)
+        ok : Result<&1, &1, RwJ, Unit> <- Chan.send(RwJ, q, j)
         rw.pw.send(more, q)
 
 # the jobs run by `jobs` workers; the answer is how many failed
