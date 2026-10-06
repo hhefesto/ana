@@ -6,6 +6,8 @@ import ../Train/Init.bend as I
 import ../Train/Ckpt.bend as K
 import ../Dense/Io.bend as Io
 import ../Dense/Decode.bend as Dd
+import ../Dense/Op.bend as P
+import ../Sample.bend as S
 
 # Model.bend's decode (the meaning) against the dense decode step
 # (Dense/Decode.bend): the same weights, the same tokens, one token at a
@@ -14,7 +16,9 @@ import ../Dense/Decode.bend as Dd
 # softmax ring wraps and overwrites its oldest slots. Two configs: v3's arms
 # (RG-LRU, qk-norm, sinks) and none of them (sigmoid gates, plain softmax).
 # A reset (states to 0) then the same tokens again must give the same
-# logits bit for bit. Every def is prefixed `td.`.
+# logits bit for bit. Greedy's pick on the store (Dd.dd.top) must be
+# Sample.bend's argmax of the same store's logits at every position, ties
+# to the least index. Every def is prefixed `td.`.
 
 def td.rnd(s: U32) -> U32:
   U32.add(U32.mul(s, 1664525), 1013904223)
@@ -121,12 +125,58 @@ def td.check(+name: String, +c: C.Config, +ts: List<&2, U32>, p: List<&2, List<&
     IO.print(name ++ " logits, positions after it wraps: " ++ td.show(td.errs(List.drop(&2, List<&2, F32>, tree, ctx), List.drop(&2, List<&2, F32>, dense, ctx), TdErr{0.0, 0.0})))
     IO.print(Bool.pick(String, Bool.and(td.same(dense, again), Nat.is_eq(List.length(&2, List<&2, F32>, dense), List.length(&2, U32, ts))), "ok ", "FAIL ") ++ name ++ " reset")
 
+# Greedy's pick on the store (Dd.dd.top) is Sample.bend's argmax of the
+# logits the same store answers, at every position: the law is exact (one
+# set of logits, two ways to pick), so a near tie cannot excuse a miss
+def td.top.and(+ok: Bool, r: Array<F32> & Bool) -> Array<F32> & Bool:
+  (s, b) = r
+  (s, Bool.and(ok, b))
+
+def td.top.cmp(+want: U32, r: Array<F32> & U32) -> Array<F32> & Bool:
+  (s, got) = r
+  (s, U32.is_eq(want, got))
+
+def td.top.one(+k: Dd.Dd, +dv: Nat, r: Array<F32> & List<&2, F32>) -> Array<F32> & Bool:
+  (s, xs) = r
+  td.top.cmp(S.argmax(dv, T.V.of_list(dv, xs)), Dd.dd.top(k, s))
+
+def td.top.step(+k: Dd.Dd, +dv: Nat, +pos: Nat, +t: U32, r: Array<F32> & Bool) -> Array<F32> & Bool:
+  (s, ok) = r
+  td.top.and(ok, td.top.one(k, dv, Dd.dd.logits(k, Dd.dd.feed(k, pos, t, s))))
+
+def td.tops(ts: List<&2, U32>, +k: Dd.Dd, +dv: Nat, +pos: Nat, r: Array<F32> & Bool) -> Array<F32> & Bool:
+  match ts:
+    case Nil{}:
+      r
+    case t <> rest:
+      td.tops(rest, k, dv, 1n+pos, td.top.step(k, dv, pos, t, r))
+
+def td.top.line(+name: String, r: Array<F32> & Bool) -> IO(Unit):
+  (s, ok) = r
+  IO.print(Bool.pick(String, ok, "ok ", "FAIL ") ++ name ++ " greedy pick on the store")
+
+# ties go to the least index, as Sample.bend's argmax: dd.pick over 4 cells
+def td.tie.got(r: Array<F32> & F32) -> U32:
+  (s, y) = r
+  U32.sub(4, F32.to_u32(y))
+
+def td.tie(+xs: List<&2, F32>) -> Bool:
+  U32.is_eq(td.tie.got(Array.get(F32, P.run(Dd.dd.pick(4, 0, 4), Io.put(xs, Array.new(F32, 3n, 0.0), 0)), 5)), S.argmax(2n, T.V.of_list(2n, xs)))
+
+def td.ties() -> Bool:
+  Bool.and(Bool.and(td.tie([1.0, 3.0, 3.0, 2.0]), td.tie([0.0, 0.0, 0.0, 0.0])),
+    Bool.and(Bool.and(td.tie([F32.neg(1.0), F32.neg(5.0), F32.neg(1.0), F32.neg(2.0)]), td.tie([2.0, 1.0, 0.0, 7.0])), td.tie([F32.neg(0.0), 0.0, F32.neg(3.0), 0.0])))
+
 def td.case(+name: String, +c: C.Config, +ts: List<&2, U32>) -> IO(Unit):
   +k = Dd.dd.of(c)
-  td.check(name, c, ts, td.again(k, ts, td.dense(ts, k, 0n, (Io.put(K.Weights.flat(I.init(c)), Dd.dd.new(k), 0), Nil{}))))
+  +w = K.Weights.flat(I.init(c))
+  do IO<Unit>:
+    td.check(name, c, ts, td.again(k, ts, td.dense(ts, k, 0n, (Io.put(w, Dd.dd.new(k), 0), Nil{}))))
+    td.top.line(name, td.tops(ts, k, Md.Dims.dv(Md.Dims.of(c)), 0n, (Io.put(w, Dd.dd.new(k), 0), True{})))
 
 def main() -> IO(Unit):
   +ts = td.window(95n, 7)
   do IO<Unit>:
     td.case("v3 arms", C.Config.small4_v3(), ts)
     td.case("no arms", {C.Config{U32.to_nat(258), 64n, 64n, U32.to_nat(192), 4n, 4n, False{}, False{}, False{}, True{}} : C.Config}, ts)
+    IO.print(Bool.pick(String, td.ties(), "ok ", "FAIL ") ++ "greedy pick ties go to the least index")

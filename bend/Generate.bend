@@ -22,27 +22,28 @@ import ./Agent/Loop.bend as L
 # incremental decoder (the cache-run law executed); every sampled token is
 # fed back until EOS or the budget.  Output streams as it is decoded.
 
-# Where decoding is: the engine after the tokens fed so far, the pick drawn
-# from its logits (and those logits, for SAMPLE_STATS), and whether the
-# pick is EOS. A Type, since the engine is (the dense store is threaded).
+# Where decoding is: the engine after the tokens fed so far, the pick it
+# answered (D.Px: on the dense store for greedy, else from the logits), the
+# pick's probability for SAMPLE_STATS (0 without), and whether the pick is
+# EOS. A Type, since the engine is (the dense store is threaded).
 type Gs is Type:
-  Gs{e: D.En, pk: S.Pick, lg: T.V, stop: Bool}
+  Gs{e: D.En, pk: S.Pick, p: F32, stop: Bool}
 
-def gs.of(+dm: Md.Dims, +st: D.Settings, +vocab: Nat, rng: S.Rng, r: D.En & T.V) -> Gs:
-  (e, +lg) = r
-  +pk = D.dc.pick(dm, st, vocab, lg, rng)
-  Gs{e, pk, lg, U32.is_eq(D.dc.Pick.token(pk), Tk.eos())}
+def gs.of(px: D.Px) -> Gs:
+  match px:
+    case D.Px{e, +pk, +p}:
+      Gs{e, pk, p, U32.is_eq(D.dc.Pick.token(pk), Tk.eos())}
 
 def gen(n: Nat, g: Gs, +dm: Md.Dims, +b: Tk.Bpe, +st: D.Settings, +vocab: Nat, +pos: Nat, +pending: List<&2, U32>,
         +count: Nat, +stats: Bool) -> IO(Nat):
   match n g:
-    case 1n+p Gs{e, +pk, +lg, False{}}:
+    case 1n+p Gs{e, +pk, +pr, False{}}:
       +t = D.dc.Pick.token(pk)
       +d = D.dc.emit(b, pending, t)
       do IO<Nat>:
-        D.dc.stats.line(stats, pos, t, D.dc.prob.of(Md.Dims.dv(dm), lg, t))
+        D.dc.stats.line(stats, pos, t, pr)
         IO.write(D.dc.Dec.text(d))
-        gen(p, gs.of(dm, st, vocab, D.dc.Pick.rng(pk), D.dc.en.step(e, pos, t)), dm, b, st, vocab, 1n+pos, D.dc.Dec.pending(d), 1n+count, stats)
+        gen(p, gs.of(D.dc.en.step.pick(e, pos, t, dm, st, vocab, stats, D.dc.Pick.rng(pk))), dm, b, st, vocab, 1n+pos, D.dc.Dec.pending(d), 1n+count, stats)
     case _ _:
       IO.pure(Nat, count)
 
@@ -69,7 +70,7 @@ def go(+c: C.Config, +total: Nat, +b: Tk.Bpe, e: D.En, +step: Nat, +prompt: Stri
     IO.print_err("generate: loaded in " ++ D.dc.ms(t0, t1) ++ " ms; prompt_tokens=" ++ Nat.show(List.length(&2, U32, ids)))
     IO.print("=== ana: step " ++ Nat.show(step) ++ " of " ++ Nat.show(total) ++ " (" ++ pct(step, Nat.max(total, 1n)) ++ "% of its plan) ===")
     IO.write(D.dc.bytes.str(Nil{}) ++ text)
-    n : Nat <- gen(budget, gs.of(dm, st, vocab, D.dc.rng.of(seed), D.dc.en.prefill(ids, e, 0n)), dm, b, st, vocab, List.length(&2, U32, ids), Nil{}, 0n, stats)
+    n : Nat <- gen(budget, gs.of(D.dc.en.prefill.pick(ids, e, 0n, dm, st, vocab, stats, D.dc.rng.of(seed))), dm, b, st, vocab, List.length(&2, U32, ids), Nil{}, 0n, stats)
     go.fin(t1, ids, n)
 
 def open.model(+prompt: String, +budget: Nat, +st: D.Settings, +seed: String, +t0: Nat, +stats: Bool, me: D.Model & D.En) -> IO(Unit):

@@ -366,6 +366,76 @@ def dc.en.prefill(+xs: List<&2, U32>, e: En, +pos: Nat) -> En & T.V:
       +n = Nat.sub(List.length(&2, U32, xs), 1n)
       dc.en.last(List.drop(&2, U32, xs, n), dc.en.feeds(List.take(&2, U32, xs, n), EDense{k, dv, s}, pos), Nat.add(pos, n))
 
+# A step answered with a pick: the engine, the pick, and the pick's
+# probability when SAMPLE_STATS wants it (else 0, never computed: as an
+# argument the probability was a max, v exps and a sum at every token).
+type Px is Type:
+  Px{e: En, pk: S.Pick, p: F32}
+
+def dc.greedy(+st: Settings) -> Bool:
+  match st:
+    case Settings{+t, k, p}:
+      F32.is_le(t, 0.0)
+
+def dc.px.p(on: Bool, +dv: Nat, +lg: T.V, +t: U32) -> F32:
+  match on:
+    case True{}:
+      dc.prob.of(dv, lg, t)
+    case False{}:
+      0.0
+
+# the meaning's way: the logits as a value, then Sample.bend's pick
+def dc.px.of(+dm: Md.Dims, +st: Settings, +vocab: Nat, +stats: Bool, rng: S.Rng, r: En & T.V) -> Px:
+  (e, +lg) = r
+  +pk = dc.pick(dm, st, vocab, lg, rng)
+  Px{e, pk, dc.px.p(stats, Md.Dims.dv(dm), lg, dc.Pick.token(pk))}
+
+# greedy's token from the store (Dd.dd.top) is Sample.bend's greedy pick
+# (argmax; the rng untouched); none (a NaN max) takes the meaning's way
+def dc.px.top(ok: Bool, +k: Dd.Dd, +dv: Nat, +dm: Md.Dims, +st: Settings, +vocab: Nat, rng: S.Rng, +t: U32, s: Array<F32>) -> Px:
+  match ok:
+    case True{}:
+      Px{EDense{k, dv, s}, S.Pick{t, rng}, 0.0}
+    case False{}:
+      dc.px.of(dm, st, vocab, False{}, rng, dc.en.dense(k, dv, Dd.dd.logits(k, s)))
+
+def dc.px.dense(+k: Dd.Dd, +dv: Nat, +dm: Md.Dims, +st: Settings, +vocab: Nat, rng: S.Rng, r: Array<F32> & U32) -> Px:
+  (s, +t) = r
+  dc.px.top(U32.is_lt(t, Dd.dd.vocab(k)), k, dv, dm, st, vocab, rng, t, s)
+
+def dc.en.dense.pick(fast: Bool, +k: Dd.Dd, +dv: Nat, +dm: Md.Dims, +st: Settings, +vocab: Nat, +stats: Bool, rng: S.Rng, s: Array<F32>) -> Px:
+  match fast:
+    case True{}:
+      dc.px.dense(k, dv, dm, st, vocab, rng, Dd.dd.top(k, s))
+    case False{}:
+      dc.px.of(dm, st, vocab, stats, rng, dc.en.dense(k, dv, Dd.dd.logits(k, s)))
+
+# a token in, the pick after it: greedy on the dense engine without stats
+# picks on the store (the v logits never leave it); everything else is the
+# meaning's way (dc.en.step, then the pick from its logits)
+def dc.en.step.pick(e: En, +pos: Nat, +t: U32, +dm: Md.Dims, +st: Settings, +vocab: Nat, +stats: Bool, rng: S.Rng) -> Px:
+  match e:
+    case ETree{+tdm, +w, sts}:
+      dc.px.of(dm, st, vocab, stats, rng, dc.en.step(ETree{tdm, w, sts}, pos, t))
+    case EDense{+k, +dv, s}:
+      dc.en.dense.pick(Bool.and(dc.greedy(st), Bool.not(stats)), k, dv, dm, st, vocab, stats, rng, Dd.dd.feed(k, pos, t, s))
+
+def dc.en.last.pick(ys: List<&2, U32>, e: En, +pos: Nat, +dm: Md.Dims, +st: Settings, +vocab: Nat, +stats: Bool, rng: S.Rng) -> Px:
+  match ys:
+    case t <> rest:
+      dc.en.step.pick(e, pos, t, dm, st, vocab, stats, rng)
+    case Nil{}:
+      dc.px.of(dm, st, vocab, stats, rng, (e, T.VZ{}))
+
+# dc.en.prefill answered with a pick (the last token through dc.en.step.pick)
+def dc.en.prefill.pick(+xs: List<&2, U32>, e: En, +pos: Nat, +dm: Md.Dims, +st: Settings, +vocab: Nat, +stats: Bool, rng: S.Rng) -> Px:
+  match e:
+    case ETree{+tdm, +w, sts}:
+      dc.px.of(dm, st, vocab, stats, rng, dc.en.prefill(xs, ETree{tdm, w, sts}, pos))
+    case EDense{+k, +dv, s}:
+      +n = Nat.sub(List.length(&2, U32, xs), 1n)
+      dc.en.last.pick(List.drop(&2, U32, xs, n), dc.en.feeds(List.take(&2, U32, xs, n), EDense{k, dv, s}, pos), Nat.add(pos, n), dm, st, vocab, stats, rng)
+
 # every layer's state back to empty (a fresh episode on loaded weights)
 def dc.en.reset(e: En) -> En:
   match e:

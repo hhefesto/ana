@@ -339,7 +339,7 @@
             (cd src && bend tests/decode-dense.bend -o $TMPDIR/dd) && $TMPDIR/dd --threads 4 | tee dd.out
             awk '/logits, positions/ { r = $(NF); gsub(/[()]/, "", r); k++; if (r + 0 > 1e-5) { print "logits differ: " $0; bad = 1 } }
                  END { if (k != 4) { print "expected 4 logit checks, got " k; bad = 1 } exit bad }' dd.out
-            test "$(grep -c '^ok ' dd.out)" = 2
+            test "$(grep -c '^ok ' dd.out)" = 5 && ! grep -q '^FAIL' dd.out
             touch $out
           '';
           # CPU bulk ops refine the Base definitions without changing F32

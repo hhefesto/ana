@@ -32,26 +32,26 @@ import ./Io.bend as Io
 
 type Dd is Data:
   Dd{c: C.Config, p: U32, st0: U32, stn: U32, tok: U32, slot: U32, npos: U32, lg: U32, v: U32, ctx: U32,
-     depth: Nat, feed: List<&2, P.Op>, head: List<&2, P.Op>}
+     depth: Nat, feed: List<&2, P.Op>, head: List<&2, P.Op>, top: U32, pick: List<&2, P.Op>}
 
 def dd.c(+d: Dd) -> C.Config:
   match d:
-    case Dd{c, p, a, b, t, s, n, lg, v, x, dp, f, h}:
+    case Dd{c, p, a, b, t, s, n, lg, v, x, dp, f, h, tp, pk}:
       c
 
 def dd.p(+d: Dd) -> U32:
   match d:
-    case Dd{c, p, a, b, t, s, n, lg, v, x, dp, f, h}:
+    case Dd{c, p, a, b, t, s, n, lg, v, x, dp, f, h, tp, pk}:
       p
 
 def dd.depth(+d: Dd) -> Nat:
   match d:
-    case Dd{c, p, a, b, t, s, n, lg, v, x, dp, f, h}:
+    case Dd{c, p, a, b, t, s, n, lg, v, x, dp, f, h, tp, pk}:
       dp
 
 def dd.vocab(+d: Dd) -> U32:
   match d:
-    case Dd{c, p, a, b, t, s, n, lg, v, x, dp, f, h}:
+    case Dd{c, p, a, b, t, s, n, lg, v, x, dp, f, h, tp, pk}:
       v
 
 # Layout ----------------------------------------------------------------------
@@ -287,10 +287,22 @@ def dd.layers(bs: List<&2, L.BP>, +m: L.Dm, +x: U32, +w: L.Wg, +dx: Dx, +o: U32)
     case +bp <> t:
       dd.layer(m, bp, x, w, dx, o) <> dd.layers(t, m, x, w, dx, U32.add(o, dd.st.size(bp, m)))
 
-# The decoder for a config: the layout and its two programs. `feed` takes
-# the token, slot and live cells to the residual stream after the last
-# layer (states advanced); `head` turns it into the logits (Model.bend
-# decode.fin: the tied embedding over the final RMSNorm).
+# Greedy's pick on the store (Sample.bend's argmax: the first of the
+# largest logits), so the v logits never become a Bend value: the cell top
+# gets their max m, the cell top+1 the max over i of v - i where l_i >= m
+# (0 elsewhere), so v minus it is the least i holding m. Every v - i is an
+# integer below 2^24, exact in F32. No l_i >= m (m NaN) leaves 0 there:
+# dd.top answers v, and the caller falls back to the logits.
+def dd.pick(+v: U32, +lg: U32, +top: U32) -> List<&2, P.Op>:
+  [dd.ein(Es{[v], 1, 1, 0, dd.v(top, [0]), [dd.v(lg, [1])], X.x(0)}),
+   dd.ein(Es{[v], 1, 1, 0, dd.v(U32.add(top, 1), [0]), [dd.v(lg, [1]), dd.v(top, [0])],
+     X.sel(X.le(X.x(1), X.x(0)), X.sub(X.k(U32.to_f32(v)), X.ix(0)), X.k(0.0))})]
+
+# The decoder for a config: the layout and its programs. `feed` takes the
+# token, slot and live cells to the residual stream after the last layer
+# (states advanced); `head` turns it into the logits (Model.bend
+# decode.fin: the tied embedding over the final RMSNorm); `pick` takes
+# them to greedy's token in the two cells at `top`.
 def dd.of(+c: C.Config) -> Dd:
   +m = dd.dm(c)
   +d = L.Dm.d(m)
@@ -303,14 +315,15 @@ def dd.of(+c: C.Config) -> Dd:
   +w = L.Wg.at(m, stn)
   +dx = dd.dx(m, L.Wg.end(w))
   +x = dd.dx.x(dx)
-  +total = dd.dx.end(dx)
+  +top = dd.dx.end(dx)
+  +total = U32.add(top, 2)
   +feed = List.concat(&2, P.Op, List.append(&2, List<&2, P.Op>,
     [[dd.ein(Es{[1, d], 0, 0, 0, dd.v(x, [d, 1]), [View{0, [0, 1], IxAt{dd.dx.tok(dx), [0, 0], d}}], X.x(0)})]],
     dd.layers(bs, m, x, w, dx, st0)))
   +head = List.append(&2, P.Op, M.norm(1, d, x, fin, dd.dx.ssf(dx), dd.dx.fv(dx)),
     [P.linear(1, d, L.Dm.v(m), dd.dx.fv(dx), d, 0, dd.dx.lg(dx), L.Dm.v(m))])
   Dd{c, p, st0, stn, dd.dx.tok(dx), dd.dx.slot(dx), dd.dx.npos(dx), dd.dx.lg(dx), L.Dm.v(m), L.Dm.t(m),
-     L.depth(31n, U32.is_lt(2, total), total, 0n, 1), feed, head}
+     L.depth(31n, U32.is_lt(2, total), total, 0n, 1), feed, head, top, dd.pick(L.Dm.v(m), dd.dx.lg(dx), top)}
 
 # Running ---------------------------------------------------------------------
 
@@ -320,13 +333,13 @@ def dd.new(+k: Dd) -> Array<F32>:
 # every layer's state back to 0 (a fresh episode on loaded weights)
 def dd.reset(+k: Dd, s: Array<F32>) -> Array<F32>:
   match k:
-    case Dd{c, p, +st0, stn, +tok, +slot, +npos, lg, v, +ctx, dp, f, h}:
+    case Dd{c, p, +st0, stn, +tok, +slot, +npos, lg, v, +ctx, dp, f, h, tp, pk}:
       P.run([P.zero(U32.sub(stn, st0), st0)], s)
 
 # one token at a position: its cells, then every layer (no logits)
 def dd.feed(+k: Dd, +pos: Nat, +t: U32, s: Array<F32>) -> Array<F32>:
   match k:
-    case Dd{c, p, +st0, stn, +tok, +slot, +npos, lg, v, +ctx, dp, f, h}:
+    case Dd{c, p, +st0, stn, +tok, +slot, +npos, lg, v, +ctx, dp, f, h, tp, pk}:
       +slot1 = U32.from_nat(Nat.mod(pos, U32.to_nat(ctx)))
       +live = U32.from_nat(Nat.min(pos, U32.to_nat(U32.sub(ctx, 1))))
       P.run(f, Array.set(F32, Array.set(F32, Array.set(F32, s, tok, U32.to_f32(t)), slot, U32.to_f32(slot1)), npos, U32.to_f32(live)))
@@ -334,8 +347,19 @@ def dd.feed(+k: Dd, +pos: Nat, +t: U32, s: Array<F32>) -> Array<F32>:
 # the logits after the tokens fed so far
 def dd.logits(+k: Dd, s: Array<F32>) -> Array<F32> & List<&2, F32>:
   match k:
-    case Dd{c, p, +st0, stn, +tok, +slot, +npos, lg, v, +ctx, dp, f, h}:
+    case Dd{c, p, +st0, stn, +tok, +slot, +npos, lg, v, +ctx, dp, f, h, tp, pk}:
       Io.get(U32.to_nat(v), P.run(h, s), lg)
+
+def dd.top.of(+v: U32, r: Array<F32> & F32) -> Array<F32> & U32:
+  (s, y) = r
+  (s, U32.sub(v, F32.to_u32(y)))
+
+# greedy's pick after the tokens fed so far (dd.pick): the head, then the
+# argmax on the store; v when no logit is the max (NaN)
+def dd.top(+k: Dd, s: Array<F32>) -> Array<F32> & U32:
+  match k:
+    case Dd{c, p, +st0, stn, +tok, +slot, +npos, lg, +v, +ctx, dp, f, h, +tp, pk}:
+      dd.top.of(v, Array.get(F32, P.run(pk, P.run(h, s)), U32.add(tp, 1)))
 
 # Loading ---------------------------------------------------------------------
 
