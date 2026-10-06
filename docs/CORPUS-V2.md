@@ -352,6 +352,7 @@ what format 2 targets. The post-raw checkpoints are not fair on these units
 - **Run 2's v2-step20000** also scores 14/99, mixed differently: direct
   6/50 (Haskell 5/17, Bend 1/4) and repair 8/49 (Agda 0/3, Bend 2/2,
   Haskell 4/14, Lean 2/21). At 99 prompts a few answers either way are noise.
+- **Run 2's v2-step21000** scores 16/99: direct 5/50 (Haskell 5/17) and repair 11/49 (Agda 1/3, Bend 1/2, Haskell 4/14, Lean 3/21, Nix 2/9). This is run 2's first Nix pass: it closed 3 of 9 Nix fences.
 - **Logs:** `run/v2/evalruns/both-v2-step{15000,20000}.check.log`, run by
   `run/v2/evalruns/run2-e1.sh STEP`.
 

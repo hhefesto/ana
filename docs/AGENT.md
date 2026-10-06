@@ -186,6 +186,8 @@ Rerun with both fixes, 94 of the 99 episodes are byte-identical to the run
 with only the first. The five that changed are Agda (31 now solved; 35 and 36
 solved on the first call instead of the fourth and second).
 
+**Run 2's v2-step21000 (format 2, 39% trained) scores 15/99, all of it on the first call.** Haskell 4/17 direct and 4/14 repair, Agda repair 1/3, Lean repair 3/21, Nix repair 2/9, Bend repair 1/2. The tool's answers gain nothing yet, and the format-2 repair view is still not built (Next 2). Log: `run/v2/evalruns/agent-e5-v2-21000.log`.
+
 **Units 4 and 21** were cut just before a closing bracket at column 1. The
 bracket stays in the unit's after-text, so a complete answer gets a duplicate
 `}` and cannot pass.
