@@ -238,6 +238,10 @@
             # original, a unit's presentations distinct, Nix never direct
             bend transcript.bend > transcript.out
             printf '%s\n' "ok direct" "ok turns 0" "ok turns 1" "ok turns 2" "ok turns 3" "ok turns 4" "ok turns 5" "ok terms" "ok copies repo:x/A.hs#twice@1" "ok copies repo:x/a.nix#file@1" | diff - transcript.out
+            # E5 reads ana's output as a transcript less ana's closing
+            # newline: a passing last echo is solved (it never was before)
+            bend agent-eval.bend > agent-eval.out
+            printf '%s\n' "ok a passing last echo is solved" "ok read with the closing newline it is not (the bug)" "ok a failing echo then a stopped call is not" "ok one call answered" "ok one answered, the stopped one not" | diff - agent-eval.out
             # the corpus tools' libraries: processes and text (Sys), JSON
             # strings as jq decodes and writes them (Json), POSIX cksum
             bend sys.bend > sys.out

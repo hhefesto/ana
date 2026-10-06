@@ -30,7 +30,8 @@ import ../Agent/Spec.bend as A
 #       `nix run .#deploy --`, then `corpus-v2 agent-tool TASK`: a built
 #       deploy pins the tools for a long run), PROCS (3) at a time; K: only
 #       the first K prompts of each language and shape.  The outcome is read
-#       from the episode's text (Spec `ag.solved`: its last turn an echo
+#       from the episode's text, ana's output less its closing newline
+#       (`ea.text`; Spec `ag.solved`: its last turn an echo
 #       ending `[exit 0]`; its calls, the tool's answers after the prompt's
 #       own: a repair prompt holds the attempt's check, and a call the quota
 #       stopped has no answer).  Writes DIR/task.N.nul and
@@ -217,6 +218,21 @@ def ea.answered(e: List<&2, A.Turn>) -> Nat:
     case A.Turn{+r, +x} <> t:
       Nat.add(Bool.pick(Nat, Bool.and(Nat.is_eq(A.ag.role.code(r), 5n), A.ag.prefix(x, A.ag.ascii("\n```"))), 1n, 0n), ea.answered(t))
 
+# ana's stdout is the episode then the newline Generate.bend's agent.fin
+# ends it with; the transcript Spec reads is that less the newline. Read
+# with it, an episode whose last echo passed ends "[exit 0]\n```\n\n\n",
+# not ag.passed's "[exit 0]\n```\n\n", and was never solved (the first E5
+# runs, 2026-10-05/06, scored 29 solved episodes of 99 as none).
+def ea.text.if(cut: Bool, +ep: List<&2, U32>) -> List<&2, U32>:
+  match cut:
+    case True{}:
+      List.take(&2, U32, ep, Nat.sub(List.length(&2, U32, ep), 1n))
+    case False{}:
+      ep
+
+def ea.text(+ep: List<&2, U32>) -> List<&2, U32>:
+  ea.text.if(A.ag.ends.with(ep, [10]), ep)
+
 # ana's calls: the answers in the episode after those its prompt held
 def ea.r.of(+q: Ev.EvQ, +e: List<&2, A.Turn>, +asked: List<&2, A.Turn>) -> EaR:
   match q:
@@ -235,7 +251,7 @@ def ea.one(+count: Nat, +dir: String, +q: Ev.EvQ, r: C.CbRes) -> IO(EaR):
       +secs = Ev.ev.secs(ms)
       do IO<EaR>:
         pm : Maybe<&2, List<&2, U32>> <- S.slurp(dir ++ "/prompt." ++ Nat.show(i))
-        +x : EaR = ea.r.of(q, A.ag.read.bytes(ep), A.ag.read.bytes(S.slurp.or(pm)))
+        +x : EaR = ea.r.of(q, A.ag.read.bytes(ea.text(ep)), A.ag.read.bytes(S.slurp.or(pm)))
         S.add(dir ++ "/episodes.nul", L.v2.concat([Ev.ev.show(i), [0], ep, [0]]))
         S.add(dir ++ "/agent.nul", ea.rec.bytes(i, q, x, secs))
         Ck.log(Nat.show(count) ++ " " ++ Ev.ev.q.lang(q) ++ " " ++ Bool.pick(String, EaR.solved(x), "solved", "unsolved") ++ ", " ++ Nat.show(EaR.calls(x)) ++ " calls, " ++ secs ++ " s")
