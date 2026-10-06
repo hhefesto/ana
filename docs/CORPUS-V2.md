@@ -348,7 +348,11 @@ what format 2 targets. The post-raw checkpoints are not fair on these units
   the figure is fair. It closes the fence less often than nr7 within 100
   tokens (Lean direct 14/25 against 23/25, Haskell direct 13/17 against
   15/17).
-- **Logs:** `run/v2/evalruns/both-v2-step15000.check.log`.
+- **Run 2's v2-step20000** also scores 14/99, mixed differently: direct
+  6/50 (Haskell 5/17, Bend 1/4) and repair 8/49 (Agda 0/3, Bend 2/2,
+  Haskell 4/14, Lean 2/21). At 99 prompts a few answers either way are noise.
+- **Logs:** `run/v2/evalruns/both-v2-step{15000,20000}.check.log`, run by
+  `run/v2/evalruns/run2-e1.sh STEP`.
 
 E4 (verdict calibration) is not built: it needs the probability of `[exit 0]`
 after a verify prompt, which the trainer's eval does not print.
