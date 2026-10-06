@@ -137,6 +137,59 @@ out of scope. What it does have:
   example 16 or 64 per leaf). That would cut node count and refcount traffic
   by the block size.
 
+## Decoding on the dense store (2026-10-05/06)
+
+ana no longer decodes on the trees. `bend/Dense/Decode.bend` (`dd.`) runs
+Model.bend's decode on the dense trainer's flat F32 store: the trainer's
+layout, its FTC2 loader and its ops. `bend/Decode.bend`'s engine `En` has
+two cases: `ETree` is the meaning and `EDense` the default. Each step of the
+refinement has a law, and every law is a flake check:
+
+- `bend-decode-dense`: the dense logits match the tree decoder's, past ctx
+  so the softmax ring wraps. The store's greedy pick is Sample.bend's argmax,
+  ties to the least index.
+- `bend-prefill-dense`: a 64-token prefill chunk leaves the same states,
+  logits and pick as feeding the tokens one at a time, bit for bit.
+- `bend-bulk-cpu`: the fork's CPU kernels, fast, `BEND_FT=c` and
+  `BEND_FT=loop`, equal JS byte for byte at 1, 8 and 16 threads.
+
+All measurements are on nr7-step61000 (115M) with a 669-token prompt, on the
+local Ryzen 7 3700X. Greedy text is byte-identical at every row.
+
+| step (commit) | load | prompt, ms/token | decode, ms/token | 669 + 129 tokens |
+|---|---|---|---|---|
+| tree decoder, 16 threads, idle | ~20 s | 340–470 | 340–470 | ~5 min |
+| tree decoder inside E5's load | ~150 s | ~1,060 | ~1,060 | ~14 min |
+| dense step + fork d6b3def7's kernels (5b911df) | 1.6 s | 21.6 | 26 | 14.8 s |
+| greedy pick on the store (866244c) | 1.6 s | 21.6 | ~21 | |
+| 64-token chunked prefill (a5e578e) | 1.6 s | 1.5 | ~21 | 3.8 s |
+
+- **The fork's kernels (d6b3def7):** a threaded AVX2 gemm, a tiled einsum and
+  a spec cache. Before them, the CPU bulk ops fell back to naive
+  single-threaded loops.
+- **Decode** is bound by memory bandwidth. Each token streams about 460 MB
+  of weights, and the head's 32768×768 gemv alone runs at ~27 GB/s, the
+  machine's streaming rate. More than 3–5 kernel threads per process buy
+  nothing. Several decoders share one memory bus, so tune throughput across
+  processes, not threads within one.
+- **The store pick** runs two einsums: the max of the logits, then the max of
+  v − i over the logits that reach it. The 32768 logits never become a Bend
+  value. Time outside the kernels fell from 17–22 to ~2 ms/token under load.
+- **Chunked prefill** runs the norms, projections, gates and MLP once per
+  chunk of 64 rows. The GLA and ring recurrences stay token by token inside
+  each layer. A gemm output's bits do not depend on its row count, so the
+  result is bit-exact. Chunks of 16, 32 and 128 were slower.
+  `ANA_PREFILL_CHUNK` overrides the size.
+
+**What it did to the evaluations:**
+- **E1 generation** (99 prompts × 100 tokens, 3 at a time): 3 h 24 min on
+  the tree decoder (w1-step19080), then 12 min 40 s on the dense one
+  (5b911df), then 4 min 5 s with every step above.
+- **E5** (99 agent episodes, 4 calls): about 9 h projected on the tree
+  decoder (34 episodes at a mean of 1,008 s), then 34 min after 866244c,
+  then 12 min 43 s after a5e578e (a mean of 22.9 s per episode, tool calls
+  included). The checkers are now most of an episode's time.
+
 ## Training on a GPU: the dense trainer (2026-09-24)
 
 ### Where the tree trainer stood

@@ -2,7 +2,51 @@
 
 This file holds everything needed to continue this work from another machine and account. It was restarted from zero on 2026-10-02 for a new path: **legere**, the Bend Jev. The previous handoff (the FP-agent transcript corpus: the checks, the Bend ×4 rebuild, the filler) is in git at `e9cce23:HANDOFF.md`. The one before it (the v3 hot start and the dense trainer) is at `41e1920:HANDOFF.md`, and master's Haskell-era trainer is at the tag `haskell-final`.
 
-## ▶ CONTINUE HERE (2026-10-05, evening UTC-6): run 2 is training (TRAIN_MASK=kinds); E5 is running locally
+## ▶ CONTINUE HERE (2026-10-06, 07:00 UTC-6): run 2 is training; ana is fast; E5 is fixed; the Bend port awaits the user
+
+**Run 2** (vast 54410376; the box and the chain are described in the 10-05 section below):
+- **State at 07:00:** step ≈ 20,700 of 53,880. 1.90 s/step, GPU at 99% and ~595 W, 82 °C. Losses are falling with no NaN.
+- **Pulled:** the chain has pulled v2-step5000, 10000, 15000 and 20000 into `run/v2/run2/out/`.
+- **End:** ≈ 00:30 on 2026-10-07 if the credit lasts.
+- **Credit: $9.33 at 07:00, burning ~$0.58/h.** It falls under $1 at ≈ 21:00 (step ≈ 47k). The credit watch then stops the trainer, and the chain scores, pulls and destroys.
+- **To finish, the run needs ~$3–4 more credit.** Ask the user; never top up unasked.
+
+**Boot guard.** The reboot at 20:58 on 10-05 killed the transient chain and credit-watch units for 3.5 h. `ft-run2-guard.service` (a persistent user unit, enabled, with linger) runs `run/v2/run2/boot-guard.sh` at boot. It restarts either unit if inactive, until the chain has destroyed the box.
+
+**ana is fast** (docs/BEND-PORT.md, "Decoding on the dense store"):
+- Decode runs at 21 ms/token and a prompt at 1.5 ms/token (bit-exact, held by flake checks).
+- An E1 generation takes 4 min. E5 takes 12.7 min.
+- master is a5e578e. The fork is pinned at d6b3def7.
+
+**E5** (docs/AGENT.md, "E5 on run 1"):
+- Two silent bugs had made every earlier E5 wrong: the scoring newline (4ca428d) and the concurrent-Agda race (4f8cc2b).
+- nr7-step61000 scores **28/99 within 4 calls**, 26 within 1 (E1: 21/99).
+- Run 2's v2-step15000 scores **E1 14/99** (docs/CORPUS-V2.md).
+- Scripts (untracked): `run/v2/evalruns/agent-e5.sh` and `run2-e1-15000.sh`. Copy the latter for each new checkpoint the chain pulls.
+- The gcroots `run/gcroot-bend-generate`, `run/gcroot-bend-agent` and `run/v2/gcroot-deploy-agent` keep the builds alive through a GC.
+
+**Bend upstream port (needs the user's decision):**
+- **Ready but not pushed:** `ft-port-2.0.35` (3d52da39, worktree `~/src/bend2-port`) ports the fork onto upstream main 53fc961d (2.0.35+45).
+- **Validated:**
+  - every flake check and all 12 tool packages;
+  - the plan-corpus identity slice;
+  - an E1 re-check (21/99, the same verdicts);
+  - ana's text and speed.
+- **Upstream makes no part of the fork redundant** (memory note `project-bend2-fork-remotes`).
+- **Publishing:**
+  1. Tag d6b3def7 as `ft-kernels-2.0.34` and push the tag.
+  2. Force-with-lease push the port to `ft-kernels`. The auto-mode classifier blocked this, so it is the user's call; another branch name works too.
+  3. Run `nix flake update bend2`.
+  4. Commit the compat patch in the same commit as the lock. It is prepared, uncommitted, in `~/src/ft-pick` (branch `port-switch`): 9 `ok : Result<…> <- Chan.send` binds, and `Ready` → `HsReady` in Check/Haskell.bend. It can't compile on both compilers.
+  5. Rebuild the gcroots.
+
+**Disk:** 107 GB free. Old training sets and the 53 GB market snapshot were removed with the user's approval.
+
+**Next:**
+- E1 on each run-2 checkpoint as it arrives.
+- At the end of run 2: E1 and E5 on its final checkpoint. Run 2 is format 2, which wants the repair view (docs/AGENT.md, Next 2).
+
+## Previous (2026-10-05, evening UTC-6): run 2 is training (TRAIN_MASK=kinds); E5 is running locally
 
 **The user (2026-10-05): "Do the next steps, I'll add more credit before it runs out".**
 - **Run 2: vast 54410376**, RTX 5090, Illinois, $0.58/h with a 45 GB disk, image `nvidia/cuda:12.8.1-devel-ubuntu22.04` (+ apt clang-15, rsync); `ssh -p 40039 root@66.225.46.15`. Rented 19:26, trainer started 19:34: `PLAN=run/v2/mixall/plan-fp100m-b16-windows.tsv RUN=run/v2/mixall NAME=v2 STEPS=53880 SAVE=1000 ./fp.sh run` (from scratch, Muon 3e-4, warmup 300, log `train.log`, saves `out/v2-step<N>.checkpoint`). The startup line says `training targets: by role (TRAIN_MASK=kinds ...)`. G2 gate PASS on the box (masked case 5.1e-7). **1,845 ms/step, 17,700 tok/s: 53,880 steps ≈ 27.6 h, ends ≈ 23:10 on 2026-10-06, ≈ $16 + egress.** The plan: `run/v2/mixall` (combine 17:01: 1,037 shards, 3.7 GB, 94,182 transcript + 759,859 raw windows, raw 89%); staged by `BOX_ENV=bend/gpu/v2-box.env bend/gpu/fp-stage.sh` (unit ft-v2-stage, log `run/v2/run2/stage.log`; the trainer started while the push was still sending shards in plan order, far ahead of it).

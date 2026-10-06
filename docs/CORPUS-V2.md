@@ -338,6 +338,18 @@ within 100 tokens: a whole file). Repair is ana's strength; direct answering is
 what format 2 targets. The post-raw checkpoints are not fair on these units
 (the raw stages fed v1's held-out files).
 
+**Later checkpoints on the same 99 prompts (2026-10-06):**
+- **Run 1's nr7-step61000** scores 21/99 (direct 6/50, repair 15/49) on
+  E1 and 28/99 on E5 within 4 calls (docs/AGENT.md). It is a post-raw
+  checkpoint, so both figures are optimistic.
+- **Run 2's v2-step15000** (28% trained, format 2) scores 14/99 on E1:
+  direct 3/50 (Haskell 2/17, Lean 1/25) and repair 11/49 (Agda 2/3, Bend
+  2/2, Haskell 5/14, Lean 2/21, Nix 0/9). Run 2 never saw these units, so
+  the figure is fair. It closes the fence less often than nr7 within 100
+  tokens (Lean direct 14/25 against 23/25, Haskell direct 13/17 against
+  15/17).
+- **Logs:** `run/v2/evalruns/both-v2-step15000.check.log`.
+
 E4 (verdict calibration) is not built: it needs the probability of `[exit 0]`
 after a verify prompt, which the trainer's eval does not print.
 

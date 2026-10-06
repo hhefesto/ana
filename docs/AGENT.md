@@ -142,6 +142,54 @@ scope: mergeSort'`; ana repeated its wrong answer and ended at the call
 quota. The mechanism is right; this checkpoint was trained to predict
 errors, not to read them.
 
+## E5 on run 1 (2026-10-06): 28/99 within 4 calls
+
+nr7-step61000 was run on the 99 prompts both runs held out (format 1,
+greedy, 4 calls, 160 tokens a stretch, 3 at a time, on the dense decoder).
+It took 12 min 43 s (`run/v2/evalruns/agent-nr7-61000/`, log `agent-e5.log`).
+
+| language | direct, within 1 call / 4 calls | repair, within 1 call / 4 calls |
+|---|---|---|
+| Haskell | 4/17 · 5/17 | 6/14 · 6/14 |
+| Agda | 1/4 · 1/4 | 3/3 · 3/3 |
+| Lean | 0/25 · 0/25 | 4/21 · 5/21 |
+| Nix | – | 5/9 · 5/9 |
+| Bend | 1/4 · 1/4 | 2/2 · 2/2 |
+| **all** | **26/99 within 1 call** | **28/99 within 4 calls** |
+
+- **nr7 is a post-raw checkpoint.** Run 1's raw stages fed v1's held-out
+  files, so both E1 and E5 are optimistic for it (docs/CORPUS-V2.md). Run 2
+  never saw these units.
+- **The first call is E1's answer.** E5's first call reproduces E1's 21/99
+  on the same units language by language. The 5 extra are Nix: with 160
+  tokens a stretch ana closes the fence, while E1's 100 tokens never do.
+- **Reading the tool's answer gained 2 episodes:** one Haskell direct and
+  one Lean repair, each solved on the second call. Elsewhere nr7 mostly
+  resubmits the same answer after the same error. It was trained to
+  predict errors, not to read them.
+
+**Two bugs made every earlier E5 wrong, and only reading the episodes found
+them:**
+1. **Scoring (4ca428d).** ana's stdout ends with the newline that
+   Generate.bend's `agent.fin` prints. Spec's `ag.passed` requires the
+   last echo to end exactly ``[exit 0]\n```\n\n``, so no episode ever counted
+   as solved. The report said 0/99 while 29 episodes ended on a passing
+   check. `ea.text` now drops the newline, and `tests/agent-eval.bend` holds
+   it.
+2. **The Agda race (4f8cc2b).** Every tool call runs its own `bend-check`
+   as worker 0. Concurrent Agda checks all wrote one `FTUnit0.agda` (and its
+   interface) into the unit's library and read each other's files. This
+   happened 6–7 times per run. `CHECK_TAG` sets the first tag, and
+   agent-eval gives episode i the tag 100000 + i.
+
+Rerun with both fixes, 94 of the 99 episodes are byte-identical to the run
+with only the first. The five that changed are Agda (31 now solved; 35 and 36
+solved on the first call instead of the fourth and second).
+
+**Units 4 and 21** were cut just before a closing bracket at column 1. The
+bracket stays in the unit's after-text, so a complete answer gets a duplicate
+`}` and cannot pass.
+
 ## Next
 
 1. **E5 on the held-out units (built 2026-10-05, bend/CorpusV2/Agent.bend).**
