@@ -328,6 +328,20 @@
             sha256sum adamw.btc muon.btc | diff - ${./bend/tests/dense-identity.sha256}
             touch $out
           '';
+          # the dense decode step (bend/Dense/Decode.bend, ana's engine)
+          # against Model.bend's decode, its meaning: every position's logits
+          # within 1e-5 relative, before and after the softmax ring wraps,
+          # with and without v3's arms; a reset gives them again bit for bit
+          bend-decode-dense = pkgs.runCommand "bend-decode-dense" { nativeBuildInputs = [ (bendFor pkgs) pkgs.gawk ]; } ''
+            export HOME=$TMPDIR
+            cp -r ${bendSrc}/bend src
+            chmod -R u+w src
+            (cd src && bend tests/decode-dense.bend -o $TMPDIR/dd) && $TMPDIR/dd --threads 4 | tee dd.out
+            awk '/logits, positions/ { r = $(NF); gsub(/[()]/, "", r); k++; if (r + 0 > 1e-5) { print "logits differ: " $0; bad = 1 } }
+                 END { if (k != 4) { print "expected 4 logit checks, got " k; bad = 1 } exit bad }' dd.out
+            test "$(grep -c '^ok ' dd.out)" = 2
+            touch $out
+          '';
         }
       );
 

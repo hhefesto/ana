@@ -8,6 +8,8 @@ import ./Model.bend as Md
 import ./Sample.bend as S
 import ./Tensor.bend as T
 import ./Tokenizer.bend as Tk
+import ./Dense/Ckpt.bend as Dk
+import ./Dense/Decode.bend as Dd
 
 # Decode: ana's decoder as a library (bend/Generate.bend, the `ana` command,
 # and bend/Agent.bend, the tool loop, both use it; every def is `dc.`, so
@@ -280,72 +282,173 @@ def dc.tok.btc(bytes: Bool, +pinned: String, +want: String) -> IO(Tk.Bpe):
 # Loading -------------------------------------------------------------------
 
 type Model is Data:
-  Model{c: C.Config, total: Nat, step: Nat, w: Md.Weights, b: Tk.Bpe}
+  Model{c: C.Config, total: Nat, step: Nat, b: Tk.Bpe}
 
 def dc.Model.c(+m: Model) -> C.Config:
   match m:
-    case Model{c, t, s, w, b}:
+    case Model{c, t, s, b}:
       c
 
 def dc.Model.total(+m: Model) -> Nat:
   match m:
-    case Model{c, t, s, w, b}:
+    case Model{c, t, s, b}:
       t
 
 def dc.Model.step(+m: Model) -> Nat:
   match m:
-    case Model{c, t, s, w, b}:
+    case Model{c, t, s, b}:
       s
-
-def dc.Model.w(+m: Model) -> Md.Weights:
-  match m:
-    case Model{c, t, s, w, b}:
-      w
 
 def dc.Model.b(+m: Model) -> Tk.Bpe:
   match m:
-    case Model{c, t, s, w, b}:
+    case Model{c, t, s, b}:
       b
 
-def dc.loaded.wts(+m: K.Manifest, +b: Tk.Bpe, rw: B.Cur & Wts) -> IO(Model):
-  (cur, +run) = rw
-  do IO<Model>:
-    B.Bytes.close(cur)
-    return Model{K.Manifest.cfg(m), K.Manifest.total_steps(m), dc.Wts.step(run), dc.Wts.w(run), b}
+# The engine: the decoder's state after the tokens fed so far, and how it
+# computes. ETree is the meaning (Model.bend's decode over tree tensors,
+# its layer states a value); EDense is its refinement on the dense store
+# (Dense/Decode.bend, held to it by tests/decode-dense.bend), the store
+# threaded linearly. Both answer the same logits up to F32 rounding.
+type En is Type:
+  ETree{dm: Md.Dims, w: Md.Weights, sts: List<&2, Md.LState>}
+  EDense{k: Dd.Dd, dv: Nat, s: Array<F32>}
 
-# an FTC2 checkpoint: its manifest, its tokenizer, then its weights
-def dc.loaded(r: B.Cur & K.Manifest, +pinned: String) -> IO(Model):
+def dc.en.tree(+dm: Md.Dims, +w: Md.Weights, o: Md.Out) -> En & T.V:
+  match o:
+    case Md.Out{l, s}:
+      (ETree{dm, w, s}, l)
+
+def dc.en.dense(+k: Dd.Dd, +dv: Nat, r: Array<F32> & List<&2, F32>) -> En & T.V:
+  (s, xs) = r
+  (EDense{k, dv, s}, T.V.of_list(dv, xs))
+
+# a token in, the logits after it
+def dc.en.step(e: En, +pos: Nat, +t: U32) -> En & T.V:
+  match e:
+    case ETree{+dm, +w, sts}:
+      dc.en.tree(dm, w, Md.decode(dm, w, sts, pos, t))
+    case EDense{+k, +dv, s}:
+      dc.en.dense(k, dv, Dd.dd.logits(k, Dd.dd.feed(k, pos, t, s)))
+
+# a token in, no logits wanted (the dense head is not run)
+def dc.en.feed(e: En, +pos: Nat, +t: U32) -> En:
+  match e:
+    case ETree{+dm, +w, sts}:
+      ETree{dm, w, dc.Out.sts(Md.decode(dm, w, sts, pos, t))}
+    case EDense{+k, dv, s}:
+      EDense{k, dv, Dd.dd.feed(k, pos, t, s)}
+
+# a fold of feeds: every token without logits
+def dc.en.feeds(xs: List<&2, U32>, e: En, +pos: Nat) -> En:
+  match xs:
+    case Nil{}:
+      e
+    case t <> rest:
+      dc.en.feeds(rest, dc.en.feed(e, pos, t), 1n+pos)
+
+# the last token (if any) stepped: its logits
+def dc.en.last(ys: List<&2, U32>, e: En, +pos: Nat) -> En & T.V:
+  match ys:
+    case t <> rest:
+      dc.en.step(e, pos, t)
+    case Nil{}:
+      (e, T.VZ{})
+
+# tokens in from pos, the logits after the last (none: T.VZ). The tree
+# engine prefills with dc.prefill, the meaning's (Spec/Refinement.bend's
+# prefill_chunks law is about it); the dense engine runs the head only for
+# the last token.
+def dc.en.prefill(+xs: List<&2, U32>, e: En, +pos: Nat) -> En & T.V:
+  match e:
+    case ETree{+dm, +w, sts}:
+      dc.en.tree(dm, w, dc.prefill(xs, dm, w, {Md.Out{T.VZ{}, sts} : Md.Out}, pos))
+    case EDense{+k, +dv, s}:
+      +n = Nat.sub(List.length(&2, U32, xs), 1n)
+      dc.en.last(List.drop(&2, U32, xs, n), dc.en.feeds(List.take(&2, U32, xs, n), EDense{k, dv, s}, pos), Nat.add(pos, n))
+
+# every layer's state back to empty (a fresh episode on loaded weights)
+def dc.en.reset(e: En) -> En:
+  match e:
+    case ETree{+dm, w, +sts}:
+      ETree{dm, w, Md.states.zero(List.length(&2, Md.LState, sts), dm, 0n)}
+    case EDense{+k, dv, s}:
+      EDense{k, dv, Dd.dd.reset(k, s)}
+
+def dc.en.name(e: En) -> En & String:
+  match e:
+    case ETree{dm, w, sts}:
+      (ETree{dm, w, sts}, "tree")
+    case EDense{k, dv, s}:
+      (EDense{k, dv, s}, "dense")
+
+# a fresh tree engine: the weights, every layer's state empty
+def dc.en.of.tree(+c: C.Config, +w: Md.Weights) -> En:
+  +dm = Md.Dims.of(c)
+  ETree{dm, w, Md.states.zero(C.Config.layers(c), dm, 0n)}
+
+def dc.loaded.wts(+m: K.Manifest, +b: Tk.Bpe, rw: B.Cur & Wts) -> IO(Model & En):
+  (cur, +run) = rw
+  do IO<Model & En>:
+    B.Bytes.close(cur)
+    return (Model{K.Manifest.cfg(m), K.Manifest.total_steps(m), dc.Wts.step(run), b}, dc.en.of.tree(K.Manifest.cfg(m), dc.Wts.w(run)))
+
+# an FTC2 checkpoint on the tree engine: its manifest, its tokenizer, then
+# its weights
+def dc.loaded(r: B.Cur & K.Manifest, +pinned: String) -> IO(Model & En):
   (cur, +m) = r
-  do IO<Model>:
+  do IO<Model & En>:
     dc.problem(K.Manifest.problem(m))
     b : Tk.Bpe <- dc.tok.of(pinned, K.Manifest.tokenizer_id(m))
     rw : B.Cur & Wts <- dc.Load.run(K.Manifest.cfg(m))(cur)
     dc.loaded.wts(m, b, rw)
 
 # a BTC1 checkpoint (the Bend trainer's): parsed whole, trained to 100%
-def dc.loaded.btc(+l: TC.Loaded, +pinned: String) -> IO(Model):
+def dc.loaded.btc(+l: TC.Loaded, +pinned: String) -> IO(Model & En):
   match l:
     case TC.Loaded{+c, +tok, +step, +w}:
-      do IO<Model>:
+      do IO<Model & En>:
         b : Tk.Bpe <- dc.tok.btc(String.eq(tok, dc.byte.identity()), pinned, tok)
-        return Model{c, step, step, w, b}
+        return (Model{c, step, step, b}, dc.en.of.tree(c, w))
 
-def dc.load.fmt(btc: Bool, +path: String, +pinned: String) -> IO(Model):
-  match btc:
-    case True{}:
-      do IO<Model>:
+def dc.loaded.dense.fin(+man: K.Manifest, +b: Tk.Bpe, +k: Dd.Dd, r: Array<F32> & Nat) -> IO(Model & En):
+  (s, +step) = r
+  IO.pure(Model & En, (Model{K.Manifest.cfg(man), K.Manifest.total_steps(man), step, b},
+    EDense{k, Md.Dims.dv(Md.Dims.of(K.Manifest.cfg(man))), s}))
+
+# an FTC2 checkpoint on the dense engine: its parameter vector read
+# straight into the store (one bulk read)
+def dc.loaded.dense(+path: String, +pinned: String, mh: K.Manifest & Nat) -> IO(Model & En):
+  (+man, +h) = mh
+  +k = Dd.dd.of(K.Manifest.cfg(man))
+  do IO<Model & En>:
+    dc.problem(K.Manifest.problem(man))
+    b : Tk.Bpe <- dc.tok.of(pinned, K.Manifest.tokenizer_id(man))
+    r : Array<F32> & Nat <- Dd.dd.load(path, man, h, k)
+    dc.loaded.dense.fin(man, b, k, r)
+
+def dc.load.fmt(btc: Bool, tree: Bool, +path: String, +pinned: String) -> IO(Model & En):
+  match btc tree:
+    case True{} _:
+      do IO<Model & En>:
         +xs : List<&2, U32> <- B.Bytes.read_all(path)
         dc.loaded.btc(TC.parse(xs), pinned)
-    case False{}:
-      do IO<Model>:
+    case False{} True{}:
+      do IO<Model & En>:
         c : B.Cur <- B.Bytes.open(path)
         r : B.Cur & K.Manifest <- K.Load.header()(c)
         dc.loaded(r, pinned)
+    case False{} False{}:
+      do IO<Model & En>:
+        mh : K.Manifest & Nat <- Dk.header(path)
+        dc.loaded.dense(path, pinned, mh)
 
-# a checkpoint, by its extension (.btc: BTC1, else FTC2); pinned is
+# a checkpoint and its engine: a .btc file is BTC1 (the tree engine), any
+# other FTC2 on the dense engine unless ANA_DECODER=tree; pinned is
 # TOKENIZER_FILE ("" to search)
-def dc.load(+path: String, +pinned: String) -> IO(Model):
-  dc.load.fmt(String.ends_with(path, ".btc"), path, pinned)
+def dc.load(+path: String, +pinned: String) -> IO(Model & En):
+  do IO<Model & En>:
+    eng : String <- dc.env("ANA_DECODER", "dense")
+    dc.load.fmt(String.ends_with(path, ".btc"), String.eq(eng, "tree"), path, pinned)
 
 # the decoding settings: TEMPERATURE (0.8), TOP_K (none), TOP_P (0.95)
 def dc.settings(+temp: String, +topk: String, +topp: String) -> Settings:

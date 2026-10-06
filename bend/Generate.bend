@@ -22,19 +22,27 @@ import ./Agent/Loop.bend as L
 # incremental decoder (the cache-run law executed); every sampled token is
 # fed back until EOS or the budget.  Output streams as it is decoded.
 
-def gen(n: Nat, stop: Bool, +pk: S.Pick, +dm: Md.Dims, +w: Md.Weights, +b: Tk.Bpe, +st: D.Settings,
-        +vocab: Nat, +sts: List<&2, Md.LState>, +pos: Nat, +pending: List<&2, U32>, +count: Nat,
-        +stats: Bool, +lg: T.V) -> IO(Nat):
-  match n stop:
-    case 1n+p False{}:
+# Where decoding is: the engine after the tokens fed so far, the pick drawn
+# from its logits (and those logits, for SAMPLE_STATS), and whether the
+# pick is EOS. A Type, since the engine is (the dense store is threaded).
+type Gs is Type:
+  Gs{e: D.En, pk: S.Pick, lg: T.V, stop: Bool}
+
+def gs.of(+dm: Md.Dims, +st: D.Settings, +vocab: Nat, rng: S.Rng, r: D.En & T.V) -> Gs:
+  (e, +lg) = r
+  +pk = D.dc.pick(dm, st, vocab, lg, rng)
+  Gs{e, pk, lg, U32.is_eq(D.dc.Pick.token(pk), Tk.eos())}
+
+def gen(n: Nat, g: Gs, +dm: Md.Dims, +b: Tk.Bpe, +st: D.Settings, +vocab: Nat, +pos: Nat, +pending: List<&2, U32>,
+        +count: Nat, +stats: Bool) -> IO(Nat):
+  match n g:
+    case 1n+p Gs{e, +pk, +lg, False{}}:
       +t = D.dc.Pick.token(pk)
       +d = D.dc.emit(b, pending, t)
-      +o = Md.decode(dm, w, sts, pos, t)
-      +pk2 = D.dc.pick(dm, st, vocab, D.dc.Out.logits(o), D.dc.Pick.rng(pk))
       do IO<Nat>:
         D.dc.stats.line(stats, pos, t, D.dc.prob.of(Md.Dims.dv(dm), lg, t))
         IO.write(D.dc.Dec.text(d))
-        gen(p, U32.is_eq(D.dc.Pick.token(pk2), Tk.eos()), pk2, dm, w, b, st, vocab, D.dc.Out.sts(o), 1n+pos, D.dc.Dec.pending(d), 1n+count, stats, D.dc.Out.logits(o))
+        gen(p, gs.of(dm, st, vocab, D.dc.Pick.rng(pk), D.dc.en.step(e, pos, t)), dm, b, st, vocab, 1n+pos, D.dc.Dec.pending(d), 1n+count, stats)
     case _ _:
       IO.pure(Nat, count)
 
@@ -43,32 +51,32 @@ def gen(n: Nat, stop: Bool, +pk: S.Pick, +dm: Md.Dims, +w: Md.Weights, +b: Tk.Bp
 def pct(+done: Nat, +total: Nat) -> String:
   D.dc.pct(done, total)
 
-def go(+c: C.Config, +total: Nat, +b: Tk.Bpe, +w: Md.Weights, +step: Nat, +prompt: String, +budget: Nat,
+def go.fin(+t1: Nat, +ids: List<&2, U32>, n: Nat) -> IO(Unit):
+  do IO<Unit>:
+    +t3 : Nat <- IO.now()
+    IO.print("")
+    IO.print_err("generate: " ++ Nat.show(List.length(&2, U32, ids)) ++ " prompt tokens and " ++ Nat.show(n) ++ " tokens in " ++ D.dc.ms(t1, t3) ++ " ms")
+
+def go(+c: C.Config, +total: Nat, +b: Tk.Bpe, e: D.En, +step: Nat, +prompt: String, +budget: Nat,
        +st: D.Settings, +seed: String, +t0: Nat, +stats: Bool) -> IO(Unit):
   +dm = Md.Dims.of(c)
   +vocab = C.Config.vocab(c)
   +text = D.dc.strip.if(Bool.not(Tk.Bpe.v2(b)), prompt)
   +bytes = Tk.utf8.bytes(text)
   +ids = List.append(&2, U32, [Tk.bos()], Tk.Bpe.encode(b, bytes))
-  +start = {Md.Out{T.VZ{}, Md.states.zero(C.Config.layers(c), dm, 0n)} : Md.Out}
-  +o = D.dc.prefill(ids, dm, w, start, 0n)
-  +pk = D.dc.pick(dm, st, vocab, D.dc.Out.logits(o), D.dc.rng.of(seed))
   do IO<Unit>:
     +t1 : Nat <- IO.now()
     IO.print_err("generate: loaded in " ++ D.dc.ms(t0, t1) ++ " ms; prompt_tokens=" ++ Nat.show(List.length(&2, U32, ids)))
     IO.print("=== ana: step " ++ Nat.show(step) ++ " of " ++ Nat.show(total) ++ " (" ++ pct(step, Nat.max(total, 1n)) ++ "% of its plan) ===")
     IO.write(D.dc.bytes.str(Nil{}) ++ text)
-    +t2 : Nat <- IO.now()
-    n : Nat <- gen(budget, U32.is_eq(D.dc.Pick.token(pk), Tk.eos()), pk, dm, w, b, st, vocab, D.dc.Out.sts(o), List.length(&2, U32, ids), Nil{}, 0n, stats, D.dc.Out.logits(o))
-    +t3 : Nat <- IO.now()
-    IO.print("")
-    IO.print_err("generate: prefill " ++ D.dc.ms(t1, t2) ++ " ms; " ++ Nat.show(n) ++ " tokens in " ++ D.dc.ms(t2, t3) ++ " ms")
+    n : Nat <- gen(budget, gs.of(dm, st, vocab, D.dc.rng.of(seed), D.dc.en.prefill(ids, e, 0n)), dm, b, st, vocab, List.length(&2, U32, ids), Nil{}, 0n, stats)
+    go.fin(t1, ids, n)
 
-
-def open.model(+prompt: String, +budget: Nat, +st: D.Settings, +seed: String, +t0: Nat, +stats: Bool, m: D.Model) -> IO(Unit):
+def open.model(+prompt: String, +budget: Nat, +st: D.Settings, +seed: String, +t0: Nat, +stats: Bool, me: D.Model & D.En) -> IO(Unit):
+  (m, e) = me
   match m:
-    case D.Model{+c, +total, +step, +w, +b}:
-      go(c, total, b, w, step, prompt, budget, st, seed, t0, stats)
+    case D.Model{+c, +total, +step, +b}:
+      go(c, total, b, e, step, prompt, budget, st, seed, t0, stats)
 
 # the decoding settings from the environment, then the checkpoint
 def generate(+path: String, +prompt: String, +tokens: String, +pinned: String, +t0: Nat) -> IO(Unit):
@@ -80,8 +88,8 @@ def generate(+path: String, +prompt: String, +tokens: String, +pinned: String, +
     sflag : String <- D.dc.env("SAMPLE_STATS", "")
     +st : D.Settings = D.dc.settings(temp, topk, topp)
     IO.print_err("generate: temperature=" ++ temp ++ " top_k=" ++ topk ++ " top_p=" ++ topp ++ " seed=" ++ seed)
-    m : D.Model <- D.dc.load(path, pinned)
-    open.model(prompt, D.dc.nat.or(U32.read(tokens), 128n), st, seed, t0, String.eq(sflag, "1"), m)
+    me : D.Model & D.En <- D.dc.load(path, pinned)
+    open.model(prompt, D.dc.nat.or(U32.read(tokens), 128n), st, seed, t0, String.eq(sflag, "1"), me)
 
 # --agent: the tool loop (Agent/Loop.bend).  ana stops at each call line
 # (`## ghc` ...), the tool command answers (AGENT_TOOL, default
@@ -95,15 +103,14 @@ def agent.fin(+t1: Nat, ep: L.AlEp) -> IO(Unit):
         IO.print("")
         IO.print_err("agent: " ++ f ++ "; " ++ Nat.show(c) ++ " calls, " ++ Nat.show(k) ++ " tokens in " ++ D.dc.ms(t1, t2) ++ " ms")
 
-def agent.go(+tool: String, +calls: Nat, +budget: Nat, +st: D.Settings, +seed: String, +prompt: String, +t0: Nat, m: D.Model) -> IO(Unit):
-  match m:
-    case D.Model{+c, +total, +step, +w, +b}:
-      do IO<Unit>:
-        +t1 : Nat <- IO.now()
-        IO.print_err("agent: loaded in " ++ D.dc.ms(t0, t1) ++ " ms")
-        IO.print("=== ana: step " ++ Nat.show(step) ++ " of " ++ Nat.show(total) ++ " (" ++ pct(step, Nat.max(total, 1n)) ++ "% of its plan) ===")
-        ep : L.AlEp <- L.al.episode(D.Model{c, total, step, w, b}, st, seed, tool, calls, budget, Tk.utf8.bytes(prompt))
-        agent.fin(t1, ep)
+def agent.go(+tool: String, +calls: Nat, +budget: Nat, +st: D.Settings, +seed: String, +prompt: String, +t0: Nat, me: D.Model & D.En) -> IO(Unit):
+  (+m, e) = me
+  do IO<Unit>:
+    +t1 : Nat <- IO.now()
+    IO.print_err("agent: loaded in " ++ D.dc.ms(t0, t1) ++ " ms")
+    IO.print("=== ana: step " ++ Nat.show(D.dc.Model.step(m)) ++ " of " ++ Nat.show(D.dc.Model.total(m)) ++ " (" ++ pct(D.dc.Model.step(m), Nat.max(D.dc.Model.total(m), 1n)) ++ "% of its plan) ===")
+    ep : L.AlEp <- L.al.episode(m, e, st, seed, tool, calls, budget, Tk.utf8.bytes(prompt))
+    agent.fin(t1, ep)
 
 def agent(+path: String, +prompt: String, +tokens: String, +pinned: String, +t0: Nat) -> IO(Unit):
   do IO<Unit>:
@@ -115,8 +122,8 @@ def agent(+path: String, +prompt: String, +tokens: String, +pinned: String, +t0:
     +calls : String <- D.dc.env("AGENT_CALLS", "4")
     +st : D.Settings = D.dc.settings(temp, topk, topp)
     IO.print_err("agent: temperature=" ++ temp ++ " top_k=" ++ topk ++ " top_p=" ++ topp ++ " seed=" ++ seed ++ "; tool `" ++ tool ++ "`, at most " ++ calls ++ " calls")
-    m : D.Model <- D.dc.load(path, pinned)
-    agent.go(tool, D.dc.nat.or(U32.read(calls), 4n), D.dc.nat.or(U32.read(tokens), 128n), st, seed, prompt, t0, m)
+    me : D.Model & D.En <- D.dc.load(path, pinned)
+    agent.go(tool, D.dc.nat.or(U32.read(calls), 4n), D.dc.nat.or(U32.read(tokens), 128n), st, seed, prompt, t0, me)
 
 # Command line -----------------------------------------------------------
 #

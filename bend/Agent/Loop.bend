@@ -93,53 +93,80 @@ def al.next.line(+l: AlLine, +tb: List<&2, U32>) -> AlLine:
     case AlLine{+line, pe}:
       Bool.pick(AlLine, al.starts.nl(tb), AlLine{List.reverse(&2, U32, al.tail(tb)), al.is.empty(line)}, AlLine{List.append(&2, U32, List.reverse(&2, U32, tb), line), pe})
 
-# The model and its settings, fixed for an episode: dims, weights, the
-# tokenizer, the sampling settings, the vocabulary, the byte headings, the
-# newline token
+# The model and its settings, fixed for an episode: dims, the tokenizer,
+# the sampling settings, the vocabulary, the byte headings, the newline
+# token (the weights live in the engine, Decode.bend's En)
 type AlM is Data:
-  AlM{dm: Md.Dims, w: Md.Weights, b: Tk.Bpe, st: D.Settings, vocab: Nat, hs: List<&2, A.Hd>, nlt: U32}
+  AlM{dm: Md.Dims, b: Tk.Bpe, st: D.Settings, vocab: Nat, hs: List<&2, A.Hd>, nlt: U32}
+
+def AlM.dm(+m: AlM) -> Md.Dims:
+  match m:
+    case AlM{dm, b, st, v, hs, n}:
+      dm
 
 def AlM.b(+m: AlM) -> Tk.Bpe:
   match m:
-    case AlM{dm, w, b, st, v, hs, n}:
+    case AlM{dm, b, st, v, hs, n}:
       b
+
+def AlM.st(+m: AlM) -> D.Settings:
+  match m:
+    case AlM{dm, b, st, v, hs, n}:
+      st
+
+def AlM.vocab(+m: AlM) -> Nat:
+  match m:
+    case AlM{dm, b, st, v, hs, n}:
+      v
 
 def AlM.hs(+m: AlM) -> List<&2, A.Hd>:
   match m:
-    case AlM{dm, w, b, st, v, hs, n}:
+    case AlM{dm, b, st, v, hs, n}:
       hs
 
 def al.of(+md: D.Model, +st: D.Settings) -> AlM:
   match md:
-    case D.Model{+c, t, s, +w, +b}:
-      AlM{Md.Dims.of(c), w, b, st, C.Config.vocab(c), A.ag.hds.bytes(), al.first(Tk.Bpe.encode(b, [10]))}
+    case D.Model{+c, t, s, +b}:
+      AlM{Md.Dims.of(c), b, st, C.Config.vocab(c), A.ag.hds.bytes(), al.first(Tk.Bpe.encode(b, [10]))}
 
 # whether picking token t on this line ends a call line
 def al.is.call(+m: AlM, +l: AlLine, +t: U32) -> Bool:
   Bool.and(al.starts.nl(Tk.Bpe.decode(AlM.b(m), t)), Bool.not(al.is.empty(al.call.at(AlM.hs(m), l))))
 
+# Where decoding is: the engine after the tokens fed so far, the pick drawn
+# from its logits, whether the pick is EOS, and whether it ends a call line
+# (a Type: the engine is one, its dense store threaded)
+type AlG is Type:
+  AlG{e: D.En, pk: Sm.Pick, stop: Bool, call: Bool}
+
+def al.g.of(+m: AlM, +l: AlLine, rng: Sm.Rng, r: D.En & T.V) -> AlG:
+  (e, +lg) = r
+  +pk = D.dc.pick(AlM.dm(m), AlM.st(m), AlM.vocab(m), lg, rng)
+  +t = D.dc.Pick.token(pk)
+  AlG{e, pk, U32.is_eq(t, Tk.eos()), al.is.call(m, l, t)}
+
 # Where the loop is
 #   AlStop    ana ended a stretch (EOS or the budget): what it wrote, tokens
 #   AlCalled  ana ended a call line: the tool, what it wrote, tokens, and the
-#             decoder after the line (states, position, RNG, pending bytes)
+#             decoder after the line (engine, position, RNG, pending bytes)
 #   AlPass    the tool passed the check: its echo
 #   AlFail    the tool failed the check: its echo, and the decoder as it was
 #   AlBroke   the tool could not answer
-type AlS is Data:
+type AlS is Type:
   AlStop{why: String, out: List<&2, U32>, n: Nat}
-  AlCalled{tool: List<&2, U32>, out: List<&2, U32>, n: Nat, sts: List<&2, Md.LState>, pos: Nat, rng: Sm.Rng, pending: List<&2, U32>}
+  AlCalled{tool: List<&2, U32>, out: List<&2, U32>, n: Nat, e: D.En, pos: Nat, rng: Sm.Rng, pending: List<&2, U32>}
   AlPass{echo: List<&2, U32>}
-  AlFail{echo: List<&2, U32>, sts: List<&2, Md.LState>, pos: Nat, rng: Sm.Rng, pending: List<&2, U32>}
+  AlFail{echo: List<&2, U32>, e: D.En, pos: Nat, rng: Sm.Rng, pending: List<&2, U32>}
   AlBroke{msg: String}
 
-def al.called(+m: AlM, +pk: Sm.Pick, +sts: List<&2, Md.LState>, +pos: Nat, +pending: List<&2, U32>, +out: List<&2, U32>, +count: Nat, +tool: List<&2, U32>) -> IO(AlS):
+# the call line's newline fed (no logits: the echo comes next)
+def al.called(+m: AlM, +pk: Sm.Pick, e: D.En, +pos: Nat, +pending: List<&2, U32>, +out: List<&2, U32>, +count: Nat, +tool: List<&2, U32>) -> IO(AlS):
   match m:
-    case AlM{+dm, +w, +b, st, vocab, hs, +nlt}:
+    case AlM{dm, +b, st, vocab, hs, +nlt}:
       +d = D.dc.emit(b, pending, nlt)
-      +o = Md.decode(dm, w, sts, pos, nlt)
       do IO<AlS>:
         IO.write(D.dc.Dec.text(d))
-        return AlCalled{tool, List.reverse(&2, U32, 10 <> out), 1n+count, D.dc.Out.sts(o), 1n+pos, D.dc.Pick.rng(pk), D.dc.Dec.pending(d)}
+        return AlCalled{tool, List.reverse(&2, U32, 10 <> out), 1n+count, D.dc.en.feed(e, pos, nlt), 1n+pos, D.dc.Pick.rng(pk), D.dc.Dec.pending(d)}
 
 def al.halt(stop: Bool, +out: List<&2, U32>, +count: Nat) -> IO(AlS):
   match stop:
@@ -148,27 +175,22 @@ def al.halt(stop: Bool, +out: List<&2, U32>, +count: Nat) -> IO(AlS):
     case False{}:
       IO.pure(AlS, AlStop{"budget", List.reverse(&2, U32, out), count})
 
-# decode until EOS (`stop`: the pick is EOS), the budget, or a call (`call`:
-# the pick ends a call line); `out` is what ana wrote, newest byte first
-def al.gen(n: Nat, stop: Bool, call: Bool, +m: AlM, +pk: Sm.Pick, +sts: List<&2, Md.LState>, +pos: Nat, +pending: List<&2, U32>,
-           +l: AlLine, +out: List<&2, U32>, +count: Nat) -> IO(AlS):
-  match n stop call:
-    case 1n+p False{} True{}:
-      al.called(m, pk, sts, pos, pending, out, count, al.call.at(AlM.hs(m), l))
-    case 1n+p False{} False{}:
-      match m:
-        case AlM{+dm, +w, +b, +st, +vocab, hs, nlt}:
-          +t = D.dc.Pick.token(pk)
-          +tb = Tk.Bpe.decode(b, t)
-          +d = D.dc.emit(b, pending, t)
-          +o = Md.decode(dm, w, sts, pos, t)
-          +pk2 = D.dc.pick(dm, st, vocab, D.dc.Out.logits(o), D.dc.Pick.rng(pk))
-          +l2 = al.next.line(l, tb)
-          +t2 = D.dc.Pick.token(pk2)
-          do IO<AlS>:
-            IO.write(D.dc.Dec.text(d))
-            al.gen(p, U32.is_eq(t2, Tk.eos()), al.is.call(m, l2, t2), m, pk2, D.dc.Out.sts(o), 1n+pos, D.dc.Dec.pending(d), l2, List.append(&2, U32, List.reverse(&2, U32, tb), out), 1n+count)
-    case _ _ _:
+# decode until EOS, the budget, or a call (the pick ends a call line);
+# `out` is what ana wrote, newest byte first
+def al.gen(n: Nat, g: AlG, +m: AlM, +pos: Nat, +pending: List<&2, U32>, +l: AlLine, +out: List<&2, U32>, +count: Nat) -> IO(AlS):
+  match n g:
+    case 1n+p AlG{e, +pk, False{}, True{}}:
+      al.called(m, pk, e, pos, pending, out, count, al.call.at(AlM.hs(m), l))
+    case 1n+p AlG{e, +pk, False{}, False{}}:
+      +b = AlM.b(m)
+      +t = D.dc.Pick.token(pk)
+      +tb = Tk.Bpe.decode(b, t)
+      +d = D.dc.emit(b, pending, t)
+      +l2 = al.next.line(l, tb)
+      do IO<AlS>:
+        IO.write(D.dc.Dec.text(d))
+        al.gen(p, al.g.of(m, l2, D.dc.Pick.rng(pk), D.dc.en.step(e, pos, t)), m, 1n+pos, D.dc.Dec.pending(d), l2, List.append(&2, U32, List.reverse(&2, U32, tb), out), 1n+count)
+    case _ AlG{e, pk, stop, call}:
       al.halt(stop, out, count)
 
 # The episode as written: its segments, newest first, each with who wrote
@@ -208,32 +230,28 @@ def al.ep.text(+e: AlEp) -> List<&2, U32>:
     case AlEp{ss, c, k, f}:
       al.segs.text(ss, Nil{})
 
-def al.status(pass: Bool, fail: Bool, +st: U32, +so: String, +se: String, +sts: List<&2, Md.LState>, +pos: Nat, +rng: Sm.Rng, +pending: List<&2, U32>) -> AlS:
+
+def al.status(pass: Bool, fail: Bool, +st: U32, +so: String, +se: String, e: D.En, +pos: Nat, +rng: Sm.Rng, +pending: List<&2, U32>) -> AlS:
   match pass fail:
     case True{} _:
       AlPass{Tk.utf8.bytes(so)}
     case False{} True{}:
-      AlFail{Tk.utf8.bytes(so), sts, pos, rng, pending}
+      AlFail{Tk.utf8.bytes(so), e, pos, rng, pending}
     case False{} False{}:
       AlBroke{"the tool failed (exit " ++ U32.show(st) ++ "): " ++ se}
 
-def al.tool.of(r: Result<&1, &1, U32 & String, U32 & (String & String)>, +sts: List<&2, Md.LState>, +pos: Nat, +rng: Sm.Rng, +pending: List<&2, U32>) -> AlS:
+def al.tool.of(r: Result<&1, &1, U32 & String, U32 & (String & String)>, e: D.En, +pos: Nat, +rng: Sm.Rng, +pending: List<&2, U32>) -> AlS:
   match r:
     case Done{(+st, (so, se))}:
-      al.status(U32.is_eq(st, 0), U32.is_eq(st, 1), st, so, se, sts, pos, rng, pending)
+      al.status(U32.is_eq(st, 0), U32.is_eq(st, 1), st, so, se, e, pos, rng, pending)
     case Fail{(code, msg)}:
       AlBroke{"the tool did not run: " ++ msg}
 
 # the decoder fed the echo, then a new stretch
-def al.resume(+m: AlM, +budget: Nat, +echo: List<&2, U32>, +sts: List<&2, Md.LState>, +pos: Nat, +rng: Sm.Rng, +pending: List<&2, U32>) -> IO(AlS):
-  match m:
-    case AlM{+dm, +w, +b, +st, +vocab, hs, nlt}:
-      +ids = Tk.Bpe.encode(b, echo)
-      +o = D.dc.prefill(ids, dm, w, {Md.Out{T.VZ{}, sts} : Md.Out}, pos)
-      +pk = D.dc.pick(dm, st, vocab, D.dc.Out.logits(o), rng)
-      +l = al.line.of(echo, AlLine{Nil{}, False{}})
-      +t = D.dc.Pick.token(pk)
-      al.gen(budget, U32.is_eq(t, Tk.eos()), al.is.call(m, l, t), m, pk, D.dc.Out.sts(o), Nat.add(pos, List.length(&2, U32, ids)), pending, l, Nil{}, 0n)
+def al.resume(+m: AlM, +budget: Nat, +echo: List<&2, U32>, e: D.En, +pos: Nat, +rng: Sm.Rng, +pending: List<&2, U32>) -> IO(AlS):
+  +ids = Tk.Bpe.encode(AlM.b(m), echo)
+  +l = al.line.of(echo, AlLine{Nil{}, False{}})
+  al.gen(budget, al.g.of(m, l, rng, D.dc.en.prefill(ids, e, pos)), m, Nat.add(pos, List.length(&2, U32, ids)), pending, l, Nil{}, 0n)
 
 # The loop: `fuel` is two steps a call (the call, then resuming after a
 # failed check), so at most fuel / 2 calls; `cmd` the tool command (run by
@@ -242,14 +260,14 @@ def al.round(+fuel: Nat, +m: AlM, +cmd: String, +budget: Nat, s: AlS, +ep: AlEp)
   match fuel s:
     case _ AlStop{why, +out, +n}:
       IO.pure(AlEp, al.ep.fin(al.ep.add(ep, 1n, out, n), why))
-    case 0n AlCalled{tool, +out, +n, sts, pos, rng, pending}:
+    case 0n AlCalled{tool, +out, +n, e, pos, rng, pending}:
       IO.pure(AlEp, al.ep.fin(al.ep.add(ep, 1n, out, n), "calls"))
-    case 1n+p AlCalled{+tool, +out, +n, +sts, +pos, +rng, +pending}:
+    case 1n+p AlCalled{+tool, +out, +n, e, +pos, +rng, +pending}:
       +ep2 = al.ep.call(al.ep.add(ep, 1n, out, n))
       do IO<AlEp>:
         r : Result<&1, &1, U32 & String, U32 & (String & String)> <-
           Process.run("sh", ["-c", cmd ++ " \"$1\"", "sh", al.str(tool)], al.str(al.ep.text(ep2)), 16777216, 3600000)
-        al.round(p, m, cmd, budget, al.tool.of(r, sts, pos, rng, pending), ep2)
+        al.round(p, m, cmd, budget, al.tool.of(r, e, pos, rng, pending), ep2)
     case _ AlPass{+echo}:
       do IO<AlEp>:
         IO.write(al.str(echo))
@@ -258,29 +276,25 @@ def al.round(+fuel: Nat, +m: AlM, +cmd: String, +budget: Nat, s: AlS, +ep: AlEp)
       do IO<AlEp>:
         IO.print_err("agent: " ++ msg)
         return al.ep.fin(ep, "tool-error")
-    case 1n+p AlFail{+echo, +sts, +pos, +rng, +pending}:
+    case 1n+p AlFail{+echo, e, +pos, +rng, +pending}:
       do IO<AlEp>:
         IO.write(al.str(echo))
-        s2 : AlS <- al.resume(m, budget, echo, sts, pos, rng, pending)
+        s2 : AlS <- al.resume(m, budget, echo, e, pos, rng, pending)
         al.round(p, m, cmd, budget, s2, al.ep.add(ep, 2n, echo, 0n))
-    case 0n AlFail{+echo, sts, pos, rng, pending}:
+    case 0n AlFail{+echo, e, pos, rng, pending}:
       do IO<AlEp>:
         IO.write(al.str(echo))
         return al.ep.fin(al.ep.add(ep, 2n, echo, 0n), "calls")
 
-# An episode from a prompt: BOS and the prompt fed, then the loop.  The
-# prompt is written to standard output first, then everything ana and the
-# tools write, as it comes: the transcript.
-def al.episode(+md: D.Model, +st: D.Settings, +seed: String, +cmd: String, +calls: Nat, +budget: Nat, +prompt: List<&2, U32>) -> IO(AlEp):
+# An episode from a prompt on an engine with empty states: BOS and the
+# prompt fed, then the loop.  The prompt is written to standard output
+# first, then everything ana and the tools write, as it comes: the
+# transcript.
+def al.episode(+md: D.Model, e: D.En, +st: D.Settings, +seed: String, +cmd: String, +calls: Nat, +budget: Nat, +prompt: List<&2, U32>) -> IO(AlEp):
   +m = al.of(md, st)
-  +dm = Md.Dims.of(D.dc.Model.c(md))
   +ids = List.append(&2, U32, [Tk.bos()], Tk.Bpe.encode(D.dc.Model.b(md), prompt))
-  +start = {Md.Out{T.VZ{}, Md.states.zero(C.Config.layers(D.dc.Model.c(md)), dm, 0n)} : Md.Out}
-  +o = D.dc.prefill(ids, dm, D.dc.Model.w(md), start, 0n)
-  +pk = D.dc.pick(dm, st, C.Config.vocab(D.dc.Model.c(md)), D.dc.Out.logits(o), D.dc.rng.of(seed))
   +l = al.line.of(prompt, AlLine{Nil{}, True{}})
-  +t = D.dc.Pick.token(pk)
   do IO<AlEp>:
     IO.write(al.str(prompt))
-    s : AlS <- al.gen(budget, U32.is_eq(t, Tk.eos()), al.is.call(m, l, t), m, pk, D.dc.Out.sts(o), List.length(&2, U32, ids), Nil{}, l, Nil{}, 0n)
+    s : AlS <- al.gen(budget, al.g.of(m, l, D.dc.rng.of(seed), D.dc.en.prefill(ids, e, 0n)), m, List.length(&2, U32, ids), Nil{}, l, Nil{}, 0n)
     al.round(Nat.mul(2n, calls), m, cmd, budget, s, AlEp{[AlSeg{0n, prompt}], 0n, 0n, ""})
