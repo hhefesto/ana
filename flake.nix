@@ -346,6 +346,25 @@
             test "$(grep -c '^ok ' dd.out)" = 5 && ! grep -q '^FAIL' dd.out
             touch $out
           '';
+          # ana's chunked prefill (bend/Dense/Decode.bend dd.feeds: chunks of
+          # up to C tokens through the chunk program) against the one-token
+          # step it refines: the layers' states and the next logits bit for
+          # bit and the store's greedy pick the same, chunks of 16 on ctx 64
+          # (six runs: whole and partial chunks, a stepped remainder,
+          # attention batched before the ring's wrap and per token across
+          # and after it), with and without v3's arms; the chunked logits
+          # within 1e-5 of Model.bend's decode
+          bend-prefill-dense = pkgs.runCommand "bend-prefill-dense" { nativeBuildInputs = [ (bendFor pkgs) pkgs.gawk ]; } ''
+            export HOME=$TMPDIR
+            cp -r ${bendSrc}/bend src
+            chmod -R u+w src
+            (cd src && bend tests/prefill-dense.bend -o $TMPDIR/pd) && $TMPDIR/pd --threads 4 | tee pd.out
+            if grep -q '^FAIL' pd.out; then exit 1; fi
+            test "$(grep -c '^ok ' pd.out)" = 12
+            awk '/against Model.bend decode/ { r = $(NF); gsub(/[()]/, "", r); k++; if (r + 0 > 1e-5) { print "logits differ: " $0; bad = 1 } }
+                 END { if (k != 2) { print "expected 2 logit checks, got " k; bad = 1 } exit bad }' pd.out
+            touch $out
+          '';
           # CPU bulk ops refine the Base definitions without changing F32
           # bits. Small cases compare to JS; seeded and adversarial cases
           # cover SIMD tails, threaded reductions, aliases and wrapping.

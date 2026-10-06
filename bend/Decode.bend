@@ -20,7 +20,8 @@ import ./Dense/Decode.bend as Dd
 # the tokenizer it names, found by identity (TOKENIZER_FILE, or the first
 # candidate artifact that matches).  Decoding is the incremental decoder
 # (Model.bend `decode`, the cache-run law executed): a prompt is fed one
-# token at a time (`dc.prefill`), and each next token is drawn from the
+# token at a time (`dc.prefill`; the dense engine reads it a chunk at a
+# time, to the same state bit for bit), and each next token is drawn from the
 # logits by `dc.pick` (Sample.bend; temperature 0 is argmax).  The state
 # after any prefix (layer states, position, the RNG) is a plain value, so a
 # loop can keep it, extend it with text it did not sample (a tool's answer),
@@ -41,6 +42,9 @@ def dc.env(name: String, d: String) -> IO(String):
 
 def dc.f32.or(m: Maybe<&2, F32>, d: F32) -> F32:
   Maybe.default(&2, F32, m, d)
+
+def dc.u32.or(m: Maybe<&2, U32>, d: U32) -> U32:
+  Maybe.default(&2, U32, m, d)
 
 def dc.nat.or(m: Maybe<&2, U32>, d: Nat) -> Nat:
   match m:
@@ -339,32 +343,42 @@ def dc.en.feed(e: En, +pos: Nat, +t: U32) -> En:
       EDense{k, dv, Dd.dd.feed(k, pos, t, s)}
 
 # a fold of feeds: every token without logits
-def dc.en.feeds(xs: List<&2, U32>, e: En, +pos: Nat) -> En:
+def dc.en.feeds.each(xs: List<&2, U32>, e: En, +pos: Nat) -> En:
   match xs:
     case Nil{}:
       e
     case t <> rest:
-      dc.en.feeds(rest, dc.en.feed(e, pos, t), 1n+pos)
+      dc.en.feeds.each(rest, dc.en.feed(e, pos, t), 1n+pos)
 
-# the last token (if any) stepped: its logits
-def dc.en.last(ys: List<&2, U32>, e: En, +pos: Nat) -> En & T.V:
-  match ys:
-    case t <> rest:
-      dc.en.step(e, pos, t)
+# every token without logits: the tree engine one at a time (the fold);
+# the dense engine a chunk at a time (Dense/Decode.bend dd.feeds, the same
+# store as the fold, bit for bit: tests/prefill-dense.bend)
+def dc.en.feeds(+xs: List<&2, U32>, e: En, +pos: Nat) -> En:
+  match e:
+    case ETree{+dm, +w, sts}:
+      dc.en.feeds.each(xs, ETree{dm, w, sts}, pos)
+    case EDense{+k, dv, s}:
+      EDense{k, dv, Dd.dd.feeds(k, xs, pos, s)}
+
+# the dense engine's prefill: the tokens (if any) a chunk at a time, then
+# the head once, on the last token's row
+def dc.en.prefill.dense(xs: List<&2, U32>, +k: Dd.Dd, +dv: Nat, +pos: Nat, s: Array<F32>) -> En & T.V:
+  match xs:
     case Nil{}:
-      (e, T.VZ{})
+      (EDense{k, dv, s}, T.VZ{})
+    case t <> rest:
+      dc.en.dense(k, dv, Dd.dd.logits(k, Dd.dd.feeds(k, t <> rest, pos, s)))
 
 # tokens in from pos, the logits after the last (none: T.VZ). The tree
 # engine prefills with dc.prefill, the meaning's (Spec/Refinement.bend's
-# prefill_chunks law is about it); the dense engine runs the head only for
-# the last token.
+# prefill_chunks law is about it); the dense engine reads them a chunk at a
+# time (dd.feeds) and runs the head only for the last.
 def dc.en.prefill(+xs: List<&2, U32>, e: En, +pos: Nat) -> En & T.V:
   match e:
     case ETree{+dm, +w, sts}:
       dc.en.tree(dm, w, dc.prefill(xs, dm, w, {Md.Out{T.VZ{}, sts} : Md.Out}, pos))
     case EDense{+k, +dv, s}:
-      +n = Nat.sub(List.length(&2, U32, xs), 1n)
-      dc.en.last(List.drop(&2, U32, xs, n), dc.en.feeds(List.take(&2, U32, xs, n), EDense{k, dv, s}, pos), Nat.add(pos, n))
+      dc.en.prefill.dense(xs, k, dv, pos, s)
 
 # A step answered with a pick: the engine, the pick, and the pick's
 # probability when SAMPLE_STATS wants it (else 0, never computed: as an
@@ -420,21 +434,23 @@ def dc.en.step.pick(e: En, +pos: Nat, +t: U32, +dm: Md.Dims, +st: Settings, +voc
     case EDense{+k, +dv, s}:
       dc.en.dense.pick(Bool.and(dc.greedy(st), Bool.not(stats)), k, dv, dm, st, vocab, stats, rng, Dd.dd.feed(k, pos, t, s))
 
-def dc.en.last.pick(ys: List<&2, U32>, e: En, +pos: Nat, +dm: Md.Dims, +st: Settings, +vocab: Nat, +stats: Bool, rng: S.Rng) -> Px:
-  match ys:
-    case t <> rest:
-      dc.en.step.pick(e, pos, t, dm, st, vocab, stats, rng)
+# the dense engine's prefill answered with a pick: the tokens (if any) a
+# chunk at a time (dd.feeds), then the pick after the last as
+# dc.en.step.pick takes it (on the store when greedy without stats)
+def dc.en.prefill.dense.pick(xs: List<&2, U32>, +k: Dd.Dd, +dv: Nat, +pos: Nat, +dm: Md.Dims, +st: Settings, +vocab: Nat, +stats: Bool, rng: S.Rng, s: Array<F32>) -> Px:
+  match xs:
     case Nil{}:
-      dc.px.of(dm, st, vocab, stats, rng, (e, T.VZ{}))
+      dc.px.of(dm, st, vocab, stats, rng, (EDense{k, dv, s}, T.VZ{}))
+    case t <> rest:
+      dc.en.dense.pick(Bool.and(dc.greedy(st), Bool.not(stats)), k, dv, dm, st, vocab, stats, rng, Dd.dd.feeds(k, t <> rest, pos, s))
 
-# dc.en.prefill answered with a pick (the last token through dc.en.step.pick)
+# dc.en.prefill answered with a pick
 def dc.en.prefill.pick(+xs: List<&2, U32>, e: En, +pos: Nat, +dm: Md.Dims, +st: Settings, +vocab: Nat, +stats: Bool, rng: S.Rng) -> Px:
   match e:
     case ETree{+tdm, +w, sts}:
       dc.px.of(dm, st, vocab, stats, rng, dc.en.prefill(xs, ETree{tdm, w, sts}, pos))
     case EDense{+k, +dv, s}:
-      +n = Nat.sub(List.length(&2, U32, xs), 1n)
-      dc.en.last.pick(List.drop(&2, U32, xs, n), dc.en.feeds(List.take(&2, U32, xs, n), EDense{k, dv, s}, pos), Nat.add(pos, n), dm, st, vocab, stats, rng)
+      dc.en.prefill.dense.pick(xs, k, dv, pos, dm, st, vocab, stats, rng, s)
 
 # every layer's state back to empty (a fresh episode on loaded weights)
 def dc.en.reset(e: En) -> En:
@@ -485,16 +501,21 @@ def dc.loaded.dense.fin(+man: K.Manifest, +b: Tk.Bpe, +k: Dd.Dd, r: Array<F32> &
   IO.pure(Model & En, (Model{K.Manifest.cfg(man), K.Manifest.total_steps(man), step, b},
     EDense{k, Md.Dims.dv(Md.Dims.of(K.Manifest.cfg(man))), s}))
 
-# an FTC2 checkpoint on the dense engine: its parameter vector read
-# straight into the store (one bulk read)
-def dc.loaded.dense(+path: String, +pinned: String, mh: K.Manifest & Nat) -> IO(Model & En):
-  (+man, +h) = mh
-  +k = Dd.dd.of(K.Manifest.cfg(man))
+def dc.loaded.dense.k(+path: String, +pinned: String, +man: K.Manifest, +h: Nat, +k: Dd.Dd) -> IO(Model & En):
   do IO<Model & En>:
     dc.problem(K.Manifest.problem(man))
     b : Tk.Bpe <- dc.tok.of(pinned, K.Manifest.tokenizer_id(man))
     r : Array<F32> & Nat <- Dd.dd.load(path, man, h, k)
     dc.loaded.dense.fin(man, b, k, r)
+
+# an FTC2 checkpoint on the dense engine: its parameter vector read
+# straight into the store (one bulk read); prompts are read in chunks of
+# ANA_PREFILL_CHUNK tokens (Dense/Decode.bend's default; at least 1)
+def dc.loaded.dense(+path: String, +pinned: String, mh: K.Manifest & Nat) -> IO(Model & En):
+  (+man, +h) = mh
+  do IO<Model & En>:
+    cs : String <- dc.env("ANA_PREFILL_CHUNK", "")
+    dc.loaded.dense.k(path, pinned, man, h, Dd.dd.of.n(K.Manifest.cfg(man), U32.max(1, dc.u32.or(U32.read(cs), Dd.dd.chunk.default()))))
 
 def dc.load.fmt(btc: Bool, tree: Bool, +path: String, +pinned: String) -> IO(Model & En):
   match btc tree:

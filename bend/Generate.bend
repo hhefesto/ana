@@ -19,7 +19,8 @@ import ./Agent/Loop.bend as L
 # "Command line" below.
 #
 # The prompt is BOS then its encoding, fed one token at a time through the
-# incremental decoder (the cache-run law executed); every sampled token is
+# incremental decoder (the cache-run law executed; the dense engine reads
+# it ANA_PREFILL_CHUNK tokens at a time, to the same state); every sampled token is
 # fed back until EOS or the budget.  Output streams as it is decoded.
 
 # Where decoding is: the engine after the tokens fed so far, the pick it
