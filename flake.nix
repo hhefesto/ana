@@ -342,6 +342,31 @@
             test "$(grep -c '^ok ' dd.out)" = 2
             touch $out
           '';
+          # CPU bulk ops refine the Base definitions without changing F32
+          # bits. Small cases compare to JS; seeded and adversarial cases
+          # cover SIMD tails, threaded reductions, aliases and wrapping.
+          bend-bulk-cpu = pkgs.runCommand "bend-bulk-cpu" { nativeBuildInputs = [ (bendFor pkgs) ]; } ''
+            export HOME=$TMPDIR
+            cp -r ${bendSrc}/bend src
+            chmod -R u+w src
+            for name in GemmConf EinsumConf; do
+              bend src/gpu/$name.bend > $name.js
+              bend src/gpu/$name.bend -o $TMPDIR/$name
+              BEND_FT=loop $TMPDIR/$name --gpu off --threads 1 > $name.loop
+              cmp $name.js $name.loop
+              $TMPDIR/$name --gpu off --threads 8 > $name.fast
+              cmp $name.loop $name.fast
+            done
+            bend src/tests/bulk-cpu.bend -o $TMPDIR/bulk
+            BEND_FT=loop $TMPDIR/bulk --gpu off --threads 1 > reference
+            BEND_FT=c $TMPDIR/bulk --gpu off --threads 8 > actual
+            cmp reference actual
+            for threads in 1 8 16; do
+              $TMPDIR/bulk --gpu off --threads $threads > actual
+              cmp reference actual
+            done
+            touch $out
+          '';
         }
       );
 
