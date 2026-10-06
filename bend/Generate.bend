@@ -143,10 +143,11 @@ def agent(+path: String, +prompt: String, +tokens: String, +pinned: String, +t0:
 # discovery is announced (`ana: PATH` on stderr); CKPT is used as given, so
 # the harness's output is what it was.
 #
-# Discovery.  The candidates are the files up to three levels under run/
+# Discovery.  The candidates are the files up to four levels under run/
 # named *.checkpoint, as the glob run/*.checkpoint run/*/*.checkpoint
-# run/*/*/*.checkpoint sees them (symbolic links followed, no component
-# starting with a dot), listed by one `find` (Bend has no directory
+# run/*/*/*.checkpoint run/*/*/*/*.checkpoint sees them (symbolic links
+# followed, no component starting with a dot): four reaches a run chain's
+# pulls (run/v2/run2/out/), listed by one `find` (Bend has no directory
 # listing).  Each one's first four bytes say FTC2, BTC1 or unreadable; they
 # rank by write time (seconds), newest first, then by the step in the name
 # (the digits after the last "step" or "step-"), then by path; the newest
@@ -373,7 +374,7 @@ type CkE is Data:
   CkE{mtime: Nat, step: Nat, size: String, date: String, status: String, path: String}
 
 def cli.find.args() -> List<String>:
-  ["-L", "run", "-mindepth", "1", "-maxdepth", "3", "-name", "*.checkpoint", "-type", "f",
+  ["-L", "run", "-mindepth", "1", "-maxdepth", "4", "-name", "*.checkpoint", "-type", "f",
    "-not", "-path", "*/.*", "-printf", "%T@\t%s\t%TY-%Tm-%Td %TH:%TM\t%p\n"]
 
 def cli.head.digit(+s: String) -> Bool:
