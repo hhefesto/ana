@@ -28,8 +28,9 @@
 # for 20 minutes: DEST/DIED says which, and no later stage starts. Then
 # `fp.sh eval` scores every pulled checkpoint and each stage's last on
 # run/eval/transcript-fp.corpus and run/eval/transcript-next.corpus (eval.log,
-# eval-next.log), the last checkpoints are pulled, every pulled file is held to
-# the box's sha256 (a mismatch leaves the box up and exits 1), and the box is
+# eval-next.log), the last checkpoints are pulled, every checkpoint on the box
+# is held to its pulled copy's sha256 (a mismatch or a missing copy leaves the
+# box up and exits 1), and the box is
 # destroyed: after DEST/HOLD's epoch deadline if that file exists, never if
 # DEST/CONTINUED exists (someone took the box over).
 # EXTRA_EVAL lists more checkpoints already on the box to score first.
@@ -167,8 +168,10 @@ want=""
 for le in $logs; do [ "${le##*:}" = 0 ] && continue; want="$want $(saved "${le%%:*}" | awk -v e="${le##*:}" '$1 % e == 0 { print $2 }' | tr '\n' ' ')"; done
 want="$want $lasts"; missing=""
 for f in $want; do have "$f" && grep -q "  $f\$" "$dest/sha256.txt" || missing="$missing $f"; done
-if [ -n "$remote" ] && [ -s "$dest/sha256.txt" ] && [ -z "$(grep -vxF -f <(echo "$remote") "$dest/sha256.txt")" ] && [ -z "$missing" ]; then
-  log "pulled: $(wc -l < "$dest/sha256.txt") checkpoints, each matching the box's sha256; none of the $(echo $want | wc -w) wanted missing"
+# every checkpoint on the box must be here with the box's sha256; one only here (pulled, then
+# pruned on the box, as run 2's v2-step21000 was) has nothing on the box to match
+if [ -n "$remote" ] && [ -s "$dest/sha256.txt" ] && [ -z "$(grep -vxF -f "$dest/sha256.txt" <(echo "$remote"))" ] && [ -z "$missing" ]; then
+  log "pulled: $(echo "$remote" | wc -l) checkpoints on the box, each matching its copy here; none of the $(echo $want | wc -w) wanted missing"
 elif [ -n "$missing" ]; then
   log "WARNING: not pulled:$missing; the box is NOT destroyed"; exit 1
 else
