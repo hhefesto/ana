@@ -29,7 +29,8 @@ import ./Lib.bend as L
 # (sha256("corpus-v2 raw\0" + id) as hex, id, text), is written in that order
 # with the repository caps (code points; Haskell 8 M, Lean 15 M, Agda 10 M)
 # applied file by file: a file that would take its repository past the cap
-# is passed over ("repo cap").  summary.txt: a line per language with a kept
+# is passed over ("repo cap"); $RAW_CAP_REPOS replaces the cap of the
+# repositories it names (rw.caps.of).  summary.txt: a line per language with a kept
 # file, `{lang:8} kept {n:7d} files {MB:8.1f} MB; ` and the reasons' counts
 # in sorted order.
 #
@@ -230,6 +231,56 @@ def rw.reason(n: Nat) -> String:
 def rw.cap(+lang: String) -> Nat:
   Bool.pick(Nat, String.eq(lang, "haskell"), 8000000n,
     Bool.pick(Nat, String.eq(lang, "lean"), 15000000n, Bool.pick(Nat, String.eq(lang, "agda"), 10000000n, 0n)))
+
+# RAW_CAP_REPOS (2026-10-07, the user: openai/math and
+# anthropics/fermats-last-theorem up to ~300 MB each): per-repository caps
+# that replace the language's, `NAME=CPS,NAME=CPS` (NAME owner__name or
+# name, folded by L.v2.repo.of as the caps' repositories are, so a fork
+# shares it; CPS in code points, 0: none; a part without `=` is passed
+# over).  Unset or empty: no override, the language caps alone.
+type RwOv is Data:
+  RwOv{name: String, cps: Nat}
+
+type RwCaps is Data:
+  RwCaps{base: Nat, ov: List<&2, RwOv>}
+
+def rw.ov.one(has: Bool, +p: List<&2, U32>, rest: List<&2, RwOv>) -> List<&2, RwOv>:
+  match has:
+    case True{}:
+      RwOv{S.str(L.v2.repo.of(L.v2.concat([S.b("repo:"), L.v2.before(p, 61), [47]]))), rw.nat(L.v2.after(p, 61), 0n)} <> rest
+    case False{}:
+      rest
+
+def rw.ov.parse(ps: List<&2, List<&2, U32>>) -> List<&2, RwOv>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case +p <> more:
+      rw.ov.one(L.v2.has(p, 61), p, rw.ov.parse(more))
+
+# does the head override name repo
+def rw.ov.at(+ov: List<&2, RwOv>, +repo: String) -> Bool:
+  match ov:
+    case Nil{}:
+      False{}
+    case RwOv{+k, v} <> more:
+      String.eq(k, repo)
+
+# the first override naming repo, else cap (hit: the head names it)
+def rw.cap.go(ov: List<&2, RwOv>, +repo: String, +cap: Nat, hit: Bool) -> Nat:
+  match ov hit:
+    case Nil{} _:
+      cap
+    case RwOv{k, v} <> more True{}:
+      v
+    case h <> +more False{}:
+      rw.cap.go(more, repo, cap, rw.ov.at(more, repo))
+
+# a repository's cap: its override's, else the language's
+def rw.caps.of(+c: RwCaps, +repo: String) -> Nat:
+  match c:
+    case RwCaps{+b, +ov}:
+      rw.cap.go(ov, repo, b, rw.ov.at(ov, repo))
 
 def rw.lang.ext(+x: List<&2, U32>) -> Nat:
   Bool.pick(Nat, Bool.or(S.eq(x, S.b("hs")), S.eq(x, S.b("lhs"))), 2n,
@@ -625,14 +676,15 @@ def rw.wt.one(dropped: Bool, out: File, ac: RwAc, +cap: Nat, +repo: String, +cl:
       rw.wt.got(out, Map.get(Nat, 0n, per, repo), n, b, capped, cands, cap, repo, cl, json)
 
 # ORDER TAB POS TAB CPS TAB REPO TAB LINE
-def rw.wt.line(+drop: Set(), +cap: Nat, +l: List<&2, U32>, st: File & RwAc) -> IO(File & RwAc):
+def rw.wt.line(+drop: Set(), +cap: RwCaps, +l: List<&2, U32>, st: File & RwAc) -> IO(File & RwAc):
   (out, ac) = st
   +r1 = L.v2.after(l, 9)
   +r2 = L.v2.after(r1, 9)
   +r3 = L.v2.after(r2, 9)
-  rw.wt.one(L.v2.in(drop, S.str(L.v2.before(r1, 9))), out, ac, cap, S.str(L.v2.before(r3, 9)), rw.nat(L.v2.before(r2, 9), 0n), L.v2.after(r3, 9))
+  +repo = S.str(L.v2.before(r3, 9))
+  rw.wt.one(L.v2.in(drop, S.str(L.v2.before(r1, 9))), out, ac, rw.caps.of(cap, repo), repo, rw.nat(L.v2.before(r2, 9), 0n), L.v2.after(r3, 9))
 
-def rw.wt.lines(+drop: Set(), +cap: Nat, ls: List<&2, List<&2, U32>>, st: File & RwAc) -> IO(File & RwAc):
+def rw.wt.lines(+drop: Set(), +cap: RwCaps, ls: List<&2, List<&2, U32>>, st: File & RwAc) -> IO(File & RwAc):
   match ls:
     case Nil{}:
       IO.pure(File & RwAc, st)
@@ -689,7 +741,7 @@ def rw.wt.stop(rd: S.Rd, r: File & RwAc) -> IO(RwWt):
   (out, ac) = r
   IO.pure(RwWt, RwWt{rd, out, Nil{}, Nil{}, ac, False{}})
 
-def rw.wt.next(same: Bool, rd: S.Rd, out: File, cur: List<&2, U32>, grp: List<&2, List<&2, U32>>, ac: RwAc, +drop: Set(), +cap: Nat, l: List<&2, U32>, h: List<&2, U32>) -> IO(RwWt):
+def rw.wt.next(same: Bool, rd: S.Rd, out: File, cur: List<&2, U32>, grp: List<&2, List<&2, U32>>, ac: RwAc, +drop: Set(), +cap: RwCaps, l: List<&2, U32>, h: List<&2, U32>) -> IO(RwWt):
   match same:
     case True{}:
       IO.pure(RwWt, RwWt{rd, out, cur, l <> grp, ac, True{}})
@@ -698,7 +750,7 @@ def rw.wt.next(same: Bool, rd: S.Rd, out: File, cur: List<&2, U32>, grp: List<&2
         r : File & RwAc <- rw.wt.lines(drop, cap, rw.grp.order(grp), (out, ac))
         rw.wt.new(rd, h, l, r)
 
-def rw.wt.rec(rd: S.Rd, out: File, +cur: List<&2, U32>, grp: List<&2, List<&2, U32>>, ac: RwAc, +drop: Set(), +cap: Nat, m: Maybe<&2, List<&2, U32>>) -> IO(RwWt):
+def rw.wt.rec(rd: S.Rd, out: File, +cur: List<&2, U32>, grp: List<&2, List<&2, U32>>, ac: RwAc, +drop: Set(), +cap: RwCaps, m: Maybe<&2, List<&2, U32>>) -> IO(RwWt):
   match m:
     case None{}:
       do IO<RwWt>:
@@ -708,18 +760,18 @@ def rw.wt.rec(rd: S.Rd, out: File, +cur: List<&2, U32>, grp: List<&2, List<&2, U
       +h = List.take(&2, U32, l, 64n)
       rw.wt.next(S.eq(h, cur), rd, out, cur, grp, ac, drop, cap, l, h)
 
-def rw.wt.read(out: File, +cur: List<&2, U32>, grp: List<&2, List<&2, U32>>, ac: RwAc, +drop: Set(), +cap: Nat, x: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(RwWt):
+def rw.wt.read(out: File, +cur: List<&2, U32>, grp: List<&2, List<&2, U32>>, ac: RwAc, +drop: Set(), +cap: RwCaps, x: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(RwWt):
   (rd, m) = x
   rw.wt.rec(rd, out, cur, grp, ac, drop, cap, m)
 
-def rw.wt.step(+drop: Set(), +cap: Nat, s: RwWt) -> IO(RwWt):
+def rw.wt.step(+drop: Set(), +cap: RwCaps, s: RwWt) -> IO(RwWt):
   match s:
     case RwWt{rd, out, +cur, grp, ac, g}:
       do IO<RwWt>:
         x : S.Rd & Maybe<&2, List<&2, U32>> <- S.Rd.next(rd)
         rw.wt.read(out, cur, grp, ac, drop, cap, x)
 
-def rw.wt.go(fuel: Nat, +drop: Set(), +cap: Nat, s: RwWt) -> IO(RwWt):
+def rw.wt.go(fuel: Nat, +drop: Set(), +cap: RwCaps, s: RwWt) -> IO(RwWt):
   match fuel s:
     case 1n+f RwWt{rd, out, cur, grp, ac, True{}}:
       IO.bind(RwWt, RwWt, rw.wt.step(drop, cap, RwWt{rd, out, cur, grp, ac, True{}}), rw.wt.go(f, drop, cap))
@@ -834,7 +886,8 @@ def rw.write(+lang: String, +w: String, +out: String) -> IO(Unit):
     +cl : List<&2, U32> <- S.read(w ++ "/" ++ lang ++ ".counts")
     rd : S.Rd <- S.Rd.lines(w ++ "/" ++ lang ++ ".sorted")
     o : File <- IO.try(File, File.open(out ++ "/" ++ lang ++ ".jsonl", "w"))
-    s : RwWt <- rw.wt.go(rw.big(), Set.from_list(L.v2.lines.str(S.split.lines(dl))), rw.cap(lang), RwWt{rd, o, Nil{}, Nil{}, RwAc{Map.new(&2, Nat), 0n, 0n, 0n, 0n}, True{}})
+    ovs : String <- S.env("RAW_CAP_REPOS", "")
+    s : RwWt <- rw.wt.go(rw.big(), Set.from_list(L.v2.lines.str(S.split.lines(dl))), RwCaps{rw.cap(lang), rw.ov.parse(S.split(S.b(ovs), 44))}, RwWt{rd, o, Nil{}, Nil{}, RwAc{Map.new(&2, Nat), 0n, 0n, 0n, 0n}, True{}})
     rw.wt.fin(lang, w, out, cl, s)
 
 # split-nul ------------------------------------------------------------------------
