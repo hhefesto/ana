@@ -8,7 +8,7 @@
 #                                            shard, packed to 128 KB, as run 1's raw stages)
 # `bend-corpus-v2 combine` then interleaves these shards with the transcript windows' (run/v2/T).
 set -euo pipefail
-R=run/v2/R; SLICE=${SLICE:-300000000}
+R=${R:-run/v2/R}; SLICE=${SLICE:-300000000}
 CV2=${CV2:-nix run .#deploy -- corpus-v2}
 case "${1:-}" in
   mix)
