@@ -10,6 +10,7 @@ import ./Tensor.bend as T
 import ./Tokenizer.bend as Tk
 import ./Decode.bend as D
 import ./Agent/Loop.bend as L
+import ./Agent/Episode.bend as E
 
 # generate (the `ana` app): master's `formal-transformer-* generate CKPT
 # PROMPT N`, with the same environment (TEMPERATURE, TOP_K, TOP_P,
@@ -97,22 +98,33 @@ def generate(+path: String, +prompt: String, +tokens: String, +pinned: String, +
 # (`## ghc` ...), the tool command answers (AGENT_TOOL, default
 # `bend-agent-tool snippet`; its standard output is the echo), and ana goes
 # on, at most AGENT_CALLS calls (4); TOKENS is each stretch's budget.
-def agent.fin(+t1: Nat, ep: L.AlEp) -> IO(Unit):
+# AGENT_LOG=PATH appends the episode to PATH as a record of
+# Agent/Episode.bend's log (its segments in order, who wrote each, each
+# tool's name and status), AGENT_META's text (KEY=VALUE lines) its metadata.
+def agent.log(empty: Bool, +path: String, +meta: String, +f: String, +ss: List<&2, E.EpSeg>) -> IO(Unit):
+  match empty:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      E.ep.file.add(path, E.ep.put(Tk.utf8.bytes(meta), Tk.utf8.bytes(f), E.ep.order(ss)))
+
+def agent.fin(+t1: Nat, +log: String, +meta: String, ep: L.AlEp) -> IO(Unit):
   match ep:
-    case L.AlEp{ss, +c, +k, +f}:
+    case L.AlEp{+ss, +c, +k, +f, tl}:
       do IO<Unit>:
         +t2 : Nat <- IO.now()
         IO.print("")
+        agent.log(String.is_empty(log), log, meta, f, ss)
         IO.print_err("agent: " ++ f ++ "; " ++ Nat.show(c) ++ " calls, " ++ Nat.show(k) ++ " tokens in " ++ D.dc.ms(t1, t2) ++ " ms")
 
-def agent.go(+tool: String, +calls: Nat, +budget: Nat, +st: D.Settings, +seed: String, +prompt: String, +t0: Nat, me: D.Model & D.En) -> IO(Unit):
+def agent.go(+tool: String, +calls: Nat, +budget: Nat, +st: D.Settings, +seed: String, +prompt: String, +t0: Nat, +log: String, +meta: String, me: D.Model & D.En) -> IO(Unit):
   (+m, e) = me
   do IO<Unit>:
     +t1 : Nat <- IO.now()
     IO.print_err("agent: loaded in " ++ D.dc.ms(t0, t1) ++ " ms")
     IO.print("=== ana: step " ++ Nat.show(D.dc.Model.step(m)) ++ " of " ++ Nat.show(D.dc.Model.total(m)) ++ " (" ++ pct(D.dc.Model.step(m), Nat.max(D.dc.Model.total(m), 1n)) ++ "% of its plan) ===")
     ep : L.AlEp <- L.al.episode(m, e, st, seed, tool, calls, budget, Tk.utf8.bytes(prompt))
-    agent.fin(t1, ep)
+    agent.fin(t1, log, meta ++ "step=" ++ Nat.show(D.dc.Model.step(m)) ++ "\nseed=" ++ seed ++ "\n", ep)
 
 def agent(+path: String, +prompt: String, +tokens: String, +pinned: String, +t0: Nat) -> IO(Unit):
   do IO<Unit>:
@@ -122,10 +134,13 @@ def agent(+path: String, +prompt: String, +tokens: String, +pinned: String, +t0:
     +seed : String <- D.dc.env("SAMPLE_SEED", "0")
     +tool : String <- D.dc.env("AGENT_TOOL", "bend-agent-tool snippet")
     +calls : String <- D.dc.env("AGENT_CALLS", "4")
+    +log : String <- D.dc.env("AGENT_LOG", "")
+    +meta : String <- D.dc.env("AGENT_META", "")
     +st : D.Settings = D.dc.settings(temp, topk, topp)
     IO.print_err("agent: temperature=" ++ temp ++ " top_k=" ++ topk ++ " top_p=" ++ topp ++ " seed=" ++ seed ++ "; tool `" ++ tool ++ "`, at most " ++ calls ++ " calls")
     me : D.Model & D.En <- D.dc.load(path, pinned)
-    agent.go(tool, D.dc.nat.or(U32.read(calls), 4n), D.dc.nat.or(U32.read(tokens), 128n), st, seed, prompt, t0, me)
+    agent.go(tool, D.dc.nat.or(U32.read(calls), 4n), D.dc.nat.or(U32.read(tokens), 128n), st, seed, prompt, t0, log,
+      meta ++ "temperature=" ++ temp ++ "\ntop_p=" ++ topp ++ "\ncalls=" ++ calls ++ "\ntokens=" ++ tokens ++ "\n", me)
 
 # Command line -----------------------------------------------------------
 #

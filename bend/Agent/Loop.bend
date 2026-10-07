@@ -6,6 +6,7 @@ import ../Tensor.bend as T
 import ../Config.bend as C
 import ../Decode.bend as D
 import ./Spec.bend as A
+import ./Episode.bend as E
 
 # The tool loop (docs/AGENT.md): Agent/Spec.bend's `ag.unfold` refined.
 # ana decodes until it ends a call line (a tool's heading, `## ghc` ...,
@@ -193,42 +194,40 @@ def al.gen(n: Nat, g: AlG, +m: AlM, +pos: Nat, +pending: List<&2, U32>, +l: AlLi
     case _ AlG{e, pk, stop, call}:
       al.halt(stop, out, count)
 
-# The episode as written: its segments, newest first, each with who wrote
-# it (0 the prompt, 1 ana, 2 a tool); the calls made, the tokens ana drew,
-# and how it ended (solved, eos, budget, calls, tool-error)
-type AlSeg is Data:
-  AlSeg{who: Nat, text: List<&2, U32>}
-
+# The episode as written: its segments (Agent/Episode.bend), newest first,
+# each with who wrote it (0 the prompt, 1 ana, 2 a tool: its name and exit
+# status, 0 passed, 1 failed); the calls made, the tokens ana drew, how it
+# ended (solved, eos, budget, calls, tool-error), and the tool last called
 type AlEp is Data:
-  AlEp{segs: List<&2, AlSeg>, calls: Nat, tokens: Nat, end: String}
+  AlEp{segs: List<&2, E.EpSeg>, calls: Nat, tokens: Nat, end: String, tool: List<&2, U32>}
 
 def al.ep.add(+e: AlEp, +who: Nat, +x: List<&2, U32>, +n: Nat) -> AlEp:
   match e:
-    case AlEp{ss, c, k, f}:
-      AlEp{AlSeg{who, x} <> ss, c, Nat.add(k, n), f}
+    case AlEp{ss, c, k, f, tl}:
+      AlEp{E.EpSeg{who, Nil{}, 0, x} <> ss, c, Nat.add(k, n), f, tl}
 
-def al.ep.call(+e: AlEp) -> AlEp:
+# the tool's turn: its echo, written by the tool last called, with its status
+def al.ep.echo(+e: AlEp, +code: U32, +x: List<&2, U32>) -> AlEp:
   match e:
-    case AlEp{ss, c, k, f}:
-      AlEp{ss, 1n+c, k, f}
+    case AlEp{ss, c, k, f, +tl}:
+      AlEp{E.EpSeg{2n, tl, code, x} <> ss, c, k, f, tl}
+
+def al.ep.call(+e: AlEp, +tool: List<&2, U32>) -> AlEp:
+  match e:
+    case AlEp{ss, c, k, f, tl}:
+      AlEp{ss, 1n+c, k, f, tool}
 
 def al.ep.fin(+e: AlEp, +why: String) -> AlEp:
   match e:
-    case AlEp{ss, c, k, f}:
-      AlEp{ss, c, k, why}
+    case AlEp{ss, c, k, f, tl}:
+      AlEp{ss, c, k, why, tl}
 
-def al.segs.text(ss: List<&2, AlSeg>, acc: List<&2, U32>) -> List<&2, U32>:
-  match ss:
-    case Nil{}:
-      acc
-    case AlSeg{w, x} <> t:
-      al.segs.text(t, List.append(&2, U32, x, acc))
-
-# the episode's text, in order
+# the episode's text, in order (Episode.bend `ep.law.newest`: the newest-first
+# fold is `ep.text` of the segments in order, the text the log renders)
 def al.ep.text(+e: AlEp) -> List<&2, U32>:
   match e:
-    case AlEp{ss, c, k, f}:
-      al.segs.text(ss, Nil{})
+    case AlEp{ss, c, k, f, tl}:
+      E.ep.text.newest(ss, Nil{})
 
 
 def al.status(pass: Bool, fail: Bool, +st: U32, +so: String, +se: String, e: D.En, +pos: Nat, +rng: Sm.Rng, +pending: List<&2, U32>) -> AlS:
@@ -263,7 +262,7 @@ def al.round(+fuel: Nat, +m: AlM, +cmd: String, +budget: Nat, s: AlS, +ep: AlEp)
     case 0n AlCalled{tool, +out, +n, e, pos, rng, pending}:
       IO.pure(AlEp, al.ep.fin(al.ep.add(ep, 1n, out, n), "calls"))
     case 1n+p AlCalled{+tool, +out, +n, e, +pos, +rng, +pending}:
-      +ep2 = al.ep.call(al.ep.add(ep, 1n, out, n))
+      +ep2 = al.ep.call(al.ep.add(ep, 1n, out, n), tool)
       do IO<AlEp>:
         r : Result<&1, &1, U32 & String, U32 & (String & String)> <-
           Process.run("sh", ["-c", cmd ++ " \"$1\"", "sh", al.str(tool)], al.str(al.ep.text(ep2)), 16777216, 3600000)
@@ -271,7 +270,7 @@ def al.round(+fuel: Nat, +m: AlM, +cmd: String, +budget: Nat, s: AlS, +ep: AlEp)
     case _ AlPass{+echo}:
       do IO<AlEp>:
         IO.write(al.str(echo))
-        return al.ep.fin(al.ep.add(ep, 2n, echo, 0n), "solved")
+        return al.ep.fin(al.ep.echo(ep, 0, echo), "solved")
     case _ AlBroke{msg}:
       do IO<AlEp>:
         IO.print_err("agent: " ++ msg)
@@ -280,11 +279,11 @@ def al.round(+fuel: Nat, +m: AlM, +cmd: String, +budget: Nat, s: AlS, +ep: AlEp)
       do IO<AlEp>:
         IO.write(al.str(echo))
         s2 : AlS <- al.resume(m, budget, echo, e, pos, rng, pending)
-        al.round(p, m, cmd, budget, s2, al.ep.add(ep, 2n, echo, 0n))
+        al.round(p, m, cmd, budget, s2, al.ep.echo(ep, 1, echo))
     case 0n AlFail{+echo, e, pos, rng, pending}:
       do IO<AlEp>:
         IO.write(al.str(echo))
-        return al.ep.fin(al.ep.add(ep, 2n, echo, 0n), "calls")
+        return al.ep.fin(al.ep.echo(ep, 1, echo), "calls")
 
 # An episode from a prompt on an engine with empty states: BOS and the
 # prompt fed, then the loop.  The prompt is written to standard output
@@ -297,4 +296,4 @@ def al.episode(+md: D.Model, e: D.En, +st: D.Settings, +seed: String, +cmd: Stri
   do IO<AlEp>:
     IO.write(al.str(prompt))
     s : AlS <- al.gen(budget, al.g.of(m, l, D.dc.en.prefill.pick(ids, e, 0n, AlM.dm(m), AlM.st(m), AlM.vocab(m), False{}, D.dc.rng.of(seed))), m, List.length(&2, U32, ids), Nil{}, l, Nil{}, 0n)
-    al.round(Nat.mul(2n, calls), m, cmd, budget, s, AlEp{[AlSeg{0n, prompt}], 0n, 0n, ""})
+    al.round(Nat.mul(2n, calls), m, cmd, budget, s, AlEp{[E.EpSeg{0n, Nil{}, 0, prompt}], 0n, 0n, "", Nil{}})

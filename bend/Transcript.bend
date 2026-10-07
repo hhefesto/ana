@@ -443,13 +443,92 @@ def all2(+b: Tk.Bpe, +limit: Nat, +k: Nat, rs: List<&2, Ns.Doc>) -> List<&2, Ns.
     case Ns.Doc{+i, +t} <> more:
       unit2(b, limit, k, i, split(t, 30), all2(b, limit, k, more))
 
-# fmt 0: format 1; k > 0: format 2 with k presentations a unit
-def all.fmt(+fmt: Nat, +b: Tk.Bpe, +limit: Nat, rs: List<&2, Ns.Doc>) -> List<&2, Ns.Doc>:
+# Chains (TRANSCRIPT_FORMAT=chain) ---------------------------------------------------
+#
+# A multi-turn episode as the tool loop writes it (Agent/Loop.bend's plain
+# append; Agent/Episode.bend): ana's Term, the checker's rejection, ana's
+# next Term, ... the original, the checker's pass.  Every rejected Term is
+# one of the unit's kept mutants and its check is the checker's own output,
+# so the text is a real episode whose tries happen to be the mutants; the
+# reader (Agent/Spec.bend) reads each rejected Term as a try (weight 0), the
+# original as the act.  One chain a unit:
+#
+#   chain-J         User, Context, Type, J tries, Term (the original), the verdict
+#   chain-repair-J  format 2's repair prompt (Attempt mutant m, its error), then
+#                   J tries, Term, the verdict
+#
+# J is 1, 2 or 3 (55/30/15 by the unit's hash), at most the mutants left and
+# chain.k() - 1 (an episode makes at most K calls); the tries take the
+# mutants after m in turn.  A unit with two mutants or more is chain-repair
+# 30 times in 100 (Nix: always, it is never asked directly); a unit with no
+# mutant to try gives none.
+
+def chain.k() -> Nat:
+  4n
+
+def chain.tries(+fs: List<&2, List<&2, U32>>, j: Nat, +m: Nat, +nm: Nat) -> List<&2, U32>:
+  match j:
+    case 0n:
+      Nil{}
+    case 1n+p:
+      cat([term(fs, mutant(fs, m)), check.turn(fs, mutant.check(fs, m)), chain.tries(fs, p, next.m(m, 1n, nm), nm)])
+
+def chain.text(repair: Bool, +fs: List<&2, List<&2, U32>>, +m: Nat, +j: Nat, +nm: Nat) -> List<&2, U32>:
+  match repair:
+    case True{}:
+      cat([user2(fs, 1n), context(fs), typ(fs), attempt(fs, mutant(fs, m)), check.turn(fs, mutant.check(fs, m)),
+        chain.tries(fs, j, next.m(m, 1n, nm), nm), answer(fs)])
+    case False{}:
+      cat([user2(fs, 0n), context(fs), typ(fs), chain.tries(fs, j, m, nm), answer(fs)])
+
+def chain.doc(some: Bool, +b: Tk.Bpe, +limit: Nat, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +repair: Bool, +m: Nat, +j: Nat, +nm: Nat,
+              rest: List<&2, Ns.Doc>) -> List<&2, Ns.Doc>:
+  match some:
+    case True{}:
+      +text = chain.text(repair, fs, m, j, nm)
+      +name = cat([U.b(Bool.pick(String, repair, "chain-repair-", "chain-")), U.b(Nat.show(j))])
+      emit.if(fits(b, limit, text), Ns.Doc{cat([id, U.b("/"), name]), text}, rest)
+    case False{}:
+      rest
+
+def chain.unit(+b: Tk.Bpe, +limit: Nat, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, rest: List<&2, Ns.Doc>) -> List<&2, Ns.Doc>:
+  +nm = mutant.count(fs)
+  +nix = is.nix(field(fs, 0n))
+  +repair = Bool.and(Nat.is_lt(1n, nm), Bool.or(nix, Nat.is_lt(roll(id, 12n, 100n), 30n)))
+  +r = roll(id, 11n, 100n)
+  +want = Bool.pick(Nat, Nat.is_lt(r, 55n), 1n, Bool.pick(Nat, Nat.is_lt(r, 85n), 2n, 3n))
+  +left = Bool.pick(Nat, repair, Nat.sub(nm, 1n), nm)
+  +j = Nat.min(want, Nat.min(left, Nat.sub(chain.k(), 1n)))
+  chain.doc(Bool.and(Nat.is_lt(0n, j), Bool.or(repair, Bool.not(nix))), b, limit, id, fs, repair, roll(id, 9n, nm), j, nm, rest)
+
+def chain.all(+b: Tk.Bpe, +limit: Nat, rs: List<&2, Ns.Doc>) -> List<&2, Ns.Doc>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case Ns.Doc{+i, +t} <> more:
+      chain.unit(b, limit, i, split(t, 30), chain.all(b, limit, more))
+
+def all.fmt.k(+fmt: Nat, +b: Tk.Bpe, +limit: Nat, rs: List<&2, Ns.Doc>) -> List<&2, Ns.Doc>:
   match fmt:
     case 0n:
       all(b, limit, rs)
     case _:
       all2(b, limit, fmt, rs)
+
+# fmt 0: format 1; chain.fmt(): chains; any other k > 0: format 2 with k
+# presentations a unit
+def chain.fmt() -> Nat:
+  999n
+
+def all.fmt.if(chains: Bool, +fmt: Nat, +b: Tk.Bpe, +limit: Nat, rs: List<&2, Ns.Doc>) -> List<&2, Ns.Doc>:
+  match chains:
+    case True{}:
+      chain.all(b, limit, rs)
+    case False{}:
+      all.fmt.k(fmt, b, limit, rs)
+
+def all.fmt(+fmt: Nat, +b: Tk.Bpe, +limit: Nat, rs: List<&2, Ns.Doc>) -> List<&2, Ns.Doc>:
+  all.fmt.if(Nat.is_eq(fmt, chain.fmt()), fmt, b, limit, rs)
 
 # Main ---------------------------------------------------------------------------
 
@@ -560,9 +639,10 @@ def tokenizer(+fmt: Nat, +inp: String, +out: String, +limit: Nat, m: Maybe<&2, T
         p : Ps <- ps.go(big(), fmt, out, b, limit, Ps{rd, 0n, 0n, False{}})
         done(p)
 
-# TRANSCRIPT_FORMAT (1) and, for format 2, COPIES (2, at least 1): all.fmt's fmt
+# TRANSCRIPT_FORMAT (1, 2 or chain) and, for format 2, COPIES (2, at least 1):
+# all.fmt's fmt
 def fmt.of(+f: String, +k: Nat) -> Nat:
-  Bool.pick(Nat, String.eq(f, "2"), Bool.pick(Nat, Nat.is_eq(k, 0n), 1n, k), 0n)
+  Bool.pick(Nat, String.eq(f, "chain"), chain.fmt(), Bool.pick(Nat, String.eq(f, "2"), Bool.pick(Nat, Nat.is_eq(Nat.min(k, 998n), 0n), 1n, Nat.min(k, 998n)), 0n))
 
 def run(tok: String, inp: String, +out: String, +window: Nat) -> IO(Unit):
   do IO<Unit>:

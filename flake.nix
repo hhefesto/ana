@@ -122,6 +122,7 @@
           # laws over a transcript file (the trainer's token reading against
           # the byte reading)
           bend-agent-tool = bendBinary pkgs "bend-agent-tool" "Agent/Tools.bend";
+          bend-episode = bendBinary pkgs "bend-episode" "Agent/EpTool.bend";
           bend-agent-laws = bendBinary pkgs "bend-agent-laws" "Agent/Laws.bend";
           # the GHC `bend-check haskell` drives: the common Hackage
           # packages, so a module importing only these checks on its own
@@ -268,15 +269,27 @@
             # the lines back
             bend legere.bend > legere.out
             printf 'ok %s\n' score bool marginals boundaries logp posteriors bposteriors viterbi cues ngram roundtrip | diff - legere.out
+            # an episode as the loop writes it (Agent/Episode.bend): the log
+            # reads back any bytes and refuses a cut record, the loop's
+            # newest-first fold is the text in order, and the training
+            # grammar: a solved chain holds; drift, an unsolved end, a call
+            # past the cap and a tool byte not read as echo fail, each with
+            # its reason
+            bend episode.bend > episode.out
+            printf 'ok %s\n' "log roundtrip" newest "chain (ok)" "drift (drift)" "unsolved (unsolved)" "calls (calls)" \
+              "authors (authors)" tries solved | diff - episode.out
             # ana's episodes (Agent/Spec.bend): each shape's roles, reading's
-            # round trip, every call answered, weight 0 exactly on attempts and
-            # echoes, the loop's unfold, and a code32k window's weights
-            # (compiled: the interpreter's stack is too small for the
-            # tokenizer's parse)
+            # round trip, every call answered, weight 0 exactly on attempts,
+            # tries and echoes, the loop's unfold, multi-turn chains (every
+            # rejected Term a try), the reader before tries agreeing on every
+            # format-2 shape, and a code32k window's weights (compiled: the
+            # interpreter's stack is too small for the tokenizer's parse)
             mkdir -p weights && cp ${./weights/code32k.bpe} weights/code32k.bpe
             bend agent.bend -o agent-test && ./agent-test > agent.out
-            head -8 agent.out > agent8.out
-            printf 'ok %s\n' direct repair term-to-type verify trap "weights direct" "weights repair" unfold | diff - agent8.out
+            head -18 agent.out > agent18.out
+            printf 'ok %s\n' direct repair term-to-type verify trap "weights direct" "weights repair" unfold \
+              chain chain-repair "label drift" "tries weigh 0" "v1 direct" "v1 repair" "v1 term-to-type" "v1 verify" "v1 trap" \
+              verdict | diff - agent18.out
             grep -q '^ok window' agent.out
             touch $out
           '';
@@ -320,6 +333,13 @@
             awk '/validation_loss=/ { for (i = 1; i <= NF; i++) if ($i ~ /^validation_loss=/) { split($i, a, "="); v[++n] = a[2] } }
                  END { if (n < 2 || !(v[n] < v[1] - 0.3)) { print "loss did not fall"; exit 1 } }' run.out
             head -1 tiny.btc | grep -qx BTC1
+            # a validation set smaller than a micro-batch is scored, not 0 (run 2,
+            # step 32,250: a shard's 3 windows at micro 4 logged loss 0, and
+            # best_validation_loss stayed 0 for the rest of the run)
+            CORPUS=corpus.txt PRESET=tiny-v3 TRAIN_STEPS=2 TRAIN_BATCH=8 TRAIN_MICRO=4 TRAIN_LR=3e-3 TRAIN_WARMUP=1 \
+              EVAL_EVERY=1 EVAL_WINDOWS=3 OUT=short.btc ${self.packages.${system}.bend-train-dense}/bin/bend-train-dense --gpu off --threads 4 | tee short.out
+            awk '/validation_loss=/ { for (i = 1; i <= NF; i++) if ($i ~ /^validation_loss=/) { split($i, a, "="); n++; if (!(a[2] + 0 > 0)) bad = 1 } }
+                 END { if (n < 1 || bad) { print "a validation set smaller than a micro-batch scored 0"; exit 1 } }' short.out
             # the trajectory itself, byte for byte (bend/tests/dense-identity.sh
             # writes the goldens): six steps of small4-v3, batch 8 in micro-
             # batches of 4, AdamW and Muon, on a corpus nothing edits. A layout

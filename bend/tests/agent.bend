@@ -82,6 +82,30 @@ def to.type() -> String:
 def verify() -> String:
   user("Does this check?") ++ context() ++ typ() ++ fenced("Attempt", "f = (+ 1)") ++ ghc("[exit 0]\n")
 
+# Multi-turn episodes, as the loop writes them: ana's Term, the tool's
+# rejection (ghc's interactive status `-`: no exit line), ana's next Term ...
+# until the tool passes.  Every Term but the last is a try.
+def chain() -> String:
+  user("Define `f`.") ++ context() ++ typ() ++ fenced("Term", "f = (++ 1)")
+    ++ ghc("Unit.hs:3:5: error: No instance for (Num [a0])\n") ++ fenced("Term", "f = (+ 1)") ++ ghc("[exit 0]\n")
+
+# after format 2's repair prompt (a given attempt), two tries
+def chain.repair() -> String:
+  user("Define `f`.\n\nThis attempt fails. Fix it.") ++ context() ++ typ() ++ fenced("Attempt", "f = (++ 1)")
+    ++ ghc("Unit.hs:3:5: error: No instance for (Num [a0])\n") ++ fenced("Term", "f = (-- 1)")
+    ++ ghc("Unit.hs:3:5: error: parse error\n") ++ fenced("Term", "f = 1 +")
+    ++ ghc("Unit.hs:3:8: error: parse error (possibly incorrect indentation)\n") ++ fenced("Term", "f = (+ 1)") ++ ghc("[exit 0]\n")
+
+# E5's episode 1 at v2-step53880: the same Term twice, then a Type, then a
+# Term.  Only the first Term is followed by its own heading after the tool,
+# so it alone is a try; the drifted turns read as given (the acceptor,
+# Agent/Episode.bend `ep.ok`, keeps such an episode out of training).
+def drift() -> String:
+  user("Define `f`.") ++ context() ++ typ() ++ fenced("Term", "f = (++ 1)")
+    ++ ghc("Unit.hs:3:5: error: No instance for (Num [a0])\n") ++ fenced("Term", "f = (++ 1)")
+    ++ ghc("Unit.hs:3:5: error: No instance for (Num [a0])\n") ++ "## Type\n\n```haskell\nf :: Int -> Int\n```\n\n"
+    ++ ghc("Unit.hs:1:1: error: The type signature for `f' lacks an accompanying binding\n") ++ fenced("Term", "f = (+ 1)") ++ ghc("[exit 0]\n")
+
 # a Bend term whose code holds a `## Term` line not after an empty line: no turn
 def trap() -> String:
   user("Define `g`.") ++ "## Term\n\n```bend\ndef g() -> Nat:\n## Term\n  0n\n```\n\n" ++ "## bend\n\n```\nAll terms check.\n[exit 0]\n```\n\n"
@@ -91,14 +115,29 @@ def shape(+name: String, +text: String, +want: List<&2, Nat>) -> String:
   +e = A.ag.read.bytes(xs)
   verdict(name, Bool.and(nats.eq(codes(e), want), Bool.and(A.ag.law.roundtrip(10, A.ag.hds.bytes(), xs), A.ag.law.calls(e))))
 
-# the weights: one per byte, 0 exactly on the attempt's and the echoes' bytes
+# the weights: one per byte, 0 exactly on the attempt's, the tries' and the
+# echoes' bytes
 def weights(+name: String, +text: String) -> String:
   +xs = b(text)
   +e = A.ag.read.bytes(xs)
   +ws = A.ag.weights(e)
   +n = List.length(&2, U32, xs)
-  +on = Nat.sub(n, Nat.add(bytes.of(e, 2n), bytes.of(e, 5n)))
+  +on = Nat.sub(n, Nat.add(Nat.add(bytes.of(e, 2n), bytes.of(e, 5n)), bytes.of(e, 6n)))
   verdict(name, Bool.and(Nat.is_eq(List.length(&2, F32, ws), n), F32.is_eq(sum(ws), F32.from_nat(on))))
+
+# the reader before tries reads every format-2 shape as the reader now does
+def v1(+name: String, +text: String) -> String:
+  +xs = b(text)
+  verdict(name, nats.eq(codes(A.ag.read.bytes(xs)), codes(A.ag.read.v1(10, A.ag.hds.bytes(), xs))))
+
+# the verdict is read from the echo alone: a pass shows `[exit 0]`, a failure
+# shows another status or (ghc's, agda's interactive `-`) none
+def verdicts() -> String:
+  +pass = A.ag.echo(List.concat(&2, U32, [b("0"), [31], b("")]))
+  +fail = A.ag.echo(List.concat(&2, U32, [b("1"), [31], b("Unit.lean:1:0: error")]))
+  +session = A.ag.echo(List.concat(&2, U32, [b("-"), [31], b("Unit.hs:3:5: error: parse error")]))
+  +noexit = Bool.not(A.ag.prefix(List.reverse(&2, U32, session), List.reverse(&2, U32, b("]\n```\n\n"))))
+  verdict("verdict", Bool.and(Bool.and(A.ag.verdict(pass), Bool.not(A.ag.verdict(fail))), Bool.and(Bool.not(A.ag.verdict(session)), noexit)))
 
 # The loop on a toy: ana answers badly and calls ghc until it has read one
 # echo, then answers well; the tool always answers.
@@ -124,7 +163,7 @@ def zeros.of(+b: Tk.Bpe, e: List<&2, A.Turn>) -> Nat:
       0n
     case A.Turn{+r, +x} <> t:
       +c = A.ag.role.code(r)
-      Nat.add(Bool.pick(Nat, Bool.or(Nat.is_eq(c, 2n), Nat.is_eq(c, 5n)), List.length(&2, U32, Tk.Bpe.encode(b, x)), 0n), zeros.of(b, t))
+      Nat.add(Bool.pick(Nat, Bool.or(Nat.is_eq(c, 2n), Bool.or(Nat.is_eq(c, 5n), Nat.is_eq(c, 6n))), List.length(&2, U32, Tk.Bpe.encode(b, x)), 0n), zeros.of(b, t))
 
 def count.zero(ws: List<&2, F32>) -> Nat:
   match ws:
@@ -140,9 +179,11 @@ def window.test(m: Maybe<&2, Tk.Bpe>) -> String:
     case Some{+tb}:
       +ids = Ms.ms.ids(tb)
       +fill = Tk.Bpe.encode(tb, b("go :: Int\n## ghc\ngo = 0\n"))
-      +w = List.concat(&2, U32, [[0], fill, [1], Tk.Bpe.encode(tb, b(direct())), [1], Tk.Bpe.encode(tb, b(repair())), [1]])
+      +w = List.concat(&2, U32, [[0], fill, [1], Tk.Bpe.encode(tb, b(direct())), [1], Tk.Bpe.encode(tb, b(repair())), [1],
+        Tk.Bpe.encode(tb, b(chain.repair())), [1]])
       +ws = Ms.ms.weights(ids, w)
-      +want = Nat.add(zeros.of(tb, A.ag.read.bytes(b(direct()))), zeros.of(tb, A.ag.read.bytes(b(repair()))))
+      +want = Nat.add(Nat.add(zeros.of(tb, A.ag.read.bytes(b(direct()))), zeros.of(tb, A.ag.read.bytes(b(repair())))),
+        zeros.of(tb, A.ag.read.bytes(b(chain.repair()))))
       verdict("window (" ++ Nat.show(count.zero(ws)) ++ " of " ++ Nat.show(List.length(&2, F32, ws)) ++ " targets weigh 0)",
         Bool.and(Nat.is_eq(List.length(&2, F32, ws), Nat.sub(List.length(&2, U32, w), 1n)), Nat.is_eq(count.zero(ws), want)))
 
@@ -156,6 +197,16 @@ def main() -> IO(Unit):
     IO.print(weights("weights direct", direct()))
     IO.print(weights("weights repair", repair()))
     IO.print(unfold())
+    IO.print(shape("chain", chain(), [0n, 1n, 1n, 6n, 4n, 5n, 3n, 4n, 5n]))
+    IO.print(shape("chain-repair", chain.repair(), [0n, 1n, 1n, 2n, 4n, 5n, 6n, 4n, 5n, 6n, 4n, 5n, 3n, 4n, 5n]))
+    IO.print(shape("label drift", drift(), [0n, 1n, 1n, 6n, 4n, 5n, 1n, 4n, 5n, 1n, 4n, 5n, 3n, 4n, 5n]))
+    IO.print(weights("tries weigh 0", chain.repair()))
+    IO.print(v1("v1 direct", direct()))
+    IO.print(v1("v1 repair", repair()))
+    IO.print(v1("v1 term-to-type", to.type()))
+    IO.print(v1("v1 verify", verify()))
+    IO.print(v1("v1 trap", trap()))
+    IO.print(verdicts())
     tx : List<&2, U32> <- B.Bytes.read_all("weights/code32k.bpe")
     IO.print(window.test(Tk.Bpe.parse(tx)))
     return Unit{}

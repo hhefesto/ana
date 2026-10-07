@@ -237,15 +237,22 @@ def valid.go(ms: List<&2, List<&2, List<&2, U32>>>, +rn: Run, r: Array<F32> & F3
     case mw <> t:
       valid.go(t, rn, valid.one(mw, rn, r))
 
-def whole(+mb: Nat, +ws: List<&2, List<&2, U32>>) -> List<&2, List<&2, List<&2, U32>>>:
-  micros(mb, List.take(&2, List<&2, U32>, ws, Nat.mul(mb, Nat.div(List.length(&2, List<&2, U32>, ws), mb))))
-
 def valid.fin(+k: Nat, r: Array<F32> & F32) -> Array<F32> & F32:
   (s, l) = r
   (s, F32.div(l, F32.from_nat(Nat.max(k, 1n))))
 
+# the windows padded to whole micro-batches with one-token windows (no
+# predictions), as `eval.run` scores them: every window counts.  Cut to whole
+# micro-batches instead (`whole`), a shard with fewer validation windows than
+# a micro-batch scored none and reported loss 0 (run 2, step 32,250, shard 604:
+# 3 windows at micro 4), and best_validation_loss stayed 0 for the rest of
+# the run.
+def valid.pad(+mb: Nat, +ws: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  +n = List.length(&2, List<&2, U32>, ws)
+  List.append(&2, List<&2, U32>, ws, List.replicate(List<&2, U32>, Nat.mod(Nat.sub(mb, Nat.mod(n, mb)), mb), [0]))
+
 def valid(+rn: Run, +mb: Nat, +ws: List<&2, List<&2, U32>>, s: Array<F32>) -> Array<F32> & F32:
-  +ms = whole(mb, ws)
+  +ms = micros(mb, valid.pad(mb, ws))
   valid.fin(List.length(&2, List<&2, List<&2, U32>>, ms), valid.go(ms, rn, (s, 0.0)))
 
 # Saving -------------------------------------------------------------------

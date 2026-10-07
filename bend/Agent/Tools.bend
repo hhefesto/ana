@@ -22,8 +22,11 @@ import ./Spec.bend as A
 # heading line, rendered by Agent/Spec.bend's `ag.echo` (40 lines, then
 # `[N more lines]`, then `[exit N]`), which bend-agent-laws holds to
 # Transcript.bend's `checker` on every check of the corpus: ana reads the
-# tool in the layout it was trained on.  The exit status is 0 when the check passed, 1 when it
-# failed, 2 when the tool could not run.
+# tool in the layout it was trained on.  The corpus checks a failing ghc or
+# agda answer in an interactive session (GHCi, Agda's interaction mode),
+# whose status is `-`, so such an echo has no exit line; `snippet` writes
+# its ghc and agda failures the same way (`at.status`).  The exit status is
+# 0 when the check passed, 1 when it failed, 2 when the tool could not run.
 
 def at.nl(+xs: List<&2, U32>) -> List<&2, U32>:
   Bool.pick(List<&2, U32>, Nat.is_eq(List.length(&2, U32, xs), 0n), Nil{}, List.append(&2, U32, xs, [10]))
@@ -73,9 +76,15 @@ def at.env(+tool: String, +lp: String) -> List<String>:
   Bool.pick(List<String>, String.eq(tool, "nix"), ["NIX_PATH="],
     Bool.pick(List<String>, Bool.and(String.eq(tool, "lean"), Bool.not(String.is_empty(lp))), ["LEAN_PATH=" ++ lp], []))
 
+# the status as the trained layout shows it: `-` for a failing ghc or agda
+# check (the corpus's interactive sessions), else the number
+def at.status(+tool: String, +st: U32) -> List<&2, U32>:
+  +session = Bool.or(String.eq(tool, "ghc"), String.eq(tool, "agda"))
+  Bool.pick(List<&2, U32>, Bool.and(session, Bool.not(U32.is_eq(st, 0))), [45], S.b(U32.show(st)))
+
 # the echo: the checker's turn after its heading line
 def at.echo(+tool: String, +dir: String, +o: S.Out) -> List<&2, U32>:
-  A.ag.echo(List.append(&2, U32, S.b(U32.show(S.Out.status(o))), 31 <> S.clean(dir, 100n, S.Out.text(o))))
+  A.ag.echo(List.append(&2, U32, at.status(tool, S.Out.status(o)), 31 <> S.clean(dir, 100n, S.Out.text(o))))
 
 # exit 0 when the check passed; else 1 (IO.die flushes the echo first)
 def at.done(ok: Bool, +tool: String, +st: U32) -> IO(Unit):

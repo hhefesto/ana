@@ -24,6 +24,13 @@ import ../Transcript.bend as Tr
 #   as Transcript.bend's `checker` renders it, against `## TOOL\n` then
 #   Spec's `ag.echo`: the echo the loop's tools write is the trained layout.
 #
+#   bend-agent-laws v1 TOKENIZER TRANSCRIPTS.nul: each transcript's turns read
+#   by `ag.read` (with tries) have the roles `ag.read.v1` (before tries) gives
+#   them, over bytes and over the trainer's tokens.  On every transcript the
+#   mixes hold, this is the trainer's masks unchanged: a window reads each
+#   transcript it holds, or a prefix of one, and a prefix has no try its
+#   whole lacks (a try needs the tool's turn and the next heading after it).
+#
 # A failing transcript prints `FAIL ID: LAWS`; the last line counts them.
 # SHARD and SHARDS (environment, 0 and 1) check the documents whose index is
 # SHARD mod SHARDS, so a file fans out over processes.
@@ -56,14 +63,29 @@ def la.first.user(+e: List<&2, A.Turn>) -> Bool:
     case Nil{}:
       False{}
 
+# a chain's tries: the number after its shape's last `-` (chain-J, chain-repair-J)
+def la.last.num(xs: List<&2, U32>, +n: Nat) -> Nat:
+  match xs:
+    case Nil{}:
+      n
+    case +h <> t:
+      la.last.num(t, Bool.pick(Nat, Bool.and(U32.is_le(48, h), U32.is_le(h, 57)), Nat.add(Nat.mul(n, 10n), U32.to_nat(U32.sub(h, 48))), 0n))
+
+# the roles a shape means: one act (none for verify; the Term, or the Type
+# for term-to-type); one attempt for repair, fill, verify and chain-repair;
+# J tries for chain-J and chain-repair-J and none for any other shape; the
+# User first
 def la.shape.ok(+s: List<&2, U32>, +e: List<&2, A.Turn>) -> Bool:
   +verify = la.is(s, "verify")
   +t2t = la.is(s, "term-to-type")
-  +att = Bool.or(verify, Bool.or(la.is(s, "repair"), la.is(s, "fill")))
+  +chain = A.ag.prefix(s, A.ag.ascii("chain-"))
+  +crep = A.ag.prefix(s, A.ag.ascii("chain-repair-"))
+  +att = Bool.or(Bool.or(verify, crep), Bool.or(la.is(s, "repair"), la.is(s, "fill")))
   +acts = Nat.is_eq(A.ag.count(e, 3n), Bool.pick(Nat, verify, 0n, 1n))
   +atts = Nat.is_eq(A.ag.count(e, 2n), Bool.pick(Nat, att, 1n, 0n))
+  +tries = Nat.is_eq(A.ag.count(e, 6n), Bool.pick(Nat, chain, la.last.num(s, 0n), 0n))
   +label = Bool.or(verify, A.ag.prefix(la.act.text(e), A.ag.ascii(Bool.pick(String, t2t, "## Type\n", "## Term\n"))))
-  Bool.and(Bool.and(acts, atts), Bool.and(label, la.first.user(e)))
+  Bool.and(Bool.and(Bool.and(acts, atts), tries), Bool.and(label, la.first.user(e)))
 
 def la.codes(rs: List<&2, A.Role>) -> List<&2, Nat>:
   match rs:
@@ -132,13 +154,31 @@ def la.echo.doc(+rec: List<&2, U32>) -> List<&2, String>:
   +fs = S.split(rec, 30)
   la.if(la.echo.ok(la.checks(fs, 0n), Tr.tool(Tr.field(fs, 0n))), "echo", Nil{})
 
-# the laws a document fails under a mode (0 transcripts, 1 checked units)
+# each turn's role code
+def la.turn.codes(e: List<&2, A.Turn>) -> List<&2, Nat>:
+  match e:
+    case Nil{}:
+      Nil{}
+    case A.Turn{r, x} <> t:
+      A.ag.role.code(r) <> la.turn.codes(t)
+
+# the reader with tries against the reader before them, over bytes and tokens
+def la.v1.doc(+b: Tk.Bpe, +ids: Ms.Ids, +text: List<&2, U32>) -> List<&2, String>:
+  +ts = Tk.Bpe.encode(b, text)
+  +bytes = la.nats.eq(la.turn.codes(A.ag.read.bytes(text)), la.turn.codes(A.ag.read.v1(10, A.ag.hds.bytes(), text)))
+  +toks = la.nats.eq(la.turn.codes(Ms.ms.read(ids, ts)), la.turn.codes(A.ag.read.v1(Ms.ms.nl(ids), Ms.ms.hds(ids), ts)))
+  la.if(bytes, "v1-bytes", la.if(toks, "v1-tokens", Nil{}))
+
+# the laws a document fails under a mode (0 transcripts, 1 checked units,
+# 2 the reader before tries)
 def la.fails(+mode: Nat, +b: Tk.Bpe, +ids: Ms.Ids, +id: List<&2, U32>, +text: List<&2, U32>) -> List<&2, String>:
   match mode:
     case 0n:
       la.doc(b, ids, id, text)
-    case _:
+    case 1n:
       la.echo.doc(text)
+    case _:
+      la.v1.doc(b, ids, text)
 
 def la.names(xs: List<&2, String>) -> String:
   match xs:
@@ -246,12 +286,16 @@ def la.args(xs: List<String>) -> IO(Unit):
       do IO<Unit>:
         tx : List<&2, U32> <- B.Bytes.read_all(tok)
         la.run(1n, path, Tk.Bpe.parse(tx))
+    case "v1" <> tok <> path <> Nil{}:
+      do IO<Unit>:
+        tx : List<&2, U32> <- B.Bytes.read_all(tok)
+        la.run(2n, path, Tk.Bpe.parse(tx))
     case tok <> path <> Nil{}:
       do IO<Unit>:
         tx : List<&2, U32> <- B.Bytes.read_all(tok)
         la.run(0n, path, Tk.Bpe.parse(tx))
     case _:
-      IO.die(Unit, 2, "usage: bend-agent-laws [echo] TOKENIZER FILE.nul")
+      IO.die(Unit, 2, "usage: bend-agent-laws [echo|v1] TOKENIZER FILE.nul")
 
 def main() -> IO(Unit):
   do IO<Unit>:

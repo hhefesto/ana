@@ -14,6 +14,9 @@ import Base
 #                                                     after any Attempt
 #   RoCall     ana calling a tool                     the tool's line: `## ghc` ...
 #   RoEcho     the tool's answer                      the fenced output after the line
+#   RoTry      a term ana wrote that the tool         a `## Term` or `## Type` the tool
+#              rejected                               answered, followed by the same
+#                                                     heading again
 #
 # A tool is a function of the episode so far, so the probability of an
 # episode under ana (parameters θ) factors as
@@ -28,7 +31,9 @@ import Base
 # writes one, at training or at inference.  `weight` says so: 1 on act and
 # call, 0 on echo.  User and given text keep 1 as plain language modelling
 # (real asks and real code, the raw corpus's kind of text); an attempt is 0
-# (code handed over as wrong).
+# (code handed over as wrong), and so is a try: in a multi-turn episode
+# (ana's Term, the tool's rejection, ana's next Term, ...) ana learns the
+# fix it wrote after the tool's answer, never the term the tool rejected.
 #
 # The loop (bend/Agent.bend) refines `unfold`: ana is sampled, the tool is
 # Process.run, the episode is the log.  Training (bend/Mask.bend) reads the
@@ -44,6 +49,7 @@ type Role is Data:
   RoAct{}
   RoCall{}
   RoEcho{}
+  RoTry{}
 
 type Turn is Data:
   Turn{role: Role, text: List<&2, U32>}
@@ -62,6 +68,8 @@ def ag.role.code(+r: Role) -> Nat:
       4n
     case RoEcho{}:
       5n
+    case RoTry{}:
+      6n
 
 def ag.role.eq(+a: Role, +b: Role) -> Bool:
   Nat.is_eq(ag.role.code(a), ag.role.code(b))
@@ -80,6 +88,8 @@ def ag.role.name(+r: Role) -> String:
       "call"
     case RoEcho{}:
       "echo"
+    case RoTry{}:
+      "try"
 
 # the training weight of a token of this role
 def ag.weight(+r: Role) -> F32:
@@ -87,6 +97,8 @@ def ag.weight(+r: Role) -> F32:
     case RoAttempt{}:
       0.0
     case RoEcho{}:
+      0.0
+    case RoTry{}:
       0.0
     case _:
       1.0
@@ -158,9 +170,10 @@ def ag.unfold(~ana: List<&2, Turn> -> List<&2, Turn>, ~tool: List<&2, Turn> -> L
 # A turn starts at a heading line, `## LABEL` and a newline, that opens the
 # text or follows an empty line (format 2 puts one before every turn).  The
 # label gives the role: User; Context (given); Attempt; Term and Type (the
-# answer, act, when it is the last of them after any Attempt, else given);
-# a tool's name (the heading line is the call, the rest of the turn the
-# echo).  Text before the first heading is given.  The reader works on any
+# answer, act, when it is the last of them after any Attempt; a try when a
+# tool answered it and the same heading opens the turn after the tool's;
+# else given); a tool's name (the heading line is the call, the rest of the
+# turn the echo).  Text before the first heading is given.  The reader works on any
 # alphabet: `nl` is the newline symbol, each heading a symbol string ending
 # with it.
 
@@ -308,31 +321,59 @@ def ag.nonempty(+r: Role, +x: List<&2, U32>, rest: List<&2, Turn>) -> List<&2, T
     case h <> t:
       Turn{r, h <> t} <> rest
 
-# a block's turns
-def ag.turns.blk(+nl: U32, +c: Nat, +act: Bool, +x: List<&2, U32>, rest: List<&2, Turn>) -> List<&2, Turn>:
+# a block's turns (a Term or Type block: the act, else a try, else given)
+def ag.turns.blk(+nl: U32, +c: Nat, +act: Bool, +tried: Bool, +x: List<&2, U32>, rest: List<&2, Turn>) -> List<&2, Turn>:
   match c:
     case 1n:
       Turn{RoUser{}, x} <> rest
     case 3n:
       Turn{RoAttempt{}, x} <> rest
     case 4n:
-      Turn{Bool.pick(Role, act, RoAct{}, RoGiven{}), x} <> rest
+      Turn{Bool.pick(Role, act, RoAct{}, Bool.pick(Role, tried, RoTry{}, RoGiven{})), x} <> rest
     case 5n:
       Turn{RoCall{}, ag.line1(nl, x)} <> ag.nonempty(RoEcho{}, ag.after1(nl, x), rest)
     case _:
       Turn{RoGiven{}, x} <> rest
 
+# whether a Term or Type block (heading line first in x) is a try: the
+# blocks after it are a tool's turn, then a turn under the same heading.
+# A tool's pass ends the episode (the loop stops on exit 0), so a term the
+# tool answered and ana wrote again is one the tool rejected.  Format 2
+# never puts a Term after a tool's turn under the same label (term-to-type
+# is Term, ghc, Type), so no transcript it renders has a try.
+def ag.tried(+nl: U32, +x: List<&2, U32>, t: List<&2, Blk>) -> Bool:
+  match t:
+    case Blk{c, y} <> Blk{d, +z} <> r:
+      Bool.and(Bool.and(Nat.is_eq(c, 5n), Nat.is_eq(d, 4n)), ag.eq(ag.line1(nl, x), ag.line1(nl, z)))
+    case _:
+      False{}
+
 def ag.turns.go(bs: List<&2, Blk>, +nl: U32, +act: Nat, +i: Nat) -> List<&2, Turn>:
   match bs:
     case Nil{}:
       Nil{}
-    case Blk{+c, +x} <> t:
-      ag.turns.blk(nl, c, Nat.is_eq(act, 1n+i), x, ag.turns.go(t, nl, act, 1n+i))
+    case Blk{+c, +x} <> +t:
+      ag.turns.blk(nl, c, Nat.is_eq(act, 1n+i), ag.tried(nl, x, t), x, ag.turns.go(t, nl, act, 1n+i))
 
 # the episode a text denotes, over the alphabet (nl, hs)
 def ag.read(+nl: U32, +hs: List<&2, Hd>, +xs: List<&2, U32>) -> List<&2, Turn>:
   +bs = ag.blocks(nl, hs, xs)
   ag.turns.go(bs, nl, ag.answer(bs, ag.last(bs, 3n, 0n, 0n), 0n, 0n), 0n)
+
+# The reader before tries (2026-10-07): every Term or Type but the act is
+# given.  bend-agent-laws v1 holds `ag.read` to it on every transcript of the
+# corpus, so the masks the trainer computed for run 2 are the masks it
+# computes now.
+def ag.turns.go.v1(bs: List<&2, Blk>, +nl: U32, +act: Nat, +i: Nat) -> List<&2, Turn>:
+  match bs:
+    case Nil{}:
+      Nil{}
+    case Blk{+c, +x} <> t:
+      ag.turns.blk(nl, c, Nat.is_eq(act, 1n+i), False{}, x, ag.turns.go.v1(t, nl, act, 1n+i))
+
+def ag.read.v1(+nl: U32, +hs: List<&2, Hd>, +xs: List<&2, U32>) -> List<&2, Turn>:
+  +bs = ag.blocks(nl, hs, xs)
+  ag.turns.go.v1(bs, nl, ag.answer(bs, ag.last(bs, 3n, 0n, 0n), 0n, 0n), 0n)
 
 # ... over bytes
 def ag.read.bytes(+xs: List<&2, U32>) -> List<&2, Turn>:
@@ -499,10 +540,16 @@ def ag.last.of(e: List<&2, Turn>, +best: Turn) -> Turn:
     case +x <> t:
       ag.last.of(t, x)
 
+# a tool's verdict from its echo alone: passed when the echo ends with
+# `[exit 0]` (every pass shows its status; ghc's and agda's failures, checked
+# in an interactive session, show none), failed otherwise
+def ag.verdict(+x: List<&2, U32>) -> Bool:
+  ag.ends.with(x, ag.ascii("[exit 0]\n```\n\n"))
+
 def ag.passed(+t: Turn) -> Bool:
   match t:
     case Turn{+r, +x}:
-      Bool.and(Nat.is_eq(ag.role.code(r), 5n), ag.ends.with(x, ag.ascii("[exit 0]\n```\n\n")))
+      Bool.and(Nat.is_eq(ag.role.code(r), 5n), ag.verdict(x))
 
 def ag.solved(+e: List<&2, Turn>) -> Bool:
   ag.passed(ag.last.of(e, Turn{RoUser{}, Nil{}}))

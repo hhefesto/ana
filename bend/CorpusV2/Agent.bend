@@ -5,6 +5,7 @@ import ./Lib.bend as L
 import ./Combine.bend as C
 import ./Eval.bend as Ev
 import ../Agent/Spec.bend as A
+import ../Agent/Episode.bend as E
 
 # E5 (docs/AGENT.md): ana's tool loop on the evaluation's held-out units.
 #
@@ -168,7 +169,10 @@ def ea.prep.one(+i: Nat, +fmt1: Bool, +dir: String, +recs: List<&2, Ev.EvKv>, +r
         # work directory (Agda's FTUnit<tag>.agda) apart from the episodes
         # running beside it (ana's environment passes to the tool, the tool's
         # to bend-check)
-        return C.CbJob{i, List.append(&2, String, env0, {["AGENT_TOOL=" ++ dep ++ " corpus-v2 agent-tool " ++ task, "CHECK_TAG=" ++ Nat.show(Nat.add(100000n, i))] : List<&2, String>}), ea.bin(),
+        # AGENT_LOG: the episode's record (Agent/Episode.bend), held to its text
+        # and appended to DIR/episodes.eplog when the job ends (`ea.one`)
+        return C.CbJob{i, List.append(&2, String, env0, {["AGENT_TOOL=" ++ dep ++ " corpus-v2 agent-tool " ++ task, "CHECK_TAG=" ++ Nat.show(Nat.add(100000n, i)),
+          "AGENT_LOG=" ++ dir ++ "/ep." ++ Nat.show(i) ++ ".log", "AGENT_META=n=" ++ Nat.show(i) ++ "\nlang=" ++ S.str(l) ++ "\nunit=" ++ S.str(u) ++ "\n"] : List<&2, String>}), ea.bin(),
           {["--threads", threads, "--agent", "--prompt-file", pf] : List<&2, String>}}
 
 def ea.has(xs: List<&2, Nat>, +i: Nat) -> Bool:
@@ -248,16 +252,41 @@ def ea.rec.bytes(+i: Nat, +q: Ev.EvQ, +x: EaR, +secs: String) -> List<&2, U32>:
     case Ev.EvQ{id, l, u, s, p, p1, r} EaR{xl, xs, ok, c}:
       L.v2.concat([id, [0], S.join([Ev.ev.show(i), l, u, s, S.b(Bool.pick(String, ok, "1", "0")), Ev.ev.show(c), S.b(secs)], 30), [0]])
 
+# The render law: the episode's log record (one, Agent/Episode.bend) has
+# for its text what ana printed after its header line (`=== ana: ...`).
+def ea.law.recs(rs: List<&2, E.EpRec>, +body: List<&2, U32>) -> Bool:
+  match rs:
+    case +r <> Nil{}:
+      S.eq(E.ep.text(E.EpRec.segs(r)), body)
+    case _:
+      False{}
+
+def ea.law.got(m: Maybe<&2, List<&2, E.EpRec>>, +body: List<&2, U32>) -> Bool:
+  match m:
+    case Some{rs}:
+      ea.law.recs(rs, body)
+    case None{}:
+      False{}
+
+def ea.law(+log: List<&2, U32>, +ep: List<&2, U32>) -> Bool:
+  ea.law.got(E.ep.get(log), A.ag.after1(10, ea.text(ep)))
+
 def ea.one(+count: Nat, +dir: String, +q: Ev.EvQ, r: C.CbRes) -> IO(EaR):
   match r:
     case C.CbRes{+i, o, +ms}:
       +ep = S.no.nul(S.Out.text(o))
       +secs = Ev.ev.secs(ms)
+      +lg = dir ++ "/ep." ++ Nat.show(i) ++ ".log"
       do IO<EaR>:
         pm : Maybe<&2, List<&2, U32>> <- S.slurp(dir ++ "/prompt." ++ Nat.show(i))
         +x : EaR = ea.r.of(q, A.ag.read.bytes(ea.text(ep)), A.ag.read.bytes(S.slurp.or(pm)))
         S.add(dir ++ "/episodes.nul", L.v2.concat([Ev.ev.show(i), [0], ep, [0]]))
         S.add(dir ++ "/agent.nul", ea.rec.bytes(i, q, x, secs))
+        lm : Maybe<&2, List<&2, U32>> <- S.slurp(lg)
+        +log : List<&2, U32> = S.slurp.or(lm)
+        S.add(dir ++ "/episodes.eplog", log)
+        S.add(dir ++ "/render.txt", S.b(Nat.show(i) ++ Bool.pick(String, ea.law(log, ep), " ok\n", " FAIL\n")))
+        S.rm(lg)
         Ck.log(Nat.show(count) ++ " " ++ Ev.ev.q.lang(q) ++ " " ++ Bool.pick(String, EaR.solved(x), "solved", "unsolved") ++ ", " ++ Nat.show(EaR.calls(x)) ++ " calls, " ++ secs ++ " s")
         return x
 
@@ -362,13 +391,28 @@ def ea.prior.rs(ps: List<&2, EaP>) -> List<&2, EaR>:
     case EaP{i, r} <> more:
       r <> ea.prior.rs(more)
 
+# render.txt's lines (N ok | N FAIL), counted: the episodes whose log
+# renders the text ana printed, of those logged
+def ea.law.count(ls: List<&2, List<&2, U32>>, +ok: Nat, +n: Nat) -> Nat & Nat:
+  match ls:
+    case Nil{}:
+      (ok, n)
+    case +l <> t:
+      +has = Bool.not(Nat.is_eq(S.len(l), 0n))
+      ea.law.count(t, Nat.add(ok, Bool.pick(Nat, S.suffix(l, S.b(" ok")), 1n, 0n)), Nat.add(n, Bool.pick(Nat, has, 1n, 0n)))
+
+def ea.law.line(+ls: List<&2, List<&2, U32>>) -> String:
+  "render law" ++ ea.total(ea.law.count(ls, 0n, 0n)) ++ "\n"
+
 def ea.fin(+n: Nat, +qs: List<&2, Ev.EvQ>, +dir: String, +calls: Nat, +prior: List<&2, EaR>, x: Chan(C.CbRes) & C.CbPool) -> IO(Unit):
   (res, p) = x
   do IO<Unit>:
     +xs : List<&2, EaR> <- ea.loop(n, List.length(&2, EaR, prior), res, qs, dir, prior)
     C.cb.pool.close(p)
-    S.write(dir ++ "/report.txt", S.b(ea.report(xs, calls)))
-    IO.print(ea.report(xs, calls))
+    rm : Maybe<&2, List<&2, U32>> <- S.slurp(dir ++ "/render.txt")
+    +lawl : String = ea.law.line(S.split.lines(S.slurp.or(rm)))
+    S.write(dir ++ "/report.txt", S.b(ea.report(xs, calls) ++ lawl))
+    IO.print(ea.report(xs, calls) ++ lawl)
     Ck.log("agent-eval: " ++ Nat.show(n) ++ " episodes in " ++ dir)
 
 def ea.eval.run(+ckpt: String, +dir: String, +fmt1: Bool, +k: Nat) -> IO(Unit):
