@@ -27,7 +27,8 @@
 #   fp.sh next CKPT        continue CKPT's run on the next plan (TRAIN_NEXT; traind-next.c built from
 #                          the trainer that has it): run/next/plan-next-b16-windows.tsv and its shards
 #                          run/next/shard-K-next.corpus, saves out/next-step<N>.checkpoint, log next.log;
-#                          lr NLR (1e-4) after NWARM (5% of the plan's steps) of warmup, cosine to 0
+#                          lr NLR (1e-4) after NWARM (5% of the plan's steps) of warmup, cosine to 0;
+#                          RUN_DIR/stage.env, when there, sets them for its plan (run 3's S2)
 #
 # The run's setting (override in the environment): Muon at TRAIN_LR 3e-4
 # (master's v3 manifest: lr 3e-4, Muon 0.95, weight decay 0.01, clip 1.0,
@@ -100,6 +101,9 @@ case "${1:-}" in
     if [ "$1" = next ]; then plan=run/next/plan-next-b16-windows.tsv; rdir=run/next; ssz=next; name=next
     else plan="${3:?}"; rdir="${4:?}"; ssz="${5:?}"; name="${6:?}"; fi
     mkdir -p out
+    # a stage built on the box may set its own NLR and NWARM in RUN_DIR/stage.env
+    # (run 3's S2, tools/corpus-v2/s2.sh: the lr S1 stopped at, warmup 10)
+    [ -f "$rdir/stage.env" ] && . "$rdir/stage.env"
     # warmup: 5% of the plan's steps (at least 10) unless NWARM says otherwise
     nsteps=$(head -1 "$plan" | awk '{ print $3 }')
     NWARM=${NWARM:-$(( nsteps / 20 > 10 ? nsteps / 20 : 10 ))}

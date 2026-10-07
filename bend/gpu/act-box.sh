@@ -15,7 +15,7 @@
 #                                     held-out units' records and source trees
 #                                     (about 3.5 GB), Mathlib's source, then on
 #                                     the box elan's toolchain and `lake exe
-#                                     cache get`
+#                                     cache get`; S2's filler (run/v3/s2fill)
 #   act-box.sh ckpt HOST PORT CKPT    a checkpoint to the box's workspace
 #   act-box.sh check HOST PORT CKPT   agent-act on 1 prompt of each language
 #                                     and shape, 2 seeds: every language
@@ -94,6 +94,8 @@ setup() {
   done
   rs -a "$S"/*.train.nul run/v2/results/*.holdout.nul "$host:$ws/run/v2/results/"
   rs -a run/v2/act/prompts.nul "$host:$ws/run/v2/act/"
+  # S2's episode windows take their gaps' filler from here (tools/corpus-v2/s2.sh)
+  rs -a run/v3/s2fill "$host:$ws/run/v3/"
   rs -aR run/v2/evalset run/v2/transcripts/*/transcripts.holdout.nul run/v2/transcripts/*/results.holdout.nul "$host:$ws/"
   log "source trees"
   trees "$S/units.txt" | sort -u > "$S/trees.txt"
