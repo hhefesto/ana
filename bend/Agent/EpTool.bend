@@ -2,6 +2,8 @@ import Base
 import ../Sys.bend as S
 import ./Spec.bend as A
 import ./Episode.bend as E
+import ../Transcript.bend as Tr
+import ../CorpusV2/Eval.bend as Ev
 
 # bend-episode: Agent/Episode.bend's log from the shell.
 #
@@ -10,6 +12,7 @@ import ./Episode.bend as E
 #                             is not a training episode under at most K calls)
 #   bend-episode accept K CAP OUT LOG...   the episodes that train, at most CAP a unit, as
 #                             each language's transcripts (below)
+#   bend-episode fixed K CAP OUT LOG...    the unsolved ones with the unit's own fix (below)
 #
 # A log that does not read (not a log, or a record cut short) exits 1.
 
@@ -225,6 +228,189 @@ def et.accept(+k: Nat, +cap: Nat, +out: String, ps: List<String>) -> IO(Unit):
     IO.print("accept: " ++ Nat.show(List.length(&2, E.EpRec, rs)) ++ " episodes;" ++ et.counts(et.why.all(rs, k, Nil{}))
       ++ "; " ++ Nat.show(n) ++ " accepted (at most the cap a unit, tried first) into " ++ out ++ "/LANG-act")
 
+# Fixed episodes ------------------------------------------------------------------
+#
+#   bend-episode fixed K CAP OUT LOG...
+#
+# ana's unsolved episodes as training episodes with the unit's own fix (the
+# user's choice, 2026-10-07: ana fixes too few of its own errors to learn
+# from): the prompt, ana's first j rejected Terms and the checker's real
+# answers to them (the tries, weight 0), then the unit's original Term and
+# the checker's pass on it (the act). The fix is rendered as format 2
+# renders it (Transcript.bend `term`, `check.turn`: the chains' last turns)
+# and split as the tool loop splits a turn: ana's segment ends with the
+# call's heading line (`## ghc`), the tool's holds the rest. j is the
+# largest, at most K - 1 and the calls made, under which the whole is a
+# training episode (`ep.why`: a changed heading ends the tries; a copy is a
+# try like any other). A solved episode, one with no checked Term, or one
+# whose unit's original has an escape hatch gives none; at most CAP a unit,
+# in log order. The records are run/v2/results/LANG.R.nul, R AGENT_RECORDS
+# (holdout unless set; agent-act.sh: train), read for the log's units only.
+# OUT/LANG-fix/transcripts.train.nul gets each of LANG's as
+# `UNIT/fixed-N\0TEXT\0` (N its job).
+
+def et.fx.next(tool: Bool, +p: Nat) -> Nat:
+  match tool:
+    case True{}:
+      p
+    case False{}:
+      1n+p
+
+# the segments up to and including the j-th tool turn
+def et.fx.upto(ss: List<&2, E.EpSeg>, j: Nat) -> List<&2, E.EpSeg>:
+  match ss j:
+    case _ 0n:
+      Nil{}
+    case Nil{} _:
+      Nil{}
+    case +s <> t 1n+p:
+      s <> et.fx.upto(t, et.fx.next(Nat.is_eq(E.ep.seg.who(s), 2n), p))
+
+# a text's first line, its newline included
+def et.fx.line1(xs: List<&2, U32>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +c <> t:
+      c <> Bool.pick(List<&2, U32>, U32.is_eq(c, 10), Nil{}, et.fx.line1(t))
+
+# the unit's fix as the tool loop splits it: ana's Term and the call's
+# heading line, then the tool's answer
+def et.fx.fix(+fs: List<&2, List<&2, U32>>) -> List<&2, E.EpSeg>:
+  +c = Tr.check.turn(fs, Tr.field(fs, 11n))
+  +h = et.fx.line1(c)
+  [E.EpSeg{1n, Nil{}, 0, List.concat(&2, U32, [Tr.term(fs, Tr.field(fs, 7n)), h])},
+   E.EpSeg{2n, Tr.tool(Tr.field(fs, 0n)), 0, List.drop(&2, U32, c, List.length(&2, U32, h))}]
+
+def et.fx.or(ok: Bool, e: List<&2, E.EpSeg>, rest: Maybe<&2, List<&2, E.EpSeg>>) -> Maybe<&2, List<&2, E.EpSeg>>:
+  match ok:
+    case True{}:
+      Some{e}
+    case False{}:
+      rest
+
+# the episode with the most tries, j at most, that trains
+def et.fx.best(+j: Nat, +ss: List<&2, E.EpSeg>, +fix: List<&2, E.EpSeg>, +k: Nat) -> Maybe<&2, List<&2, E.EpSeg>>:
+  match j:
+    case 0n:
+      None{}
+    case 1n+p:
+      +e = List.append(&2, E.EpSeg, et.fx.upto(ss, j), fix)
+      et.fx.or(E.ep.ok(e, k), e, et.fx.best(p, ss, fix, k))
+
+def et.fx.make.if(none: Bool, +k: Nat, +ss: List<&2, E.EpSeg>, +fs: List<&2, List<&2, U32>>) -> Maybe<&2, List<&2, E.EpSeg>>:
+  match none:
+    case True{}:
+      None{}
+    case False{}:
+      et.fx.best(Nat.min(E.ep.calls(ss), Nat.sub(k, 1n)), ss, et.fx.fix(fs), k)
+
+# a record's fixed episode, when it gives one (t: its unit's record)
+def et.fx.make(+k: Nat, +r: E.EpRec, +t: List<&2, U32>) -> Maybe<&2, List<&2, E.EpSeg>>:
+  +ss = E.EpRec.segs(r)
+  +fs = Tr.split(t, 30)
+  +lang = et.meta(E.EpRec.meta(r), "lang")
+  et.fx.make.if(Bool.or(Bool.or(E.ep.solved(ss), List.is_empty(&2, U32, t)), et.hatch(lang, Tr.field(fs, 7n))), k, ss, fs)
+
+# why a record gives no fixed episode ("" it gives one): solved, no-call
+# (ana never closed a Term), no-record, hatch (the original's), or the
+# grammar's reason with one try
+def et.fx.why(+k: Nat, +r: E.EpRec, +t: List<&2, U32>) -> String:
+  +ss = E.EpRec.segs(r)
+  +fs = Tr.split(t, 30)
+  +lang = et.meta(E.EpRec.meta(r), "lang")
+  +best = Bool.not(Maybe.is_none(&2, List<&2, E.EpSeg>, et.fx.make(k, r, t)))
+  Bool.pick(String, E.ep.solved(ss), "solved",
+    Bool.pick(String, Nat.is_eq(E.ep.calls(ss), 0n), "no-call",
+      Bool.pick(String, List.is_empty(&2, U32, t), "no-record",
+        Bool.pick(String, et.hatch(lang, Tr.field(fs, 7n)), "hatch",
+          Bool.pick(String, best, "ok", E.ep.why(List.append(&2, E.EpSeg, et.fx.upto(ss, 1n), et.fx.fix(fs)), k))))))
+
+# the fixed so far: the output (newest first), each unit's count, the
+# records by unit, how many, the reasons
+type EtF is Type:
+  EtF{out: List<&2, List<&2, U32>>, cs: Map<&2, Nat>, rm: Map<&2, List<&2, U32>>, n: Nat, why: List<&2, EtC>}
+
+def et.fx.fin(room: Bool, m: Maybe<&2, List<&2, E.EpSeg>>, +unit: String, +id: List<&2, U32>, +c: Nat,
+              o: List<&2, List<&2, U32>>, cs: Map<&2, Nat>, rm: Map<&2, List<&2, U32>>, +n: Nat, ws: List<&2, EtC>) -> EtF:
+  match room m:
+    case True{} Some{e}:
+      EtF{List.concat(&2, U32, [id, [0], E.ep.text(e), [0]]) <> o, Map.set(&2, Nat, cs, unit, 1n+c), rm, 1n+n, ws}
+    case _ _:
+      EtF{o, cs, rm, n, ws}
+
+# Map.get hands the map back with its answer
+def et.fx.cnt(+k: Nat, +cap: Nat, +r: E.EpRec, +unit: String, +id: List<&2, U32>, +t: List<&2, U32>, o: List<&2, List<&2, U32>>,
+              rm: Map<&2, List<&2, U32>>, +n: Nat, ws: List<&2, EtC>, g: Map<&2, Nat> & Nat) -> EtF:
+  (cs, +c) = g
+  et.fx.fin(Nat.is_lt(c, cap), et.fx.make(k, r, t), unit, id, c, o, cs, rm, n, et.bump(ws, et.fx.why(k, r, t)))
+
+def et.fx.rec(+k: Nat, +cap: Nat, +r: E.EpRec, +unit: String, +id: List<&2, U32>, o: List<&2, List<&2, U32>>, cs: Map<&2, Nat>, +n: Nat,
+              ws: List<&2, EtC>, g: Map<&2, List<&2, U32>> & List<&2, U32>) -> EtF:
+  (rm, +t) = g
+  et.fx.cnt(k, cap, r, unit, id, t, o, rm, n, ws, Map.get(Nat, 0n, cs, unit))
+
+def et.fx.step(+k: Nat, +cap: Nat, +r: E.EpRec, a: EtF) -> EtF:
+  match a:
+    case EtF{o, cs, rm, +n, ws}:
+      +m = E.EpRec.meta(r)
+      +unit = S.str(et.meta(m, "unit"))
+      +id = List.concat(&2, U32, [et.meta(m, "unit"), S.b("/fixed-"), et.meta(m, "n")])
+      et.fx.rec(k, cap, r, unit, id, o, cs, n, ws, Map.get(List<&2, U32>, Nil{}, rm, unit))
+
+def et.fx.pass(rs: List<&2, E.EpRec>, +k: Nat, +cap: Nat, a: EtF) -> EtF:
+  match rs:
+    case Nil{}:
+      a
+    case +r <> t:
+      et.fx.pass(t, k, cap, et.fx.step(k, cap, r, a))
+
+def et.fx.map(kvs: List<&2, Ev.EvKv>, m: Map<&2, List<&2, U32>>) -> Map<&2, List<&2, U32>>:
+  match kvs:
+    case Nil{}:
+      m
+    case Ev.EvKv{k, v} <> t:
+      et.fx.map(t, Map.set(&2, List<&2, U32>, m, S.str(k), v))
+
+def et.fx.units(rs: List<&2, E.EpRec>, s: Set()) -> Set():
+  match rs:
+    case Nil{}:
+      s
+    case r <> t:
+      et.fx.units(t, Set.add(s, S.str(et.meta(E.EpRec.meta(r), "unit"))))
+
+def et.fx.put(+dir: String, +l: String, a: EtF) -> IO(Nat):
+  match a:
+    case EtF{o, cs, rm, +n, ws}:
+      do IO<Nat>:
+        S.mkdir(dir)
+        S.write(dir ++ "/transcripts.train.nul", List.concat(&2, U32, List.reverse(&2, List<&2, U32>, o)))
+        IO.print("fixed: " ++ l ++ " " ++ Nat.show(n) ++ " into " ++ dir ++ "/transcripts.train.nul; episodes by reason:" ++ et.counts(ws))
+        return n
+
+# one language: its records (its units' only), its pass, its file
+def et.fx.one(+out: String, +k: Nat, +cap: Nat, +l: String, +rs: List<&2, E.EpRec>) -> IO(Nat):
+  +mine = et.lang.of(S.b(l), rs)
+  do IO<Nat>:
+    kvs : List<&2, Ev.EvKv> <- Ev.ev.holdout([l], et.fx.units(mine, Set.new()), Nil{})
+    et.fx.put(out ++ "/" ++ l ++ "-fix", l, et.fx.pass(mine, k, cap, EtF{Nil{}, Map.new(&2, Nat), et.fx.map(kvs, Map.new(&2, List<&2, U32>)), 0n, Nil{}}))
+
+def et.fx.all(ls: List<&2, String>, +out: String, +k: Nat, +cap: Nat, +rs: List<&2, E.EpRec>, +n: Nat) -> IO(Nat):
+  match ls:
+    case Nil{}:
+      IO.pure(Nat, n)
+    case l <> t:
+      do IO<Nat>:
+        m : Nat <- et.fx.one(out, k, cap, l, rs)
+        et.fx.all(t, out, k, cap, rs, Nat.add(n, m))
+
+def et.fixed(+k: Nat, +cap: Nat, +out: String, ps: List<String>) -> IO(Unit):
+  do IO<Unit>:
+    +rs : List<&2, E.EpRec> <- et.logs(ps, Nil{})
+    n : Nat <- et.fx.all(et.langs(), out, k, cap, rs, 0n)
+    IO.print("fixed: " ++ Nat.show(List.length(&2, E.EpRec, rs)) ++ " episodes; " ++ Nat.show(n)
+      ++ " fixed episodes (at most the cap a unit) into " ++ out ++ "/LANG-fix")
+
 def et.read(+mode: Nat, +k: Nat, +path: String) -> IO(Unit):
   do IO<Unit>:
     xs : List<&2, U32> <- S.read(path)
@@ -238,8 +424,10 @@ def et.args(xs: List<String>) -> IO(Unit):
       et.read(1n, S.env.nat.got(Nat.read(k), 4n), path)
     case "accept" <> +k <> +cap <> +out <> logs:
       et.accept(S.env.nat.got(Nat.read(k), 4n), S.env.nat.got(Nat.read(cap), 2n), out, logs)
+    case "fixed" <> +k <> +cap <> +out <> logs:
+      et.fixed(S.env.nat.got(Nat.read(k), 4n), S.env.nat.got(Nat.read(cap), 2n), out, logs)
     case _:
-      IO.die(Unit, 2, "usage: bend-episode text LOG | why LOG K | accept K CAP OUT LOG...")
+      IO.die(Unit, 2, "usage: bend-episode text LOG | why LOG K | accept K CAP OUT LOG... | fixed K CAP OUT LOG...")
 
 def main() -> IO(Unit):
   do IO<Unit>:
