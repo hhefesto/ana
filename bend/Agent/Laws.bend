@@ -73,17 +73,21 @@ def la.last.num(xs: List<&2, U32>, +n: Nat) -> Nat:
 
 # the roles a shape means: one act (none for verify; the Term, or the Type
 # for term-to-type); one attempt for repair, fill, verify and chain-repair;
-# J tries for chain-J and chain-repair-J and none for any other shape; the
+# J tries for chain-J and chain-repair-J (any for episode-N, one ana wrote) and
+# none for any other shape; the
 # User first
 def la.shape.ok(+s: List<&2, U32>, +e: List<&2, A.Turn>) -> Bool:
   +verify = la.is(s, "verify")
   +t2t = la.is(s, "term-to-type")
   +chain = A.ag.prefix(s, A.ag.ascii("chain-"))
   +crep = A.ag.prefix(s, A.ag.ascii("chain-repair-"))
+  # an episode ana wrote (bend-episode accept): its prompt direct or repair,
+  # any number of tries
+  +own = A.ag.prefix(s, A.ag.ascii("episode-"))
   +att = Bool.or(Bool.or(verify, crep), Bool.or(la.is(s, "repair"), la.is(s, "fill")))
   +acts = Nat.is_eq(A.ag.count(e, 3n), Bool.pick(Nat, verify, 0n, 1n))
-  +atts = Nat.is_eq(A.ag.count(e, 2n), Bool.pick(Nat, att, 1n, 0n))
-  +tries = Nat.is_eq(A.ag.count(e, 6n), Bool.pick(Nat, chain, la.last.num(s, 0n), 0n))
+  +atts = Bool.or(Nat.is_eq(A.ag.count(e, 2n), Bool.pick(Nat, att, 1n, 0n)), Bool.and(own, Nat.is_lt(A.ag.count(e, 2n), 2n)))
+  +tries = Bool.or(own, Nat.is_eq(A.ag.count(e, 6n), Bool.pick(Nat, chain, la.last.num(s, 0n), 0n)))
   +label = Bool.or(verify, A.ag.prefix(la.act.text(e), A.ag.ascii(Bool.pick(String, t2t, "## Type\n", "## Term\n"))))
   Bool.and(Bool.and(Bool.and(acts, atts), tries), Bool.and(label, la.first.user(e)))
 

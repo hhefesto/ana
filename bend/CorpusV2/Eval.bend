@@ -626,13 +626,17 @@ def ev.lang(+l: String, +nd: Nat, +nr: Nat, +both: Bool, +us: List<&2, EvU>) -> 
 type EvLu is Data:
   EvLu{lang: String, us: List<&2, EvU>}
 
+# EVALSET_SRC (run/v2/transcripts): where the transcripts are cut from,
+# SRC/LANG/transcripts.holdout.nul (agent-act: a sample of train units,
+# tools/corpus-v2/actset.sh)
 def ev.load.units(ls: List<&2, String>, acc: List<&2, EvLu>) -> IO(List<&2, EvLu>):
   match ls:
     case Nil{}:
       IO.pure(List<&2, EvLu>, List.reverse(&2, EvLu, acc))
     case +l <> more:
       do IO<List<&2, EvLu>>:
-        kvs : List<&2, EvKv> <- ev.scan("run/v2/transcripts/" ++ l ++ "/transcripts.holdout.nul", Set.new(), True{})
+        +src : String <- S.env("EVALSET_SRC", "run/v2/transcripts")
+        kvs : List<&2, EvKv> <- ev.scan(src ++ "/" ++ l ++ "/transcripts.holdout.nul", Set.new(), True{})
         ev.load.units(more, EvLu{l, ev.units(kvs)} <> acc)
 
 def ev.names.u(us: List<&2, EvU>) -> List<&2, String>:
@@ -925,13 +929,28 @@ def ev.q.nth(qs: List<&2, EvQ>, +i: Nat) -> EvQ:
 def ev.gen.bin() -> String:
   "run/gcroot-bend-generate/bin/bend-generate"
 
-def ev.jobs(qs: List<&2, EvQ>, +i: Nat, +fmt1: Bool, +ckpt: String, +tokens: String, +threads: String) -> List<&2, C.CbJob>:
+def ev.q.l.str(+q: EvQ) -> String:
+  match q:
+    case EvQ{id, l, u, s, p, p1, r}:
+      S.str(l)
+
+# a prompt's token budget: TOKENS_LANG when set (TOKENS_NIX=160: a whole Nix
+# file outgrows 100 tokens, so E1's Nix was 0/9 from step 40000 on), else
+# TOKENS; `per` holds TOKENS_LANG in ev.langs() order, "" when unset
+def ev.tokens.of(+q: EvQ, +tokens: String, ls: List<&2, String>, per: List<&2, String>) -> String:
+  match ls per:
+    case +l <> lt +t <> pt:
+      Bool.pick(String, Bool.and(String.eq(ev.q.l.str(q), l), Bool.not(String.is_empty(t))), t, ev.tokens.of(q, tokens, lt, pt))
+    case _ _:
+      tokens
+
+def ev.jobs(qs: List<&2, EvQ>, +i: Nat, +fmt1: Bool, +ckpt: String, +tokens: String, +per: List<&2, String>, +threads: String) -> List<&2, C.CbJob>:
   match qs:
     case Nil{}:
       Nil{}
     case +q <> more:
-      +env = {["CKPT=" ++ ckpt, "PROMPT=" ++ S.str(ev.asked(fmt1, q)), "TOKENS=" ++ tokens, "TEMPERATURE=0", "TOKENIZER_FILE=weights/code32k.bpe"] : List<&2, String>}
-      C.CbJob{i, env, ev.gen.bin(), {["--threads", threads] : List<&2, String>}} <> ev.jobs(more, 1n+i, fmt1, ckpt, tokens, threads)
+      +env = {["CKPT=" ++ ckpt, "PROMPT=" ++ S.str(ev.asked(fmt1, q)), "TOKENS=" ++ ev.tokens.of(q, tokens, ev.langs(), per), "TEMPERATURE=0", "TOKENIZER_FILE=weights/code32k.bpe"] : List<&2, String>}
+      C.CbJob{i, env, ev.gen.bin(), {["--threads", threads] : List<&2, String>}} <> ev.jobs(more, 1n+i, fmt1, ckpt, tokens, per, threads)
 
 # tenths of a second, rounded
 def ev.secs(+ms: Nat) -> String:
@@ -1017,13 +1036,18 @@ def ev.gen.run(+ckpt: String, +dir: String, +fmt1: Bool, +k: Nat) -> IO(Unit):
     kvs : List<&2, EvKv> <- ev.nul(es)
     +qs : List<&2, EvQ> = ev.cut.k(k, ev.qs.of(kvs))
     +tokens : String <- S.env("TOKENS", "100")
+    +th : String <- S.env("TOKENS_HASKELL", "")
+    +ta : String <- S.env("TOKENS_AGDA", "")
+    +tl : String <- S.env("TOKENS_LEAN", "")
+    +tn : String <- S.env("TOKENS_NIX", "")
+    +tb : String <- S.env("TOKENS_BEND", "")
     +threads : String <- S.env("THREADS", "5")
     +procs : Nat <- S.env.nat("PROCS", 3n)
     S.mkdir(dir)
     S.write(dir ++ "/results.nul", Nil{})
     S.write(dir ++ "/raw.nul", Nil{})
     Ck.log("gen: " ++ Nat.show(List.length(&2, EvQ, qs)) ++ " prompts of " ++ es ++ ", " ++ Nat.show(procs) ++ " at a time")
-    p : C.CbPool <- C.cb.pool.open(procs, ev.jobs(qs, 0n, fmt1, ckpt, tokens, threads))
+    p : C.CbPool <- C.cb.pool.open(procs, ev.jobs(qs, 0n, fmt1, ckpt, tokens, [th, ta, tl, tn, tb], threads))
     ev.gen.fin(List.length(&2, EvQ, qs), qs, fmt1, dir, C.cb.pool.res(p))
 
 def ev.usage() -> IO(Unit):
@@ -1095,13 +1119,15 @@ def ev.r.units(rs: List<&2, EvR>) -> List<&2, String>:
     case EvR{n, l, u, s, c, r, t} <> more:
       S.str(u) <> ev.r.units(more)
 
+# AGENT_RECORDS (holdout): which split's records the units come from (agent-act: train)
 def ev.holdout(ls: List<&2, String>, +keep: Set(), acc: List<&2, EvKv>) -> IO(List<&2, EvKv>):
   match ls:
     case Nil{}:
       IO.pure(List<&2, EvKv>, acc)
     case l <> more:
       do IO<List<&2, EvKv>>:
-        kvs : List<&2, EvKv> <- ev.scan("run/v2/results/" ++ l ++ ".holdout.nul", keep, False{})
+        +split : String <- S.env("AGENT_RECORDS", "holdout")
+        kvs : List<&2, EvKv> <- ev.scan("run/v2/results/" ++ l ++ "." ++ split ++ ".nul", keep, False{})
         ev.holdout(more, keep, List.append(&2, EvKv, acc, kvs))
 
 def ev.slash(xs: List<&2, String>) -> List<&2, String>:

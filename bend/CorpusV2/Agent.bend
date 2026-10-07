@@ -154,7 +154,7 @@ def ea.units(qs: List<&2, Ev.EvQ>) -> List<&2, String>:
       S.str(u) <> ea.units(more)
 
 def ea.prep.one(+i: Nat, +fmt1: Bool, +dir: String, +recs: List<&2, Ev.EvKv>, +roots: List<&2, String>, +home: String,
-                +env0: List<&2, String>, +threads: String, +dep: String, q: Ev.EvQ) -> IO(C.CbJob):
+                +env0: List<&2, String>, +threads: String, +dep: String, +seeds: Nat, +tag: Nat, q: Ev.EvQ) -> IO(C.CbJob):
   match q:
     case Ev.EvQ{id, +l, +u, s, +p, +p1, +r}:
       +asked = Bool.pick(List<&2, U32>, Bool.and(fmt1, Nat.is_lt(0n, S.len(p1))), p1, p)
@@ -171,7 +171,8 @@ def ea.prep.one(+i: Nat, +fmt1: Bool, +dir: String, +recs: List<&2, Ev.EvKv>, +r
         # to bend-check)
         # AGENT_LOG: the episode's record (Agent/Episode.bend), held to its text
         # and appended to DIR/episodes.eplog when the job ends (`ea.one`)
-        return C.CbJob{i, List.append(&2, String, env0, {["AGENT_TOOL=" ++ dep ++ " corpus-v2 agent-tool " ++ task, "CHECK_TAG=" ++ Nat.show(Nat.add(100000n, i)),
+        return C.CbJob{i, List.append(&2, String, env0, {["AGENT_TOOL=" ++ dep ++ " corpus-v2 agent-tool " ++ task, "CHECK_TAG=" ++ Nat.show(Nat.add(tag, i)),
+          "SAMPLE_SEED=" ++ Nat.show(Nat.mod(i, Nat.max(seeds, 1n))),
           "AGENT_LOG=" ++ dir ++ "/ep." ++ Nat.show(i) ++ ".log", "AGENT_META=n=" ++ Nat.show(i) ++ "\nlang=" ++ S.str(l) ++ "\nunit=" ++ S.str(u) ++ "\n"] : List<&2, String>}), ea.bin(),
           {["--threads", threads, "--agent", "--prompt-file", pf] : List<&2, String>}}
 
@@ -184,24 +185,24 @@ def ea.has(xs: List<&2, Nat>, +i: Nat) -> Bool:
 
 # a prompt's job, or none when a resumed run already holds its episode
 def ea.prep.if(done: Bool, +i: Nat, +fmt1: Bool, +dir: String, +recs: List<&2, Ev.EvKv>, +roots: List<&2, String>, +home: String,
-               +env0: List<&2, String>, +threads: String, +dep: String, q: Ev.EvQ, acc: List<&2, C.CbJob>) -> IO(List<&2, C.CbJob>):
+               +env0: List<&2, String>, +threads: String, +dep: String, +seeds: Nat, +tag: Nat, q: Ev.EvQ, acc: List<&2, C.CbJob>) -> IO(List<&2, C.CbJob>):
   match done:
     case True{}:
       IO.pure(List<&2, C.CbJob>, acc)
     case False{}:
       do IO<List<&2, C.CbJob>>:
-        j : C.CbJob <- ea.prep.one(i, fmt1, dir, recs, roots, home, env0, threads, dep, q)
+        j : C.CbJob <- ea.prep.one(i, fmt1, dir, recs, roots, home, env0, threads, dep, seeds, tag, q)
         return j <> acc
 
 def ea.prep(qs: List<&2, Ev.EvQ>, +i: Nat, +fmt1: Bool, +dir: String, +recs: List<&2, Ev.EvKv>, +roots: List<&2, String>, +home: String,
-            +env0: List<&2, String>, +threads: String, +dep: String, +done: List<&2, Nat>, acc: List<&2, C.CbJob>) -> IO(List<&2, C.CbJob>):
+            +env0: List<&2, String>, +threads: String, +dep: String, +seeds: Nat, +tag: Nat, +done: List<&2, Nat>, acc: List<&2, C.CbJob>) -> IO(List<&2, C.CbJob>):
   match qs:
     case Nil{}:
       IO.pure(List<&2, C.CbJob>, List.reverse(&2, C.CbJob, acc))
     case +q <> more:
       do IO<List<&2, C.CbJob>>:
-        acc2 : List<&2, C.CbJob> <- ea.prep.if(ea.has(done, i), i, fmt1, dir, recs, roots, home, env0, threads, dep, q, acc)
-        ea.prep(more, 1n+i, fmt1, dir, recs, roots, home, env0, threads, dep, done, acc2)
+        acc2 : List<&2, C.CbJob> <- ea.prep.if(ea.has(done, i), i, fmt1, dir, recs, roots, home, env0, threads, dep, seeds, tag, q, acc)
+        ea.prep(more, 1n+i, fmt1, dir, recs, roots, home, env0, threads, dep, seeds, tag, done, acc2)
 
 # an episode's outcome
 type EaR is Data:
@@ -415,11 +416,34 @@ def ea.fin(+n: Nat, +qs: List<&2, Ev.EvQ>, +dir: String, +calls: Nat, +prior: Li
     IO.print(ea.report(xs, calls) ++ lawl)
     Ck.log("agent-eval: " ++ Nat.show(n) ++ " episodes in " ++ dir)
 
+# each prompt n times over (AGENT_SEEDS): job i asks prompt i / n with seed i mod n
+def ea.rep.go(+q: Ev.EvQ, j: Nat, rest: List<&2, Ev.EvQ>) -> List<&2, Ev.EvQ>:
+  match j:
+    case 0n:
+      rest
+    case 1n+p:
+      q <> ea.rep.go(q, p, rest)
+
+def ea.rep(qs: List<&2, Ev.EvQ>, +n: Nat) -> List<&2, Ev.EvQ>:
+  match qs:
+    case Nil{}:
+      Nil{}
+    case +q <> more:
+      ea.rep.go(q, n, ea.rep(more, n))
+
+# The settings agent-eval (E5: greedy, the held-out units, one seed, check
+# tags from 100000) and agent-act (tools/corpus-v2/agent-act.sh: ana's own
+# episodes on train units, sampled, several seeds, tags from 200000) differ
+# in: TEMPERATURE (0), AGENT_SEEDS (1), AGENT_TAG (100000), AGENT_RECORDS
+# (holdout, Eval.bend `ev.holdout`) and EVALSET.
 def ea.eval.run(+ckpt: String, +dir: String, +fmt1: Bool, +k: Nat) -> IO(Unit):
   do IO<Unit>:
     +es : String <- Ev.ev.evalset.path()
     kvs : List<&2, Ev.EvKv> <- Ev.ev.nul(es)
-    +qs : List<&2, Ev.EvQ> = Ev.ev.cut.k(k, Ev.ev.qs.of(kvs))
+    +seeds : Nat <- S.env.nat("AGENT_SEEDS", 1n)
+    +tag : Nat <- S.env.nat("AGENT_TAG", 100000n)
+    +temp : String <- S.env("TEMPERATURE", "0")
+    +qs : List<&2, Ev.EvQ> = ea.rep(Ev.ev.cut.k(k, Ev.ev.qs.of(kvs)), Nat.max(seeds, 1n))
     recs : List<&2, Ev.EvKv> <- Ev.ev.holdout(Ev.ev.langs(), Set.from_list(ea.units(qs)), Nil{})
     +roots : List<&2, String> <- Ev.ev.roots()
     +home : String <- S.env("HOME", "")
@@ -433,9 +457,9 @@ def ea.eval.run(+ckpt: String, +dir: String, +fmt1: Bool, +k: Nat) -> IO(Unit):
     pm : Maybe<&2, List<&2, U32>> <- S.slurp(dir ++ "/agent.nul")
     +prior : List<&2, EaP> = ea.prior(pm)
     S.add(dir ++ "/agent.nul", Nil{})
-    Ck.log("agent-eval: " ++ Nat.show(List.length(&2, Ev.EvQ, qs)) ++ " prompts of " ++ es ++ " (" ++ Nat.show(List.length(&2, EaP, prior)) ++ " done before), " ++ Nat.show(procs) ++ " at a time, " ++ calls ++ " calls, " ++ tokens ++ " tokens a stretch")
-    +env0 : List<&2, String> = {["CKPT=" ++ ckpt, "TOKENS=" ++ tokens, "AGENT_CALLS=" ++ calls, "TEMPERATURE=0", "TOKENIZER_FILE=weights/code32k.bpe"] : List<&2, String>}
-    +js : List<&2, C.CbJob> <- ea.prep(qs, 0n, fmt1, dir, List.reverse(&2, Ev.EvKv, recs), roots, C.cb.path(home, "src"), env0, threads, dep, ea.prior.is(prior), Nil{})
+    Ck.log("agent-eval: " ++ Nat.show(List.length(&2, Ev.EvQ, qs)) ++ " prompts of " ++ es ++ " (" ++ Nat.show(List.length(&2, EaP, prior)) ++ " done before), " ++ Nat.show(procs) ++ " at a time, " ++ calls ++ " calls, " ++ tokens ++ " tokens a stretch, temperature " ++ temp ++ ", " ++ Nat.show(Nat.max(seeds, 1n)) ++ " seed(s) a prompt")
+    +env0 : List<&2, String> = {["CKPT=" ++ ckpt, "TOKENS=" ++ tokens, "AGENT_CALLS=" ++ calls, "TEMPERATURE=" ++ temp, "TOKENIZER_FILE=weights/code32k.bpe"] : List<&2, String>}
+    +js : List<&2, C.CbJob> <- ea.prep(qs, 0n, fmt1, dir, List.reverse(&2, Ev.EvKv, recs), roots, C.cb.path(home, "src"), env0, threads, dep, seeds, tag, ea.prior.is(prior), Nil{})
     +n : Nat = List.length(&2, C.CbJob, js)
     p : C.CbPool <- C.cb.pool.open(procs, js)
     ea.fin(n, qs, dir, C.cb.nat(S.b(calls)), ea.prior.rs(prior), C.cb.pool.res(p))

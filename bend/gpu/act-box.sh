@@ -41,7 +41,7 @@ r() { ssh -p "$port" -o ServerAliveInterval=30 -o StrictHostKeyChecking=accept-n
 rs() { rsync -e "ssh -p $port -o ServerAliveInterval=30 -o StrictHostKeyChecking=accept-new" "$@"; }
 # a command in the box's workspace, as here: its HOME, the box's nix on PATH
 rw() { r "export HOME=$bh PATH=/usr/local/bin:\$PATH; cd $ws && $*"; }
-links="run/v2/gcroot-deploy-agent run/gcroot-bend-generate-agent run/agent/gcroot-bend-episode"
+links="run/v2/gcroot-deploy-agent run/gcroot-bend-generate-agent run/agent/gcroot-bend-episode run/gcroot-ana"
 S=$(mktemp -d); trap 'rm -rf "$S"' EXIT
 
 # the box's nix: the static binary under its tools' names, a root store with
