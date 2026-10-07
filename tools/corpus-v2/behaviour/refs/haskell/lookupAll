@@ -1,0 +1,2 @@
+lookupAll ks kvs = mapMaybe (`lookup` kvs) ks
+```

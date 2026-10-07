@@ -1,0 +1,14 @@
+## User
+
+Prove `map-id`.
+
+## Type
+
+proposition
+```agda
+map-id : ∀ {A : Set} (xs : List A) → map (λ x → x) xs ≡ xs
+```
+
+## Term
+
+```agda

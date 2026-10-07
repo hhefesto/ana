@@ -1,0 +1,60 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+The first element of a list, or Nothing for an empty list.
+
+## Type
+
+type
+```haskell
+safeHead :: [a] -> Maybe a
+```
+
+## Term
+
+```haskell
+safeHead [] = Nothing
+safeHead (x:_) = Just x
+```
+
+## ghc
+
+```haskell
+safeHead (x:_) = Just x
+```
+
+## ghc
+
+```haskell
+safeHead [] = Nothing
+safeHead (x:_) = Just x
+```
+
+## ghc
+
+```haskell
+safeHead [] = Nothing
+safeHead (x:_) = Just x
+```
+
+## ghc
+
+```haskell
+safeHead [] = Nothing
+safeHead (x:_) = Just x
+```
+
+## ghc
+
+```haskell
+safeHead [] = Nothing
+safeHead (x:_) = Just x
+```
+
+## ghc
+
+```haskell
+safeHead [] = Nothing
+safeHead (x:_) = Just x
+```
+

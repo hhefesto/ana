@@ -1,0 +1,1 @@
+def twice (n : ℕ) : ℕ := n + n

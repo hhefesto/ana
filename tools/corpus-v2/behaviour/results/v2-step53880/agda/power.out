@@ -1,0 +1,35 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+power b e is b raised to the power e, by repeated multiplication.
+
+## Type
+
+type
+```agda
+power : ℕ → ℕ → ℕ
+```
+
+## Term
+
+```agda
+power b e = b * e
+```
+
+## agda
+
+```agda
+power-+ : ∀ b e → power b e + power b e ≡ e
+```
+
+## agda
+
+```agda
+power-+ b e = begin
+  power b e + power b e
+    ≡⟨ +-assoc (power b e) (power b e) (power b e) ⟩
+  power b e + (power b e + power b e)
+    ≡⟨ cong (_+_ (power b e)) (power-+ b e (power b e)) ⟩
+  power b e + (power b e + power b e)
+    ≡⟨ +-assoc (power b e) (power b e) (power b e) ⟩
+  power b e + (power b e + power

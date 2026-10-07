@@ -1,0 +1,8 @@
+by
+  induction n with
+  | zero => rfl
+  | succ k ih =>
+    simp only [sumTo]
+    rw [Nat.mul_add, ih]
+    ring
+```

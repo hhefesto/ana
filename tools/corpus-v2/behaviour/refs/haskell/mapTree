@@ -1,0 +1,3 @@
+mapTree _ Leaf = Leaf
+mapTree f (Node l x r) = Node (mapTree f l) (f x) (mapTree f r)
+```

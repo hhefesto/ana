@@ -1,0 +1,20 @@
+## User
+
+Prove `twice_le`.
+
+## Context
+
+```lean
+twice (n : ℕ) : ℕ
+```
+
+## Type
+
+proposition
+```lean
+theorem twice_le (n : ℕ) : n ≤ twice n
+```
+
+## Term
+
+```lean

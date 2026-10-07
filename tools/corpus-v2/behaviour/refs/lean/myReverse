@@ -1,0 +1,4 @@
+match l with
+  | [] => []
+  | x :: xs => myReverse xs ++ [x]
+```

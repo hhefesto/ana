@@ -1,0 +1,14 @@
+## User
+
+Check whether a list reads the same forwards and backwards.
+
+## Type
+
+type
+```haskell
+isPalindrome :: Eq a => [a] -> Bool
+```
+
+## Term
+
+```haskell

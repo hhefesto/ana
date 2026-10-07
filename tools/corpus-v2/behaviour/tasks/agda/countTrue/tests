@@ -1,0 +1,6 @@
+_ : countTrue (true ∷ false ∷ true ∷ []) ≡ 2
+_ = refl
+_ : countTrue [] ≡ 0
+_ = refl
+_ : countTrue (false ∷ []) ≡ 0
+_ = refl

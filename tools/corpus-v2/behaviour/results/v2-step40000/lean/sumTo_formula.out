@@ -1,0 +1,58 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+Prove `sumTo_formula`.
+
+## Context
+
+```lean
+sumTo : ℕ → ℕ
+```
+
+## Type
+
+proposition
+```lean
+theorem sumTo_formula (n : ℕ) : 2 * sumTo n = n * (n + 1)
+```
+
+## Term
+
+```lean
+by
+  rw [sumTo, sumTo]
+```
+
+## lean
+
+proposition
+```lean
+theorem sumTo_formula (n : ℕ) : 2 * sumTo n = n * (n + 1)
+```
+
+## lean
+
+proposition
+```lean
+theorem sumTo_formula (n : ℕ) : 2 * sumTo n = n * (n + 1)
+```
+
+## lean
+
+proposition
+```lean
+theorem sumTo_formula (n : ℕ) : 2 * sumTo n = n * (n + 1)
+```
+
+## lean
+
+proposition
+```lean
+theorem sumTo_formula (n : ℕ) : 2 * sumTo n = n * (n + 1)
+```
+
+## lean
+
+proposition
+```lean
+

@@ -1,0 +1,1 @@
+myGcd :: Int -> Int -> Int

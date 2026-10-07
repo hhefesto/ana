@@ -1,0 +1,6 @@
+_ : sumList [] ≡ 0
+_ = refl
+_ : sumList (1 ∷ 2 ∷ 3 ∷ []) ≡ 6
+_ = refl
+_ : sumList (10 ∷ []) ≡ 10
+_ = refl

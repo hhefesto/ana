@@ -1,0 +1,87 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+The sum of the decimal digits of a non-negative integer.
+
+## Type
+
+type
+```haskell
+sumDigits :: Int -> Int
+```
+
+## Term
+
+```haskell
+sumDigits n = sumDigits' n 0
+```
+
+## ghc
+
+```haskell
+sumDigits' :: Int -> Int -> Int
+```
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc

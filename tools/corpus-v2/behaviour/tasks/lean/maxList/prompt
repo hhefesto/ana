@@ -1,0 +1,14 @@
+## User
+
+The largest element of a list of natural numbers, or 0 for the empty list.
+
+## Type
+
+type
+```lean
+def maxList (l : List ℕ) : ℕ
+```
+
+## Term
+
+```lean

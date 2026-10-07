@@ -1,0 +1,14 @@
+## User
+
+All prime numbers up to and including n, in increasing order.
+
+## Type
+
+type
+```haskell
+primesUpTo :: Int -> [Int]
+```
+
+## Term
+
+```haskell

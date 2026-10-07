@@ -1,0 +1,5 @@
+#guard isPalindrome [1, 2, 1] = true
+#guard isPalindrome [] = true
+#guard isPalindrome [1, 2] = false
+#guard isPalindrome [3, 3] = true
+#guard isPalindrome [1, 2, 3, 1] = false

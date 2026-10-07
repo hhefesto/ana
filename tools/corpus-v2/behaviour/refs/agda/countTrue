@@ -1,0 +1,4 @@
+countTrue [] = 0
+countTrue (true ∷ bs) = suc (countTrue bs)
+countTrue (false ∷ bs) = countTrue bs
+```

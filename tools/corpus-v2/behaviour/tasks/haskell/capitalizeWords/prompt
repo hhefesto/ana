@@ -1,0 +1,22 @@
+## User
+
+Uppercase the first letter of every word in a string of words separated by single spaces.
+
+## Context
+
+```haskell
+toUpper :: Char -> Char
+words :: String -> [String]
+unwords :: [String] -> String
+```
+
+## Type
+
+type
+```haskell
+capitalizeWords :: String -> String
+```
+
+## Term
+
+```haskell

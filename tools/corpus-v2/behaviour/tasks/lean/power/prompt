@@ -1,0 +1,14 @@
+## User
+
+b raised to the power e, by repeated multiplication.
+
+## Type
+
+type
+```lean
+def power (b e : ℕ) : ℕ
+```
+
+## Term
+
+```lean

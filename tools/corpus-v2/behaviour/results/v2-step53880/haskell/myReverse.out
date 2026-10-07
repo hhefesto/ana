@@ -1,0 +1,94 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+Reverse a list.
+
+## Type
+
+type
+```haskell
+myReverse :: [a] -> [a]
+```
+
+## Term
+
+```haskell
+myReverse = reverse
+```
+
+## ghc
+
+```haskell
+
+```
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+

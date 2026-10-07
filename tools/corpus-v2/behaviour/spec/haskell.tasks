@@ -1,0 +1,353 @@
+@@# Haskell behaviour tasks: answers compiled with GHC and run against `tests` (a [Bool] expression).
+@@# Format: see ../README.txt.  tasks.sh turns this file into tasks/haskell/NAME/ and refs/haskell/NAME.
+
+@@ task merge type
+@@ user
+Merge two sorted lists into one sorted list.
+@@ type
+merge :: Ord a => [a] -> [a] -> [a]
+@@ tests
+[merge [1,3,5] [2,4,6::Int] == [1..6], merge [] [1::Int] == [1], merge [1,1] [1::Int] == [1,1,1], merge "ace" "bd" == "abcde"]
+@@ ref
+merge [] ys = ys
+merge xs [] = xs
+merge (x:xs) (y:ys) | x <= y = x : merge xs (y:ys)
+                    | otherwise = y : merge (x:xs) ys
+
+@@ task safeDiv type
+@@ user
+Divide two integers, returning Nothing when the divisor is zero.
+@@ type
+safeDiv :: Int -> Int -> Maybe Int
+@@ tests
+[safeDiv 7 2 == Just 3, safeDiv 1 0 == Nothing, safeDiv 0 5 == Just 0, safeDiv 9 3 == Just 3]
+@@ ref
+safeDiv _ 0 = Nothing
+safeDiv x y = Just (x `div` y)
+
+@@ task countIf type
+@@ user
+Count how many elements of a list satisfy a predicate.
+@@ context
+filter :: (a -> Bool) -> [a] -> [a]
+length :: Foldable t => t a -> Int
+@@ type
+countIf :: (a -> Bool) -> [a] -> Int
+@@ tests
+[countIf even [1..10::Int] == 5, countIf odd ([] :: [Int]) == 0, countIf (> 2) [5,1,3::Int] == 2]
+@@ ref
+countIf p = length . filter p
+
+@@ task myReverse type
+@@ user
+Reverse a list.
+@@ type
+myReverse :: [a] -> [a]
+@@ tests
+[myReverse [1,2,3::Int] == [3,2,1], myReverse "" == "", myReverse "ab" == "ba"]
+@@ ref
+myReverse = foldl (flip (:)) []
+
+@@ task isPalindrome type
+@@ user
+Check whether a list reads the same forwards and backwards.
+@@ type
+isPalindrome :: Eq a => [a] -> Bool
+@@ tests
+[isPalindrome "racecar", not (isPalindrome "ab"), isPalindrome ([] :: [Int]), isPalindrome [1,2,1::Int]]
+@@ ref
+isPalindrome xs = xs == reverse xs
+
+@@ task fib type
+@@ user
+The n-th Fibonacci number, with fib 0 = 0 and fib 1 = 1.
+@@ type
+fib :: Int -> Integer
+@@ tests
+[fib 0 == 0, fib 1 == 1, fib 10 == 55, fib 25 == 75025]
+@@ ref
+fib n = go n 0 1 where
+  go 0 a _ = a
+  go k a b = go (k - 1) b (a + b)
+
+@@ task factorial type
+@@ user
+The factorial of a non-negative integer.
+@@ type
+factorial :: Integer -> Integer
+@@ tests
+[factorial 0 == 1, factorial 5 == 120, factorial 20 == 2432902008176640000]
+@@ ref
+factorial n = product [1..n]
+
+@@ task dedup type
+@@ user
+Remove duplicate elements from a list, keeping the first occurrence of each.
+@@ type
+dedup :: Eq a => [a] -> [a]
+@@ tests
+[dedup [1,2,1,3,2::Int] == [1,2,3], dedup "" == "", dedup "aaa" == "a"]
+@@ ref
+dedup [] = []
+dedup (x:xs) = x : dedup (filter (/= x) xs)
+
+@@ task chunksOf type
+@@ user
+Split a list into chunks of the given size; the last chunk may be shorter.
+@@ type
+chunksOf :: Int -> [a] -> [[a]]
+@@ tests
+[chunksOf 2 [1..5::Int] == [[1,2],[3,4],[5]], chunksOf 3 ([] :: [Int]) == [], chunksOf 1 "ab" == ["a","b"]]
+@@ ref
+chunksOf _ [] = []
+chunksOf n xs = take n xs : chunksOf n (drop n xs)
+
+@@ task wordFreq type
+@@ user
+Count how many times each word occurs in a text, as a map from each word to its count.
+@@ context
+words :: String -> [String]
+M.insertWith :: Ord k => (a -> a -> a) -> k -> a -> M.Map k a -> M.Map k a
+M.empty :: M.Map k a
+@@ type
+wordFreq :: String -> M.Map String Int
+@@ tests
+[wordFreq "a b a" == M.fromList [("a",2),("b",1)], wordFreq "" == M.empty, wordFreq "x  x x" == M.fromList [("x",3)]]
+@@ ref
+wordFreq = foldr (\w m -> M.insertWith (+) w 1 m) M.empty . words
+
+@@ task capitalizeWords type
+@@ user
+Uppercase the first letter of every word in a string of words separated by single spaces.
+@@ context
+toUpper :: Char -> Char
+words :: String -> [String]
+unwords :: [String] -> String
+@@ type
+capitalizeWords :: String -> String
+@@ tests
+[capitalizeWords "hello world" == "Hello World", capitalizeWords "" == "", capitalizeWords "a" == "A"]
+@@ ref
+capitalizeWords = unwords . map cap . words where
+  cap (c:cs) = toUpper c : cs
+  cap [] = []
+
+@@ task rle type
+@@ user
+Run-length encode a list: each maximal run of equal elements becomes the element and the length of the run.
+@@ type
+rle :: Eq a => [a] -> [(a, Int)]
+@@ tests
+[rle "aaabcc" == [('a',3),('b',1),('c',2)], rle "" == [], rle [1,1,2,1::Int] == [(1,2),(2,1),(1,1)]]
+@@ ref
+rle = map (\g -> (head g, length g)) . group
+
+@@ task transposeM type
+@@ user
+Transpose a matrix given as a non-empty list of rows of equal length.
+@@ type
+transposeM :: [[a]] -> [[a]]
+@@ tests
+[transposeM [[1,2,3],[4,5,6::Int]] == [[1,4],[2,5],[3,6]], transposeM [[1::Int]] == [[1]], transposeM [[1],[2::Int]] == [[1,2]]]
+@@ ref
+transposeM = transpose
+
+@@ task primesUpTo type
+@@ user
+All prime numbers up to and including n, in increasing order.
+@@ type
+primesUpTo :: Int -> [Int]
+@@ tests
+[primesUpTo 20 == [2,3,5,7,11,13,17,19], primesUpTo 1 == [], primesUpTo 2 == [2]]
+@@ ref
+primesUpTo n = [p | p <- [2..n], all (\d -> p `mod` d /= 0) [2..p-1]]
+
+@@ task myGcd type
+@@ user
+The greatest common divisor of two non-negative integers, by Euclid's algorithm.
+@@ type
+myGcd :: Int -> Int -> Int
+@@ tests
+[myGcd 12 18 == 6, myGcd 7 0 == 7, myGcd 0 5 == 5, myGcd 17 5 == 1]
+@@ ref
+myGcd a 0 = a
+myGcd a b = myGcd b (a `mod` b)
+
+@@ task insertSorted type
+@@ user
+Insert an element into a sorted list, keeping it sorted.
+@@ type
+insertSorted :: Ord a => a -> [a] -> [a]
+@@ tests
+[insertSorted 3 [1,2,4,5::Int] == [1,2,3,4,5], insertSorted 0 [] == [0::Int], insertSorted 9 [1,2::Int] == [1,2,9]]
+@@ ref
+insertSorted x [] = [x]
+insertSorted x (y:ys) | x <= y = x : y : ys
+                      | otherwise = y : insertSorted x ys
+
+@@ task quicksort type
+@@ user
+Sort a list with quicksort.
+@@ type
+quicksort :: Ord a => [a] -> [a]
+@@ tests
+[quicksort [3,1,2::Int] == [1,2,3], quicksort [5,5,1::Int] == [1,5,5], quicksort ([] :: [Int]) == [], quicksort "banana" == "aaabnn"]
+@@ ref
+quicksort [] = []
+quicksort (p:xs) = quicksort [x | x <- xs, x < p] ++ [p] ++ quicksort [x | x <- xs, x >= p]
+
+@@ task safeHead type
+@@ user
+The first element of a list, or Nothing for an empty list.
+@@ type
+safeHead :: [a] -> Maybe a
+@@ tests
+[safeHead [1,2::Int] == Just 1, safeHead ([] :: [Int]) == Nothing]
+@@ ref
+safeHead [] = Nothing
+safeHead (x:_) = Just x
+
+@@ task treeSum type
+@@ user
+The sum of all the values in a tree.
+@@ context
+data Tree a = Leaf | Node (Tree a) a (Tree a)
+@@ type
+treeSum :: Num a => Tree a -> a
+@@ pre
+data Tree a = Leaf | Node (Tree a) a (Tree a)
+@@ tests
+[treeSum (Node (Node Leaf 1 Leaf) 2 (Node Leaf 3 Leaf)) == (6::Int), treeSum (Leaf :: Tree Int) == 0]
+@@ ref
+treeSum Leaf = 0
+treeSum (Node l x r) = treeSum l + x + treeSum r
+
+@@ task depth type
+@@ user
+The depth of a tree: 0 for a leaf, and one more than the deeper subtree for a node.
+@@ context
+data Tree a = Leaf | Node (Tree a) a (Tree a)
+@@ type
+depth :: Tree a -> Int
+@@ pre
+data Tree a = Leaf | Node (Tree a) a (Tree a)
+@@ tests
+[depth (Leaf :: Tree Int) == 0, depth (Node Leaf (1::Int) (Node Leaf 2 Leaf)) == 2, depth (Node Leaf (1::Int) Leaf) == 1]
+@@ ref
+depth Leaf = 0
+depth (Node l _ r) = 1 + max (depth l) (depth r)
+
+@@ task zipThree type
+@@ user
+Combine three lists element by element with a function, stopping at the shortest list.
+@@ type
+zipThree :: (a -> b -> c -> d) -> [a] -> [b] -> [c] -> [d]
+@@ tests
+[zipThree (\a b c -> a+b+c) [1,2] [10,20] [100,200,300::Int] == [111,222], zipThree (\a b c -> (a,b,c)) "" "x" "y" == []]
+@@ ref
+zipThree f (a:as) (b:bs) (c:cs) = f a b c : zipThree f as bs cs
+zipThree _ _ _ _ = []
+
+@@ task sumDigits type
+@@ user
+The sum of the decimal digits of a non-negative integer.
+@@ type
+sumDigits :: Int -> Int
+@@ tests
+[sumDigits 1234 == 10, sumDigits 0 == 0, sumDigits 9 == 9, sumDigits 1001 == 2]
+@@ ref
+sumDigits 0 = 0
+sumDigits n = n `mod` 10 + sumDigits (n `div` 10)
+
+@@ task caesar type
+@@ user
+Shift every lowercase letter forward by n places in the alphabet, wrapping from z to a; leave every other character unchanged.
+@@ context
+ord :: Char -> Int
+chr :: Int -> Char
+isLower :: Char -> Bool
+@@ type
+caesar :: Int -> String -> String
+@@ tests
+[caesar 3 "xyz abc" == "abc def", caesar 0 "hi!" == "hi!", caesar 1 "Az" == "Aa"]
+@@ ref
+caesar n = map (\c -> if isLower c then chr ((ord c - ord 'a' + n) `mod` 26 + ord 'a') else c)
+
+@@ task flatten type
+@@ user
+Concatenate a list of lists into one list.
+@@ type
+flatten :: [[a]] -> [a]
+@@ tests
+[flatten [[1],[2,3],[]] == [1,2,3::Int], flatten ([] :: [[Int]]) == []]
+@@ ref
+flatten = concat
+
+@@ task indexOf type
+@@ user
+The index of the first occurrence of an element in a list, if there is one.
+@@ type
+indexOf :: Eq a => a -> [a] -> Maybe Int
+@@ tests
+[indexOf 3 [1,2,3,3::Int] == Just 2, indexOf 9 [1::Int] == Nothing, indexOf (1::Int) [1] == Just 0]
+@@ ref
+indexOf x = elemIndex x
+
+@@ task splitOn type
+@@ user
+Split a string on every occurrence of a separator character.
+@@ type
+splitOn :: Char -> String -> [String]
+@@ tests
+[splitOn ',' "a,b,,c" == ["a","b","","c"], splitOn ',' "abc" == ["abc"], splitOn ',' "" == [""]]
+@@ ref
+splitOn c s = case break (== c) s of
+  (a, []) -> [a]
+  (a, _:rest) -> a : splitOn c rest
+
+@@ task lookupAll type
+@@ user
+Look up every key of a list in an association list, keeping only the values that are found.
+@@ context
+lookup :: Eq a => a -> [(a, b)] -> Maybe b
+@@ type
+lookupAll :: Eq k => [k] -> [(k, v)] -> [v]
+@@ tests
+[lookupAll [1,3::Int] [(1,"a"),(2,"b"),(3,"c")] == ["a","c"], lookupAll [5::Int] [(1,"a")] == ([] :: [String])]
+@@ ref
+lookupAll ks kvs = mapMaybe (`lookup` kvs) ks
+
+@@ task average type
+@@ user
+The arithmetic mean of a non-empty list of numbers.
+@@ type
+average :: [Double] -> Double
+@@ tests
+[average [1,2,3,4] == 2.5, average [5] == 5]
+@@ ref
+average xs = sum xs / fromIntegral (length xs)
+
+@@ task longestWord type
+@@ user
+The longest word of a string of words separated by spaces; on a tie, the first such word.
+@@ type
+longestWord :: String -> String
+@@ tests
+[longestWord "a bbb cc ddd" == "bbb", longestWord "hello" == "hello", longestWord "ab cd" == "ab"]
+@@ ref
+longestWord = foldl1 (\a w -> if length w > length a then w else a) . words
+
+@@ task mapTree type
+@@ user
+Apply a function to every value in a tree, keeping its shape.
+@@ context
+data Tree a = Leaf | Node (Tree a) a (Tree a)
+@@ type
+mapTree :: (a -> b) -> Tree a -> Tree b
+@@ pre
+data Tree a = Leaf | Node (Tree a) a (Tree a)
+@@ tests
+[toL (mapTree (*2) (Node (Node Leaf 1 Leaf) (2::Int) Leaf)) == [2,4], toL (mapTree show (Leaf :: Tree Int)) == []] where { toL Leaf = []; toL (Node l x r) = toL l ++ [x] ++ toL r }
+@@ ref
+mapTree _ Leaf = Leaf
+mapTree f (Node l x r) = Node (mapTree f l) (f x) (mapTree f r)

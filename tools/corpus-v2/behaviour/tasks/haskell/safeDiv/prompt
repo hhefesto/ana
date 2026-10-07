@@ -1,0 +1,14 @@
+## User
+
+Divide two integers, returning Nothing when the divisor is zero.
+
+## Type
+
+type
+```haskell
+safeDiv :: Int -> Int -> Maybe Int
+```
+
+## Term
+
+```haskell

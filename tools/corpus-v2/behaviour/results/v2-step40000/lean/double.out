@@ -1,0 +1,45 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+Twice a natural number.
+
+## Type
+
+type
+```lean
+def double (n : ℕ) : ℕ
+```
+
+## Term
+
+```lean
+n + 1
+```
+
+## lean
+theorem double_zero : double 0 = 0 := by
+  rfl
+```
+
+## lean
+theorem double_succ (n : ℕ) : double (n + 1) = double n + 1 := by
+  rfl
+```
+
+## lean
+theorem double_add (n m : ℕ) : double (n + m) = double n + double m := by
+  rfl
+```
+
+## lean
+theorem double_add' (n m : ℕ) : double (n + m) = double n + double m := by
+  rfl
+```
+
+## lean
+theorem double_add'' (n m : ℕ) : double (n + m) = double n + double m := by
+  rfl
+```
+
+## lean
+theorem double_add''' (n m : ℕ) : double (n + m) =

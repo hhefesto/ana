@@ -1,0 +1,66 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+Prove `twice_le`.
+
+## Context
+
+```lean
+twice (n : ℕ) : ℕ
+```
+
+## Type
+
+proposition
+```lean
+theorem twice_le (n : ℕ) : n ≤ twice n
+```
+
+## Term
+
+```lean
+by
+  rw [twice]
+  exact n
+```
+
+## lean
+
+proposition
+```lean
+theorem twice_le (n : ℕ) : n ≤ twice n
+```
+
+## lean
+
+proposition
+```lean
+theorem twice_le (n : ℕ) : n ≤ twice n
+```
+
+## lean
+
+proposition
+```lean
+theorem twice_le (n : ℕ) : n ≤ twice n
+```
+
+## lean
+
+proposition
+```lean
+theorem twice_le (n : ℕ) : n ≤ twice n
+```
+
+## lean
+
+proposition
+```lean
+theorem twice_le (n : ℕ) : n ≤ twice n
+```
+
+## lean
+
+proposition
+```lean
+theorem twice_le (n : ℕ) : n ≤ twice n

@@ -1,0 +1,1 @@
+def isPalindrome (l : List ℕ) : Bool

@@ -1,0 +1,2 @@
+if h : n < 10 then n else n % 10 + sumDigits (n / 10)
+```

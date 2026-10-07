@@ -1,0 +1,34 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+The n-th Fibonacci number, with fib 0 = 0 and fib 1 = 1.
+
+## Type
+
+type
+```agda
+fib : ℕ → ℕ
+```
+
+## Term
+
+```agda
+fib 0 = 0
+fib 1 = 1
+fib (suc (suc n)) = fib n + fib (suc n)
+```
+
+## agda
+
+-- The fibonacci number is the sum of the fibonacci numbers
+-- of the form n = 0 + 1 + 1 + ... + n = 0
+fibonacci : ℕ → ℕ
+fibonacci 0 = 0
+fibonacci 1 = 1
+fibonacci (suc (suc n)) = fibonacci n + fibonacci (suc n)
+```
+
+## agda
+
+-- The fibonacci number is the sum of the fibonacci numbers
+-- of the form n = 0 + 1 + 1 + ... + n

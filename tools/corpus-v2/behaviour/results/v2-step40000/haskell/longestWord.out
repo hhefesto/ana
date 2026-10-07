@@ -1,0 +1,46 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+The longest word of a string of words separated by spaces; on a tie, the first such word.
+
+## Type
+
+type
+```haskell
+longestWord :: String -> String
+```
+
+## Term
+
+```haskell
+longestWord = longestWord' 0
+```
+
+## ghc
+
+```haskell
+longestWord' :: Int -> String -> String
+```
+
+## ghc
+
+```haskell
+longestWord' n s = if n > 0 then s else longestWord' (n - 1) (tail s)
+```
+
+## ghc
+
+```haskell
+longestWord' n s = if n > 0 then s else longestWord' (n - 1) (tail s)
+```
+
+## ghc
+
+```haskell
+longestWord' n s = if n > 0 then s else longestWord' (n - 1) (tail s)
+```
+
+## ghc
+
+```haskell
+longestWord' n s = if n > 0 then s

@@ -1,0 +1,46 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+b raised to the power e, by repeated multiplication.
+
+## Type
+
+type
+```lean
+def power (b e : ℕ) : ℕ
+```
+
+## Term
+
+```lean
+b * e
+```
+
+## lean
+
+proposition
+```lean
+theorem power_b_e (b e : ℕ) : power b e = b * e := by
+  induction e with
+  | zero => simp
+  | succ e ih => simp [pow_succ, ih]
+```
+
+## lean
+
+proposition
+```lean
+theorem power_b_e_e (b e : ℕ) : power b e = b * e := by
+  induction e with
+  | zero => simp
+  | succ e ih => simp [pow_succ, ih]
+```
+
+## lean
+
+proposition
+```lean
+theorem power_b_e_e (b e : ℕ) : power b e = b * e := by
+  induction e with
+  | zero => simp
+  | succ

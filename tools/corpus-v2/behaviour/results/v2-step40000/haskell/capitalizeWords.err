@@ -1,0 +1,4 @@
+ana: /home/hhefesto/src/formalTransformer/run/v2/run2/out/v2-step40000.checkpoint
+generate: temperature=0 top_k= top_p=0.95 seed=0
+generate: loaded in 3134 ms; prompt_tokens=87
+generate: 87 prompt tokens and 160 tokens in 11327 ms

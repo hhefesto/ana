@@ -1,0 +1,3 @@
+twice-sum zero = refl
+twice-sum (suc n) = cong suc (trans (cong suc (twice-sum n)) (sym (+-suc n n)))
+```

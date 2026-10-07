@@ -1,0 +1,1 @@
+length-append : ∀ {A : Set} (xs ys : List A) → length (xs ++ ys) ≡ length xs + length ys

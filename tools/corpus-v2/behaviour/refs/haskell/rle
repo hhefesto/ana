@@ -1,0 +1,2 @@
+rle = map (\g -> (head g, length g)) . group
+```

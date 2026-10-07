@@ -1,0 +1,3 @@
+zipThree f (a:as) (b:bs) (c:cs) = f a b c : zipThree f as bs cs
+zipThree _ _ _ _ = []
+```

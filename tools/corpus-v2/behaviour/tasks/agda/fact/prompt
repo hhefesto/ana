@@ -1,0 +1,14 @@
+## User
+
+The factorial of a natural number.
+
+## Type
+
+type
+```agda
+fact : ℕ → ℕ
+```
+
+## Term
+
+```agda

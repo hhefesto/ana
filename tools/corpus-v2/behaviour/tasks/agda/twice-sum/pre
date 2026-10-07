@@ -1,0 +1,5 @@
+open import Data.Nat.Properties using (+-suc)
+
+twice : ℕ → ℕ
+twice zero = zero
+twice (suc n) = suc (suc (twice n))

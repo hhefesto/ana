@@ -1,0 +1,4 @@
+match e with
+  | 0 => 1
+  | k + 1 => b * power b k
+```

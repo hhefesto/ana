@@ -1,0 +1,3 @@
+treeSum Leaf = 0
+treeSum (Node l x r) = treeSum l + x + treeSum r
+```

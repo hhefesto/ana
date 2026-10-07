@@ -1,0 +1,97 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+Twice a natural number.
+
+## Type
+
+type
+```agda
+double : ℕ → ℕ
+```
+
+## Term
+
+```agda
+double zero = zero
+double (suc n) = suc (suc (double n))
+```
+
+## agda
+
+```agda
+
+
+```
+
+## agda
+
+
+```
+
+## agda
+
+
+```
+
+## agda
+
+
+```
+
+## agda
+
+
+```
+
+## agda
+
+
+```
+
+## agda
+
+
+```
+
+## agda
+
+
+```
+
+## agda
+
+
+```
+
+## agda
+
+
+```
+
+## agda
+
+
+```
+
+## agda
+
+
+```
+
+## agda
+
+
+```
+
+## agda
+
+
+```
+
+## agda
+
+
+```
+
+## ag

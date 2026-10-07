@@ -1,0 +1,7 @@
+#guard isPrime 2 = true
+#guard isPrime 13 = true
+#guard isPrime 97 = true
+#guard isPrime 0 = false
+#guard isPrime 1 = false
+#guard isPrime 15 = false
+#guard isPrime 49 = false

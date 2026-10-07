@@ -1,0 +1,14 @@
+## User
+
+Merge two sorted lists into one sorted list.
+
+## Type
+
+type
+```haskell
+merge :: Ord a => [a] -> [a] -> [a]
+```
+
+## Term
+
+```haskell

@@ -1,0 +1,1 @@
+twice-sum : ∀ (n : ℕ) → twice n ≡ n + n

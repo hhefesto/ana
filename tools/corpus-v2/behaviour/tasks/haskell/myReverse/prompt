@@ -1,0 +1,14 @@
+## User
+
+Reverse a list.
+
+## Type
+
+type
+```haskell
+myReverse :: [a] -> [a]
+```
+
+## Term
+
+```haskell

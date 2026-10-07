@@ -1,0 +1,14 @@
+## User
+
+The sum of the decimal digits of a natural number.
+
+## Type
+
+type
+```lean
+def sumDigits (n : ℕ) : ℕ
+```
+
+## Term
+
+```lean

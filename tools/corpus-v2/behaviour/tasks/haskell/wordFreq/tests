@@ -1,0 +1,1 @@
+[wordFreq "a b a" == M.fromList [("a",2),("b",1)], wordFreq "" == M.empty, wordFreq "x  x x" == M.fromList [("x",3)]]

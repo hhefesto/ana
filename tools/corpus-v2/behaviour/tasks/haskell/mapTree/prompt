@@ -1,0 +1,20 @@
+## User
+
+Apply a function to every value in a tree, keeping its shape.
+
+## Context
+
+```haskell
+data Tree a = Leaf | Node (Tree a) a (Tree a)
+```
+
+## Type
+
+type
+```haskell
+mapTree :: (a -> b) -> Tree a -> Tree b
+```
+
+## Term
+
+```haskell

@@ -1,0 +1,14 @@
+## User
+
+Split a list into chunks of the given size; the last chunk may be shorter.
+
+## Type
+
+type
+```haskell
+chunksOf :: Int -> [a] -> [[a]]
+```
+
+## Term
+
+```haskell

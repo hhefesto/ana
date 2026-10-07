@@ -1,0 +1,44 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+Whether a natural number is even.
+
+## Type
+
+type
+```agda
+isEven : ℕ → Bool
+```
+
+## Term
+
+```agda
+isEven zero = true
+isEven (suc zero) = false
+isEven (suc (suc n)) = isEven n
+```
+
+## agda
+
+```agda
+isEven-even : (n : ℕ) → isEven n ≡ true → isEven (suc n) ≡ false
+```
+
+## agda
+
+```agda
+isEven-even zero p = refl
+isEven-even (suc zero) p = refl
+isEven-even (suc (suc n)) p = isEven-even n p
+```
+
+## agda
+
+```agda
+isEven-odd : (n : ℕ) → isEven n ≡ true → isEven (suc n) ≡ false
+```
+
+## agda
+
+```agda
+isEven-odd zero p = refl

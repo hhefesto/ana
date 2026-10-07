@@ -1,0 +1,52 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+Prove `not-not`.
+
+## Type
+
+proposition
+```agda
+not-not : ∀ (b : Bool) → not (not b) ≡ b
+```
+
+## Term
+
+```agda
+not-not true = refl
+not-not false = refl
+```
+
+## agda
+
+```agda
+not-not' : ∀ (b : Bool) → not (not b) ≡ b
+```
+
+## agda
+
+```agda
+not-not' true = refl
+not-not' false = refl
+```
+
+## agda
+
+```agda
+not-not'' : ∀ (b : Bool) → not (not b) ≡ b
+```
+
+## agda
+
+```agda
+not-not'' true = refl
+not-not'' false = refl
+```
+
+## agda
+
+```agda
+not-not''' : ∀ (b : Bool) → not (not b) ≡ b
+```
+
+## ag

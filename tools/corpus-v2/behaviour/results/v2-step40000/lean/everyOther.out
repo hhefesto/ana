@@ -1,0 +1,36 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+The elements at even positions (0, 2, 4, ...) of a list.
+
+## Type
+
+type
+```lean
+def everyOther (l : List ℕ) : List ℕ
+```
+
+## Term
+
+```lean
+l.map (· + 1)
+```
+
+## lean
+theorem everyOther_length (l : List ℕ) : l.every.length = l.length := by
+  simp only [every, List.length_map, List.length_range, List.length_ofFn]
+```
+
+## lean
+theorem everyOther_even (l : List ℕ) : l.every.length = l.length := by
+  simp only [every, List.length_map, List.length_range, List.length_ofFn]
+```
+
+## lean
+theorem everyOther_odd (l : List ℕ) : l.every.length = l.length := by
+  simp only [every, List.length_map, List.length_range, List.length_ofFn]
+```
+
+## lean
+theorem everyOther_odd (l : List ℕ) : l.every.length = l.length := by
+  simp

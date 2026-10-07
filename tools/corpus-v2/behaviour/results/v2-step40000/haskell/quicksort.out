@@ -1,0 +1,43 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+Sort a list with quicksort.
+
+## Type
+
+type
+```haskell
+quicksort :: Ord a => [a] -> [a]
+```
+
+## Term
+
+```haskell
+quicksort [] = []
+quicksort (x:xs) = quicksort smaller ++ [x] ++ quicksort larger
+  where smaller = filter (<= x) xs
+        larger = filter (>= x) xs
+```
+
+## ghc
+
+```haskell
+quicksort [] = []
+quicksort (x:xs) = quicksort smaller ++ [x] ++ quicksort larger
+  where smaller = filter (<= x) xs
+        larger = filter (>= x) xs
+```
+
+## ghc
+
+```haskell
+quicksort [] = []
+quicksort (x:xs) = quicksort smaller ++ [x] ++ quicksort larger
+  where smaller = filter (<= x) xs
+        larger = filter (>= x) xs
+```
+
+## ghc
+
+```haskell
+quicksort []

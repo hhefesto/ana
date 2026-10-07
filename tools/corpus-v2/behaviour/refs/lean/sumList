@@ -1,0 +1,4 @@
+match l with
+  | [] => 0
+  | x :: xs => x + sumList xs
+```

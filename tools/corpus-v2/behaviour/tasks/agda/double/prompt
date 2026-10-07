@@ -1,0 +1,14 @@
+## User
+
+Twice a natural number.
+
+## Type
+
+type
+```agda
+double : ℕ → ℕ
+```
+
+## Term
+
+```agda

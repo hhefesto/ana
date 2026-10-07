@@ -1,0 +1,2 @@
+caesar n = map (\c -> if isLower c then chr ((ord c - ord 'a' + n) `mod` 26 + ord 'a') else c)
+```

@@ -1,0 +1,78 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+The factorial of a natural number.
+
+## Type
+
+type
+```lean
+def fact (n : ℕ) : ℕ
+```
+
+## Term
+
+```lean
+n * fact n
+```
+
+## lean
+
+proposition
+```lean
+theorem fact_zero : fact 0 = 0
+```
+
+## lean
+
+proposition
+```lean
+theorem fact_succ (n : ℕ) : fact (n + 1) = fact n + 1
+```
+
+## lean
+
+proposition
+```lean
+theorem fact_succ_zero : fact 0 = 0
+```
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+##

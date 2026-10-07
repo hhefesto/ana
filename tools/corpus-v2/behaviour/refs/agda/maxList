@@ -1,0 +1,3 @@
+maxList [] = 0
+maxList (x ∷ xs) = x ⊔ maxList xs
+```

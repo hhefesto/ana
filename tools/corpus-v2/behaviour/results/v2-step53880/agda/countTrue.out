@@ -1,0 +1,48 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+The number of true values in a list of booleans.
+
+## Type
+
+type
+```agda
+countTrue : List Bool → ℕ
+```
+
+## Term
+
+```agda
+countTrue [] = 0
+countTrue (b ∷ bs) = if b then 1 + countTrue bs else countTrue bs
+```
+
+## agda
+
+```agda
+countTrue' : List Bool → ℕ
+```
+
+## agda
+
+```agda
+countTrue' [] = 0
+countTrue' (b ∷ bs) = if b then 1 + countTrue' bs else countTrue' bs
+```
+
+## agda
+
+```agda
+countTrue'' : List Bool → ℕ
+```
+
+## agda
+
+```agda
+countTrue'' [] = 0
+countTrue'' (b ∷ bs) = if b then 1 + countTrue'' bs else countTrue'' bs
+```
+
+## agda
+
+```agda

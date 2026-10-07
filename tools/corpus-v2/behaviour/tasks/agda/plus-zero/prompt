@@ -1,0 +1,14 @@
+## User
+
+Prove `plus-zero`.
+
+## Type
+
+proposition
+```agda
+plus-zero : ∀ (n : ℕ) → n + 0 ≡ n
+```
+
+## Term
+
+```agda

@@ -1,0 +1,3 @@
+plus-suc zero n = refl
+plus-suc (suc m) n = cong suc (plus-suc m n)
+```

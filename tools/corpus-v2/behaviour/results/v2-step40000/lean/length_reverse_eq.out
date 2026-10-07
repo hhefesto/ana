@@ -1,0 +1,54 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+Prove `length_reverse_eq`.
+
+## Type
+
+proposition
+```lean
+theorem length_reverse_eq (l : List ℕ) : l.reverse.length = l.length
+```
+
+## Term
+
+```lean
+by
+  induction l with
+  | nil => simp
+  | cons x xs ih => simp [ih]
+```
+
+## lean
+
+proposition
+```lean
+theorem length_reverse_eq (l : List ℕ) : l.reverse.length = l.length
+```
+
+## lean
+
+proposition
+```lean
+theorem length_reverse_eq (l : List ℕ) : l.reverse.length = l.length
+```
+
+## lean
+
+proposition
+```lean
+theorem length_reverse_eq' (l : List ℕ) : l.reverse.length = l.length
+```
+
+## lean
+
+proposition
+```lean
+theorem length_reverse_eq' (l : List ℕ) : l.reverse.length = l.length
+```
+
+## lean
+
+proposition
+```lean
+theorem length_reverse_eq' (l

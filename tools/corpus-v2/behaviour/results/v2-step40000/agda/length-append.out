@@ -1,0 +1,46 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+Prove `length-append`.
+
+## Type
+
+proposition
+```agda
+length-append : ∀ {A : Set} (xs ys : List A) → length (xs ++ ys) ≡ length xs + length ys
+```
+
+## Term
+
+```agda
+length-append [] ys = refl
+length-append (x ∷ xs) ys = cong suc (length-append xs ys)
+```
+
+## agda
+
+```agda
+length-append' : ∀ {A : Set} (xs ys : List A) → length (xs ++ ys) ≡ length xs + length ys
+```
+
+## agda
+
+```agda
+length-append' xs ys = length-append xs ys
+```
+
+## agda
+
+```agda
+length-append'' : ∀ {A : Set} (xs ys : List A) → length (xs ++ ys) ≡ length xs + length ys
+```
+
+## agda
+
+```agda
+length-append'' xs ys = length-append xs ys
+```
+
+## agda
+
+```ag

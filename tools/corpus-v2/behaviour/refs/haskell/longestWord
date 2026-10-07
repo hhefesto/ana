@@ -1,0 +1,2 @@
+longestWord = foldl1 (\a w -> if length w > length a then w else a) . words
+```

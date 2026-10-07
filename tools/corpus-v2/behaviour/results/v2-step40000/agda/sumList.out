@@ -1,0 +1,41 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+The sum of a list of natural numbers.
+
+## Type
+
+type
+```agda
+sumList : List ℕ → ℕ
+```
+
+## Term
+
+```agda
+sumList [] = 0
+sumList (x ∷ xs) = x + sumList xs
+```
+
+## agda
+
+-- We can prove the following equalities
+
++-identityˡ : ∀ (n : ℕ) → 0 + n ≡ n
++-identityˡ n = refl
+
++-identityʳ : ∀ (n : ℕ) → n + 0 ≡ n
++-identityʳ zero = refl
++-identityʳ (suc n) = cong suc (+-identityʳ n)
+```
+
+## agda
+
++-suc : ∀ (m n : ℕ) → m + suc n ≡ suc (m + n)
++-suc zero n = refl
++-suc (suc m) n = cong suc (+-suc m n)
+```
+
+## agda
+
++-comm : ∀ (m n :

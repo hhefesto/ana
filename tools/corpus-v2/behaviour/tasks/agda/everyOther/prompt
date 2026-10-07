@@ -1,0 +1,14 @@
+## User
+
+The elements at even positions (0, 2, 4, ...) of a list.
+
+## Type
+
+type
+```agda
+everyOther : List ℕ → List ℕ
+```
+
+## Term
+
+```agda

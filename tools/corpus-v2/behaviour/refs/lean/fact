@@ -1,0 +1,4 @@
+match n with
+  | 0 => 1
+  | k + 1 => (k + 1) * fact k
+```

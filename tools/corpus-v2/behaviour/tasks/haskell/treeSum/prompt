@@ -1,0 +1,20 @@
+## User
+
+The sum of all the values in a tree.
+
+## Context
+
+```haskell
+data Tree a = Leaf | Node (Tree a) a (Tree a)
+```
+
+## Type
+
+type
+```haskell
+treeSum :: Num a => Tree a -> a
+```
+
+## Term
+
+```haskell

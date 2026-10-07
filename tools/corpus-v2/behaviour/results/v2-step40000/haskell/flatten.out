@@ -1,0 +1,87 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+Concatenate a list of lists into one list.
+
+## Type
+
+type
+```haskell
+flatten :: [[a]] -> [a]
+```
+
+## Term
+
+```haskell
+flatten = foldr (++) []
+```
+
+## ghc
+
+```haskell
+flatten = foldr (++) []
+```
+
+## ghc
+
+```haskell
+flatten = foldr (++) []
+```
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc

@@ -1,0 +1,5 @@
+match n with
+  | 0 => 0
+  | 1 => 1
+  | k + 2 => fib k + fib (k + 1)
+```

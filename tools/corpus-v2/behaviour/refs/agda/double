@@ -1,0 +1,3 @@
+double zero = zero
+double (suc n) = suc (suc (double n))
+```

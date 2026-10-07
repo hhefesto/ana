@@ -1,0 +1,3 @@
+countOcc x [] = 0
+countOcc x (y ∷ ys) = if x ≡ᵇ y then suc (countOcc x ys) else countOcc x ys
+```

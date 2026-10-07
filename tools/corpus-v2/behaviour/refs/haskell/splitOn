@@ -1,0 +1,4 @@
+splitOn c s = case break (== c) s of
+  (a, []) -> [a]
+  (a, _:rest) -> a : splitOn c rest
+```

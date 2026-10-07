@@ -1,0 +1,1 @@
+control haskell: 30/30 pass;  30 pass 

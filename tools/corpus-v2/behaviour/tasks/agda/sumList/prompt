@@ -1,0 +1,14 @@
+## User
+
+The sum of a list of natural numbers.
+
+## Type
+
+type
+```agda
+sumList : List ℕ → ℕ
+```
+
+## Term
+
+```agda

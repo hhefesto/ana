@@ -1,0 +1,56 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+Prove `two_mul_self`.
+
+## Type
+
+proposition
+```lean
+theorem two_mul_self (n : ℕ) : 2 * n = n + n
+```
+
+## Term
+
+```lean
+by
+  induction n with
+  | zero => simp
+  | succ n ih =>
+    rw [ih]
+    simp
+```
+
+## lean
+
+proposition
+```lean
+theorem two_mul_self (n : ℕ) : 2 * n = n + n
+```
+
+## lean
+
+proposition
+```lean
+theorem two_mul_self (n : ℕ) : 2 * n = n + n
+```
+
+## lean
+
+proposition
+```lean
+theorem two_mul_self (n : ℕ) : 2 * n = n + n
+```
+
+## lean
+
+proposition
+```lean
+theorem two_mul_self (n : ℕ) : 2 * n = n + n
+```
+
+## lean
+
+proposition
+```lean
+theorem two_mul_self (n : ℕ)

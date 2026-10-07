@@ -1,0 +1,111 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+Reverse a list.
+
+## Type
+
+type
+```lean
+def myReverse {α : Type} (l : List α) : List α
+```
+
+## Term
+
+```lean
+l.reverse
+```
+
+## lean
+
+## lean
+
+
+## lean
+
+
+## lean
+
+
+## lean
+
+
+## lean
+
+
+## lean
+
+
+## lean
+
+
+## lean
+
+
+## lean
+
+
+## lean
+
+
+## lean
+
+
+## lean
+
+
+## lean
+
+
+## lean
+
+
+## lean
+
+
+## lean
+
+
+## lean
+
+
+## lean
+
+
+## lean
+
+
+## lean
+
+
+## lean
+
+
+## lean
+
+
+## lean
+
+
+## lean
+
+
+## lean
+
+
+## lean
+
+
+## lean
+
+
+## lean
+
+
+## lean
+
+
+## lean
+
+
+

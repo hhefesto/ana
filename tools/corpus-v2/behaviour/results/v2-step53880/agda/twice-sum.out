@@ -1,0 +1,52 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+Prove `twice-sum`.
+
+## Context
+
+```agda
+twice : ℕ → ℕ
++-suc : ∀ m n → m + suc n ≡ suc (m + n)
+```
+
+## Type
+
+proposition
+```agda
+twice-sum : ∀ (n : ℕ) → twice n ≡ n + n
+```
+
+## Term
+
+```agda
+twice-sum zero = refl
+twice-sum (suc n) = twice-sum n ∙ +-suc n n
+```
+
+## agda
+
+```agda
+twice-sum zero = refl
+twice-sum (suc n) = twice-sum n ∙ +-suc n n
+```
+
+## agda
+
+```agda
+twice-sum zero = refl
+twice-sum (suc n) = twice-sum n ∙ +-suc n n
+```
+
+## agda
+
+```agda
+twice-sum zero = refl
+twice-sum (suc n) = twice-sum n ∙ +-suc n n
+```
+
+## agda
+
+```agda
+twice-sum zero = refl
+

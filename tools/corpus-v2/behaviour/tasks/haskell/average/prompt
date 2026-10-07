@@ -1,0 +1,14 @@
+## User
+
+The arithmetic mean of a non-empty list of numbers.
+
+## Type
+
+type
+```haskell
+average :: [Double] -> Double
+```
+
+## Term
+
+```haskell

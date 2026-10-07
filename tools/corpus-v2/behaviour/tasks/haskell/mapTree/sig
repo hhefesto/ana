@@ -1,0 +1,1 @@
+mapTree :: (a -> b) -> Tree a -> Tree b

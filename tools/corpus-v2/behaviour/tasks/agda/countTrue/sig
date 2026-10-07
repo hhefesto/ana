@@ -1,0 +1,1 @@
+countTrue : List Bool → ℕ

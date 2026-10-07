@@ -1,0 +1,14 @@
+## User
+
+Prove `length-append`.
+
+## Type
+
+proposition
+```agda
+length-append : ∀ {A : Set} (xs ys : List A) → length (xs ++ ys) ≡ length xs + length ys
+```
+
+## Term
+
+```agda

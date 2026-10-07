@@ -1,0 +1,4 @@
+everyOther [] = []
+everyOther (x ∷ []) = x ∷ []
+everyOther (x ∷ y ∷ rest) = x ∷ everyOther rest
+```

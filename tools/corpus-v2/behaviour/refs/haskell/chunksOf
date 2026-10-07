@@ -1,0 +1,3 @@
+chunksOf _ [] = []
+chunksOf n xs = take n xs : chunksOf n (drop n xs)
+```

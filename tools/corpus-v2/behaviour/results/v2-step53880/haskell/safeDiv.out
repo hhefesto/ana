@@ -1,0 +1,81 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+Divide two integers, returning Nothing when the divisor is zero.
+
+## Type
+
+type
+```haskell
+safeDiv :: Int -> Int -> Maybe Int
+```
+
+## Term
+
+```haskell
+safeDiv x y = if x == 0 then Nothing else Just (x `div` y)
+```
+
+## ghc
+
+```haskell
+safeDiv x y = if x == 0 then Nothing else Just (x `div` y)
+```
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+

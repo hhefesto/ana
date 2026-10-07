@@ -1,0 +1,14 @@
+## User
+
+The greatest common divisor of two natural numbers, by Euclid's algorithm.
+
+## Type
+
+type
+```lean
+def myGcd (a b : ℕ) : ℕ
+```
+
+## Term
+
+```lean

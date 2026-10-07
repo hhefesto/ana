@@ -1,0 +1,1 @@
+[indexOf 3 [1,2,3,3::Int] == Just 2, indexOf 9 [1::Int] == Nothing, indexOf (1::Int) [1] == Just 0]

@@ -1,0 +1,71 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+Whether a natural number is prime.
+
+## Type
+
+type
+```lean
+def isPrime (n : ℕ) : Bool
+```
+
+## Term
+
+```lean
+n = 2
+```
+
+## lean
+
+proposition
+```lean
+theorem isPrime_iff (n : ℕ) : isPrime n ↔ n = 2 ∨ n = 4 := by
+  constructor
+  · intro h
+    rcases h with rfl | rfl
+    · exact Or.inl rfl
+    · exact Or.inr rfl
+  · rintro (rfl | rfl)
+    · exact Or.inl rfl
+    · exact Or.inr rfl
+```
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+

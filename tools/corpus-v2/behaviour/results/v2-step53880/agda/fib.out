@@ -1,0 +1,36 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+The n-th Fibonacci number, with fib 0 = 0 and fib 1 = 1.
+
+## Type
+
+type
+```agda
+fib : ℕ → ℕ
+```
+
+## Term
+
+```agda
+fib 0 = 0
+fib 1 = 1
+fib n = fib (n - 1) + fib (n - 2)
+```
+
+## agda
+
+```agda
+fib-lemma : (n : ℕ) → fib n ≡ fib (n - 1) + fib (n - 2)
+fib-lemma 0 = refl
+fib-lemma 1 = refl
+fib-lemma n = fib-lemma (n - 1) + fib-lemma (n - 2)
+```
+
+## agda
+
+```agda
+fib-lemma' : (n : ℕ) → fib n ≡ fib (n - 1) + fib (n - 2)
+fib-lemma' 0 = refl
+fib-lemma' 1 = refl
+fib-lemma' n = fib-lemma'

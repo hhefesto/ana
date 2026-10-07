@@ -1,0 +1,1 @@
+theorem length_reverse_eq (l : List ℕ) : l.reverse.length = l.length

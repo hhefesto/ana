@@ -1,0 +1,3 @@
+insertSorted x [] = x ∷ []
+insertSorted x (y ∷ ys) = if x ≤ᵇ y then x ∷ y ∷ ys else y ∷ insertSorted x ys
+```

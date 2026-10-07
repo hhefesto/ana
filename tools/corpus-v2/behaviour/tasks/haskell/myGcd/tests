@@ -1,0 +1,1 @@
+[myGcd 12 18 == 6, myGcd 7 0 == 7, myGcd 0 5 == 5, myGcd 17 5 == 1]

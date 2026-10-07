@@ -1,0 +1,1 @@
+theorem two_mul_self (n : ℕ) : 2 * n = n + n

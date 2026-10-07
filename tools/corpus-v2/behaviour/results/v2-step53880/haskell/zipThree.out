@@ -1,0 +1,90 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+Combine three lists element by element with a function, stopping at the shortest list.
+
+## Type
+
+type
+```haskell
+zipThree :: (a -> b -> c -> d) -> [a] -> [b] -> [c] -> [d]
+```
+
+## Term
+
+```haskell
+zipThree f (a:as) (b:bs) (c:cs) = f a b c : zipThree f as bs cs
+zipThree _ _ _ _ = []
+```
+
+## ghc
+
+## ghc
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc

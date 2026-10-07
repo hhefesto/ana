@@ -1,0 +1,14 @@
+## User
+
+Concatenate a list of lists into one list.
+
+## Type
+
+type
+```haskell
+flatten :: [[a]] -> [a]
+```
+
+## Term
+
+```haskell

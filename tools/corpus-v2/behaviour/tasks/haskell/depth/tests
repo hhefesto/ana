@@ -1,0 +1,1 @@
+[depth (Leaf :: Tree Int) == 0, depth (Node Leaf (1::Int) (Node Leaf 2 Leaf)) == 2, depth (Node Leaf (1::Int) Leaf) == 1]

@@ -1,0 +1,91 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+Whether a natural number is even.
+
+## Type
+
+type
+```agda
+isEven : ℕ → Bool
+```
+
+## Term
+
+```agda
+isEven n = n % 2 == 0
+```
+
+## agda
+
+```
+
+## agda
+
+```
+
+## agda
+
+```
+
+## agda
+
+```
+
+## agda
+
+```
+
+## agda
+
+```
+
+## agda
+
+```
+
+## agda
+
+```
+
+## agda
+
+```
+
+## agda
+
+```
+
+## agda
+
+```
+
+## agda
+
+```
+
+## agda
+
+```
+
+## agda
+
+```
+
+## agda
+
+```
+
+## agda
+
+```
+
+## agda
+
+```
+
+## agda
+
+```
+
+## agda

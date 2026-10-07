@@ -1,0 +1,2 @@
+l.foldl (fun acc x => if acc.contains x then acc else acc ++ [x]) []
+```

@@ -1,0 +1,14 @@
+## User
+
+A list holding n copies of an element.
+
+## Type
+
+type
+```agda
+copies : {A : Set} → ℕ → A → List A
+```
+
+## Term
+
+```agda

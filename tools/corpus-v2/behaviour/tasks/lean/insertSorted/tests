@@ -1,0 +1,4 @@
+#guard insertSorted 3 [1, 2, 4, 5] = [1, 2, 3, 4, 5]
+#guard insertSorted 0 [] = [0]
+#guard insertSorted 9 [1, 2] = [1, 2, 9]
+#guard insertSorted 1 [2, 3] = [1, 2, 3]

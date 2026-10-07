@@ -1,0 +1,20 @@
+## User
+
+The depth of a tree: 0 for a leaf, and one more than the deeper subtree for a node.
+
+## Context
+
+```haskell
+data Tree a = Leaf | Node (Tree a) a (Tree a)
+```
+
+## Type
+
+type
+```haskell
+depth :: Tree a -> Int
+```
+
+## Term
+
+```haskell

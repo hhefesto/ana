@@ -1,0 +1,36 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+Insert a number into a sorted list of natural numbers, keeping it sorted.
+
+## Type
+
+type
+```lean
+def insertSorted (x : ℕ) (l : List ℕ) : List ℕ
+```
+
+## Term
+
+```lean
+x :: l
+```
+
+## lean
+
+## lean
+
+
+module
+
+public import Mathlib.Analysis.InnerProductSpace.PiL2
+public import Mathlib.Analysis.InnerProductSpace.PiL2
+public import Mathlib.Analysis.InnerProductSpace.PiL2
+public import Mathlib.Analysis.InnerProductSpace.PiL2
+public import Mathlib.Analysis.InnerProductSpace.PiL2
+public import Mathlib.Analysis.InnerProductSpace.PiL2
+public import Mathlib.Analysis.InnerProductSpace.PiL2
+public import Mathlib.Analysis.InnerProductSpace.PiL2
+public import Mathlib.Analysis.InnerProductSpace.PiL2
+public import Mathlib.Analysis.InnerProductSpace.PiL2
+public

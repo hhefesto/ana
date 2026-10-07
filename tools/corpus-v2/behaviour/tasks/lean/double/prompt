@@ -1,0 +1,14 @@
+## User
+
+Twice a natural number.
+
+## Type
+
+type
+```lean
+def double (n : ℕ) : ℕ
+```
+
+## Term
+
+```lean

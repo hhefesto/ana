@@ -1,0 +1,45 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+The depth of a tree: 0 for a leaf, and one more than the deeper subtree for a node.
+
+## Context
+
+```haskell
+data Tree a = Leaf | Node (Tree a) a (Tree a)
+```
+
+## Type
+
+type
+```haskell
+depth :: Tree a -> Int
+```
+
+## Term
+
+```haskell
+depth (Leaf) = 0
+depth (Node l _ r) = 1 + max (depth l) (depth r)
+```
+
+## ghc
+
+```haskell
+
+
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE StrictData #-}
+{-# LANGUAGE TupleSections #-}
+
+-- | http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-iotanalytics-multipartyconfiguration-listener.html
+
+module Stratosphere.ResourceProperties.IoTAnalyticsMultipartyConfigurationListener where
+
+import Stratosphere.ResourceImports
+
+
+-- | Full data type definition for IoTAnalyticsMultipartyConfiguration. See
+-- 'ioTAnalyticsMultipartyConfig' for a more convenient constructor.
+data I

@@ -1,0 +1,14 @@
+## User
+
+The factorial of a non-negative integer.
+
+## Type
+
+type
+```haskell
+factorial :: Integer -> Integer
+```
+
+## Term
+
+```haskell

@@ -1,0 +1,51 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+Remove duplicate elements from a list, keeping the first occurrence of each.
+
+## Type
+
+type
+```haskell
+dedup :: Eq a => [a] -> [a]
+```
+
+## Term
+
+```haskell
+dedup = go []
+  where
+    go :: Eq a => [a] -> [a] -> [a]
+    go acc [] = acc
+    go acc (x:xs) = go (x:acc) xs
+```
+
+## ghc
+
+```haskell
+dedup2 :: Eq a => [a] -> [a]
+```
+
+## ghc
+
+```haskell
+dedup2 = go []
+  where
+    go :: Eq a => [a] -> [a] -> [a]
+    go acc [] = acc
+    go acc (x:xs) = go (x:acc) xs
+```
+
+## ghc
+
+```haskell
+dedup3 :: Eq a => [a] -> [a]
+```
+
+## ghc
+
+```haskell
+dedup3 = go []
+  where
+    go :: Eq a => [a] -> [a] -> [a]
+    go acc []

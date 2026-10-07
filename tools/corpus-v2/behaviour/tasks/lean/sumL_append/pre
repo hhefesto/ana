@@ -1,0 +1,3 @@
+def sumL : List ℕ → ℕ
+  | [] => 0
+  | x :: xs => x + sumL xs

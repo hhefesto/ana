@@ -1,0 +1,1 @@
+def everyOther (l : List ℕ) : List ℕ

@@ -1,0 +1,1 @@
+[toL (mapTree (*2) (Node (Node Leaf 1 Leaf) (2::Int) Leaf)) == [2,4], toL (mapTree show (Leaf :: Tree Int)) == []] where { toL Leaf = []; toL (Node l x r) = toL l ++ [x] ++ toL r }

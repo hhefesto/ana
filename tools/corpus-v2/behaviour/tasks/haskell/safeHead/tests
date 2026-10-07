@@ -1,0 +1,1 @@
+[safeHead [1,2::Int] == Just 1, safeHead ([] :: [Int]) == Nothing]

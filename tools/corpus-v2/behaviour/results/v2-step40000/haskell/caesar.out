@@ -1,0 +1,36 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+Shift every lowercase letter forward by n places in the alphabet, wrapping from z to a; leave every other character unchanged.
+
+## Context
+
+```haskell
+ord :: Char -> Int
+chr :: Int -> Char
+isLower :: Char -> Bool
+```
+
+## Type
+
+type
+```haskell
+caesar :: Int -> String -> String
+```
+
+## Term
+
+```haskell
+caesar n = map (chr . ord) . filter isLower . map chr . filter isLower . map chr . filter isLower . map chr . filter isLower . map chr . filter isLower . map chr . filter isLower . map chr . filter isLower . map chr . filter isLower . map chr . filter isLower . map chr . filter isLower . map chr . filter isLower
+```
+
+## ghc
+
+```haskell
+caesar' :: Int -> String -> String
+```
+
+## ghc
+
+```haskell
+caesar' n = caesar n . map (chr . ord) . filter isLower . map chr . filter isLower . map

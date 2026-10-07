@@ -1,0 +1,14 @@
+## User
+
+The number of even elements of a list of natural numbers.
+
+## Type
+
+type
+```lean
+def countEven (l : List ℕ) : ℕ
+```
+
+## Term
+
+```lean

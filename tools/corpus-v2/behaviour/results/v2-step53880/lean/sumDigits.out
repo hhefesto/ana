@@ -1,0 +1,64 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+The sum of the decimal digits of a natural number.
+
+## Type
+
+type
+```lean
+def sumDigits (n : ℕ) : ℕ
+```
+
+## Term
+
+```lean
+n % 10
+```
+
+## lean
+
+proposition
+```lean
+theorem sumDigits_zero : sumDigits 0 = 0
+```
+
+## lean
+
+proposition
+```lean
+theorem sumDigits_zero : sumDigits 0 = 0
+```
+
+## lean
+
+proposition
+```lean
+theorem sumDigits_zero : sumDigits 0 = 0
+```
+
+## lean
+
+proposition
+```lean
+theorem sumDigits_zero : sumDigits 0 = 0
+```
+
+## lean
+
+proposition
+```lean
+theorem sumDigits_zero : sumDigits 0 = 0
+```
+
+## lean
+
+proposition
+```lean
+theorem sumDigits_zero : sumDigits 0 = 0
+```
+
+## lean
+
+proposition
+```lean

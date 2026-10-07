@@ -1,0 +1,14 @@
+## User
+
+power b e is b raised to the power e, by repeated multiplication.
+
+## Type
+
+type
+```agda
+power : ℕ → ℕ → ℕ
+```
+
+## Term
+
+```agda

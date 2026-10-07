@@ -1,0 +1,41 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+The factorial of a natural number.
+
+## Type
+
+type
+```lean
+def fact (n : ℕ) : ℕ
+```
+
+## Term
+
+```lean
+n * fact n
+```
+
+## lean
+
+## lean
+
+
+```lean
+by
+  induction n with
+  | zero => simp
+  | succ n ih =>
+    simp only [add_succ, fact_succ, ih]
+    exact Nat.mul_le_mul_right _ (Nat.le_succ n)
+```
+
+## lean
+
+
+import Mathlib
+import Aesop
+set_option maxHeartbeats 0
+open BigOperators Real Nat Topology Rat
+
+theorem lean_workbook_plus_14566 (a b c : ℝ) (ha : 0 < a) (hb : 0 < b) (hc : 0 < c) (habc : a + b + c = 1) : (a * b / (a + b) + b * c / (b + c) + c * a / (c + a)) ^ 2 ≤ 9 /

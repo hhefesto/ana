@@ -1,0 +1,20 @@
+## User
+
+How many times a number occurs in a list.
+
+## Context
+
+```agda
+_≡ᵇ_ : ℕ → ℕ → Bool
+```
+
+## Type
+
+type
+```agda
+countOcc : ℕ → List ℕ → ℕ
+```
+
+## Term
+
+```agda

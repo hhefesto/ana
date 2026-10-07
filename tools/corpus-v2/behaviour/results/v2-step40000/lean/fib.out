@@ -1,0 +1,95 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+The n-th Fibonacci number, with fib 0 = 0 and fib 1 = 1.
+
+## Type
+
+type
+```lean
+def fib (n : ℕ) : ℕ
+```
+
+## Term
+
+```lean
+fib n
+```
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+##

@@ -1,0 +1,1 @@
+headMaybe : {A : Set} → List A → Maybe A

@@ -1,0 +1,14 @@
+## User
+
+Split a string on every occurrence of a separator character.
+
+## Type
+
+type
+```haskell
+splitOn :: Char -> String -> [String]
+```
+
+## Term
+
+```haskell

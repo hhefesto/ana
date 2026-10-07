@@ -1,0 +1,42 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+power b e is b raised to the power e, by repeated multiplication.
+
+## Type
+
+type
+```agda
+power : ℕ → ℕ → ℕ
+```
+
+## Term
+
+```agda
+power zero    e = e
+power (suc n) e = power n (suc e)
+```
+
+## agda
+
+power-add : (n m : ℕ) → power n m ≡ power (m +ℕ n) m
+```
+
+## agda
+
+power-add zero    m = refl
+power-add (suc n) m = ap suc (power-add n m)
+```
+
+## agda
+
+power-add-lemma : (n m : ℕ) → power n m ≡ power (m +ℕ n) m
+```
+
+## agda
+
+power-add-lemma zero    m = refl
+power-add-lemma (suc n) m = ap suc (power-add-lemma n m)
+```
+
+## ag

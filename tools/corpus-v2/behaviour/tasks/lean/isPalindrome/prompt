@@ -1,0 +1,14 @@
+## User
+
+Whether a list of natural numbers reads the same forwards and backwards.
+
+## Type
+
+type
+```lean
+def isPalindrome (l : List ℕ) : Bool
+```
+
+## Term
+
+```lean

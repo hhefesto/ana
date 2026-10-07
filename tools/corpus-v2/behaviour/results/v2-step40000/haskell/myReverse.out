@@ -1,0 +1,53 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+Reverse a list.
+
+## Type
+
+type
+```haskell
+myReverse :: [a] -> [a]
+```
+
+## Term
+
+```haskell
+myReverse [] = []
+myReverse (x:xs) = myReverse xs ++ [x]
+```
+
+## ghc
+
+```haskell
+myReverse = myReverse . reverse
+```
+
+## ghc
+
+```haskell
+
+
+module Main where
+
+import           Control.Monad
+import           Data.List
+import           Data.Maybe
+import           System.Exit
+import           System.IO
+import           System.Process
+import           Text.Read
+
+import           Lib
+
+main :: IO ()
+main = do
+  hSetBuffering stdout NoBuffering
+  hSetBuffering stdin NoBuffering
+  hSetBuffering stdin NoBuffering
+  args <- getArgs
+  case args of
+    [] -> do
+      putStrLn "Usage: ./test"
+      exitSuccess
+    ["--hel

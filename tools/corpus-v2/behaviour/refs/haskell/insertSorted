@@ -1,0 +1,4 @@
+insertSorted x [] = [x]
+insertSorted x (y:ys) | x <= y = x : y : ys
+                      | otherwise = y : insertSorted x ys
+```

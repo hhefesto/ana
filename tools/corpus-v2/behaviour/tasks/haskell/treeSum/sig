@@ -1,0 +1,1 @@
+treeSum :: Num a => Tree a -> a

@@ -1,0 +1,4 @@
+isEven zero = true
+isEven (suc zero) = false
+isEven (suc (suc n)) = isEven n
+```

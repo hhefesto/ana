@@ -1,0 +1,3 @@
+fact zero = 1
+fact (suc n) = suc n * fact n
+```

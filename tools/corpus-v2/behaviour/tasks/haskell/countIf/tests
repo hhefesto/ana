@@ -1,0 +1,1 @@
+[countIf even [1..10::Int] == 5, countIf odd ([] :: [Int]) == 0, countIf (> 2) [5,1,3::Int] == 2]

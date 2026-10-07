@@ -1,0 +1,43 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+Insert a number into a sorted list of natural numbers, keeping it sorted.
+
+## Type
+
+type
+```lean
+def insertSorted (x : ℕ) (l : List ℕ) : List ℕ
+```
+
+## Term
+
+```lean
+x :: l
+```
+
+## lean
+
+## lean
+
+
+```lean
+
+
+end List
+```
+
+
+import Mathlib
+import Aesop
+
+set_option maxHeartbeats 0
+
+open BigOperators Real Nat Topology Rat
+
+theorem thm_24097 :
+  let f := fun x => x ^ 2 + x + 1;
+  let g := fun x => x ^ 2 + x + 1;
+  let h := fun x => x ^ 2 + x + 1;
+  let x := f g;
+  x = 1 ∧ g = 1 ∧ h = 1 ∧ x = 1 ∧ x = 1 ∧ x = 1 ∧ x = 1 ∧ x = 1 ∧ x = 1 ∧ x = 1 ∧ x = 1 ∧ x = 1 ∧ x

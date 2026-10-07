@@ -1,0 +1,14 @@
+## User
+
+Insert a number into a sorted list of natural numbers, keeping it sorted.
+
+## Type
+
+type
+```lean
+def insertSorted (x : ℕ) (l : List ℕ) : List ℕ
+```
+
+## Term
+
+```lean

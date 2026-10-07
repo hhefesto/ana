@@ -1,0 +1,95 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+The sum of a list of natural numbers.
+
+## Type
+
+type
+```lean
+def sumList (l : List ℕ) : ℕ
+```
+
+## Term
+
+```lean
+l.sum
+```
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean

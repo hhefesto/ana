@@ -1,0 +1,55 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+Insert a number into a sorted list of natural numbers, keeping it sorted.
+
+## Context
+
+```agda
+_≤ᵇ_ : ℕ → ℕ → Bool
+```
+
+## Type
+
+type
+```agda
+insertSorted : ℕ → List ℕ → List ℕ
+```
+
+## Term
+
+```agda
+insertSorted n [] = []
+insertSorted n (x ∷ xs) = insert n x ∷ insertSorted n xs
+```
+
+## agda
+
+insert : ℕ → ℕ → List ℕ
+```
+
+## agda
+
+insert n x = insertSorted n (x ∷ [])
+```
+
+## agda
+
+insertSorted : ℕ → List ℕ → List ℕ
+```
+
+## agda
+
+insertSorted n [] = []
+insertSorted n (x ∷ xs) = insert n x ∷ insertSorted n xs
+```
+
+## agda
+
+insertSorted : ℕ → List ℕ → List ℕ
+```
+
+## agda
+
+insertSorted n [] = []
+insertSorted n (x ∷ xs)

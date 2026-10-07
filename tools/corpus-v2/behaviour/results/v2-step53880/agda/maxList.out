@@ -1,0 +1,40 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+The largest element of a list of natural numbers, or 0 for the empty list.
+
+## Type
+
+type
+```agda
+maxList : List ℕ → ℕ
+```
+
+## Term
+
+```agda
+maxList [] = 0
+maxList (x ∷ xs) = max x (maxList xs)
+```
+
+## agda
+
+```agda
+maxList-[] : ∀ xs → maxList [] ≡ 0
+maxList-[] [] = refl
+maxList-[] (x ∷ xs) = maxList-[] xs
+```
+
+## agda
+
+```agda
+maxList-∷ : ∀ xs → maxList (x ∷ xs) ≡ max x (maxList xs)
+maxList-∷ [] = refl
+maxList-∷ (x ∷ xs) = maxList-∷ xs
+```
+
+## agda
+
+```agda
+maxList-[]-∷ : ∀ xs → maxList (x ∷ xs) ≡ max x (maxList xs)
+maxList-[]-∷

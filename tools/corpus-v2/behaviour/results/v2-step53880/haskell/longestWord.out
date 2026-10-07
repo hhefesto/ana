@@ -1,0 +1,57 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+The longest word of a string of words separated by spaces; on a tie, the first such word.
+
+## Type
+
+type
+```haskell
+longestWord :: String -> String
+```
+
+## Term
+
+```haskell
+longestWord = go []
+  where
+    go acc [] = acc
+    go acc (x:xs) = go (x:acc) xs
+```
+
+## ghc
+
+```haskell
+longestWord' :: String -> String
+```
+
+## ghc
+
+```haskell
+longestWord' = go []
+  where
+    go acc [] = acc
+    go acc (x:xs) = go (x:acc) xs
+```
+
+## ghc
+
+```haskell
+longestWord'' :: String -> String
+```
+
+## ghc
+
+```haskell
+longestWord'' = go []
+  where
+    go acc [] = acc
+    go acc (x:xs) = go (x:acc) xs
+```
+
+## ghc
+
+```haskell
+longestWord'' = go []
+  where
+   

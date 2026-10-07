@@ -1,0 +1,4 @@
+#guard fact 0 = 1
+#guard fact 1 = 1
+#guard fact 5 = 120
+#guard fact 10 = 3628800

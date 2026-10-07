@@ -1,0 +1,34 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+The factorial of a natural number.
+
+## Type
+
+type
+```agda
+fact : ℕ → ℕ
+```
+
+## Term
+
+```agda
+fact zero = 1
+fact (suc n) = n * fact n
+```
+
+## agda
+
+-- We can prove that fact is a natural number.
+
+fact-is-not-even : (n : ℕ) → fact n ＝ 2 * n
+fact-is-not-even zero = refl
+fact-is-not-even (suc n) = fact-is-not-even n ∙ ap suc (fact-is-not-even n)
+```
+
+## agda
+
+-- We can prove that fact is a natural number.
+
+fact-is-not-even' : (n : ℕ) → fact n ＝ 2 * n
+fact-is-not-even' n = fact-is-not-even n ∙ fact

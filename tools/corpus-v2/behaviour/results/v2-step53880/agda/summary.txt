@@ -1,0 +1,1 @@
+v2-step53880 agda: 10/21 pass;  6 compile  10 pass  5 wrong 

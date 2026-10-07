@@ -1,0 +1,2 @@
+n ≥ 2 && (List.range n).all (fun d => d < 2 || n % d != 0)
+```

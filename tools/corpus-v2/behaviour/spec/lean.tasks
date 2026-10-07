@@ -1,0 +1,297 @@
+@@# Lean 4 behaviour tasks, checked with Lean v4.34.0-rc2 and the project's Mathlib
+@@# (run/harness/mathlib4): run.sh writes Task.lean as `import Mathlib`, the pre, the Type
+@@# joined to the answer by ` :=` (as bend/Agent/Tools.bend at.file does), then the tests.
+@@# A `type` task's tests are `#guard` lines (evaluated); a `proposition` task has none:
+@@# the kernel checking the proof is the test.  Format: see ../README.txt.
+
+@@ task double type
+@@ user
+Twice a natural number.
+@@ type
+def double (n : ℕ) : ℕ
+@@ tests
+#guard double 0 = 0
+#guard double 3 = 6
+#guard double 21 = 42
+@@ ref
+2 * n
+
+@@ task fact type
+@@ user
+The factorial of a natural number.
+@@ type
+def fact (n : ℕ) : ℕ
+@@ tests
+#guard fact 0 = 1
+#guard fact 1 = 1
+#guard fact 5 = 120
+#guard fact 10 = 3628800
+@@ ref
+match n with
+  | 0 => 1
+  | k + 1 => (k + 1) * fact k
+
+@@ task fib type
+@@ user
+The n-th Fibonacci number, with fib 0 = 0 and fib 1 = 1.
+@@ type
+def fib (n : ℕ) : ℕ
+@@ tests
+#guard fib 0 = 0
+#guard fib 1 = 1
+#guard fib 2 = 1
+#guard fib 10 = 55
+#guard fib 20 = 6765
+@@ ref
+match n with
+  | 0 => 0
+  | 1 => 1
+  | k + 2 => fib k + fib (k + 1)
+
+@@ task sumList type
+@@ user
+The sum of a list of natural numbers.
+@@ type
+def sumList (l : List ℕ) : ℕ
+@@ tests
+#guard sumList [] = 0
+#guard sumList [1, 2, 3] = 6
+#guard sumList [10] = 10
+@@ ref
+match l with
+  | [] => 0
+  | x :: xs => x + sumList xs
+
+@@ task countEven type
+@@ user
+The number of even elements of a list of natural numbers.
+@@ type
+def countEven (l : List ℕ) : ℕ
+@@ tests
+#guard countEven [1, 2, 3, 4, 6] = 3
+#guard countEven [] = 0
+#guard countEven [1, 3, 5] = 0
+#guard countEven [0] = 1
+@@ ref
+(l.filter (fun x => x % 2 == 0)).length
+
+@@ task myReverse type
+@@ user
+Reverse a list.
+@@ type
+def myReverse {α : Type} (l : List α) : List α
+@@ tests
+#guard myReverse [1, 2, 3] = [3, 2, 1]
+#guard myReverse ([] : List ℕ) = []
+#guard myReverse ['a', 'b'] = ['b', 'a']
+@@ ref
+match l with
+  | [] => []
+  | x :: xs => myReverse xs ++ [x]
+
+@@ task maxList type
+@@ user
+The largest element of a list of natural numbers, or 0 for the empty list.
+@@ type
+def maxList (l : List ℕ) : ℕ
+@@ tests
+#guard maxList [3, 1, 4, 1, 5] = 5
+#guard maxList [] = 0
+#guard maxList [7] = 7
+#guard maxList [2, 9, 9, 1] = 9
+@@ ref
+l.foldl max 0
+
+@@ task isPalindrome type
+@@ user
+Whether a list of natural numbers reads the same forwards and backwards.
+@@ type
+def isPalindrome (l : List ℕ) : Bool
+@@ tests
+#guard isPalindrome [1, 2, 1] = true
+#guard isPalindrome [] = true
+#guard isPalindrome [1, 2] = false
+#guard isPalindrome [3, 3] = true
+#guard isPalindrome [1, 2, 3, 1] = false
+@@ ref
+l == l.reverse
+
+@@ task sumDigits type
+@@ user
+The sum of the decimal digits of a natural number.
+@@ type
+def sumDigits (n : ℕ) : ℕ
+@@ tests
+#guard sumDigits 0 = 0
+#guard sumDigits 1234 = 10
+#guard sumDigits 9 = 9
+#guard sumDigits 1001 = 2
+@@ ref
+if h : n < 10 then n else n % 10 + sumDigits (n / 10)
+
+@@ task myGcd type
+@@ user
+The greatest common divisor of two natural numbers, by Euclid's algorithm.
+@@ type
+def myGcd (a b : ℕ) : ℕ
+@@ tests
+#guard myGcd 12 18 = 6
+#guard myGcd 7 0 = 7
+#guard myGcd 0 5 = 5
+#guard myGcd 17 5 = 1
+@@ ref
+if h : b = 0 then a else myGcd b (a % b)
+termination_by b
+decreasing_by exact Nat.mod_lt _ (Nat.pos_of_ne_zero h)
+
+@@ task insertSorted type
+@@ user
+Insert a number into a sorted list of natural numbers, keeping it sorted.
+@@ type
+def insertSorted (x : ℕ) (l : List ℕ) : List ℕ
+@@ tests
+#guard insertSorted 3 [1, 2, 4, 5] = [1, 2, 3, 4, 5]
+#guard insertSorted 0 [] = [0]
+#guard insertSorted 9 [1, 2] = [1, 2, 9]
+#guard insertSorted 1 [2, 3] = [1, 2, 3]
+@@ ref
+match l with
+  | [] => [x]
+  | y :: ys => if x ≤ y then x :: y :: ys else y :: insertSorted x ys
+
+@@ task dedup type
+@@ user
+Remove duplicates from a list, keeping the first occurrence of each element.
+@@ type
+def dedup (l : List ℕ) : List ℕ
+@@ tests
+#guard dedup [1, 2, 1, 3, 2] = [1, 2, 3]
+#guard dedup [] = []
+#guard dedup [5, 5, 5] = [5]
+@@ ref
+l.foldl (fun acc x => if acc.contains x then acc else acc ++ [x]) []
+
+@@ task power type
+@@ user
+b raised to the power e, by repeated multiplication.
+@@ type
+def power (b e : ℕ) : ℕ
+@@ tests
+#guard power 2 10 = 1024
+#guard power 5 0 = 1
+#guard power 0 3 = 0
+#guard power 3 4 = 81
+@@ ref
+match e with
+  | 0 => 1
+  | k + 1 => b * power b k
+
+@@ task isPrime type
+@@ user
+Whether a natural number is prime.
+@@ type
+def isPrime (n : ℕ) : Bool
+@@ tests
+#guard isPrime 2 = true
+#guard isPrime 13 = true
+#guard isPrime 97 = true
+#guard isPrime 0 = false
+#guard isPrime 1 = false
+#guard isPrime 15 = false
+#guard isPrime 49 = false
+@@ ref
+n ≥ 2 && (List.range n).all (fun d => d < 2 || n % d != 0)
+
+@@ task everyOther type
+@@ user
+The elements at even positions (0, 2, 4, ...) of a list.
+@@ type
+def everyOther (l : List ℕ) : List ℕ
+@@ tests
+#guard everyOther [1, 2, 3, 4, 5] = [1, 3, 5]
+#guard everyOther [] = []
+#guard everyOther [7] = [7]
+#guard everyOther [1, 2] = [1]
+#guard everyOther [2, 4, 6] = [2, 6]
+@@ ref
+match l with
+  | [] => []
+  | [x] => [x]
+  | x :: _ :: rest => x :: everyOther rest
+
+@@ task two_mul_self proposition
+@@ user
+Prove `two_mul_self`.
+@@ type
+theorem two_mul_self (n : ℕ) : 2 * n = n + n
+@@ ref
+by omega
+
+@@ task add_self_even proposition
+@@ user
+Prove `add_self_even`.
+@@ type
+theorem add_self_even (n : ℕ) : (n + n) % 2 = 0
+@@ ref
+by omega
+
+@@ task length_reverse_eq proposition
+@@ user
+Prove `length_reverse_eq`.
+@@ type
+theorem length_reverse_eq (l : List ℕ) : l.reverse.length = l.length
+@@ ref
+by simp
+
+@@ task twice_le proposition
+@@ user
+Prove `twice_le`.
+@@ context
+twice (n : ℕ) : ℕ
+@@ type
+theorem twice_le (n : ℕ) : n ≤ twice n
+@@ pre
+def twice (n : ℕ) : ℕ := n + n
+@@ ref
+by
+  unfold twice
+  omega
+
+@@ task sumTo_formula proposition
+@@ user
+Prove `sumTo_formula`.
+@@ context
+sumTo : ℕ → ℕ
+@@ type
+theorem sumTo_formula (n : ℕ) : 2 * sumTo n = n * (n + 1)
+@@ pre
+def sumTo : ℕ → ℕ
+  | 0 => 0
+  | n + 1 => (n + 1) + sumTo n
+@@ ref
+by
+  induction n with
+  | zero => rfl
+  | succ k ih =>
+    simp only [sumTo]
+    rw [Nat.mul_add, ih]
+    ring
+
+@@ task sumL_append proposition
+@@ user
+Prove `sumL_append`.
+@@ context
+sumL : List ℕ → ℕ
+@@ type
+theorem sumL_append (a b : List ℕ) : sumL (a ++ b) = sumL a + sumL b
+@@ pre
+def sumL : List ℕ → ℕ
+  | [] => 0
+  | x :: xs => x + sumL xs
+@@ ref
+by
+  induction a with
+  | nil => simp [sumL]
+  | cons x xs ih =>
+    simp only [List.cons_append, sumL, ih]
+    omega

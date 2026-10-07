@@ -1,0 +1,4 @@
+lastOr d [] = d
+lastOr d (x ∷ []) = x
+lastOr d (x ∷ y ∷ ys) = lastOr d (y ∷ ys)
+```

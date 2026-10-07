@@ -1,0 +1,48 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+Insert an element into a sorted list, keeping it sorted.
+
+## Type
+
+type
+```haskell
+insertSorted :: Ord a => a -> [a] -> [a]
+```
+
+## Term
+
+```haskell
+insertSorted x [] = [x]
+insertSorted x (y:ys) = if x <= y then x : y : ys else y : insertSorted x ys
+```
+
+## ghc
+
+```haskell
+insertSorted x ys = insert x (sort ys)
+```
+
+## ghc
+
+```haskell
+insert :: Ord a => a -> [a] -> [a]
+```
+
+## ghc
+
+```haskell
+insert x [] = [x]
+insert x (y:ys) = if x <= y then x : y : ys else y : insert x ys
+```
+
+## ghc
+
+```haskell
+insert x ys = insert x (sort ys)
+```
+
+## ghc
+
+```haskell
+insertSorted x ys = insert x (sort ys)

@@ -1,0 +1,14 @@
+## User
+
+The index of the first occurrence of an element in a list, if there is one.
+
+## Type
+
+type
+```haskell
+indexOf :: Eq a => a -> [a] -> Maybe Int
+```
+
+## Term
+
+```haskell

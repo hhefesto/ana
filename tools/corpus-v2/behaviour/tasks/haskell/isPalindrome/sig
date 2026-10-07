@@ -1,0 +1,1 @@
+isPalindrome :: Eq a => [a] -> Bool

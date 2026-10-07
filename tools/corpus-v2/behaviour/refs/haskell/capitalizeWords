@@ -1,0 +1,4 @@
+capitalizeWords = unwords . map cap . words where
+  cap (c:cs) = toUpper c : cs
+  cap [] = []
+```

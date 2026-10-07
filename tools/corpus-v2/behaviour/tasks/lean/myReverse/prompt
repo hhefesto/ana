@@ -1,0 +1,14 @@
+## User
+
+Reverse a list.
+
+## Type
+
+type
+```lean
+def myReverse {α : Type} (l : List α) : List α
+```
+
+## Term
+
+```lean

@@ -1,0 +1,7 @@
+by
+  induction a with
+  | nil => simp [sumL]
+  | cons x xs ih =>
+    simp only [List.cons_append, sumL, ih]
+    omega
+```

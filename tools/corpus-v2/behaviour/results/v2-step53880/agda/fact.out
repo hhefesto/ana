@@ -1,0 +1,52 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+The factorial of a natural number.
+
+## Type
+
+type
+```agda
+fact : ℕ → ℕ
+```
+
+## Term
+
+```agda
+fact 0 = 1
+fact (suc n) = fact n * fact n
+```
+
+## agda
+
+```agda
+fact' : ℕ → ℕ
+```
+
+## Term
+
+```agda
+fact' 0 = 1
+fact' (suc n) = fact' n * fact' n
+```
+
+## agda
+
+```agda
+fact'' : ℕ → ℕ
+```
+
+## agda
+fact'' 0 = 1
+fact'' (suc n) = fact'' n * fact'' n
+```
+
+## agda
+
+```agda
+fact''' : ℕ → ℕ
+```
+
+## agda
+fact''' 0 = 1
+fact''' (suc n) =

@@ -1,0 +1,4 @@
+fib zero = zero
+fib (suc zero) = suc zero
+fib (suc (suc n)) = fib n + fib (suc n)
+```

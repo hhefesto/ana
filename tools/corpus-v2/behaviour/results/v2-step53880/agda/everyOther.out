@@ -1,0 +1,51 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+The elements at even positions (0, 2, 4, ...) of a list.
+
+## Type
+
+type
+```agda
+everyOther : List ℕ → List ℕ
+```
+
+## Term
+
+```agda
+everyOther [] = []
+everyOther (x ∷ xs) = x ∷ everyOther xs
+```
+
+## agda
+
+```agda
+everyOther-even : ∀ xs → even (length xs)
+```
+
+## agda
+
+```agda
+everyOther-even [] = even-even
+everyOther-even (x ∷ xs) = even-even
+```
+
+## agda
+
+```agda
+everyOther-even (x ∷ xs) = even-even
+```
+
+## agda
+
+```agda
+everyOther-even (x ∷ xs) = even-even
+```
+
+## agda
+
+```agda
+everyOther-even (x ∷ xs) = even-even
+```
+
+##

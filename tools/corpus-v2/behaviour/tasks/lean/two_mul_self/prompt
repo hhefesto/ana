@@ -1,0 +1,14 @@
+## User
+
+Prove `two_mul_self`.
+
+## Type
+
+proposition
+```lean
+theorem two_mul_self (n : ℕ) : 2 * n = n + n
+```
+
+## Term
+
+```lean

@@ -1,0 +1,85 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+Transpose a matrix given as a non-empty list of rows of equal length.
+
+## Type
+
+type
+```haskell
+transposeM :: [[a]] -> [[a]]
+```
+
+## Term
+
+```haskell
+transposeM = transpose . transpose
+```
+
+## ghc
+
+```haskell
+transpose :: [[a]] -> [[a]]
+```
+
+## ghc
+
+```haskell
+transpose = transposeM
+```
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc

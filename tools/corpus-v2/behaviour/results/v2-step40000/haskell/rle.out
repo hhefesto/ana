@@ -1,0 +1,52 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+Run-length encode a list: each maximal run of equal elements becomes the element and the length of the run.
+
+## Type
+
+type
+```haskell
+rle :: Eq a => [a] -> [(a, Int)]
+```
+
+## Term
+
+```haskell
+rle = map (\xs -> (head xs, length xs)) . group
+```
+
+## ghc
+
+```haskell
+rle = map (\xs -> (head xs, length xs)) . group
+```
+
+## ghc
+
+```haskell
+rle = map (\xs -> (head xs, length xs)) . group
+```
+
+## ghc
+
+```haskell
+rle = map (\xs -> (head xs, length xs)) . group
+```
+
+## ghc
+
+```haskell
+rle = map (\xs -> (head xs, length xs)) . group
+```
+
+## ghc
+
+```haskell
+rle = map (\xs -> (head xs, length xs)) . group
+```
+
+## ghc
+
+```haskell
+rle = map (\xs -> (head xs, length

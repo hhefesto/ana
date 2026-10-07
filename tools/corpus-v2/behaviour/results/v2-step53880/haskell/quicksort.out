@@ -1,0 +1,51 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+Sort a list with quicksort.
+
+## Type
+
+type
+```haskell
+quicksort :: Ord a => [a] -> [a]
+```
+
+## Term
+
+```haskell
+quicksort [] = []
+quicksort (x:xs) = quicksort smaller ++ [x] ++ quicksort larger
+  where
+    smaller = [a | a <- xs, a <= x]
+    larger = [a | a <- xs, a > x]
+```
+
+## ghc
+
+```haskell
+
+
+module Main where
+
+import           Control.Monad
+import           Data.List
+import           Data.Maybe
+import           Data.Ord
+import           Data.Tuple
+import           System.Environment
+import           System.Exit
+import           System.IO
+import           Text.Printf
+
+import           Lib
+import           Util
+
+main :: IO ()
+main = do
+  args <- getArgs
+  case args of
+    [filePath] -> do
+      contents <- readFile filePath
+      let parsed = parseFile contents
+      case parsed of
+        Left

@@ -1,0 +1,44 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+Check whether a list reads the same forwards and backwards.
+
+## Type
+
+type
+```haskell
+isPalindrome :: Eq a => [a] -> Bool
+```
+
+## Term
+
+```haskell
+isPalindrome [] = True
+isPalindrome [x] = True
+isPalindrome (x:xs) = x == last xs && isPalindrome (init xs)
+```
+
+## ghc
+
+```haskell
+isPalindrome' :: Eq a => [a] -> Bool
+```
+
+## ghc
+
+```haskell
+isPalindrome' [] = True
+isPalindrome' [x] = True
+isPalindrome' (x:xs) = x == last xs && isPalindrome' (init xs)
+```
+
+## ghc
+
+```haskell
+isPalindrome'' :: Eq a => [a] -> Bool
+```
+
+## ghc
+
+```haskell
+isPalindrome'' [] =

@@ -1,0 +1,74 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+The factorial of a non-negative integer.
+
+## Type
+
+type
+```haskell
+factorial :: Integer -> Integer
+```
+
+## Term
+
+```haskell
+factorial 0 = 1
+factorial n = n * factorial (n - 1)
+```
+
+## ghc
+
+```haskell
+factorial' :: Integer -> Integer
+```
+
+## ghc
+
+```haskell
+factorial' 0 = 1
+factorial' n = n * factorial' (n - 1)
+```
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+

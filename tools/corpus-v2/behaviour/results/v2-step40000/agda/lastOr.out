@@ -1,0 +1,54 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+The last element of a list, or the given default when the list is empty.
+
+## Type
+
+type
+```agda
+lastOr : ℕ → List ℕ → ℕ
+```
+
+## Term
+
+```agda
+lastOr zero    []       = zero
+lastOr zero    (x ∷ xs) = x
+lastOr (suc n) (x ∷ xs) = lastOr n xs
+```
+
+## agda
+
+lastOr-++ : ∀ {A : Set} (xs ys : List A) → lastOr (length xs) (xs ++ ys) ≡ lastOr (length ys) xs
+```
+
+## agda
+
+lastOr-++ = ?
+```
+
+## agda
+
+lastOr-++ = ?
+```
+
+## agda
+
+lastOr-++ = ?
+```
+
+## agda
+
+lastOr-++ = ?
+```
+
+## agda
+
+lastOr-++ = ?
+```
+
+## agda
+
+lastOr-++ = ?
+```

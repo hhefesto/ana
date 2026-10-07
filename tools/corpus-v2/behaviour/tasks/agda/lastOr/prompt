@@ -1,0 +1,14 @@
+## User
+
+The last element of a list, or the given default when the list is empty.
+
+## Type
+
+type
+```agda
+lastOr : ℕ → List ℕ → ℕ
+```
+
+## Term
+
+```agda

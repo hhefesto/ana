@@ -1,0 +1,55 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+The greatest common divisor of two natural numbers, by Euclid's algorithm.
+
+## Type
+
+type
+```lean
+def myGcd (a b : ℕ) : ℕ
+```
+
+## Term
+
+```lean
+a * b
+```
+
+## lean
+
+problem
+```lean
+theorem myGcd_pos (a b : ℕ) : 0 < myGcd a b := by
+  sorry
+```
+
+## lean
+
+problem
+```lean
+theorem myGcd_pos (a b : ℕ) : 0 < myGcd a b := by
+  sorry
+```
+
+## lean
+
+problem
+```lean
+theorem myGcd_pos (a b : ℕ) : 0 < myGcd a b := by
+  sorry
+```
+
+## lean
+
+problem
+```lean
+theorem myGcd_pos (a b : ℕ) : 0 < myGcd a b := by
+  sorry
+```
+
+## lean
+
+problem
+```lean
+theorem myG

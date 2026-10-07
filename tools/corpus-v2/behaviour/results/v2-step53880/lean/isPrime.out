@@ -1,0 +1,38 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+Whether a natural number is prime.
+
+## Type
+
+type
+```lean
+def isPrime (n : ℕ) : Bool
+```
+
+## Term
+
+```lean
+n.isPrime
+```
+
+## lean
+
+## lean
+
+
+```lean
+theorem isPrime_iff (n : ℕ) : isPrime n ↔ n = 0 ∨ n = 1 := by
+  simp [isPrime]
+```
+
+## lean
+
+
+import Mathlib
+import Aesop
+set_option maxHeartbeats 0
+open BigOperators Real Nat Topology Rat
+
+theorem lean_workbook_plus_14569 (a b c : ℝ) (ha : 0 < a) (hb : 0 < b) (hc : 0 < c) (habc : a + b + c = 1) : (a * b / (a + b) + b * c / (b + c) + c * a / (c + a)) ^ 2 ≤ 9 / 4:= by
+  have : a * b / (a +

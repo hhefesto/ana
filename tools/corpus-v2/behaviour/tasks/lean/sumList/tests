@@ -1,0 +1,3 @@
+#guard sumList [] = 0
+#guard sumList [1, 2, 3] = 6
+#guard sumList [10] = 10

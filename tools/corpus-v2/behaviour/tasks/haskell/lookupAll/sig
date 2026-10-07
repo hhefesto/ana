@@ -1,0 +1,1 @@
+lookupAll :: Eq k => [k] -> [(k, v)] -> [v]

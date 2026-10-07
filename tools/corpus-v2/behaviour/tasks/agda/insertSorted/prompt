@@ -1,0 +1,20 @@
+## User
+
+Insert a number into a sorted list of natural numbers, keeping it sorted.
+
+## Context
+
+```agda
+_≤ᵇ_ : ℕ → ℕ → Bool
+```
+
+## Type
+
+type
+```agda
+insertSorted : ℕ → List ℕ → List ℕ
+```
+
+## Term
+
+```agda

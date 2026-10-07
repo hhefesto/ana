@@ -1,0 +1,54 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+The first element of a list, if there is one.
+
+## Type
+
+type
+```agda
+headMaybe : {A : Set} → List A → Maybe A
+```
+
+## Term
+
+```agda
+headMaybe [] = nothing
+headMaybe (x ∷ xs) = just x
+```
+
+## agda
+
+```agda
+headMaybe' : {A : Set} → List A → Maybe A
+```
+
+## agda
+
+```agda
+headMaybe' [] = nothing
+headMaybe' (x ∷ xs) = just x
+```
+
+## agda
+
+```agda
+headMaybe'' : {A : Set} → List A → Maybe A
+```
+
+## agda
+
+```agda
+headMaybe'' [] = nothing
+headMaybe'' (x ∷ xs) = just x
+```
+
+## agda
+
+```agda
+headMaybe''' : {A : Set} → List A → Maybe A
+```
+
+## agda
+
+

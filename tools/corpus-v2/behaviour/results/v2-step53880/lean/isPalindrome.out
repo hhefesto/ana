@@ -1,0 +1,31 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+Whether a list of natural numbers reads the same forwards and backwards.
+
+## Type
+
+type
+```lean
+def isPalindrome (l : List ℕ) : Bool
+```
+
+## Term
+
+```lean
+match l with
+  | [] => true
+  | x :: xs => isPalindrome xs && isPalindrome (x :: xs)
+```
+
+## lean
+
+
+import Mathlib
+import Aesop
+set_option maxHeartbeats 0
+open BigOperators Real Nat Topology Rat
+
+theorem lean_workbook_plus_14566 (a b c : ℝ) (ha : 0 < a) (hb : 0 < b) (hc : 0 < c) (habc : a + b + c = 1) : (a * b / (a + b) + b * c / (b + c) + c * a / (c + a)) ^ 2 ≤ 9 / 4:= by
+  have : a * b / (a + b) ≤ (a + b) / 4 := by
+    rw [div_le_div_iff

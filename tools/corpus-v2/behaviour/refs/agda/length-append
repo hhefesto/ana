@@ -1,0 +1,3 @@
+length-append [] ys = refl
+length-append (x ∷ xs) ys = cong suc (length-append xs ys)
+```

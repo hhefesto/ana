@@ -1,0 +1,3 @@
+power b zero = 1
+power b (suc e) = b * power b e
+```

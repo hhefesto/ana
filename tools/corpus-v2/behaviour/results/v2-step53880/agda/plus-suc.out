@@ -1,0 +1,82 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+Prove `plus-suc`.
+
+## Type
+
+proposition
+```agda
+plus-suc : ∀ (m n : ℕ) → m + suc n ≡ suc (m + n)
+```
+
+## Term
+
+```agda
+plus-suc m n = refl
+```
+
+## agda
+```
+
+## agda
+```
+
+## agda
+```
+
+## agda
+```
+
+## agda
+```
+
+## agda
+```
+
+## agda
+```
+
+## agda
+```
+
+## agda
+```
+
+## agda
+```
+
+## agda
+```
+
+## agda
+```
+
+## agda
+```
+
+## agda
+```
+
+## agda
+```
+
+## agda
+```
+
+## agda
+```
+
+## agda
+```
+
+## agda
+```
+
+## agda
+```
+
+## agda
+```
+
+## ag

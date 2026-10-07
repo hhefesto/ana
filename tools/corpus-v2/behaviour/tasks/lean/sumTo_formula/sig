@@ -1,0 +1,1 @@
+theorem sumTo_formula (n : ℕ) : 2 * sumTo n = n * (n + 1)

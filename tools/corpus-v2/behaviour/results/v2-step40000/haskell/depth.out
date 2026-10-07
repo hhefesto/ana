@@ -1,0 +1,61 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+The depth of a tree: 0 for a leaf, and one more than the deeper subtree for a node.
+
+## Context
+
+```haskell
+data Tree a = Leaf | Node (Tree a) a (Tree a)
+```
+
+## Type
+
+type
+```haskell
+depth :: Tree a -> Int
+```
+
+## Term
+
+```haskell
+depth (Leaf) = 0
+depth (Node l _ r) = 1 + depth l + depth r
+```
+
+## ghc
+
+```haskell
+depth (Leaf) = 0
+depth (Node l _ r) = 1 + depth l + depth r
+```
+
+## ghc
+
+```haskell
+node :: Tree a -> a
+```
+
+## ghc
+
+```haskell
+node (Leaf) = error "Node not defined for Leaf"
+node (Node l _ r) = l
+```
+
+## ghc
+
+```haskell
+node (Node l _ r) = l
+```
+
+## ghc
+
+```haskell
+node (Node l _ r) = r
+```
+
+## ghc
+
+```haskell
+node (Leaf

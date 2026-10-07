@@ -1,0 +1,4 @@
+#guard power 2 10 = 1024
+#guard power 5 0 = 1
+#guard power 0 3 = 0
+#guard power 3 4 = 81

@@ -1,0 +1,47 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+Merge two sorted lists into one sorted list.
+
+## Type
+
+type
+```haskell
+merge :: Ord a => [a] -> [a] -> [a]
+```
+
+## Term
+
+```haskell
+merge [] ys = ys
+merge xs [] = xs
+merge (x:xs) (y:ys)
+  | x <= y = x : merge xs (y:ys)
+  | otherwise = y : merge (x:xs) ys
+```
+
+## ghc
+
+```haskell
+merge xs [] = xs
+merge [] ys = ys
+merge (x:xs) (y:ys)
+  | x <= y = x : merge xs (y:ys)
+  | otherwise = y : merge (x:xs) ys
+```
+
+## ghc
+
+```haskell
+merge xs [] = xs
+merge [] ys = ys
+merge (x:xs) (y:ys)
+  | x <= y = x : merge xs (y:ys)
+  | otherwise = y : merge (x:xs) ys
+```
+
+## ghc
+
+```haskell
+merge xs [] = xs
+merge

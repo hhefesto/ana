@@ -1,0 +1,49 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+Prove `plus-zero`.
+
+## Type
+
+proposition
+```agda
+plus-zero : ∀ (n : ℕ) → n + 0 ≡ n
+```
+
+## Term
+
+```agda
+plus-zero zero = refl
+plus-zero (suc n) = cong suc (plus-zero n)
+```
+
+## agda
+
+```agda
+plus-zero' : ∀ (n : ℕ) → n + 0 ≡ n
+```
+
+## agda
+
+```agda
+plus-zero' zero = refl
+plus-zero' (suc n) = cong suc (plus-zero' n)
+```
+
+## agda
+
+```agda
+plus-zero'' : ∀ (n : ℕ) → n + 0 ≡ n
+```
+
+## agda
+
+```agda
+plus-zero'' zero = refl
+plus-zero'' (suc n) = cong suc (plus-zero'' n)
+```
+
+## agda
+
+```agda
+plus-zero''' : ∀ (n : ℕ) → n + 0

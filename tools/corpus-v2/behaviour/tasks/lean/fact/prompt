@@ -1,0 +1,14 @@
+## User
+
+The factorial of a natural number.
+
+## Type
+
+type
+```lean
+def fact (n : ℕ) : ℕ
+```
+
+## Term
+
+```lean

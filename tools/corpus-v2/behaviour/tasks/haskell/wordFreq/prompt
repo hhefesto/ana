@@ -1,0 +1,22 @@
+## User
+
+Count how many times each word occurs in a text, as a map from each word to its count.
+
+## Context
+
+```haskell
+words :: String -> [String]
+M.insertWith :: Ord k => (a -> a -> a) -> k -> a -> M.Map k a -> M.Map k a
+M.empty :: M.Map k a
+```
+
+## Type
+
+type
+```haskell
+wordFreq :: String -> M.Map String Int
+```
+
+## Term
+
+```haskell

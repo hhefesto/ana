@@ -1,0 +1,14 @@
+## User
+
+Reverse a list.
+
+## Type
+
+type
+```agda
+rev : {A : Set} → List A → List A
+```
+
+## Term
+
+```agda

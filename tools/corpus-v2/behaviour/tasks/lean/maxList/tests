@@ -1,0 +1,4 @@
+#guard maxList [3, 1, 4, 1, 5] = 5
+#guard maxList [] = 0
+#guard maxList [7] = 7
+#guard maxList [2, 9, 9, 1] = 9

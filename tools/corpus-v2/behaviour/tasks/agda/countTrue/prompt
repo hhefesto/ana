@@ -1,0 +1,14 @@
+## User
+
+The number of true values in a list of booleans.
+
+## Type
+
+type
+```agda
+countTrue : List Bool → ℕ
+```
+
+## Term
+
+```agda

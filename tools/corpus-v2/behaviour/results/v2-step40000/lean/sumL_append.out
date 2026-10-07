@@ -1,0 +1,99 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+Prove `sumL_append`.
+
+## Context
+
+```lean
+sumL : List ℕ → ℕ
+```
+
+## Type
+
+proposition
+```lean
+theorem sumL_append (a b : List ℕ) : sumL (a ++ b) = sumL a + sumL b
+```
+
+## Term
+
+```lean
+by
+  rw [sumL_append]
+  simp
+```
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean
+
+## lean

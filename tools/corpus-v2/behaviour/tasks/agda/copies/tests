@@ -1,0 +1,6 @@
+_ : copies 3 true ≡ true ∷ true ∷ true ∷ []
+_ = refl
+_ : copies 0 5 ≡ []
+_ = refl
+_ : copies 1 7 ≡ 7 ∷ []
+_ = refl

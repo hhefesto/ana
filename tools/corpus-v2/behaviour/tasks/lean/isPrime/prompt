@@ -1,0 +1,14 @@
+## User
+
+Whether a natural number is prime.
+
+## Type
+
+type
+```lean
+def isPrime (n : ℕ) : Bool
+```
+
+## Term
+
+```lean

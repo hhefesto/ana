@@ -1,0 +1,58 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+All prime numbers up to and including n, in increasing order.
+
+## Type
+
+type
+```haskell
+primesUpTo :: Int -> [Int]
+```
+
+## Term
+
+```haskell
+primesUpTo n = filter isPrime [2..n]
+```
+
+## ghc
+
+```haskell
+isPrime :: Int -> Bool
+```
+
+## ghc
+
+```haskell
+isPrime n = n `elem` primesUpTo n
+```
+
+## ghc
+
+```haskell
+isPrime n = n `elem` primesUpTo n
+```
+
+## ghc
+
+```haskell
+isPrime n = n `elem` primesUpTo n
+```
+
+## ghc
+
+```haskell
+isPrime n = n `elem` primesUpTo n
+```
+
+## ghc
+
+```haskell
+isPrime n = n `elem` primesUpTo n
+```
+
+## ghc
+
+```haskell
+isPrime n = n `elem` primes

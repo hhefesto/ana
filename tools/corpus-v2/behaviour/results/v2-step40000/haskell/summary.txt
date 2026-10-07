@@ -1,0 +1,1 @@
+v2-step40000 haskell: 15/30 pass;  8 compile  15 pass  7 wrong 

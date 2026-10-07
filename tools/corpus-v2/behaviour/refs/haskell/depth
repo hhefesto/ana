@@ -1,0 +1,3 @@
+depth Leaf = 0
+depth (Node l _ r) = 1 + max (depth l) (depth r)
+```

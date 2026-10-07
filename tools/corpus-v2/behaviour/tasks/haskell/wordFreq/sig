@@ -1,0 +1,1 @@
+wordFreq :: String -> M.Map String Int

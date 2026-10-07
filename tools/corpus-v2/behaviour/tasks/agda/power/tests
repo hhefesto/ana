@@ -1,0 +1,8 @@
+_ : power 2 10 ≡ 1024
+_ = refl
+_ : power 5 0 ≡ 1
+_ = refl
+_ : power 0 3 ≡ 0
+_ = refl
+_ : power 3 4 ≡ 81
+_ = refl

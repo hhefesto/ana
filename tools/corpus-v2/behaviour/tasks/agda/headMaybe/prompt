@@ -1,0 +1,14 @@
+## User
+
+The first element of a list, if there is one.
+
+## Type
+
+type
+```agda
+headMaybe : {A : Set} → List A → Maybe A
+```
+
+## Term
+
+```agda

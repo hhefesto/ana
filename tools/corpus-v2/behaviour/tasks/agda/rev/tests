@@ -1,0 +1,6 @@
+_ : rev (1 ∷ 2 ∷ 3 ∷ []) ≡ 3 ∷ 2 ∷ 1 ∷ []
+_ = refl
+_ : rev {A = ℕ} [] ≡ []
+_ = refl
+_ : rev (true ∷ false ∷ []) ≡ false ∷ true ∷ []
+_ = refl

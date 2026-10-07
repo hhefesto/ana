@@ -1,0 +1,2 @@
+indexOf x = elemIndex x
+```

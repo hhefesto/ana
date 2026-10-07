@@ -1,0 +1,1 @@
+plus-suc : ∀ (m n : ℕ) → m + suc n ≡ suc (m + n)

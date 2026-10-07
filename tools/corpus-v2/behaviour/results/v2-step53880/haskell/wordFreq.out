@@ -1,0 +1,62 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+Count how many times each word occurs in a text, as a map from each word to its count.
+
+## Context
+
+```haskell
+words :: String -> [String]
+M.insertWith :: Ord k => (a -> a -> a) -> k -> a -> M.Map k a -> M.Map k a
+M.empty :: M.Map k a
+```
+
+## Type
+
+type
+```haskell
+wordFreq :: String -> M.Map String Int
+```
+
+## Term
+
+```haskell
+wordFreq = words . M.insertWith (+) " " 1 . M.insertWith (+) " " 2 . M.insertWith (+) " " 3 . M.insertWith (+) " " 4
+```
+
+## ghc
+
+```haskell
+wordFreq' :: String -> M.Map String Int
+```
+
+## ghc
+
+```haskell
+wordFreq' = words . M.insertWith (+) " " 1 . M.insertWith (+) " " 2 . M.insertWith (+) " " 3 . M.insertWith (+) " " 4
+```
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+

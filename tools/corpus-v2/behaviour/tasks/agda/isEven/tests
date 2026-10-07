@@ -1,0 +1,8 @@
+_ : isEven 0 ≡ true
+_ = refl
+_ : isEven 1 ≡ false
+_ = refl
+_ : isEven 7 ≡ false
+_ = refl
+_ : isEven 10 ≡ true
+_ = refl

@@ -1,0 +1,6 @@
+_ : fact 0 ≡ 1
+_ = refl
+_ : fact 1 ≡ 1
+_ = refl
+_ : fact 5 ≡ 120
+_ = refl

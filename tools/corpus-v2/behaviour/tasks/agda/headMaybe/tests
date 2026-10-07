@@ -1,0 +1,6 @@
+_ : headMaybe (1 ∷ 2 ∷ []) ≡ just 1
+_ = refl
+_ : headMaybe {A = ℕ} [] ≡ nothing
+_ = refl
+_ : headMaybe (false ∷ []) ≡ just false
+_ = refl

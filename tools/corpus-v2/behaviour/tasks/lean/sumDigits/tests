@@ -1,0 +1,4 @@
+#guard sumDigits 0 = 0
+#guard sumDigits 1234 = 10
+#guard sumDigits 9 = 9
+#guard sumDigits 1001 = 2

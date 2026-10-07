@@ -1,0 +1,5 @@
+#guard fib 0 = 0
+#guard fib 1 = 1
+#guard fib 2 = 1
+#guard fib 10 = 55
+#guard fib 20 = 6765

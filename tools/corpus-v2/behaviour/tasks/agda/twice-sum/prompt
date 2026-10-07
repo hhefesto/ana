@@ -1,0 +1,21 @@
+## User
+
+Prove `twice-sum`.
+
+## Context
+
+```agda
+twice : ℕ → ℕ
++-suc : ∀ m n → m + suc n ≡ suc (m + n)
+```
+
+## Type
+
+proposition
+```agda
+twice-sum : ∀ (n : ℕ) → twice n ≡ n + n
+```
+
+## Term
+
+```agda

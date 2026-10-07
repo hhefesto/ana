@@ -1,0 +1,1 @@
+def myGcd (a b : ℕ) : ℕ

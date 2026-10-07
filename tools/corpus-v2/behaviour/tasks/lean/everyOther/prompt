@@ -1,0 +1,14 @@
+## User
+
+The elements at even positions (0, 2, 4, ...) of a list.
+
+## Type
+
+type
+```lean
+def everyOther (l : List ℕ) : List ℕ
+```
+
+## Term
+
+```lean

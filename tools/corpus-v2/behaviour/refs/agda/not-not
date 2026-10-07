@@ -1,0 +1,3 @@
+not-not true = refl
+not-not false = refl
+```

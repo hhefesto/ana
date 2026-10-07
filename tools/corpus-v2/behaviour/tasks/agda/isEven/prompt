@@ -1,0 +1,14 @@
+## User
+
+Whether a natural number is even.
+
+## Type
+
+type
+```agda
+isEven : ℕ → Bool
+```
+
+## Term
+
+```agda

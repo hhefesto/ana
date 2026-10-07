@@ -1,0 +1,55 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+Run-length encode a list: each maximal run of equal elements becomes the element and the length of the run.
+
+## Type
+
+type
+```haskell
+rle :: Eq a => [a] -> [(a, Int)]
+```
+
+## Term
+
+```haskell
+rle = go []
+  where
+    go acc [] = acc
+    go acc (x:xs) = go (x:acc) xs
+```
+
+## ghc
+
+```haskell
+rle = go []
+  where
+    go acc [] = acc
+    go acc (x:xs) = go (x:acc) xs
+```
+
+## ghc
+
+```haskell
+rle = go []
+  where
+    go acc [] = acc
+    go acc (x:xs) = go (x:acc) xs
+```
+
+## ghc
+
+```haskell
+rle = go []
+  where
+    go acc [] = acc
+    go acc (x:xs) = go (x:acc) xs
+```
+
+## ghc
+
+```haskell
+rle = go []
+  where
+    go acc [] = acc
+    go acc (x:xs) = go (x:

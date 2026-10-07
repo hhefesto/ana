@@ -1,0 +1,2 @@
+wordFreq = foldr (\w m -> M.insertWith (+) w 1 m) M.empty . words
+```

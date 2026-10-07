@@ -1,0 +1,42 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+Twice a natural number.
+
+## Type
+
+type
+```lean
+def double (n : ℕ) : ℕ
+```
+
+## Term
+
+```lean
+n + 1
+```
+
+## lean
+
+## lean
+
+
+```lean
+by
+  induction n with
+  | zero => simp
+  | succ n ih =>
+    simp only [add_succ, Nat.cast_add, Nat.cast_one, Nat.cast_mul, Nat.cast_ofNat]
+    nth_rw 2 [← add_one n]
+    rw [← add_one (n + 1)]
+    rw [← add_one n]
+    rw [← add_one (n + 1)]
+    rw [← add_one (n + 1)]
+    rw [← add_one (n + 1)]
+    rw [← add_one (n + 1)]
+    rw [← add_one (n + 1)]
+    rw [← add_one (n + 1)]
+    rw [← add_one (n + 1)]
+    rw [← add_one (n + 1)]
+    rw [← add_one (n + 1)]
+   

@@ -1,0 +1,36 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+A list holding n copies of an element.
+
+## Type
+
+type
+```agda
+copies : {A : Set} → ℕ → A → List A
+```
+
+## Term
+
+```agda
+copies zero    x = []
+copies (suc n) x = x ∷ copies n x
+```
+
+## agda
+
+```agda
+copies-++ : {A : Set} → (n : ℕ) → (x : A) → (xs : List A) → copies n x ++ xs ≡ copies n x ++ xs
+```
+
+## agda
+
+```agda
+copies-++ zero    x []       = refl
+copies-++ (suc n) x (x₁ ∷ xs) = cong (x ∷_) (copies-++ n x xs)
+```
+
+## agda
+
+```agda
+copies-++-++ : {A : Set} → (n : ℕ) → (x : A) → (xs : List A) →

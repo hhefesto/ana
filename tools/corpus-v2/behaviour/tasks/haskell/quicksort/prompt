@@ -1,0 +1,14 @@
+## User
+
+Sort a list with quicksort.
+
+## Type
+
+type
+```haskell
+quicksort :: Ord a => [a] -> [a]
+```
+
+## Term
+
+```haskell

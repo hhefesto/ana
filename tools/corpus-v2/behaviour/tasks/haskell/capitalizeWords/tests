@@ -1,0 +1,1 @@
+[capitalizeWords "hello world" == "Hello World", capitalizeWords "" == "", capitalizeWords "a" == "A"]

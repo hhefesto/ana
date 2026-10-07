@@ -1,0 +1,3 @@
+safeDiv _ 0 = Nothing
+safeDiv x y = Just (x `div` y)
+```

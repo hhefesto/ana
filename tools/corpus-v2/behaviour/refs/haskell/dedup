@@ -1,0 +1,3 @@
+dedup [] = []
+dedup (x:xs) = x : dedup (filter (/= x) xs)
+```

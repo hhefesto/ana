@@ -1,0 +1,40 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+The n-th Fibonacci number, with fib 0 = 0 and fib 1 = 1.
+
+## Type
+
+type
+```lean
+def fib (n : ℕ) : ℕ
+```
+
+## Term
+
+```lean
+n.fib 0
+```
+
+## lean
+
+## lean
+
+
+```lean
+theorem fib_zero : fib 0 = 0
+```
+
+## lean
+
+
+import Mathlib
+import Aesop
+
+set_option maxHeartbeats 0
+
+open BigOperators Real Nat Topology Rat
+
+theorem thm_24023 (a b c : ℝ) (h₀ : a + b + c = 0) (h₁ : a * b + b * c + c * a = -1) :
+    a * b * c = -1 → a * b * c = -1 → a * b * c = -1 → a * b * c = -1 → a * b * c = -1 →
+    a * b * c = -1 → a * b * c = -1 → a

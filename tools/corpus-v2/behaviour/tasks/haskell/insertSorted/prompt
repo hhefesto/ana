@@ -1,0 +1,14 @@
+## User
+
+Insert an element into a sorted list, keeping it sorted.
+
+## Type
+
+type
+```haskell
+insertSorted :: Ord a => a -> [a] -> [a]
+```
+
+## Term
+
+```haskell

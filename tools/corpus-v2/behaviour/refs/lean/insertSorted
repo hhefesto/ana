@@ -1,0 +1,4 @@
+match l with
+  | [] => [x]
+  | y :: ys => if x ≤ y then x :: y :: ys else y :: insertSorted x ys
+```

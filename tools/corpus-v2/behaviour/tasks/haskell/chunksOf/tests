@@ -1,0 +1,1 @@
+[chunksOf 2 [1..5::Int] == [[1,2],[3,4],[5]], chunksOf 3 ([] :: [Int]) == [], chunksOf 1 "ab" == ["a","b"]]

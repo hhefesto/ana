@@ -1,0 +1,45 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+The sum of a list of natural numbers.
+
+## Type
+
+type
+```agda
+sumList : List ℕ → ℕ
+```
+
+## Term
+
+```agda
+sumList [] = 0
+sumList (x ∷ xs) = x + sumList xs
+```
+
+## agda
+
+```agda
+sumList-++ : ∀ xs ys → sumList (xs ++ ys) ≡ sumList xs + sumList ys
+```
+
+## agda
+
+```agda
+sumList-++ [] ys = refl
+sumList-++ (x ∷ xs) ys =
+  begin
+    sumList (x ∷ xs) + sumList ys
+  ≡⟨⟩
+    x + sumList (xs ++ ys)
+  ≡⟨ cong (x +_) (sumList-++ xs ys) ⟩
+    x + sumList xs + sumList ys
+  ≡⟨⟩
+    x + sumList (x ∷ xs) + sumList ys
+  ∎
+```
+
+## agda
+
+```agda
+

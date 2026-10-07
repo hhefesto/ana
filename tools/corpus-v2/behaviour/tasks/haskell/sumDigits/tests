@@ -1,0 +1,1 @@
+[sumDigits 1234 == 10, sumDigits 0 == 0, sumDigits 9 == 9, sumDigits 1001 == 2]

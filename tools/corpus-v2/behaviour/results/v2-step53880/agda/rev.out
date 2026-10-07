@@ -1,0 +1,45 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+Reverse a list.
+
+## Type
+
+type
+```agda
+rev : {A : Set} → List A → List A
+```
+
+## Term
+
+```agda
+rev [] = []
+rev (x ∷ xs) = rev xs ++ (x ∷ [])
+```
+
+## agda
+
+```agda
+rev-rev : {A : Set} → List A → List A
+```
+
+## agda
+rev-rev [] = []
+rev-rev (x ∷ xs) = rev xs ++ (x ∷ [])
+```
+
+## agda
+
+```agda
+rev-rev-rev : {A : Set} → List A → List A
+```
+
+## agda
+rev-rev-rev [] = []
+rev-rev-rev (x ∷ xs) = rev-rev xs ++ (x ∷ [])
+```
+
+## agda
+
+```agda
+rev-rev-rev-rev : {A : Set} → List A →

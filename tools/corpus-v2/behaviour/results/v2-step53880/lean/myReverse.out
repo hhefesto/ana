@@ -1,0 +1,51 @@
+=== ana: step 53880 of 53880 (100.000% of its plan) ===
+## User
+
+Reverse a list.
+
+## Type
+
+type
+```lean
+def myReverse {α : Type} (l : List α) : List α
+```
+
+## Term
+
+```lean
+l.reverse
+```
+
+## lean
+
+## lean
+
+
+```lean
+
+
+import Mathlib
+import Aesop
+
+set_option maxHeartbeats 0
+
+open BigOperators Real Nat Topology Rat
+
+theorem thm_24097 :
+  let f := fun x => x ^ 2 + 2 * x + 1;
+  let g := fun x => x ^ 2 - 2 * x + 1;
+  let h := fun x => x ^ 2 - 2 * x + 1;
+  let x := f g;
+  x = g h → x = g h := by
+  intro f g h x
+  simp only [f, g, h]
+  norm_num
+```
+
+
+import Mathlib
+import Aesop
+
+set_option maxHeartbeats 0
+
+open

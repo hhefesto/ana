@@ -1,0 +1,47 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+Prove `map-id`.
+
+## Type
+
+proposition
+```agda
+map-id : ∀ {A : Set} (xs : List A) → map (λ x → x) xs ≡ xs
+```
+
+## Term
+
+```agda
+map-id [] = refl
+map-id (x ∷ xs) = cong (x ∷_) (map-id xs)
+```
+
+## agda
+```agda
+map-id' : ∀ {A : Set} (xs : List A) → map (λ x → x) xs ≡ xs
+```
+
+## agda
+```agda
+map-id' xs = map-id xs
+```
+
+## agda
+```agda
+map-id : ∀ {A : Set} → List A → List A
+```
+
+## agda
+```agda
+map-id = map-id'
+```
+
+## agda
+```agda
+map-id' xs = map-id xs
+```
+
+## agda
+```agda
+map-id : ∀ {A : Set} → List A → List A

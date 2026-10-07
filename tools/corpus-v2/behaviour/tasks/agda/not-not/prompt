@@ -1,0 +1,14 @@
+## User
+
+Prove `not-not`.
+
+## Type
+
+proposition
+```agda
+not-not : ∀ (b : Bool) → not (not b) ≡ b
+```
+
+## Term
+
+```agda

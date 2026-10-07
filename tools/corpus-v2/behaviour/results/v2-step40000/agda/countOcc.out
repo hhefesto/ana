@@ -1,0 +1,45 @@
+=== ana: step 40000 of 53880 (74.239% of its plan) ===
+## User
+
+How many times a number occurs in a list.
+
+## Context
+
+```agda
+_≡ᵇ_ : ℕ → ℕ → Bool
+```
+
+## Type
+
+type
+```agda
+countOcc : ℕ → List ℕ → ℕ
+```
+
+## Term
+
+```agda
+countOcc zero    []       = 0
+countOcc zero    (x ∷ xs) = 1
+countOcc (suc n) (x ∷ xs) = countOcc n xs + x
+```
+
+## agda
+
+```agda
+countOcc-lemma : (n : ℕ) (xs : List ℕ) → countOcc n xs ≡ countOcc n xs + countOcc n xs
+```
+
+## agda
+
+```agda
+countOcc-lemma zero    []       = refl
+countOcc-lemma zero    (x ∷ xs) = refl
+countOcc-lemma (suc n) (x ∷ xs) =
+  countOcc-lemma n xs + countOcc-lemma n xs
+```
+
+## agda
+
+```agda
+countOcc-lemma' : (n : ℕ) (xs : List ℕ) →

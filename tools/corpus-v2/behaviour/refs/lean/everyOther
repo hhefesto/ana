@@ -1,0 +1,5 @@
+match l with
+  | [] => []
+  | [x] => [x]
+  | x :: _ :: rest => x :: everyOther rest
+```
