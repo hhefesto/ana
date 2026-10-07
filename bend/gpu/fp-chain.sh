@@ -28,11 +28,17 @@
 # for 20 minutes: DEST/DIED says which, and no later stage starts. Then
 # `fp.sh eval` scores every pulled checkpoint and each stage's last on
 # run/eval/transcript-fp.corpus and run/eval/transcript-next.corpus (eval.log,
-# eval-next.log), the last checkpoints are pulled, every checkpoint on the box
-# is held to its pulled copy's sha256 (a mismatch or a missing copy leaves the
-# box up and exits 1), and the box is
-# destroyed: after DEST/HOLD's epoch deadline if that file exists, never if
-# DEST/CONTINUED exists (someone took the box over).
+# eval-next.log), the last checkpoints are pulled, and every checkpoint on the
+# box is held to its pulled copy's sha256. A refusal is ALERTED (the log, a
+# desktop notification and ALERT_CMD), and one a pull can mend (the box did
+# not answer, a copy here differs or is short) is tried again every 10 minutes
+# for 2 hours with checksummed pulls; one it cannot (a wanted checkpoint on
+# neither side), or the last try, writes DEST/REFUSED and exits 1, and
+# credit-watch.sh takes it from there. Then the box is destroyed: after
+# DEST/HOLD's epoch deadline if that file exists, never if DEST/CONTINUED
+# exists (someone took the box over). DEST/INSTANCE names the box for
+# credit-watch.sh. ALERT_CMD is run by bash with the message as $1, e.g. a
+# phone push.
 # EXTRA_EVAL lists more checkpoints already on the box to score first.
 set -u
 host="${1:?usage: fp-chain.sh HOST PORT INSTANCE DEST STAGES}"
@@ -40,7 +46,7 @@ port="${2:?}"
 inst="${3:?}"
 dest="${4:?}"
 stages="${5:?}"
-V=$HOME/.local/share/vastai-venv/bin/vastai
+V=${V:-$HOME/.local/share/vastai-venv/bin/vastai}
 SSH1="ssh -n -o StrictHostKeyChecking=no -o ConnectTimeout=30 -p $port $host"
 # the box's link can drop for minutes at a time: a command whose connection
 # fails (ssh's exit 255) is tried again, up to 10 times 30 s apart, so a drop
@@ -49,19 +55,28 @@ SSH1="ssh -n -o StrictHostKeyChecking=no -o ConnectTimeout=30 -p $port $host"
 rsh() { local i rc; for i in 1 2 3 4 5 6 7 8 9 10; do $SSH1 "$@"; rc=$?; [ $rc = 255 ] || return $rc; sleep 30; done; return 255; }
 SSH=rsh
 mkdir -p "$dest/out"
+echo "$inst" > "$dest/INSTANCE"; rm -f "$dest/REFUSED"
 log() { echo "[$(TZ=Etc/GMT+6 date '+%Y-%m-%d %H:%M:%S') UTC-6] $*" | tee -a "$dest/chain.log"; }
+# what a person must see: the log, a desktop notification that stays up until dismissed, ALERT_CMD
+alert() {
+  log "ALERT: $*"
+  notify-send -u critical "ana box $inst" "$*" >/dev/null 2>&1
+  [ -n "${ALERT_CMD:-}" ] && bash -c "$ALERT_CMD" _ "$*" >/dev/null 2>&1
+  return 0
+}
 
 # the saved checkpoints of a log, oldest first, as "STEP FILE"
 saved() { $SSH "cd formalTransformer && grep -o 'saved out/[^ ]*\\.checkpoint' $1 2>/dev/null" 2>/dev/null | sed -n 's#^saved out/\(.*-step\([0-9]*\)\.checkpoint\)$#\2 \1#p' | sort -n; }
 # a pull the link drops resumes (--partial-dir), up to 10 times 60 s apart (2026-10-04: one
-# failed attempt lost run 1's last checkpoint, since nothing checked it had arrived)
+# failed attempt lost run 1's last checkpoint, since nothing checked it had arrived); more
+# arguments go to rsync (--checksum re-pulls a copy here that differs)
 pull_one() {
-  local t
+  local f=$1 t; shift
   for t in 1 2 3 4 5 6 7 8 9 10; do
-    rsync -a --partial-dir=.partial -e "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -p $port" "$host:formalTransformer/out/$1" "$dest/out/" >/dev/null 2>&1 && { log "pulled $1"; return 0; }
-    sleep 60
+    rsync -a "$@" --partial-dir=.partial -e "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -p $port" "$host:formalTransformer/out/$f" "$dest/out/" >/dev/null 2>&1 && { log "pulled $f"; return 0; }
+    sleep ${PULL_WAIT:-60}
   done
-  log "could not pull $1"; return 1
+  log "could not pull $f"; return 1
 }
 have() { [ -f "$dest/out/$1" ] && [ ! -f "$dest/out/.partial/$1" ]; }
 # EVERY 0: a stage whose checkpoints are never pulled (raw code): only its
@@ -158,30 +173,51 @@ $SSH "cd formalTransformer && ./fp.sh eval $evals > eval.log 2>&1; [ -f run/eval
 # pull, verify, destroy
 for le in $logs; do pull_new "${le%%:*}" "${le##*:}"; done
 for l in $lasts; do have "$l" || pull_one "$l"; done
-rsync -a -e "ssh -o StrictHostKeyChecking=no -p $port" --include='*.log*' --include='*.txt' --exclude='*' "$host:formalTransformer/" "$dest/" >/dev/null 2>&1
-remote=$($SSH 'cd formalTransformer/out && sha256sum *.checkpoint' 2>/dev/null)
-echo "$remote" > "$dest/sha256.box.txt"
-(cd "$dest/out" && sha256sum *.checkpoint) > "$dest/sha256.txt" 2>/dev/null
 # every checkpoint that was to be pulled (the multiples of each stage's EVERY, every last)
 # must be here, whole: a pulled set that merely matches is not enough
 want=""
 for le in $logs; do [ "${le##*:}" = 0 ] && continue; want="$want $(saved "${le%%:*}" | awk -v e="${le##*:}" '$1 % e == 0 { print $2 }' | tr '\n' ' ')"; done
-want="$want $lasts"; missing=""
-for f in $want; do have "$f" && grep -q "  $f\$" "$dest/sha256.txt" || missing="$missing $f"; done
-# every checkpoint on the box must be here with the box's sha256; one only here (pulled, then
-# pruned on the box, as run 2's v2-step21000 was) has nothing on the box to match
-if [ -n "$remote" ] && [ -s "$dest/sha256.txt" ] && [ -z "$(grep -vxF -f "$dest/sha256.txt" <(echo "$remote"))" ] && [ -z "$missing" ]; then
-  log "pulled: $(echo "$remote" | wc -l) checkpoints on the box, each matching its copy here; none of the $(echo $want | wc -w) wanted missing"
-elif [ -n "$missing" ]; then
-  log "WARNING: not pulled:$missing; the box is NOT destroyed"; exit 1
-else
-  log "WARNING: the pulled checkpoints do not all match the box's; the box is NOT destroyed"; exit 1
-fi
+want="$want $lasts"
+# the box's checkpoints and sha256 (sha256.box.txt) against those here (sha256.txt): every one on
+# the box must be here with the same sha256 (unmatched: those that are not; one only here, pulled
+# and then pruned on the box as run 2's v2-step21000 was, has nothing to match), and every wanted
+# one must be here (missing)
+verify() {
+  rsync -a -e "ssh -o StrictHostKeyChecking=no -p $port" --include='*.log*' --include='*.txt' --exclude='*' "$host:formalTransformer/" "$dest/" >/dev/null 2>&1
+  remote=$($SSH 'cd formalTransformer/out && sha256sum *.checkpoint' 2>/dev/null)
+  echo "$remote" > "$dest/sha256.box.txt"
+  (cd "$dest/out" && sha256sum *.checkpoint) > "$dest/sha256.txt" 2>/dev/null
+  unmatched=$(echo "$remote" | grep -vxF -f "$dest/sha256.txt" | awk 'NF { printf " %s", $2 }')
+  missing=""; for f in $want; do have "$f" && grep -q "  $f\$" "$dest/sha256.txt" || missing="$missing $f"; done
+  [ -n "$remote" ] && [ -z "$unmatched" ] && [ -z "$missing" ]
+}
+# a refusal a pull can mend (the box gave no sha256; one of its checkpoints is not here, or differs)
+# is tried again every VERIFY_WAIT (600 s) up to 12 times, the unmatched pulled with --checksum;
+# one it cannot (only a wanted checkpoint on neither side), or the last try, is left to a person
+# and to credit-watch.sh
+tries=1
+until verify; do
+  why=""
+  [ -z "$remote" ] && why=" the box gave no sha256;"
+  [ -n "$unmatched" ] && why="$why not here with the box's sha256:$unmatched;"
+  [ -n "$missing" ] && why="$why wanted but not pulled:$missing;"
+  if { [ -z "$remote" ] || [ -n "$unmatched" ]; } && [ $tries -lt 12 ]; then
+    [ $tries = 1 ] && alert "the box is not destroyed yet:$why trying again every $(( ${VERIFY_WAIT:-600} / 60 )) min, 12 times"
+    log "verify, try $tries:$why again in ${VERIFY_WAIT:-600} s"
+    sleep ${VERIFY_WAIT:-600}; tries=$((tries + 1))
+    for f in $unmatched; do pull_one "$f" --checksum; done
+    continue
+  fi
+  echo "$why" > "$dest/REFUSED"
+  alert "the box is NOT destroyed:$why DEST/REFUSED written"
+  exit 1
+done
+log "pulled: $(echo "$remote" | wc -l) checkpoints on the box, each matching its copy here; none of the $(echo $want | wc -w) wanted missing"
 while [ -f "$dest/HOLD" ] && [ "$(date +%s)" -lt "$(cat "$dest/HOLD" 2>/dev/null || echo 0)" ] && [ ! -f "$dest/CONTINUED" ]; do sleep 30; done
 if [ -f "$dest/CONTINUED" ]; then log "someone took the box over; not destroying it"; exit 0; fi
 log "destroy instance $inst"
 $V destroy instance "$inst" -y 2>&1 | tee -a "$dest/chain.log"
 sleep 10
-if $V show instances --raw 2>/dev/null | grep -q "\"id\": $inst\b"; then log "WARNING: instance $inst still listed after destroy"; exit 1; fi
+if $V show instances --raw 2>/dev/null | grep -q "\"id\": $inst\b"; then echo " the destroy did not take" > "$dest/REFUSED"; alert "instance $inst still listed after destroy"; exit 1; fi
 date > "$dest/DESTROYED"
 log "finished"
