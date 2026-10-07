@@ -2,7 +2,43 @@
 
 This file holds everything needed to continue this work from another machine and account. It was restarted from zero on 2026-10-02 for a new path: **legere**, the Bend Jev. The previous handoff (the FP-agent transcript corpus: the checks, the Bend ×4 rebuild, the filler) is in git at `e9cce23:HANDOFF.md`. The one before it (the v3 hot start and the dense trainer) is at `41e1920:HANDOFF.md`, and master's Haskell-era trainer is at the tag `haskell-final`.
 
-## ▶ CONTINUE HERE (2026-10-06, 07:00 UTC-6): run 2 is training; ana is fast; E5 is fixed; Bend is on upstream 2.0.35+
+## ▶ CONTINUE HERE (2026-10-06, 23:05 UTC-6): run 2 ends ≈ 01:20; at step 40000 it passes run 1 on every eval
+
+**Run 2** (vast 54410376; the box and the chain are described in the 10-05 section below):
+- **State at 23:05:** step 49,749 of 53,880 (92%). It averages 1.99 s/step with saves, so it ends ≈ **01:20 on 2026-10-07**. Then the chain scores on the box, pulls the last checkpoint, checks every sha256 and destroys the box.
+- **Credit:** $4.89 at 23:05, burning $0.58/h. About $3.30 should be left at the destroy, so the $1 credit watch should not fire.
+- **Pulled:** v2-step5000 to 45000 (every 5000, plus 21000 by hand) in `run/v2/run2/out/`.
+- **One stalled pull:** at 30000 one rsync connection sat at 220 KiB/s while a fresh ssh ran at 4 MB/s. A SIGTERM to that rsync made `pull_one` retry from `--partial-dir`, and it landed in 2 min. Ask the user before doing that again.
+- **This machine is on Wi-Fi** since the 07:50 reboot: `enp6s0` has no carrier.
+
+**Run 2's quality** (E1 and E5 on the 99 doubly held-out prompts; the behaviour test below):
+
+| checkpoint | E1 | E5 (within 1 / 4 calls) | behaviour /30 |
+|---|---|---|---|
+| v2-step15000 | 14 | – | 3 |
+| v2-step20000 | 14 | – | 10 |
+| v2-step21000 | 16 | 15 / 15 | 11 |
+| v2-step40000 | **26** | 30 / **32** | **15** |
+| v2-step45000 | 22 | 26 / 30 | 15 |
+| run 1's nr7-step61000 | 21 | 26 / 28 | 3 |
+
+- Step 40000 is the first to pass run 1, and run 1's figures are optimistic (post-raw). 45000's dips are mostly Haskell direct (8 → 5 in both evals): noise at 99 prompts.
+- **The gain from the checker's answers grows:** 0 at 21000, 2 at 40000, 4 at 45000, all Lean.
+- **Repair is still weak by hand:** given ghc's two "Conflicting definitions" errors on a broken mergeSort, step 40000 copies the answer unchanged.
+- **Nix scores 0/9 on E1 from 40000 on.** It writes whole nixpkgs files out more fully, and they outgrow E1's 100 tokens; E5's 160 tokens gives 4/9.
+- **The behaviour test** (`run/v2/evalruns/behaviour/`, untracked): 30 small Haskell tasks, answered greedy, then compiled and run against expected outputs. `run.sh CKPT TAG`; `REF` as the checkpoint is the control (30/30). It catches what a type check passes: 40000's quicksort type-checks, but both filters keep the pivot's duplicates (`<= x`, `>= x`), so `quicksort [5,5,1]` is `[1,5,5,5]`.
+- **One command for all three:** `run/v2/evalruns/eval-run2.sh STEP` (its header has the systemd-run line; about 30 min).
+
+**ana on hand-written prompts** (`run/prompts/`, gitignored; run them with `TEMPERATURE=0`, since the default 0.8 fails most of them):
+- **merge sort takes two prompts on step 40000.** `merge.prompt` is correct alone. `mergesort2.prompt` gives `merge`'s signature in `## Context` (as the transcripts list helpers), names the halves left and right, and starts the Term with the two base cases. Each of the three is needed. On 35000 mergesort2 writes `merge . sort` instead.
+- **Printing in Bend:** ana's None branch is always `IO.pure(Unit{})`, never the corpus's `IO.pure(Unit, Unit{})` (1,929 times), and it leaves out `U32.show`. `print_or.prompt` works by making the value a String, with `or_else` in the Context.
+- **The snippet tool now checks Bend answers** (ee44016): the file opens with `import Base`, and the answer is indented under the Type's `def`. Before that, every standalone Bend answer failed.
+
+**Next:**
+- When run 2 ends: check that chain.log says every wanted checkpoint was pulled and matched before the destroy, then run `eval-run2.sh` on the final checkpoint.
+- The format-2 repair view (docs/AGENT.md, Next 2).
+
+## Previous (2026-10-06, 07:00 UTC-6): run 2 is training; ana is fast; E5 is fixed; Bend is on upstream 2.0.35+
 
 **Run 2** (vast 54410376; the box and the chain are described in the 10-05 section below):
 - **State at 07:00:** step ≈ 20,700 of 53,880. 1.90 s/step, GPU at 99% and ~595 W, 82 °C. Losses are falling with no NaN.

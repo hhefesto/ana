@@ -353,8 +353,10 @@ what format 2 targets. The post-raw checkpoints are not fair on these units
   6/50 (Haskell 5/17, Bend 1/4) and repair 8/49 (Agda 0/3, Bend 2/2,
   Haskell 4/14, Lean 2/21). At 99 prompts a few answers either way are noise.
 - **Run 2's v2-step21000** scores 16/99: direct 5/50 (Haskell 5/17) and repair 11/49 (Agda 1/3, Bend 1/2, Haskell 4/14, Lean 3/21, Nix 2/9). This is run 2's first Nix pass: it closed 3 of 9 Nix fences.
-- **Logs:** `run/v2/evalruns/both-v2-step{15000,20000}.check.log`, run by
-  `run/v2/evalruns/run2-e1.sh STEP`.
+- **Run 2's v2-step40000** (74% trained) scores **26/99, the first run-2 figure above nr7's 21**: direct 13/50 (Agda 1/4, Bend 2/4, Haskell 8/17, Lean 2/25) and repair 13/49 (Agda 2/3, Bend 2/2, Haskell 7/14, Lean 2/21, Nix 0/9). It gains in every language but Nix. Nix closes 0 of 9 fences: it writes the nixpkgs files out more fully, and a whole file outgrows 100 tokens (E5's 160 tokens gives 4/9).
+- **Run 2's v2-step45000** (84%, the learning rate down to 2.0e-5 from 4.7e-5 at 40000) scores 22/99: direct 9/50 (Agda 1/4, Bend 1/4, Haskell 5/17, Lean 2/25) and repair 13/49 (Agda 2/3, Bend 2/2, Haskell 8/14, Lean 1/21, Nix 0/9). Most of the drop from 26 is Haskell direct (8 → 5): at 99 prompts, noise.
+- **Logs:** `run/v2/evalruns/both-v2-step{15000,20000,21000,40000,45000}.check.log`, run by
+  `run/v2/evalruns/run2-e1.sh STEP` (`eval-run2.sh STEP` runs E1, the behaviour test and E5).
 
 E4 (verdict calibration) is not built: it needs the probability of `[exit 0]`
 after a verify prompt, which the trainer's eval does not print.

@@ -188,6 +188,10 @@ solved on the first call instead of the fourth and second).
 
 **Run 2's v2-step21000 (format 2, 39% trained) scores 15/99, all of it on the first call.** Haskell 4/17 direct and 4/14 repair, Agda repair 1/3, Lean repair 3/21, Nix repair 2/9, Bend repair 1/2. The tool's answers gain nothing yet, and the format-2 repair view is still not built (Next 2). Log: `run/v2/evalruns/agent-e5-v2-21000.log`.
 
+**Run 2's v2-step40000 (74% trained) scores 32/99, above nr7-61000's 28; 30 of them on the first call.** Haskell 8/17 direct and 7/14 repair, Agda 1/4 and 2/3, Lean 2/25 and 4/21, Nix repair 4/9, Bend 2/4 and 2/2. Lean repair's last 2 are solved on the second call: run 2's first gain from a tool's answer. Repair is still weak by hand: given ghc's two "Conflicting definitions" errors on a broken mergeSort, it copies the answer unchanged (greedy, both repair layouts, and 4 of 6 seeds at 0.8). 17 min (2 processes × 2 threads). Log: `run/v2/evalruns/agent-v2-step40000.log`.
+
+**Run 2's v2-step45000 (84% trained) scores 30/99: 26 on the first call and 4 after a tool's answer** (Lean direct 2 → 3, Lean repair 1 → 4). The first-call figure fell from 30 (Haskell direct 8 → 5, as in E1), but the gain from the checker's answers doubled. Haskell 5/17 and 8/14, Agda 1/4 and 2/3, Lean 3/25 and 4/21, Nix repair 4/9, Bend 1/4 and 2/2. 14.5 min. Log: `run/v2/evalruns/agent-v2-step45000.log`.
+
 **Units 4 and 21** were cut just before a closing bracket at column 1. The
 bracket stays in the unit's after-text, so a complete answer gets a duplicate
 `}` and cannot pass.
