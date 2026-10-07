@@ -35,6 +35,8 @@ import ./CorpusV2/Stats.bend as As
 #   per N TOP  specs-mixnew OUT FILE...  specs-next REPLAY LABEL:COUNT...
 #   replay-filler DIR SRC NEW...  drop-repos VAULT SRC DST  insert-stage STAGES LOG AFTER LINE...
 #   vault-sample SRC DST            the run scripts' steps   (CorpusV2/Steps.bend)
+#   agent-tool TASK  agent-eval CKPT DIR FORMAT [K]   the tool loop's checker; E5, agent-act   (CorpusV2/Agent.bend)
+#   agent-stats DIR [DIR2]  compare A B   E5's statistics; E1 or behaviour paired by prompt   (CorpusV2/Stats.bend)
 
 # A record stream ---------------------------------------------------------------
 #
@@ -122,7 +124,7 @@ def c2.code(+c: String) -> Nat:
   Bool.pick(Nat, String.eq(c, "credit"), 16n, Bool.pick(Nat, String.eq(c, "credit-ok"), 17n, Bool.pick(Nat, String.eq(c, "split-lang"), 18n,
   Bool.pick(Nat, String.eq(c, "nul-jsonl"), 19n, Bool.pick(Nat, String.eq(c, "per"), 20n, Bool.pick(Nat, String.eq(c, "specs-mixnew"), 21n,
   Bool.pick(Nat, String.eq(c, "specs-next"), 22n, Bool.pick(Nat, String.eq(c, "replay-filler"), 23n, Bool.pick(Nat, String.eq(c, "drop-repos"), 24n,
-  Bool.pick(Nat, String.eq(c, "insert-stage"), 25n, Bool.pick(Nat, String.eq(c, "vault-sample"), 26n, Bool.pick(Nat, String.eq(c, "agent-tool"), 27n, Bool.pick(Nat, String.eq(c, "agent-eval"), 28n, Bool.pick(Nat, String.eq(c, "agent-stats"), 29n, 0n)))))))))))))))))))))))))))))
+  Bool.pick(Nat, String.eq(c, "insert-stage"), 25n, Bool.pick(Nat, String.eq(c, "vault-sample"), 26n, Bool.pick(Nat, String.eq(c, "agent-tool"), 27n, Bool.pick(Nat, String.eq(c, "agent-eval"), 28n, Bool.pick(Nat, String.eq(c, "agent-stats"), 29n, Bool.pick(Nat, String.eq(c, "compare"), 30n, 0n))))))))))))))))))))))))))))))
 
 def c2.keys.cmd(xs: List<String>) -> IO(Unit):
   match xs:
@@ -191,6 +193,8 @@ def c2.run(k: Nat, +c: String, xs: List<String>) -> IO(Unit):
       Ea.ea.eval(xs)
     case 29n:
       As.as.stats(xs)
+    case 30n:
+      As.cm.compare(xs)
     case _:
       c2.usage()
 

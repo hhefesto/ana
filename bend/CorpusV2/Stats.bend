@@ -5,6 +5,7 @@ import ./Eval.bend as Ev
 import ./Agent.bend as Ea
 import ../Agent/Spec.bend as A
 import ../Agent/Episode.bend as E
+import ./Lib.bend as L
 
 # The agent evaluation's statistics (docs/AGENT.md), read from an
 # agent-eval DIR (agent.nul, episodes.nul, prompt.N):
@@ -224,3 +225,175 @@ def as.stats(xs: List<String>) -> IO(Unit):
         IO.print(as.two(a, b, es, fs))
     case _:
       IO.die(Unit, 2, "usage: agent-stats DIR [DIR2]")
+
+# compare ------------------------------------------------------------------------
+#
+#   corpus-v2 compare A B
+#
+# Two runs of one evaluation paired by prompt, for the evaluations
+# agent-stats does not read: E1 (A and B directories holding results.nul:
+# id UNIT/SHAPE, joined to its check group's verdict in r.*.nul) and the
+# behaviour test (directories holding verdicts.tsv, or the files
+# themselves: TASK TAB VERDICT, `pass` passed). Prints each side's passes,
+# the prompts both ran, among them A only and B only and the exact
+# two-sided McNemar p.
+
+type CmO is Data:
+  CmO{k: String, pass: Bool}
+
+# E1's verdicts: r.G.nul (a check group's results), ids UNIT~N (N: results.nul's
+# first field), field 11 before 0x1F the decision (`0` passed), as report.txt
+# reads them (Eval.bend `ev.verdicts`, `ev.pass.of`)
+def cm.e1.key(+v: List<&2, U32>) -> List<&2, U32>:
+  +fs = Ev.ev.split(v, 30)
+  List.concat(&2, U32, [Ev.ev.nth(fs, 2n), S.b("~"), Ev.ev.nth(fs, 0n)])
+
+def cm.e1.passed(m: Maybe<&2, List<&2, U32>>) -> Bool:
+  match m:
+    case Some{v}:
+      S.eq(L.v2.before(Ev.ev.nth(Ev.ev.split(v, 30), 11n), 31), [48])
+    case None{}:
+      False{}
+
+def cm.e1.of(kvs: List<&2, Ev.EvKv>, +vs: List<&2, Ev.EvKv>) -> List<&2, CmO>:
+  match kvs:
+    case Nil{}:
+      Nil{}
+    case Ev.EvKv{k, v} <> t:
+      CmO{S.str(k), cm.e1.passed(Ev.ev.kv.get(vs, cm.e1.key(v)))} <> cm.e1.of(t, vs)
+
+def cm.read.one(n: List<&2, U32>, +p: String) -> IO(List<&2, Ev.EvKv>):
+  match n:
+    case Nil{}:
+      IO.pure(List<&2, Ev.EvKv>, Nil{})
+    case +c <> t:
+      Ev.ev.nul(p ++ "/" ++ S.str(c <> t))
+
+def cm.read.all(ns: List<&2, List<&2, U32>>, +p: String, acc: List<&2, Ev.EvKv>) -> IO(List<&2, Ev.EvKv>):
+  match ns:
+    case Nil{}:
+      IO.pure(List<&2, Ev.EvKv>, acc)
+    case n <> t:
+      do IO<List<&2, Ev.EvKv>>:
+        kvs : List<&2, Ev.EvKv> <- cm.read.one(n, p)
+        cm.read.all(t, p, List.append(&2, Ev.EvKv, acc, kvs))
+
+def cm.tsv.line(fs: List<&2, List<&2, U32>>) -> List<&2, CmO>:
+  match fs:
+    case +k <> +v <> _:
+      [CmO{S.str(k), S.eq(v, S.b("pass"))}]
+    case _:
+      Nil{}
+
+def cm.tsv.of(ls: List<&2, List<&2, U32>>) -> List<&2, CmO>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> t:
+      List.append(&2, CmO, cm.tsv.line(Ev.ev.split(l, 9)), cm.tsv.of(t))
+
+def cm.load.tsv(+p: String) -> IO(List<&2, CmO>):
+  do IO<List<&2, CmO>>:
+    xs : List<&2, U32> <- S.read(p)
+    return cm.tsv.of(S.split.lines(xs))
+
+def cm.load.e1(+p: String) -> IO(List<&2, CmO>):
+  do IO<List<&2, CmO>>:
+    kvs : List<&2, Ev.EvKv> <- Ev.ev.nul(p ++ "/results.nul")
+    o : S.Out <- S.run(".", [], 60, "sh", ["-c", "cd \"$0\" && ls r.*.nul", p], Nil{})
+    vs : List<&2, Ev.EvKv> <- cm.read.all(S.split.lines(S.Out.text(o)), p, Nil{})
+    return cm.e1.of(kvs, vs)
+
+def cm.load.pick(e1: Bool, beh: Bool, +p: String) -> IO(List<&2, CmO>):
+  match e1 beh:
+    case True{} _:
+      cm.load.e1(p)
+    case False{} True{}:
+      cm.load.tsv(p ++ "/verdicts.tsv")
+    case False{} False{}:
+      cm.load.tsv(p)
+
+def cm.load(+p: String) -> IO(List<&2, CmO>):
+  do IO<List<&2, CmO>>:
+    e1 : Bool <- S.exists(p ++ "/results.nul")
+    beh : Bool <- S.exists(p ++ "/verdicts.tsv")
+    cm.load.pick(e1, beh, p)
+
+def cm.keys(os: List<&2, CmO>, s: Set()) -> Set():
+  match os:
+    case Nil{}:
+      s
+    case CmO{k, o} <> t:
+      cm.keys(t, Set.add(s, k))
+
+def cm.pass.add(o: Bool, k: String, s: Set()) -> Set():
+  match o:
+    case True{}:
+      Set.add(s, k)
+    case False{}:
+      s
+
+def cm.passes(os: List<&2, CmO>, s: Set()) -> Set():
+  match os:
+    case Nil{}:
+      s
+    case CmO{k, o} <> t:
+      cm.passes(t, cm.pass.add(o, k, s))
+
+def cm.count(os: List<&2, CmO>) -> Nat:
+  match os:
+    case Nil{}:
+      0n
+    case CmO{k, o} <> t:
+      Nat.add(Bool.pick(Nat, o, 1n, 0n), cm.count(t))
+
+def cm.b(+x: Bool) -> Nat:
+  Bool.pick(Nat, x, 1n, 0n)
+
+# the paired counts: both ran, both passed, A only, B only
+type CmP is Data:
+  CmP{n: Nat, both: Nat, a: Nat, b: Nat}
+
+def cm.pair.one(+ran: Bool, +o: Bool, +p: Bool, c: CmP) -> CmP:
+  match c:
+    case CmP{n, both, a, b}:
+      CmP{Nat.add(n, cm.b(ran)), Nat.add(both, cm.b(Bool.and(ran, Bool.and(o, p)))),
+        Nat.add(a, cm.b(Bool.and(ran, Bool.and(o, Bool.not(p))))), Nat.add(b, cm.b(Bool.and(ran, Bool.and(p, Bool.not(o)))))}
+
+# the pairing's state: B's prompts, B's passes, the counts
+type CmS is Type:
+  CmS{ks: Set(), ps: Set(), c: CmP}
+
+# Set.has hands the set back with its answer
+def cm.step.passed(+ran: Bool, +o: Bool, ks: Set(), r: Set() & Bool, c: CmP) -> CmS:
+  (ps, p) = r
+  CmS{ks, ps, cm.pair.one(ran, o, p, c)}
+
+def cm.step.ran(+k: String, +o: Bool, r: Set() & Bool, ps: Set(), c: CmP) -> CmS:
+  (ks, ran) = r
+  cm.step.passed(ran, o, ks, Set.has(ps, k), c)
+
+def cm.pair(os: List<&2, CmO>, st: CmS) -> CmP:
+  match os st:
+    case Nil{} CmS{ks, ps, c}:
+      c
+    case CmO{+k, +o} <> t CmS{ks, ps, c}:
+      cm.pair(t, cm.step.ran(k, o, Set.has(ks, k), ps, c))
+
+def cm.show(+a: String, +b: String, +xs: List<&2, CmO>, +ys: List<&2, CmO>, c: CmP) -> String:
+  match c:
+    case CmP{n, both, +x, +y}:
+      String.join(["A " ++ a ++ ": " ++ Nat.show(cm.count(xs)) ++ "/" ++ Nat.show(List.length(&2, CmO, xs)) ++ " passed",
+        "B " ++ b ++ ": " ++ Nat.show(cm.count(ys)) ++ "/" ++ Nat.show(List.length(&2, CmO, ys)) ++ " passed",
+        "paired by prompt: " ++ Nat.show(n) ++ " in both, both passed " ++ Nat.show(both) ++ ", A only " ++ Nat.show(x)
+          ++ ", B only " ++ Nat.show(y) ++ ", exact two-sided McNemar p = " ++ F32.show(as.mcnemar(x, y))], "\n")
+
+def cm.compare(xs: List<String>) -> IO(Unit):
+  match xs:
+    case +a <> +b <> Nil{}:
+      do IO<Unit>:
+        +os : List<&2, CmO> <- cm.load(a)
+        +ps : List<&2, CmO> <- cm.load(b)
+        IO.print(cm.show(a, b, os, ps, cm.pair(os, CmS{cm.keys(ps, Set.new()), cm.passes(ps, Set.new()), CmP{0n, 0n, 0n, 0n}})))
+    case _:
+      IO.die(Unit, 2, "usage: compare A B (E1 directories, behaviour directories or verdicts.tsv files)")
