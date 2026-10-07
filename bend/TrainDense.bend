@@ -767,22 +767,79 @@ def real(ws: List<&2, List<&2, U32>>) -> Nat:
     case +w <> t:
       Nat.add(Bool.pick(Nat, Nat.is_lt(1n, List.length(&2, U32, w)), 1n, 0n), real(t))
 
+# The scores so far: the weighted sum of micro-batch losses, the weight
+# (windows; under EVAL_MASK, weighted targets), each micro-batch's mean
+# loss (newest first: EVAL_LINES prints them)
 type Ea is Data:
-  Ea{sum: F32, n: Nat}
+  Ea{sum: F32, n: Nat, ls: List<&2, F32>}
 
 def Ea.add(+k: Nat, +l: F32, a: Ea) -> Ea:
   match a:
-    case Ea{+sum, +n}:
-      Ea{F32.add(sum, F32.mul(l, F32.from_nat(k))), Nat.add(n, k)}
+    case Ea{+sum, +n, ls}:
+      Ea{F32.add(sum, F32.mul(l, F32.from_nat(k))), Nat.add(n, k), l <> ls}
+
+# a micro-batch whose weight is 0 (no target the mask keeps) adds nothing:
+# its mean is 0/0
+def eval.add.if(none: Bool, +k: Nat, +l: F32, a: Ea) -> Ea:
+  match none:
+    case True{}:
+      a
+    case False{}:
+      Ea.add(k, l, a)
 
 def eval.add(+k: Nat, +a: Ea, r: Array<F32> & F32) -> Array<F32> & Ea:
   (s, +l) = r
-  (s, Ea.add(k, l, a))
+  (s, eval.add.if(Nat.is_eq(k, 0n), k, l, a))
+
+# EVAL_MASK=kinds: only the targets a TRAIN_MASK=kinds run trains on count
+# (a transcript's tool echoes, its given attempts and ana's rejected tries
+# weigh 0, Mask.bend), so a masked run is not charged for text it never
+# learned to write (run 2 is masked, run 1 was not). A micro-batch's loss is
+# then the mean over its weighted targets and weighs their number; bits per
+# byte scale the mean by those targets / the bytes they decode to.
+def eval.wcount(ws: List<&2, F32>) -> Nat:
+  match ws:
+    case Nil{}:
+      0n
+    case +w <> t:
+      Nat.add(Bool.pick(Nat, F32.is_eq(w, 1.0), 1n, 0n), eval.wcount(t))
+
+def eval.wbytes(+b: Tk.Bpe, ys: List<&2, U32>, ws: List<&2, F32>) -> Nat:
+  match ys ws:
+    case +y <> yt +w <> wt:
+      Nat.add(Bool.pick(Nat, F32.is_eq(w, 1.0), Ev.target.bytes.one(U32.is_ge(y, 2), b, y), 0n), eval.wbytes(b, yt, wt))
+    case _ _:
+      0n
+
+# a micro-batch's weight: its real windows, or its weighted targets
+def eval.weight(+mk: Ms.Mask, mw: List<&2, List<&2, U32>>) -> Nat:
+  match mk:
+    case Ms.MsOff{}:
+      real(mw)
+    case Ms.MsOn{+ids}:
+      eval.wcount(List.concat(&2, F32, Ms.ms.weights.all(ids, mw)))
+
+def eval.counts.on(+ids: Ms.Ids, +b: Tk.Bpe, ws: List<&2, List<&2, U32>>, +p: Nat, +y: Nat) -> Nat & Nat:
+  match ws:
+    case Nil{}:
+      (p, y)
+    case +w <> t:
+      +wt = Ms.ms.weights(ids, w)
+      eval.counts.on(ids, b, t, Nat.add(p, eval.wcount(wt)), Nat.add(y, eval.wbytes(b, List.drop(&2, U32, w, 1n), wt)))
+
+# predictions and bytes the scale counts: all ordinary targets, or the
+# weighted ones
+def eval.counts(+mk: Ms.Mask, +b: Tk.Bpe, +ws: List<&2, List<&2, U32>>) -> Nat & Nat:
+  match mk:
+    case Ms.MsOff{}:
+      (Ev.all.predictions(ws), Ev.all.bytes(b, ws))
+    case Ms.MsOn{+ids}:
+      eval.counts.on(ids, b, ws, 0n, 0n)
 
 def eval.one(+mw: List<&2, List<&2, U32>>, +rn: Run, r: Array<F32> & Ea) -> Array<F32> & Ea:
   (s, +a) = r
-  +k = real(mw)
-  eval.add(k, a, Io.get1(P.run(Run.fwd(rn), put(mw, rn, s)), L.Lay.lmean(Run.ly(rn))))
+  +k = eval.weight(Run.mask(rn), mw)
+  eval.add(k, a, Io.get1(P.run(Run.fwd(rn), put.mask(mw, rn, Run.mask(rn), s)), L.Lay.lmean(Run.ly(rn))))
 
 def eval.go(ms: List<&2, List<&2, List<&2, U32>>>, +rn: Run, r: Array<F32> & Ea) -> Array<F32> & Ea:
   match ms:
@@ -791,35 +848,79 @@ def eval.go(ms: List<&2, List<&2, List<&2, U32>>>, +rn: Run, r: Array<F32> & Ea)
     case mw <> t:
       eval.go(t, rn, eval.one(mw, rn, r))
 
-def eval.print(+scale: F32, +preds: Nat, +bytes: Nat, a: Ea) -> IO(Unit):
+# EVAL_LINES=1: each micro-batch's mean loss, in order (TRAIN_MICRO=1: each
+# window's, for paired comparisons between checkpoints on one corpus)
+def eval.lines(ls: List<&2, F32>, +i: Nat) -> IO(Unit):
+  match ls:
+    case Nil{}:
+      IO.pure(Unit, Unit{})
+    case +l <> t:
+      do IO<Unit>:
+        say("micro " ++ Nat.show(i) ++ " loss " ++ F32.show(l))
+        eval.lines(t, 1n+i)
+
+def eval.lines.if(on: Bool, ls: List<&2, F32>) -> IO(Unit):
+  match on:
+    case True{}:
+      eval.lines(List.reverse(&2, F32, ls), 0n)
+    case False{}:
+      IO.pure(Unit, Unit{})
+
+def eval.print(+lines: Bool, +masked: Bool, +scale: F32, +preds: Nat, +bytes: Nat, a: Ea) -> IO(Unit):
   match a:
-    case Ea{+sum, +n}:
+    case Ea{+sum, +n, ls}:
       +loss = F32.div(sum, F32.from_nat(Nat.max(n, 1n)))
       do IO<Unit>:
-        say("windows: " ++ Nat.show(n) ++ "  predictions: " ++ Nat.show(preds) ++ "  bytes: " ++ Nat.show(bytes))
+        eval.lines.if(lines, ls)
+        say(Bool.pick(String, masked, "weighted targets: ", "windows: ") ++ Nat.show(n) ++ "  predictions: " ++ Nat.show(preds) ++ "  bytes: " ++ Nat.show(bytes))
         say("loss: " ++ F32.show(loss) ++ " nats/token")
         say("bits_per_byte: " ++ F32.show(F32.mul(loss, scale)))
 
-def eval.fin(+scale: F32, +nw: Nat, +preds: Nat, +bytes: Nat, r: Array<F32> & Ea) -> IO(Unit):
+def eval.fin(+lines: Bool, +masked: Bool, +scale: F32, +preds: Nat, +bytes: Nat, r: Array<F32> & Ea) -> IO(Unit):
   (s, a) = r
-  eval.print(scale, preds, bytes, a)
+  eval.print(lines, masked, scale, preds, bytes, a)
 
-def eval.run(+c: C.Config, +tok: Tr.Tok, +mb: Nat, +chunk: Nat, +path: String, +limit: Nat, +xs: List<&2, U32>,
-             r: Array<F32> & Dk.Src) -> IO(Unit):
-  (s, +src) = r
+def eval.masked(+mk: Ms.Mask) -> Bool:
+  match mk:
+    case Ms.MsOff{}:
+      False{}
+    case Ms.MsOn{ids}:
+      True{}
+
+def eval.mask.of(m: Maybe<&2, Ms.Mask>) -> IO(Ms.Mask):
+  match m:
+    case Some{+mk}:
+      IO.pure(Ms.Mask, mk)
+    case None{}:
+      IO.die(Ms.Mask, 1, "evaluate (dense): EVAL_MASK must be unset or kinds (and the tokenizer's newline one token)")
+
+def eval.run.scored(+c: C.Config, +tok: Tr.Tok, +mb: Nat, +chunk: Nat, +path: String, +co: Cc.Corpus, +ws: List<&2, List<&2, U32>>,
+                    +mk: Ms.Mask, +lines: Bool, s: Array<F32>, +src: Dk.Src, pb: Nat & Nat) -> IO(Unit):
+  (+preds, +bytes) = pb
   +m = L.Dm.of.cc(c, mb, U32.from_nat(chunk))
   +ly = L.Lay.of(c, m)
-  +rn = {Run{m, ly, S.fwd(m, ly), Nil{}, Nil{}, Ms.MsOff{}} : Run}
+  +rn = {Run{m, ly, S.fwd(m, ly), Nil{}, Nil{}, mk} : Run}
+  +scale = F32.div(F32.from_nat(preds), F32.mul(F32.from_nat(Nat.max(bytes, 1n)), F32.log(2.0)))
+  do IO<Unit>:
+    u : Unit <- Dk.fail.if(Cc.Corpus.problem(co, Tr.Tok.id(tok)))
+    say("evaluate (dense): step " ++ Nat.show(Dk.Src.step(src)) ++ " on " ++ path ++ " (" ++ Cc.Corpus.dataset(co) ++ ")" ++ Bool.pick(String, eval.masked(mk), ", " ++ Ms.ms.name(mk), ""))
+    eval.fin(lines, eval.masked(mk), scale, preds, bytes, eval.go(micros(mb, pad.to(mb, ws)), rn, (s, Ea{0.0, 0n, Nil{}})))
+
+def eval.run.go(+c: C.Config, +tok: Tr.Tok, +mb: Nat, +chunk: Nat, +path: String, +limit: Nat, +xs: List<&2, U32>,
+                +mk: Ms.Mask, +lines: Bool, r: Array<F32> & Dk.Src) -> IO(Unit):
+  (s, +src) = r
   +co = Cc.corpus(xs)
   +all = D.all.windows(C.Config.ctx(c), Cc.Corpus.docs(co))
   +ws = Bool.pick(List<&2, List<&2, U32>>, Nat.is_eq(limit, 0n), all, List.take(&2, List<&2, U32>, all, limit))
-  +preds = Ev.all.predictions(ws)
-  +bytes = Ev.all.bytes(Tr.Tok.b(tok), ws)
-  +scale = F32.div(F32.from_nat(preds), F32.mul(F32.from_nat(bytes), F32.log(2.0)))
+  eval.run.scored(c, tok, mb, chunk, path, co, ws, mk, lines, s, src, eval.counts(mk, Tr.Tok.b(tok), ws))
+
+def eval.run(+c: C.Config, +tok: Tr.Tok, +mb: Nat, +chunk: Nat, +path: String, +limit: Nat, +xs: List<&2, U32>,
+             r: Array<F32> & Dk.Src) -> IO(Unit):
   do IO<Unit>:
-    u : Unit <- Dk.fail.if(Cc.Corpus.problem(co, Tr.Tok.id(tok)))
-    say("evaluate (dense): step " ++ Nat.show(Dk.Src.step(src)) ++ " on " ++ path ++ " (" ++ Cc.Corpus.dataset(co) ++ ")")
-    eval.fin(scale, List.length(&2, List<&2, U32>, ws), preds, bytes, eval.go(micros(mb, pad.to(mb, ws)), rn, (s, Ea{0.0, 0n})))
+    +ms : String <- Tr.env("EVAL_MASK", "")
+    +lines : String <- Tr.env("EVAL_LINES", "")
+    +mk : Ms.Mask <- eval.mask.of(Ms.ms.of(ms, Tr.Tok.b(tok)))
+    eval.run.go(c, tok, mb, chunk, path, limit, xs, mk, String.eq(lines, "1"), r)
 
 def batch.check.if(ok: Bool, +pb: Nat, +batch: Nat) -> IO(Unit):
   match ok:
