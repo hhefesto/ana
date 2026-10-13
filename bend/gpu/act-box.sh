@@ -41,7 +41,11 @@ r() { ssh -p "$port" -o ServerAliveInterval=30 -o StrictHostKeyChecking=accept-n
 rs() { rsync -e "ssh -p $port -o ServerAliveInterval=30 -o StrictHostKeyChecking=accept-new" "$@"; }
 # a command in the box's workspace, as here: its HOME, the box's nix on PATH
 rw() { r "export HOME=$bh PATH=/usr/local/bin:\$PATH; cd $ws && $*"; }
-links="run/v2/gcroot-deploy-agent run/gcroot-bend-generate-agent run/agent/gcroot-bend-episode run/gcroot-ana"
+# run/v2/gcroot-bend-plan-segment: combine (CorpusV2/Combine.bend) runs it by that path, and
+# s2.sh runs combine on the box (2026-10-13: without it S2 stopped at exit 127).
+# run/check-cache/ghc-harness: the Haskell checker's ghc (Check.bend cfg.haskell, GHC); without
+# it every Haskell unit is placed nowhere (2026-10-13, at trees below)
+links="run/v2/gcroot-deploy-agent run/gcroot-bend-generate-agent run/agent/gcroot-bend-episode run/gcroot-ana run/v2/gcroot-bend-plan-segment run/check-cache/ghc-harness"
 S=$(mktemp -d); trap 'rm -rf "$S"' EXIT
 
 # the box's nix: the static binary under its tools' names, a root store with
@@ -61,14 +65,24 @@ box_nix() {
 units_of() { cat "$@" | awk -v RS='\0' 'NR % 2 == 1 { sub(/\/[^\/]*$/, ""); print }'; }
 
 # the source trees units need: repo:NAME/.. -> run/code-sources/repos/NAME,
-# hackage:PKG/.. -> run/check-cache/hs/src/PKG-VERSION, own: and curated: (all
-# of them), and the Agda library file's checkouts
+# hackage:PKG/.. -> run/check-cache/hs/src/PKG-VERSION and its tarball, own: and
+# curated: (all of them, and the target of each link a unit names), and the Agda
+# library file's checkouts.
+# 2026-10-13: run 3's act round 1 had no Haskell episode: ghc never answered. The Haskell
+# checker (Check.bend cfg.haskell) knows a Hackage package by its tarball's name in
+# run/code-sources/tarballs, and most of curated/ (341 of 421) and some of own/ are links
+# into run/code-sources-next, which rsync ships as links: with neither, every unit is placed
+# nowhere (placed_no_source), its own original fails, and the tool exits 2 (tool-error).
 trees() {
   awk '/^repo:/ { sub(/^repo:/, ""); sub(/\/.*/, ""); print "run/code-sources/repos/" $0 }' "$1"
   grep -o "$ws/run/code-sources/repos/[^/]*" run/check-cache/agda/libraries | sed "s|^$ws/||"
   printf '%s\n' run/code-sources/own run/code-sources/curated run/check-cache/agda run/check-cache/hs/hi run/check-cache/hs/info \
     run/check-cache/hs/cabal-dirs
-  awk '/^hackage:/ { sub(/^hackage:/, ""); sub(/\/.*/, ""); print }' "$1" | sort -u | while read -r p; do ls -d run/check-cache/hs/src/"$p"-[0-9]* 2>/dev/null || true; done
+  awk '/^hackage:/ { sub(/^hackage:/, ""); sub(/\/.*/, ""); print }' "$1" | sort -u | while read -r p; do
+    ls -d run/check-cache/hs/src/"$p"-[0-9]* run/code-sources/tarballs/"$p"-[0-9]*.tar.gz 2>/dev/null || true; done
+  # a link's target inside this repository (an absolute one elsewhere, repos/nixpkgs, stays a link)
+  awk '/^(own|curated):/ { k = $0; sub(/:.*/, "", k); sub(/^[^:]*:/, ""); sub(/\/.*/, ""); print "run/code-sources/" k "/" $0 }' "$1" \
+    | sort -u | while read -r d; do [ -L "$d" ] && realpath --relative-to=. "$d"; done | grep -v '^\.\./' || true
 }
 
 setup() {
@@ -79,7 +93,7 @@ setup() {
   log "nix copy: $(echo "$paths" | wc -l) tools, their closures substituted on the box"
   NIX_SSHOPTS="-p $port -o ServerAliveInterval=30" nix copy -s --no-check-sigs \
     --to "ssh-ng://$host?remote-program=/usr/local/bin/nix-daemon" $paths
-  r "mkdir -p $ws/run/v2/act $ws/run/v2/results $ws/run/v3 $ws/run/agent $ws/run/harness $bh"
+  r "mkdir -p $ws/run/v2/act $ws/run/v2/results $ws/run/v3 $ws/run/agent $ws/run/harness $ws/run/check-cache $bh"
   for l in $links; do r "ln -sfn $(readlink -f "$l") $ws/$l"; done
   rw "\$(readlink -f run/v2/gcroot-deploy-agent)/bin/deploy 2>&1 | head -1"
   log "tracked files"
@@ -130,13 +144,21 @@ act() {
 
 check() {
   local c=${1:?usage: act-box.sh check HOST PORT CKPT} d=run/v3/act/check
-  rw "rm -rf $d $d.log; PROCS=\$(( \$(nproc) / 2 )) THREADS=2 tools/corpus-v2/agent-act.sh $c $d 1 > $d.log 2>&1" || true
+  rw "rm -rf $d $d.log; mkdir -p $(dirname $d); PROCS=\$(( \$(nproc) / 2 )) THREADS=2 tools/corpus-v2/agent-act.sh $c $d 1 > $d.log 2>&1" || true
   rw "cat $d/report.txt; tail -3 $d.log" | tee "$S/check.txt"
   # the render law on every episode, and all 9 languages and shapes answered
   # (Nix has no direct prompt)
   grep -Eq '^render law ([0-9]+)/\1$' "$S/check.txt" || { log "check: the render law did not hold on every episode"; exit 1; }
   local n; n=$(grep -cE 'solved within 1:[0-9]+/[1-9]' "$S/check.txt" || true)
   [ "$n" = 9 ] || { log "check: $n of the 9 languages and shapes answered"; exit 1; }
+  # every language's checker answers ana: a language with more episodes ended by a tool error
+  # than episodes the tool answered has a checker that cannot place its units (2026-10-13:
+  # round 1's Haskell, 2,596 errors and none answered, and Bend's curated units, 611 and 64;
+  # the counts above passed). LANG TOOL-ERRORS ANSWERED EPISODES a line.
+  rw "paste <(grep -a '^lang=' $d/episodes.eplog) <(run/agent/gcroot-bend-episode/bin/bend-episode why $d/episodes.eplog 4) \
+    | awk '{ n[\$1]++; if (\$3 == \"tool-error\") e[\$1]++; if (\$6 > 0) a[\$1]++ } END { for (l in n) print l, e[l] + 0, a[l] + 0, n[l] }'" | tee "$S/tools.txt"
+  n=$(awk '$4 > 0 && $2 > $3 { print $1 }' "$S/tools.txt" | tr '\n' ' ')
+  [ -z "$n" ] || { log "check: the checker failed more than it answered for $n"; exit 1; }
   log "check: passed"
 }
 

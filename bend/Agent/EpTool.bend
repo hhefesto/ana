@@ -3,6 +3,7 @@ import ../Sys.bend as S
 import ./Spec.bend as A
 import ./Episode.bend as E
 import ../Transcript.bend as Tr
+import ../Tokenizer.bend as Tk
 import ../CorpusV2/Eval.bend as Ev
 
 # bend-episode: Agent/Episode.bend's log from the shell.
@@ -15,6 +16,12 @@ import ../CorpusV2/Eval.bend as Ev
 #   bend-episode fixed K CAP OUT LOG...    the unsolved ones with the unit's own fix (below)
 #
 # A log that does not read (not a log, or a record cut short) exits 1.
+#
+# Every transcript accept and fixed write fits a window, bend-transcript's law
+# (Transcript.bend `fits`): its tokens under TOKENIZER (weights/code32k.bpe),
+# plus BOS and EOS, within WINDOW - 64 (WINDOW 2048). One that does not is
+# left out, never cut (2026-10-13: run 3's act round 1 gave 106 over the
+# window, up to 23,333 tokens, and bend-windows refuses them).
 
 def et.texts(rs: List<&2, E.EpRec>) -> List<&2, U32>:
   match rs:
@@ -54,7 +61,8 @@ def et.with(mode: Nat, +k: Nat, m: Maybe<&2, List<&2, E.EpRec>>) -> IO(Unit):
 # An episode trains when its grammar holds under at most K calls
 # (Episode.bend `ep.why`) and its answer has no escape hatch (Haskell
 # `undefined`; Lean `sorry`, `admit`; Agda `postulate`, `{!`, `TERMINATING`,
-# `trustMe`: the checker passes them, the task is not done); at most CAP a
+# `trustMe`: the checker passes them, the task is not done) and it fits the
+# window (else its reason is long, and it takes no slot); at most CAP a
 # unit, those that fixed a rejected term (a try or more) first, then in log
 # order. OUT/LANG-act/transcripts.train.nul gets each of LANG's (haskell,
 # agda, lean, nix, bend; its metadata's lang) as `UNIT/episode-N\0TEXT\0` (N
@@ -84,12 +92,30 @@ def et.hatch(+lang: List<&2, U32>, +code: List<&2, U32>) -> Bool:
       Bool.pick(Bool, S.eq(lang, S.b("agda")), Bool.or(Bool.or(et.has(code, "postulate"), et.has(code, "{!")), Bool.or(et.has(code, "TERMINATING"), et.has(code, "trustMe"))),
         False{})))
 
+# the window's law: the tokenizer and the limit (WINDOW - 64)
+type EtW is Data:
+  EtW{bpe: Tk.Bpe, lim: Nat}
+
+def et.fits(+w: EtW, +text: List<&2, U32>) -> Bool:
+  match w:
+    case EtW{b, lim}:
+      Tr.fits(b, lim, text)
+
+# a grammatical record's verdict: hatch, long (over the window), or "" (it
+# trains); a match, so only those are encoded
+def et.verdict.if(ok: Bool, +w: String, +win: EtW, +lang: List<&2, U32>, +code: List<&2, U32>, +text: List<&2, U32>) -> String:
+  match ok:
+    case True{}:
+      Bool.pick(String, et.hatch(lang, code), "hatch", Bool.pick(String, et.fits(win, text), "", "long"))
+    case False{}:
+      w
+
 # a record's verdict: "" it trains, else why not
-def et.verdict(+k: Nat, +r: E.EpRec) -> String:
+def et.verdict(+win: EtW, +k: Nat, +r: E.EpRec) -> String:
   +ss = E.EpRec.segs(r)
   +w = E.ep.why(ss, k)
   +code = A.ag.answer.code(E.ep.turns(ss))
-  Bool.pick(String, String.is_empty(w), Bool.pick(String, et.hatch(et.meta(E.EpRec.meta(r), "lang"), code), "hatch", ""), w)
+  et.verdict.if(String.is_empty(w), w, win, et.meta(E.EpRec.meta(r), "lang"), code, E.ep.text(ss))
 
 type EtC is Data:
   EtC{why: String, n: Nat}
@@ -144,24 +170,24 @@ def et.doc(+m: List<&2, U32>, +r: E.EpRec) -> List<&2, U32>:
 
 # one record into the accepted, when it trains, is of this pass (tried or
 # not) and its unit has room (a cap of 1 or 2)
-def et.take(+k: Nat, +cap: Nat, +tried: Bool, +r: E.EpRec, a: EtA) -> EtA:
+def et.take(+win: EtW, +k: Nat, +cap: Nat, +tried: Bool, +r: E.EpRec, a: EtA) -> EtA:
   +m = E.EpRec.meta(r)
   +mine = Bool.not(Bool.xor(Nat.is_lt(0n, E.ep.tries(E.EpRec.segs(r))), tried))
-  et.take.if(Bool.and(mine, String.is_empty(et.verdict(k, r))), S.str(et.meta(m, "unit")), et.doc(m, r), cap, a)
+  et.take.if(Bool.and(mine, String.is_empty(et.verdict(win, k, r))), S.str(et.meta(m, "unit")), et.doc(m, r), cap, a)
 
-def et.pass(rs: List<&2, E.EpRec>, +k: Nat, +cap: Nat, +tried: Bool, a: EtA) -> EtA:
+def et.pass(rs: List<&2, E.EpRec>, +win: EtW, +k: Nat, +cap: Nat, +tried: Bool, a: EtA) -> EtA:
   match rs:
     case Nil{}:
       a
     case +r <> t:
-      et.pass(t, k, cap, tried, et.take(k, cap, tried, r, a))
+      et.pass(t, win, k, cap, tried, et.take(win, k, cap, tried, r, a))
 
-def et.why.all(rs: List<&2, E.EpRec>, +k: Nat, cs: List<&2, EtC>) -> List<&2, EtC>:
+def et.why.all(rs: List<&2, E.EpRec>, +win: EtW, +k: Nat, cs: List<&2, EtC>) -> List<&2, EtC>:
   match rs:
     case Nil{}:
       cs
     case +r <> t:
-      et.why.all(t, k, et.bump(cs, et.verdict(k, r)))
+      et.why.all(t, win, k, et.bump(cs, et.verdict(win, k, r)))
 
 def et.keep(on: Bool, +r: E.EpRec, t: List<&2, E.EpRec>) -> List<&2, E.EpRec>:
   match on:
@@ -191,18 +217,18 @@ def et.accept.put(+dir: String, +l: String, a: EtA) -> IO(Nat):
         IO.print("accept: " ++ l ++ " " ++ Nat.show(n) ++ " into " ++ dir ++ "/transcripts.train.nul")
         return n
 
-def et.accept.one(+out: String, +k: Nat, +cap: Nat, +l: String, +rs: List<&2, E.EpRec>) -> IO(Nat):
+def et.accept.one(+out: String, +win: EtW, +k: Nat, +cap: Nat, +l: String, +rs: List<&2, E.EpRec>) -> IO(Nat):
   +mine = et.lang.of(S.b(l), rs)
-  et.accept.put(out ++ "/" ++ l ++ "-act", l, et.pass(mine, k, cap, False{}, et.pass(mine, k, cap, True{}, EtA{Nil{}, Set.new(), 0n})))
+  et.accept.put(out ++ "/" ++ l ++ "-act", l, et.pass(mine, win, k, cap, False{}, et.pass(mine, win, k, cap, True{}, EtA{Nil{}, Set.new(), 0n})))
 
-def et.accept.all(ls: List<&2, String>, +out: String, +k: Nat, +cap: Nat, +rs: List<&2, E.EpRec>, +n: Nat) -> IO(Nat):
+def et.accept.all(ls: List<&2, String>, +out: String, +win: EtW, +k: Nat, +cap: Nat, +rs: List<&2, E.EpRec>, +n: Nat) -> IO(Nat):
   match ls:
     case Nil{}:
       IO.pure(Nat, n)
     case l <> t:
       do IO<Nat>:
-        m : Nat <- et.accept.one(out, k, cap, l, rs)
-        et.accept.all(t, out, k, cap, rs, Nat.add(n, m))
+        m : Nat <- et.accept.one(out, win, k, cap, l, rs)
+        et.accept.all(t, out, win, k, cap, rs, Nat.add(n, m))
 
 def et.got(+p: String, m: Maybe<&2, List<&2, E.EpRec>>) -> IO(List<&2, E.EpRec>):
   match m:
@@ -221,11 +247,27 @@ def et.logs(ps: List<String>, acc: List<&2, E.EpRec>) -> IO(List<&2, E.EpRec>):
         rs : List<&2, E.EpRec> <- et.got(p, E.ep.get(xs))
         et.logs(t, List.append(&2, E.EpRec, acc, rs))
 
+def et.win.of(+tok: String, +lim: Nat, m: Maybe<&2, Tk.Bpe>) -> IO(EtW):
+  match m:
+    case Some{b}:
+      IO.pure(EtW, EtW{b, lim})
+    case None{}:
+      IO.die(EtW, 1, "bend-episode: the tokenizer " ++ tok ++ " does not parse")
+
+# the window's law from TOKENIZER and WINDOW
+def et.win() -> IO(EtW):
+  do IO<EtW>:
+    +tok : String <- S.env("TOKENIZER", "weights/code32k.bpe")
+    +w : Nat <- S.env.nat("WINDOW", 2048n)
+    tx : List<&2, U32> <- S.read(tok)
+    et.win.of(tok, Nat.sub(w, 64n), Tk.Bpe.parse(tx))
+
 def et.accept(+k: Nat, +cap: Nat, +out: String, ps: List<String>) -> IO(Unit):
   do IO<Unit>:
+    +win : EtW <- et.win()
     +rs : List<&2, E.EpRec> <- et.logs(ps, Nil{})
-    n : Nat <- et.accept.all(et.langs(), out, k, cap, rs, 0n)
-    IO.print("accept: " ++ Nat.show(List.length(&2, E.EpRec, rs)) ++ " episodes;" ++ et.counts(et.why.all(rs, k, Nil{}))
+    n : Nat <- et.accept.all(et.langs(), out, win, k, cap, rs, 0n)
+    IO.print("accept: " ++ Nat.show(List.length(&2, E.EpRec, rs)) ++ " episodes;" ++ et.counts(et.why.all(rs, win, k, Nil{}))
       ++ "; " ++ Nat.show(n) ++ " accepted (at most the cap a unit, tried first) into " ++ out ++ "/LANG-act")
 
 # Fixed episodes ------------------------------------------------------------------
@@ -242,8 +284,9 @@ def et.accept(+k: Nat, +cap: Nat, +out: String, ps: List<String>) -> IO(Unit):
 # call's heading line (`## ghc`), the tool's holds the rest. j is the
 # largest, at most K - 1 and the calls made, under which the whole is a
 # training episode (`ep.why`: a changed heading ends the tries; a copy is a
-# try like any other). A solved episode, one with no checked Term, or one
-# whose unit's original has an escape hatch gives none; at most CAP a unit,
+# try like any other) and that fits the window. A solved episode, one with
+# no checked Term, one whose unit's original has an escape hatch, or one
+# over the window at every j gives none; at most CAP a unit,
 # in log order. The records are run/v2/results/LANG.R.nul, R AGENT_RECORDS
 # (holdout unless set; agent-act.sh: train), read for the log's units only.
 # OUT/LANG-fix/transcripts.train.nul gets each of LANG's as
@@ -289,42 +332,56 @@ def et.fx.or(ok: Bool, e: List<&2, E.EpSeg>, rest: Maybe<&2, List<&2, E.EpSeg>>)
     case False{}:
       rest
 
-# the episode with the most tries, j at most, that trains
-def et.fx.best(+j: Nat, +ss: List<&2, E.EpSeg>, +fix: List<&2, E.EpSeg>, +k: Nat) -> Maybe<&2, List<&2, E.EpSeg>>:
+# a training episode that fits the window (a match, so only those are encoded)
+def et.fx.fits(ok: Bool, +win: EtW, +e: List<&2, E.EpSeg>) -> Bool:
+  match ok:
+    case True{}:
+      et.fits(win, E.ep.text(e))
+    case False{}:
+      False{}
+
+# the episode with the most tries, j at most, that trains and fits the window
+def et.fx.best(+win: EtW, +j: Nat, +ss: List<&2, E.EpSeg>, +fix: List<&2, E.EpSeg>, +k: Nat) -> Maybe<&2, List<&2, E.EpSeg>>:
   match j:
     case 0n:
       None{}
     case 1n+p:
       +e = List.append(&2, E.EpSeg, et.fx.upto(ss, j), fix)
-      et.fx.or(E.ep.ok(e, k), e, et.fx.best(p, ss, fix, k))
+      et.fx.or(et.fx.fits(E.ep.ok(e, k), win, e), e, et.fx.best(win, p, ss, fix, k))
 
-def et.fx.make.if(none: Bool, +k: Nat, +ss: List<&2, E.EpSeg>, +fs: List<&2, List<&2, U32>>) -> Maybe<&2, List<&2, E.EpSeg>>:
+def et.fx.make.if(none: Bool, +win: EtW, +k: Nat, +ss: List<&2, E.EpSeg>, +fs: List<&2, List<&2, U32>>) -> Maybe<&2, List<&2, E.EpSeg>>:
   match none:
     case True{}:
       None{}
     case False{}:
-      et.fx.best(Nat.min(E.ep.calls(ss), Nat.sub(k, 1n)), ss, et.fx.fix(fs), k)
+      et.fx.best(win, Nat.min(E.ep.calls(ss), Nat.sub(k, 1n)), ss, et.fx.fix(fs), k)
 
 # a record's fixed episode, when it gives one (t: its unit's record)
-def et.fx.make(+k: Nat, +r: E.EpRec, +t: List<&2, U32>) -> Maybe<&2, List<&2, E.EpSeg>>:
+def et.fx.make(+win: EtW, +k: Nat, +r: E.EpRec, +t: List<&2, U32>) -> Maybe<&2, List<&2, E.EpSeg>>:
   +ss = E.EpRec.segs(r)
   +fs = Tr.split(t, 30)
   +lang = et.meta(E.EpRec.meta(r), "lang")
-  et.fx.make.if(Bool.or(Bool.or(E.ep.solved(ss), List.is_empty(&2, U32, t)), et.hatch(lang, Tr.field(fs, 7n))), k, ss, fs)
+  et.fx.make.if(Bool.or(Bool.or(E.ep.solved(ss), List.is_empty(&2, U32, t)), et.hatch(lang, Tr.field(fs, 7n))), win, k, ss, fs)
+
+# the grammar's reason, or long when the grammar holds (with no episode, the
+# window is why)
+def et.fx.long(+w: String) -> String:
+  Bool.pick(String, String.is_empty(w), "long", w)
 
 # why a record gives no fixed episode ("" it gives one): solved, no-call
-# (ana never closed a Term), no-record, hatch (the original's), or the
-# grammar's reason with one try
-def et.fx.why(+k: Nat, +r: E.EpRec, +t: List<&2, U32>) -> String:
+# (ana never closed a Term), no-record, hatch (the original's), the
+# grammar's reason with one try, or long (it trains with one try but does
+# not fit the window)
+def et.fx.why(+win: EtW, +k: Nat, +r: E.EpRec, +t: List<&2, U32>) -> String:
   +ss = E.EpRec.segs(r)
   +fs = Tr.split(t, 30)
   +lang = et.meta(E.EpRec.meta(r), "lang")
-  +best = Bool.not(Maybe.is_none(&2, List<&2, E.EpSeg>, et.fx.make(k, r, t)))
+  +best = Bool.not(Maybe.is_none(&2, List<&2, E.EpSeg>, et.fx.make(win, k, r, t)))
   Bool.pick(String, E.ep.solved(ss), "solved",
     Bool.pick(String, Nat.is_eq(E.ep.calls(ss), 0n), "no-call",
       Bool.pick(String, List.is_empty(&2, U32, t), "no-record",
         Bool.pick(String, et.hatch(lang, Tr.field(fs, 7n)), "hatch",
-          Bool.pick(String, best, "ok", E.ep.why(List.append(&2, E.EpSeg, et.fx.upto(ss, 1n), et.fx.fix(fs)), k))))))
+          Bool.pick(String, best, "ok", et.fx.long(E.ep.why(List.append(&2, E.EpSeg, et.fx.upto(ss, 1n), et.fx.fix(fs)), k)))))))
 
 # the fixed so far: the output (newest first), each unit's count, the
 # records by unit, how many, the reasons
@@ -340,30 +397,30 @@ def et.fx.fin(room: Bool, m: Maybe<&2, List<&2, E.EpSeg>>, +unit: String, +id: L
       EtF{o, cs, rm, n, ws}
 
 # Map.get hands the map back with its answer
-def et.fx.cnt(+k: Nat, +cap: Nat, +r: E.EpRec, +unit: String, +id: List<&2, U32>, +t: List<&2, U32>, o: List<&2, List<&2, U32>>,
+def et.fx.cnt(+win: EtW, +k: Nat, +cap: Nat, +r: E.EpRec, +unit: String, +id: List<&2, U32>, +t: List<&2, U32>, o: List<&2, List<&2, U32>>,
               rm: Map<&2, List<&2, U32>>, +n: Nat, ws: List<&2, EtC>, g: Map<&2, Nat> & Nat) -> EtF:
   (cs, +c) = g
-  et.fx.fin(Nat.is_lt(c, cap), et.fx.make(k, r, t), unit, id, c, o, cs, rm, n, et.bump(ws, et.fx.why(k, r, t)))
+  et.fx.fin(Nat.is_lt(c, cap), et.fx.make(win, k, r, t), unit, id, c, o, cs, rm, n, et.bump(ws, et.fx.why(win, k, r, t)))
 
-def et.fx.rec(+k: Nat, +cap: Nat, +r: E.EpRec, +unit: String, +id: List<&2, U32>, o: List<&2, List<&2, U32>>, cs: Map<&2, Nat>, +n: Nat,
+def et.fx.rec(+win: EtW, +k: Nat, +cap: Nat, +r: E.EpRec, +unit: String, +id: List<&2, U32>, o: List<&2, List<&2, U32>>, cs: Map<&2, Nat>, +n: Nat,
               ws: List<&2, EtC>, g: Map<&2, List<&2, U32>> & List<&2, U32>) -> EtF:
   (rm, +t) = g
-  et.fx.cnt(k, cap, r, unit, id, t, o, rm, n, ws, Map.get(Nat, 0n, cs, unit))
+  et.fx.cnt(win, k, cap, r, unit, id, t, o, rm, n, ws, Map.get(Nat, 0n, cs, unit))
 
-def et.fx.step(+k: Nat, +cap: Nat, +r: E.EpRec, a: EtF) -> EtF:
+def et.fx.step(+win: EtW, +k: Nat, +cap: Nat, +r: E.EpRec, a: EtF) -> EtF:
   match a:
     case EtF{o, cs, rm, +n, ws}:
       +m = E.EpRec.meta(r)
       +unit = S.str(et.meta(m, "unit"))
       +id = List.concat(&2, U32, [et.meta(m, "unit"), S.b("/fixed-"), et.meta(m, "n")])
-      et.fx.rec(k, cap, r, unit, id, o, cs, n, ws, Map.get(List<&2, U32>, Nil{}, rm, unit))
+      et.fx.rec(win, k, cap, r, unit, id, o, cs, n, ws, Map.get(List<&2, U32>, Nil{}, rm, unit))
 
-def et.fx.pass(rs: List<&2, E.EpRec>, +k: Nat, +cap: Nat, a: EtF) -> EtF:
+def et.fx.pass(rs: List<&2, E.EpRec>, +win: EtW, +k: Nat, +cap: Nat, a: EtF) -> EtF:
   match rs:
     case Nil{}:
       a
     case +r <> t:
-      et.fx.pass(t, k, cap, et.fx.step(k, cap, r, a))
+      et.fx.pass(t, win, k, cap, et.fx.step(win, k, cap, r, a))
 
 def et.fx.map(kvs: List<&2, Ev.EvKv>, m: Map<&2, List<&2, U32>>) -> Map<&2, List<&2, U32>>:
   match kvs:
@@ -389,25 +446,26 @@ def et.fx.put(+dir: String, +l: String, a: EtF) -> IO(Nat):
         return n
 
 # one language: its records (its units' only), its pass, its file
-def et.fx.one(+out: String, +k: Nat, +cap: Nat, +l: String, +rs: List<&2, E.EpRec>) -> IO(Nat):
+def et.fx.one(+out: String, +win: EtW, +k: Nat, +cap: Nat, +l: String, +rs: List<&2, E.EpRec>) -> IO(Nat):
   +mine = et.lang.of(S.b(l), rs)
   do IO<Nat>:
     kvs : List<&2, Ev.EvKv> <- Ev.ev.holdout([l], et.fx.units(mine, Set.new()), Nil{})
-    et.fx.put(out ++ "/" ++ l ++ "-fix", l, et.fx.pass(mine, k, cap, EtF{Nil{}, Map.new(&2, Nat), et.fx.map(kvs, Map.new(&2, List<&2, U32>)), 0n, Nil{}}))
+    et.fx.put(out ++ "/" ++ l ++ "-fix", l, et.fx.pass(mine, win, k, cap, EtF{Nil{}, Map.new(&2, Nat), et.fx.map(kvs, Map.new(&2, List<&2, U32>)), 0n, Nil{}}))
 
-def et.fx.all(ls: List<&2, String>, +out: String, +k: Nat, +cap: Nat, +rs: List<&2, E.EpRec>, +n: Nat) -> IO(Nat):
+def et.fx.all(ls: List<&2, String>, +out: String, +win: EtW, +k: Nat, +cap: Nat, +rs: List<&2, E.EpRec>, +n: Nat) -> IO(Nat):
   match ls:
     case Nil{}:
       IO.pure(Nat, n)
     case l <> t:
       do IO<Nat>:
-        m : Nat <- et.fx.one(out, k, cap, l, rs)
-        et.fx.all(t, out, k, cap, rs, Nat.add(n, m))
+        m : Nat <- et.fx.one(out, win, k, cap, l, rs)
+        et.fx.all(t, out, win, k, cap, rs, Nat.add(n, m))
 
 def et.fixed(+k: Nat, +cap: Nat, +out: String, ps: List<String>) -> IO(Unit):
   do IO<Unit>:
+    +win : EtW <- et.win()
     +rs : List<&2, E.EpRec> <- et.logs(ps, Nil{})
-    n : Nat <- et.fx.all(et.langs(), out, k, cap, rs, 0n)
+    n : Nat <- et.fx.all(et.langs(), out, win, k, cap, rs, 0n)
     IO.print("fixed: " ++ Nat.show(List.length(&2, E.EpRec, rs)) ++ " episodes; " ++ Nat.show(n)
       ++ " fixed episodes (at most the cap a unit) into " ++ out ++ "/LANG-fix")
 

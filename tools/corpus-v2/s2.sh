@@ -7,7 +7,8 @@
 #   They become transcript windows of SHARD (250) episodes a shard, so combine, which
 #   interleaves by shard, spreads them over the whole stage.
 # The episode windows' gaps take filler from run/v3/s2fill: a slice of format 2's
-# filler, held-out files left out, shipped by act-box.sh.
+# filler, held-out files left out, shipped by act-box.sh, its files shuffled (below).
+# The episodes all fit a window: bend-episode accept and fixed leave out the longer.
 #
 # OUT gets the plan, its shards (hard links) and stage.env, which `fp.sh again` reads:
 # - NLR is the lr S1's schedule reaches at BOUNDARY, 0.5 LR (1 + cos(pi (B - W) / (T - W))),
@@ -17,6 +18,8 @@
 # last step). Run from the act workspace (the repository); S1_LOG (~/formalTransformer/
 # train.log) is checked against NLR. Then append to the chain's STAGES:
 #   s2 traind-next 5000 run/v3/S2/plan-fp100m-b16-windows.tsv run/v3/S2 fp100m
+# (paths relative to the trainer's directory, TRAINER_DIR, ~/formalTransformer: the chain
+# looks for a stage's plan there)
 set -euo pipefail
 s1=${1:?usage: s2.sh S1_DIR BOUNDARY OUT ACT_DIR...} b=${2:?} out=${3:?}; shift 3
 [ $# -ge 1 ] || { echo "s2.sh: no ACT_DIR" >&2; exit 2; }
@@ -48,7 +51,17 @@ for kind in act fix; do for l in haskell agda lean nix bend; do
   log "$l-$kind: $n episodes"
 done; done
 [ -n "$specs" ] || { log "no episodes in $*"; exit 1; }
-ln -sfn "$PWD/run/v3/s2fill" "$ep/tx/filler"
+# The filler's files in a fixed shuffle: plan-windows gives each shard the next FILL files
+# in order, and s2fill is in repository order, so a shard whose slice is all short files
+# (Lean problem statements, own:bend2) found none long enough for a window's gap
+# (2026-10-13, shards 24, 25, 28 of 37). Pairs move whole: an id has no \001.
+mkdir -p "$ep/tx/filler"
+for f in files-lo.nul results.holdout.nul transcripts.holdout.nul transcripts.train.nul; do
+  ln -sfn "$PWD/run/v3/s2fill/$f" "$ep/tx/filler/$f"; done
+paste -z -d $'\001' - - < run/v3/s2fill/files-hi.nul | shuf -z --random-source=<(yes 2026) \
+  | sed -z 's/\x01/\x00/' > "$ep/tx/filler/files-hi.nul"
+[ "$(tr -cd '\0' < "$ep/tx/filler/files-hi.nul" | wc -c)" = "$(tr -cd '\0' < run/v3/s2fill/files-hi.nul | wc -c)" ] \
+  || { log "the shuffled filler lost pairs"; exit 1; }
 log "plan-windows $ep/w fp100m 16$specs filler:1"
 OUT=$ep/tx SHARD=${SHARD:-250} JOBS=${JOBS:-8} TOKENIZER=weights/code32k.bpe \
   $D plan-windows "$ep/w" fp100m 16 $specs filler:1
@@ -64,4 +77,6 @@ printf 'NLR=%s\nNWARM=10\n' "$nlr" > "$out/stage.env"
 seen=$(grep -o 'lr=[0-9.e-]*' "${S1_LOG:-$HOME/formalTransformer/train.log}" 2>/dev/null | tail -1 | cut -d= -f2 || true)
 log "stage.env: NLR $nlr (S1's log last shows lr ${seen:-none}), NWARM 10"
 log "S2: $(head -1 "$out/plan-fp100m-b16-windows.tsv" | awk '{ print $3 }') steps in $out; append to STAGES:"
-echo "s2 traind-next ${EVERY:-5000} $out/plan-fp100m-b16-windows.tsv $out fp100m"
+# relative to the trainer's directory: fp-chain.sh looks for a stage's plan under ~/formalTransformer/
+rel=${out#${TRAINER_DIR:-$HOME/formalTransformer}/}
+echo "s2 traind-next ${EVERY:-5000} $rel/plan-fp100m-b16-windows.tsv $rel fp100m"
