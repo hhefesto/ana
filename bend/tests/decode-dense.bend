@@ -115,15 +115,41 @@ def td.again(+k: Dd.Dd, +ts: List<&2, U32>, r: Array<F32> & List<&2, List<&2, F3
   (s, acc) = r
   (List.reverse(&2, List<&2, F32>, acc), td.rows(td.dense(ts, k, 0n, (Dd.dd.reset(k, s), Nil{}))))
 
-def td.check(+name: String, +c: C.Config, +ts: List<&2, U32>, p: List<&2, List<&2, F32>> & List<&2, List<&2, F32>>) -> IO(Unit):
+# The tally the verdict reads: logit comparisons made and failed (each
+# within 1e-5 relative, the F32 its line shows; a NaN fails), exact laws
+# checked and failed
+type TdT is Data:
+  TdT{lg: Nat, lgbad: Nat, ex: Nat, exbad: Nat}
+
+def td.add(a: TdT, b: TdT) -> TdT:
+  match a b:
+    case TdT{l1, lb1, e1, eb1} TdT{l2, lb2, e2, eb2}:
+      TdT{Nat.add(l1, l2), Nat.add(lb1, lb2), Nat.add(e1, e2), Nat.add(eb1, eb2)}
+
+def td.bad(b: Bool) -> Nat:
+  Bool.pick(Nat, b, 0n, 1n)
+
+def td.ok(+e: TdErr) -> Bool:
+  match e:
+    case TdErr{d, s}:
+      F32.is_le(F32.div(d, s), 1.0e-5)
+
+def td.mark(b: Bool) -> String:
+  Bool.pick(String, b, "", "FAIL ")
+
+def td.check(+name: String, +c: C.Config, +ts: List<&2, U32>, p: List<&2, List<&2, F32>> & List<&2, List<&2, F32>>) -> IO(TdT):
   (+dense, +again) = p
   +dm = Md.Dims.of(c)
   +tree = td.tree(ts, dm, I.init(c), Md.states.zero(C.Config.layers(c), dm, 0n), 0n)
   +ctx = C.Config.ctx(c)
-  do IO<Unit>:
-    IO.print(name ++ " logits, positions before the ring wraps: " ++ td.show(td.errs(List.take(&2, List<&2, F32>, tree, ctx), List.take(&2, List<&2, F32>, dense, ctx), TdErr{0.0, 0.0})))
-    IO.print(name ++ " logits, positions after it wraps: " ++ td.show(td.errs(List.drop(&2, List<&2, F32>, tree, ctx), List.drop(&2, List<&2, F32>, dense, ctx), TdErr{0.0, 0.0})))
-    IO.print(Bool.pick(String, Bool.and(td.same(dense, again), Nat.is_eq(List.length(&2, List<&2, F32>, dense), List.length(&2, U32, ts))), "ok ", "FAIL ") ++ name ++ " reset")
+  +before = td.errs(List.take(&2, List<&2, F32>, tree, ctx), List.take(&2, List<&2, F32>, dense, ctx), TdErr{0.0, 0.0})
+  +after = td.errs(List.drop(&2, List<&2, F32>, tree, ctx), List.drop(&2, List<&2, F32>, dense, ctx), TdErr{0.0, 0.0})
+  +reset = Bool.and(td.same(dense, again), Nat.is_eq(List.length(&2, List<&2, F32>, dense), List.length(&2, U32, ts)))
+  do IO<TdT>:
+    IO.print(td.mark(td.ok(before)) ++ name ++ " logits, positions before the ring wraps: " ++ td.show(before))
+    IO.print(td.mark(td.ok(after)) ++ name ++ " logits, positions after it wraps: " ++ td.show(after))
+    IO.print(Bool.pick(String, reset, "ok ", "FAIL ") ++ name ++ " reset")
+    return TdT{2n, Nat.add(td.bad(td.ok(before)), td.bad(td.ok(after))), 1n, td.bad(reset)}
 
 # Greedy's pick on the store (Dd.dd.top) is Sample.bend's argmax of the
 # logits the same store answers, at every position: the law is exact (one
@@ -151,9 +177,11 @@ def td.tops(ts: List<&2, U32>, +k: Dd.Dd, +dv: Nat, +pos: Nat, r: Array<F32> & B
     case t <> rest:
       td.tops(rest, k, dv, 1n+pos, td.top.step(k, dv, pos, t, r))
 
-def td.top.line(+name: String, r: Array<F32> & Bool) -> IO(Unit):
-  (s, ok) = r
-  IO.print(Bool.pick(String, ok, "ok ", "FAIL ") ++ name ++ " greedy pick on the store")
+def td.top.line(+name: String, r: Array<F32> & Bool) -> IO(TdT):
+  (s, +ok) = r
+  do IO<TdT>:
+    IO.print(Bool.pick(String, ok, "ok ", "FAIL ") ++ name ++ " greedy pick on the store")
+    return TdT{0n, 0n, 1n, td.bad(ok)}
 
 # ties go to the least index, as Sample.bend's argmax: dd.pick over 4 cells
 def td.tie.got(r: Array<F32> & F32) -> U32:
@@ -167,16 +195,36 @@ def td.ties() -> Bool:
   Bool.and(Bool.and(td.tie([1.0, 3.0, 3.0, 2.0]), td.tie([0.0, 0.0, 0.0, 0.0])),
     Bool.and(Bool.and(td.tie([F32.neg(1.0), F32.neg(5.0), F32.neg(1.0), F32.neg(2.0)]), td.tie([2.0, 1.0, 0.0, 7.0])), td.tie([F32.neg(0.0), 0.0, F32.neg(3.0), 0.0])))
 
-def td.case(+name: String, +c: C.Config, +ts: List<&2, U32>) -> IO(Unit):
+def td.case(+name: String, +c: C.Config, +ts: List<&2, U32>) -> IO(TdT):
   +k = Dd.dd.of(c)
   +w = K.Weights.flat(I.init(c))
-  do IO<Unit>:
-    td.check(name, c, ts, td.again(k, ts, td.dense(ts, k, 0n, (Io.put(w, Dd.dd.new(k), 0), Nil{}))))
-    td.top.line(name, td.tops(ts, k, Md.Dims.dv(Md.Dims.of(c)), 0n, (Io.put(w, Dd.dd.new(k), 0), True{})))
+  do IO<TdT>:
+    a : TdT <- td.check(name, c, ts, td.again(k, ts, td.dense(ts, k, 0n, (Io.put(w, Dd.dd.new(k), 0), Nil{}))))
+    g : TdT <- td.top.line(name, td.tops(ts, k, Md.Dims.dv(Md.Dims.of(c)), 0n, (Io.put(w, Dd.dd.new(k), 0), True{})))
+    return td.add(a, g)
+
+def td.verdict.if(ok: Bool, msg: String) -> IO(Unit):
+  match ok:
+    case True{}:
+      IO.print("ok 4 logit comparisons within 1e-5 relative, 5 exact laws")
+    case False{}:
+      IO.die(Unit, 1, msg)
+
+# The verdict (the flake's bend-decode-dense check is this exit status):
+# both configs' logits before and after the wrap (4 comparisons) within
+# 1e-5 relative, and the 5 exact laws (2 resets, 2 greedy picks, the ties)
+def td.verdict(t: TdT) -> IO(Unit):
+  match t:
+    case TdT{+lg, +lgbad, +ex, +exbad}:
+      td.verdict.if(Bool.and(Bool.and(Nat.is_eq(lg, 4n), Nat.is_eq(lgbad, 0n)), Bool.and(Nat.is_eq(ex, 5n), Nat.is_eq(exbad, 0n))),
+        "decode-dense: " ++ Nat.show(lgbad) ++ " of " ++ Nat.show(lg) ++ " logit comparisons past 1e-5 relative (4 expected), "
+          ++ Nat.show(exbad) ++ " of " ++ Nat.show(ex) ++ " exact laws failed (5 expected)")
 
 def main() -> IO(Unit):
   +ts = td.window(95n, 7)
+  +ties = td.ties()
   do IO<Unit>:
-    td.case("v3 arms", C.Config.small4_v3(), ts)
-    td.case("no arms", {C.Config{U32.to_nat(258), 64n, 64n, U32.to_nat(192), 4n, 4n, False{}, False{}, False{}, True{}} : C.Config}, ts)
-    IO.print(Bool.pick(String, td.ties(), "ok ", "FAIL ") ++ "greedy pick ties go to the least index")
+    a : TdT <- td.case("v3 arms", C.Config.small4_v3(), ts)
+    b : TdT <- td.case("no arms", {C.Config{U32.to_nat(258), 64n, 64n, U32.to_nat(192), 4n, 4n, False{}, False{}, False{}, True{}} : C.Config}, ts)
+    IO.print(Bool.pick(String, ties, "ok ", "FAIL ") ++ "greedy pick ties go to the least index")
+    td.verdict(td.add(td.add(a, b), TdT{0n, 0n, 1n, td.bad(ties)}))

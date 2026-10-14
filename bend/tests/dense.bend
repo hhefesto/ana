@@ -70,6 +70,16 @@ def Err.show(+e: Err) -> String:
     case Err{d, s}:
       "max |diff| " ++ F32.show(d) ++ " of max |g| " ++ F32.show(s) ++ " (relative " ++ F32.show(F32.div(d, s)) ++ ")"
 
+# the verdict on a gradient: relative error (the F32 the line shows) at most
+# 1e-5; a NaN (no gradient at all) fails
+def Err.ok(+e: Err) -> Bool:
+  match e:
+    case Err{d, s}:
+      F32.is_le(F32.div(d, s), 1.0e-5)
+
+def Err.line(+name: String, +e: Err) -> String:
+  Bool.pick(String, Err.ok(e), "", "FAIL ") ++ name ++ ": gradient " ++ Err.show(e)
+
 type DOut is Data:
   DOut{loss: F32, grads: List<&2, F32>}
 
@@ -96,13 +106,15 @@ def dense(+ly: L.Lay, +m: L.Dm, +w: List<&2, F32>, +ws: List<&2, List<&2, U32>>)
   dense.back(ly, m, Io.get1(P.run(S.fwd(m, ly), Io.put.windows(ws, Io.put(w, Array.new(F32, L.Lay.depth(ly), 0.0), 0),
     L.Lay.tin(ly), L.Lay.ttg(ly), L.Lay.tw(ly), L.Dm.t(m))), L.Lay.lmean(ly)))
 
-def report(+name: String, +c: C.Config, +cc: U32, +flat: List<&2, F32>, +ws: List<&2, List<&2, U32>>, +tgrad: List<&2, F32>) -> IO(Unit):
+def report(+name: String, +c: C.Config, +cc: U32, +flat: List<&2, F32>, +ws: List<&2, List<&2, U32>>, +tgrad: List<&2, F32>) -> IO(Bool):
   +m = L.Dm.of.cc(c, 2n, cc)
   +ly = L.Lay.of(c, m)
   +o = dense(ly, m, flat, ws)
-  do IO<Unit>:
+  +e = err.go(tgrad, DOut.grads(o), Err{0.0, 0.0})
+  do IO<Bool>:
     IO.print(name ++ ": dense loss " ++ F32.show(DOut.loss(o)))
-    IO.print(name ++ ": gradient " ++ Err.show(err.go(tgrad, DOut.grads(o), Err{0.0, 0.0})))
+    IO.print(Err.line(name, e))
+    return Err.ok(e)
 
 # Weighted targets (bend/Mask.bend): a weight per prediction, zeros
 # included; the dense program's Σ loss·w / Σ w against the tree's
@@ -132,7 +144,7 @@ def dense.w(+ly: L.Lay, +m: L.Dm, +w: List<&2, F32>, +ws: List<&2, List<&2, U32>
   dense.back(ly, m, Io.get1(P.run(S.fwd(m, ly), Io.put.windows.w(ws, wt, Io.put(w, Array.new(F32, L.Lay.depth(ly), 0.0), 0),
     L.Lay.tin(ly), L.Lay.ttg(ly), L.Lay.tw(ly), L.Dm.t(m))), L.Lay.lmean(ly)))
 
-def masked(+c: C.Config, +cc: U32, +ws: List<&2, List<&2, U32>>) -> IO(Unit):
+def masked(+c: C.Config, +cc: U32, +ws: List<&2, List<&2, U32>>) -> IO(Bool):
   +dm = Md.Dims.of(c)
   +w = I.init(c)
   +wt = {[wts(63n, 0n), wts(63n, 5n)] : List<&2, List<&2, F32>>}
@@ -141,19 +153,45 @@ def masked(+c: C.Config, +cc: U32, +ws: List<&2, List<&2, U32>>) -> IO(Unit):
   +m = L.Dm.of.cc(c, 2n, cc)
   +ly = L.Lay.of(c, m)
   +o = dense.w(ly, m, K.Weights.flat(w), ws, wt)
-  do IO<Unit>:
+  +e = err.go(K.Weights.flat(LG.w(tg)), DOut.grads(o), Err{0.0, 0.0})
+  do IO<Bool>:
     IO.print("masked tree loss " ++ F32.show(LG.loss(tg)) ++ ", dense loss " ++ F32.show(DOut.loss(o)))
-    IO.print("masked: gradient " ++ Err.show(err.go(K.Weights.flat(LG.w(tg)), DOut.grads(o), Err{0.0, 0.0})))
+    IO.print(Err.line("masked", e))
+    return Err.ok(e)
 
 # small4: sigmoid gates, softmax without qk-norm or sinks
-def plain(+ws: List<&2, List<&2, U32>>) -> IO(Unit):
+def plain(+ws: List<&2, List<&2, U32>>) -> IO(Bool):
   +c = {C.Config{U32.to_nat(258), 64n, 64n, U32.to_nat(192), 4n, 4n, False{}, False{}, False{}, True{}} : C.Config}
   +dm = Md.Dims.of(c)
   +w = I.init(c)
   +tg = tree.grad(ws, dm, w)
-  do IO<Unit>:
+  do IO<Bool>:
     IO.print("small4 tree loss " ++ F32.show(F32.mul(LG.loss(tg), 0.5)))
     report("small4, chunk 16", c, 16, K.Weights.flat(w), ws, K.Weights.flat(O.W.scale(0.5, LG.w(tg))))
+
+def bad.count(xs: List<&2, Bool>) -> Nat:
+  match xs:
+    case Nil{}:
+      0n
+    case True{} <> t:
+      bad.count(t)
+    case False{} <> t:
+      1n+bad.count(t)
+
+def verdict.if(ok: Bool, msg: String) -> IO(Unit):
+  match ok:
+    case True{}:
+      IO.print("ok every gradient within 1e-5 relative")
+    case False{}:
+      IO.die(Unit, 1, msg)
+
+# The verdict (the flake's bend-dense check is this exit status): four
+# gradients compared (three plain, one masked), each within 1e-5 relative
+def verdict(+oks: List<&2, Bool>) -> IO(Unit):
+  +n = List.length(&2, Bool, oks)
+  +bad = bad.count(oks)
+  verdict.if(Bool.and(Nat.is_eq(n, 4n), Nat.is_eq(bad, 0n)),
+    "dense: " ++ Nat.show(bad) ++ " of " ++ Nat.show(n) ++ " gradients differ by more than 1e-5 relative (4 expected: 3 plain, 1 masked)")
 
 def main() -> IO(Unit):
   +c = C.Config.small4_v3()
@@ -166,7 +204,8 @@ def main() -> IO(Unit):
   +flat = K.Weights.flat(w)
   do IO<Unit>:
     IO.print("tree loss  " ++ F32.show(tl))
-    report("chunk 64 (one per window)", c, 64, flat, ws, tgrad)
-    report("chunk 16 (four per window)", c, 16, flat, ws, tgrad)
-    masked(c, 16, ws)
-    plain(ws)
+    r1 : Bool <- report("chunk 64 (one per window)", c, 64, flat, ws, tgrad)
+    r2 : Bool <- report("chunk 16 (four per window)", c, 16, flat, ws, tgrad)
+    r3 : Bool <- masked(c, 16, ws)
+    r4 : Bool <- plain(ws)
+    verdict([r1, r2, r3, r4])

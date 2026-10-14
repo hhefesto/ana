@@ -130,22 +130,33 @@ def show.probe(+p: Probe) -> String:
     case PBlk{j, f, r, c}:
       "block" ++ Nat.show(j) ++ ".field" ++ Nat.show(f) ++ "[" ++ U32.show(r) ++ "][" ++ U32.show(c) ++ "]"
 
-def check.one(+dm: Md.Dims, +w: Md.Weights, +g: Md.Weights, +xs: List<&2, U32>, +ys: List<&2, U32>, +p: Probe) -> String:
+# the gradient check's verdict on one probe, in the F32 the test computes:
+# |analytic - numeric| <= 5% of the larger magnitude plus 3e-5 (the
+# difference quotient's resolution at eps 0.01); a NaN fails
+def probe.ok(+ana: F32, +num: F32) -> Bool:
+  F32.is_le(F32.abs(F32.sub(ana, num)), F32.add(F32.mul(0.05, F32.max(F32.abs(ana), F32.abs(num))), 0.00003))
+
+def probe.line(+p: Probe, +ana: F32, +num: F32) -> String:
+  Bool.pick(String, probe.ok(ana, num), "", "FAIL ") ++ show.probe(p) ++ " analytic=" ++ F32.show(ana) ++ " numeric=" ++ F32.show(num)
+
+# the central difference at eps 0.01
+def numeric(+dm: Md.Dims, +w: Md.Weights, +xs: List<&2, U32>, +ys: List<&2, U32>, +p: Probe) -> F32:
   +eps = {0.01 : F32}
   +lp = G.loss(dm, bump(dm, w, p, eps), xs, ys)
   +lm = G.loss(dm, bump(dm, w, p, F32.neg(eps)), xs, ys)
-  +num = F32.div(F32.sub(lp, lm), F32.mul(2.0, eps))
-  +ana = at(dm, g, p)
-  show.probe(p) ++ " analytic=" ++ F32.show(ana) ++ " numeric=" ++ F32.show(num)
+  F32.div(F32.sub(lp, lm), F32.mul(2.0, eps))
 
-def checks(ps: List<&2, Probe>, +dm: Md.Dims, +w: Md.Weights, +g: Md.Weights, +xs: List<&2, U32>, +ys: List<&2, U32>) -> IO(Unit):
+# The probes one by one, each printed; the answer is how many failed
+def checks(ps: List<&2, Probe>, +dm: Md.Dims, +w: Md.Weights, +g: Md.Weights, +xs: List<&2, U32>, +ys: List<&2, U32>, +bad: Nat) -> IO(Nat):
   match ps:
     case Nil{}:
-      IO.pure(Unit, Unit{})
+      IO.pure(Nat, bad)
     case +p <> rest:
-      do IO<Unit>:
-        IO.print(check.one(dm, w, g, xs, ys, p))
-        checks(rest, dm, w, g, xs, ys)
+      +ana = at(dm, g, p)
+      +num = numeric(dm, w, xs, ys, p)
+      do IO<Nat>:
+        IO.print(probe.line(p, ana, num))
+        checks(rest, dm, w, g, xs, ys, Nat.add(bad, Bool.pick(Nat, probe.ok(ana, num), 0n, 1n)))
 
 # the decode path's mean loss over the same window
 def Out.logits(o: Md.Out) -> T.V:
@@ -167,6 +178,22 @@ def dec.loss(xs: List<&2, U32>, ys: List<&2, U32>, +dm: Md.Dims, +w: Md.Weights,
     case _ _:
       acc
 
+def verdict.if(ok: Bool, msg: String) -> IO(Unit):
+  match ok:
+    case True{}:
+      IO.print("ok gradient check and decode loss")
+    case False{}:
+      IO.die(Unit, 1, msg)
+
+# The verdict (the flake's bend-train check is this exit status): every
+# probe within its tolerance, all 16 of them run, and the training
+# forward's loss within 1e-5 of the decode path's
+def verdict(+bad: Nat, +n: Nat, +tl: F32, +dl: F32) -> IO(Unit):
+  +lossok = F32.is_le(F32.abs(F32.sub(tl, dl)), 1.0e-5)
+  verdict.if(Bool.and(Bool.and(Nat.is_eq(bad, 0n), Nat.is_eq(n, 16n)), lossok),
+    "train: " ++ Nat.show(bad) ++ " of " ++ Nat.show(n) ++ " gradient probes outside the tolerance (16 expected)"
+      ++ Bool.pick(String, lossok, "", "; the train and decode losses differ by more than 1e-5"))
+
 def main() -> IO(Unit):
   +c = C.Config.small4_v3()
   +dm = Md.Dims.of(c)
@@ -175,10 +202,13 @@ def main() -> IO(Unit):
   +ys = {[101, 108, 108, 111, 32, 119, 111, 114] : List<&2, U32>}
   +lg = G.loss_grad(dm, w, xs, ys)
   +g = LG.grad(lg)
+  +tl = LG.loss(lg)
+  +dl = F32.div(dec.loss(xs, ys, dm, w, Md.states.zero(C.Config.layers(c), dm, 0n), 0n, 0.0), 8.0)
+  +ps = {[PEmb{72, 3}, PEmb{108, 10}, PEmb{114, 5}, PFin{7},
+          PBlk{0n, 0n, 0, 5}, PBlk{0n, 1n, 3, 9}, PBlk{1n, 5n, 7, 2}, PBlk{2n, 6n, 0, 11}, PBlk{1n, 7n, 0, 4}, PBlk{2n, 10n, 5, 17},
+          PBlk{3n, 0n, 0, 6}, PBlk{3n, 1n, 2, 8}, PBlk{3n, 5n, 0, 3}, PBlk{3n, 6n, 0, 9}, PBlk{3n, 7n, 0, 1}, PBlk{3n, 10n, 40, 5}] : List<&2, Probe>}
   do IO<Unit>:
-    IO.print("train loss " ++ F32.show(LG.loss(lg)))
-    IO.print("decode loss " ++ F32.show(F32.div(dec.loss(xs, ys, dm, w, Md.states.zero(C.Config.layers(c), dm, 0n), 0n, 0.0), 8.0)))
-    checks([PEmb{72, 3}, PEmb{108, 10}, PEmb{114, 5}, PFin{7},
-            PBlk{0n, 0n, 0, 5}, PBlk{0n, 1n, 3, 9}, PBlk{1n, 5n, 7, 2}, PBlk{2n, 6n, 0, 11}, PBlk{1n, 7n, 0, 4}, PBlk{2n, 10n, 5, 17},
-            PBlk{3n, 0n, 0, 6}, PBlk{3n, 1n, 2, 8}, PBlk{3n, 5n, 0, 3}, PBlk{3n, 6n, 0, 9}, PBlk{3n, 7n, 0, 1}, PBlk{3n, 10n, 40, 5}],
-      dm, w, g, xs, ys)
+    IO.print("train loss " ++ F32.show(tl))
+    IO.print("decode loss " ++ F32.show(dl))
+    bad : Nat <- checks(ps, dm, w, g, xs, ys, 0n)
+    verdict(bad, List.length(&2, Probe, ps), tl, dl)

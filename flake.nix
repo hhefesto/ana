@@ -204,166 +204,74 @@
         in
         {
           # every specification law and every implementation module it is
-          # stated over type-checks and is proven
+          # stated over type-checks and is proven: the compiler's verdict is
+          # its exit status (1 on SOME PROOFS FAIL or a type error);
+          # --check-only gives the verdict even if Everything.bend had a main
           bend-spec = pkgs.runCommand "bend-spec" { nativeBuildInputs = [ (bendFor pkgs) ]; } ''
             export HOME=$TMPDIR
             cp -r ${bendSrc}/bend src
             chmod -R u+w src
-            bend src/Everything.bend | tee result
-            grep -qx "ALL PROOFS CHECK" result
+            bend --check-only src/Everything.bend
             touch $out
           '';
-          # the self-contained unit tests, against known answers
+          # the self-contained unit tests, against known answers: each test,
+          # what it must print and why are bend/tests/Checks.bend's `suite`
+          # (agent.bend runs compiled and reads weights/code32k.bpe)
           bend-tests = pkgs.runCommand "bend-tests" { nativeBuildInputs = [ (bendFor pkgs) ]; } ''
             export HOME=$TMPDIR
             cp -r ${bendSrc}/bend src
             chmod -R u+w src
+            mkdir -p src/tests/weights
+            cp ${./weights/code32k.bpe} src/tests/weights/code32k.bpe
             cd src/tests
-            bend sha.bend > sha.out
-            printf '%s\n' e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 \
-              ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad \
-              248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1 | diff - sha.out
-            bend num.bend > num.out
-            printf '%s\n' 236d88fe5618cf00 9bde02468acf1357 0000000048d159e2 0000000000000001 ffffffffffffffff 1.5 | diff - num.out
-            # the exact store size (Nat) equals Lay.of's U32 total wherever
-            # U32 cannot wrap
-            bend layout.bend > layout.out
-            if grep -q MISMATCH layout.out; then cat layout.out; exit 1; fi
-            test "$(grep -c '^ok ' layout.out)" = 52
-            # the unit extractor: unit counts per language, and every unit
-            # rebuilds its file byte for byte; the Term turn's indentation
-            bend units.bend > units.out
-            printf '%s\n' "ok term bend" "ok term haskell-instance" "ok term haskell" "ok term lean" "ok haskell 2" "ok agda 1" "ok lean 2" "ok bend 2" "ok nix 1" "ok lagda 1" | diff - units.out
-            # the transcript renderer's format 2 (docs/CORPUS-V2.md): each
-            # shape's turns, the direct shape byte for byte, every Term the
-            # original, a unit's presentations distinct, Nix never direct
-            bend transcript.bend > transcript.out
-            printf '%s\n' "ok direct" "ok turns 0" "ok turns 1" "ok turns 2" "ok turns 3" "ok turns 4" "ok turns 5" "ok terms" "ok copies repo:x/A.hs#twice@1" "ok copies repo:x/a.nix#file@1" | diff - transcript.out
-            # E5 reads ana's output as a transcript less ana's closing
-            # newline: a passing last echo is solved (it never was before)
-            bend agent-eval.bend > agent-eval.out
-            printf '%s\n' "ok a passing last echo is solved" "ok read with the closing newline it is not (the bug)" "ok a failing echo then a stopped call is not" "ok one call answered" "ok one answered, the stopped one not" | diff - agent-eval.out
-            # the corpus tools' libraries: processes and text (Sys), JSON
-            # strings as jq decodes and writes them (Json), POSIX cksum
-            bend sys.bend > sys.out
-            printf 'ok %s\n' run merge timeout cwd env stdin clean parent root chomp split replace nul slurp exists | diff - sys.out
-            bend json.bend > json.out
-            printf 'ok %s\n' escapes space trailing bad-escape unpaired-high lone-low raw-tab unclosed quote doc doc-order doc-extra nonul line | diff - json.out
-            bend cksum.bend > cksum.out
-            if grep -v '^ok ' cksum.out; then exit 1; fi
-            test "$(grep -c '^ok ' cksum.out)" = 5
-            # the drivers' own rules: the mix's rounding and ids, the
-            # extractor's UTF-8, license and holdout verdicts
-            bend mix.bend > mix.out
-            if grep -v '^ok ' mix.out; then exit 1; fi
-            test "$(grep -c '^ok ' mix.out)" = 12
-            bend extract.bend > extract.out
-            if grep -v '^ok ' extract.out; then exit 1; fi
-            test "$(grep -c '^ok ' extract.out)" = 32
-            # the cleaner's MinHash: one word apart agrees in 90+ of 128
-            bend clean.bend > clean.out
-            printf 'ok %s\n' near far self grams short key | diff - clean.out
-            # legere: forward-backward and Viterbi equal the enumeration
-            # (Legere/Spec.bend) in Nat and Bool, within 1e-4 in logp and
-            # maxp; the cues' gold and mask; Σ_b P(b | h) = 1; sections give
-            # the lines back
-            bend legere.bend > legere.out
-            printf 'ok %s\n' score bool marginals boundaries logp posteriors bposteriors viterbi cues ngram roundtrip | diff - legere.out
-            # an episode as the loop writes it (Agent/Episode.bend): the log
-            # reads back any bytes and refuses a cut record, the loop's
-            # newest-first fold is the text in order, and the training
-            # grammar: a solved chain holds; drift, an unsolved end, a call
-            # past the cap and a tool byte not read as echo fail, each with
-            # its reason
-            bend episode.bend > episode.out
-            printf 'ok %s\n' "log roundtrip" newest "chain (ok)" "drift (drift)" "unsolved (unsolved)" "calls (calls)" \
-              "authors (authors)" tries solved | diff - episode.out
-            # ana's episodes (Agent/Spec.bend): each shape's roles, reading's
-            # round trip, every call answered, weight 0 exactly on attempts,
-            # tries and echoes, the loop's unfold, multi-turn chains (every
-            # rejected Term a try), the reader before tries agreeing on every
-            # format-2 shape, and a code32k window's weights (compiled: the
-            # interpreter's stack is too small for the tokenizer's parse)
-            mkdir -p weights && cp ${./weights/code32k.bpe} weights/code32k.bpe
-            bend agent.bend -o agent-test && ./agent-test > agent.out
-            head -18 agent.out > agent18.out
-            printf 'ok %s\n' direct repair term-to-type verify trap "weights direct" "weights repair" unfold \
-              chain chain-repair "label drift" "tries weigh 0" "v1 direct" "v1 repair" "v1 term-to-type" "v1 verify" "v1 trap" \
-              verdict | diff - agent18.out
-            grep -q '^ok window' agent.out
+            bend Checks.bend suite
             touch $out
           '';
           # the training stack: the hand-written pullbacks agree with central
           # finite differences (f32: 5% relative plus 3e-5 absolute, the
           # difference quotient's resolution at eps 0.01), the training
-          # forward's loss is the decode path's, and a short byte-level run
-          # lowers the validation loss
-          bend-train = pkgs.runCommand "bend-train" { nativeBuildInputs = [ (bendFor pkgs) pkgs.gawk ]; } ''
+          # forward's loss is the decode path's (tests/train.bend decides
+          # both), and a short byte-level run lowers the validation loss
+          # (Checks.bend train-run)
+          bend-train = pkgs.runCommand "bend-train" { nativeBuildInputs = [ (bendFor pkgs) ]; } ''
             export HOME=$TMPDIR
             cp -r ${bendSrc}/bend src
             chmod -R u+w src
-            (cd src/tests && bend train.bend) | tee grad.out
-            awk '/^train loss/ { t = $3 } /^decode loss/ { d = $3 }
-                 / analytic=/ { split($2, a, "="); split($3, n, "="); x = a[2]; y = n[2]; e = x - y; if (e < 0) e = -e;
-                   m = (x < 0 ? -x : x); if ((y < 0 ? -y : y) > m) m = (y < 0 ? -y : y);
-                   k++; if (e > 0.05 * m + 3e-5) { print "gradcheck FAIL: " $0; bad = 1 } }
-                 END { e = t - d; if (e < 0) e = -e; if (e > 1e-5) { print "train/decode loss differ"; bad = 1 }
-                       if (k != 16) { print "expected 16 probes, got " k; bad = 1 } exit bad }' grad.out
+            bend src/tests/train.bend
             cat src/*.bend src/Spec/*.bend > corpus.txt
-            CORPUS=corpus.txt PRESET=tiny-v3 TRAIN_STEPS=30 TRAIN_BATCH=8 TRAIN_LR=3e-3 TRAIN_WARMUP=5 \
-              OUT=tiny.btc ${self.packages.${system}.bend-train}/bin/bend-train --threads 4 | tee run.out
-            awk '/validation loss/ { v[++n] = $5 } END { if (n < 2 || !(v[n] < v[1] - 0.3)) { print "loss did not fall"; exit 1 } }' run.out
-            head -1 tiny.btc | grep -qx BTC1
+            bend src/tests/Checks.bend train-run ${self.packages.${system}.bend-train}/bin/bend-train corpus.txt
             touch $out
           '';
           # the dense program against the tree trainer: same weights and
           # windows, the loss and every gradient within 1e-5 relative
-          # (reverse mode derived from the ops, chunked GLA, both gate kinds);
-          # then a short dense run lowers the validation loss
-          bend-dense = pkgs.runCommand "bend-dense" { nativeBuildInputs = [ (bendFor pkgs) pkgs.gawk ]; } ''
+          # (reverse mode derived from the ops, chunked GLA, both gate kinds;
+          # tests/dense.bend decides); then a short dense run lowers the
+          # validation loss, a validation set smaller than a micro-batch
+          # scores above 0, and six steps per optimizer on a frozen corpus
+          # give the goldens' parameters byte for byte
+          # (bend/tests/dense-identity.sh writes them; Checks.bend dense-run)
+          bend-dense = pkgs.runCommand "bend-dense" { nativeBuildInputs = [ (bendFor pkgs) ]; } ''
             export HOME=$TMPDIR
             cp -r ${bendSrc}/bend src
             chmod -R u+w src
-            (cd src && bend tests/dense.bend -o $TMPDIR/dense) && $TMPDIR/dense --threads 4 | tee dense.out
-            awk '/gradient max/ { r = $(NF); gsub(/[()]/, "", r); k++; if (r + 0 > 1e-5) { print "gradient differs: " $0; bad = 1 } }
-                 END { if (k != 4) { print "expected 4 gradient checks (3 plain, 1 masked), got " k; bad = 1 } exit bad }' dense.out
+            bend src/tests/dense.bend -o dense
+            ./dense --threads 4
             cat src/*.bend src/Spec/*.bend > corpus.txt
-            CORPUS=corpus.txt PRESET=tiny-v3 TRAIN_STEPS=30 TRAIN_BATCH=8 TRAIN_LR=3e-3 TRAIN_WARMUP=5 \
-              OUT=tiny.btc ${self.packages.${system}.bend-train-dense}/bin/bend-train-dense --threads 4 | tee run.out
-            awk '/validation_loss=/ { for (i = 1; i <= NF; i++) if ($i ~ /^validation_loss=/) { split($i, a, "="); v[++n] = a[2] } }
-                 END { if (n < 2 || !(v[n] < v[1] - 0.3)) { print "loss did not fall"; exit 1 } }' run.out
-            head -1 tiny.btc | grep -qx BTC1
-            # a validation set smaller than a micro-batch is scored, not 0 (run 2,
-            # step 32,250: a shard's 3 windows at micro 4 logged loss 0, and
-            # best_validation_loss stayed 0 for the rest of the run)
-            CORPUS=corpus.txt PRESET=tiny-v3 TRAIN_STEPS=2 TRAIN_BATCH=8 TRAIN_MICRO=4 TRAIN_LR=3e-3 TRAIN_WARMUP=1 \
-              EVAL_EVERY=1 EVAL_WINDOWS=3 OUT=short.btc ${self.packages.${system}.bend-train-dense}/bin/bend-train-dense --gpu off --threads 4 | tee short.out
-            awk '/validation_loss=/ { for (i = 1; i <= NF; i++) if ($i ~ /^validation_loss=/) { split($i, a, "="); n++; if (!(a[2] + 0 > 0)) bad = 1 } }
-                 END { if (n < 1 || bad) { print "a validation set smaller than a micro-batch scored 0"; exit 1 } }' short.out
-            # the trajectory itself, byte for byte (bend/tests/dense-identity.sh
-            # writes the goldens): six steps of small4-v3, batch 8 in micro-
-            # batches of 4, AdamW and Muon, on a corpus nothing edits. A layout
-            # change must leave these parameters unchanged.
-            for opt in adamw muon; do
-              CORPUS=${./docs/haskell-era/RUN-2026-07-25-WIKI-FULL.md} PRESET=small4-v3 TRAIN_STEPS=6 TRAIN_BATCH=8 \
-                TRAIN_MICRO=4 TRAIN_LR=3e-3 TRAIN_WARMUP=2 TRAIN_OPT=$opt EVAL_EVERY=3 OUT=$opt.btc \
-                ${self.packages.${system}.bend-train-dense}/bin/bend-train-dense --gpu off --threads 4 > $opt.log
-            done
-            sha256sum adamw.btc muon.btc | diff - ${./bend/tests/dense-identity.sha256}
+            bend src/tests/Checks.bend dense-run ${self.packages.${system}.bend-train-dense}/bin/bend-train-dense corpus.txt \
+              ${./docs/haskell-era/RUN-2026-07-25-WIKI-FULL.md} ${./bend/tests/dense-identity.sha256}
             touch $out
           '';
           # the dense decode step (bend/Dense/Decode.bend, ana's engine)
           # against Model.bend's decode, its meaning: every position's logits
           # within 1e-5 relative, before and after the softmax ring wraps,
           # with and without v3's arms; a reset gives them again bit for bit
-          bend-decode-dense = pkgs.runCommand "bend-decode-dense" { nativeBuildInputs = [ (bendFor pkgs) pkgs.gawk ]; } ''
+          # (tests/decode-dense.bend decides)
+          bend-decode-dense = pkgs.runCommand "bend-decode-dense" { nativeBuildInputs = [ (bendFor pkgs) ]; } ''
             export HOME=$TMPDIR
             cp -r ${bendSrc}/bend src
             chmod -R u+w src
-            (cd src && bend tests/decode-dense.bend -o $TMPDIR/dd) && $TMPDIR/dd --threads 4 | tee dd.out
-            awk '/logits, positions/ { r = $(NF); gsub(/[()]/, "", r); k++; if (r + 0 > 1e-5) { print "logits differ: " $0; bad = 1 } }
-                 END { if (k != 4) { print "expected 4 logit checks, got " k; bad = 1 } exit bad }' dd.out
-            test "$(grep -c '^ok ' dd.out)" = 5 && ! grep -q '^FAIL' dd.out
+            bend src/tests/decode-dense.bend -o dd
+            ./dd --threads 4
             touch $out
           '';
           # ana's chunked prefill (bend/Dense/Decode.bend dd.feeds: chunks of
@@ -373,41 +281,25 @@
           # (six runs: whole and partial chunks, a stepped remainder,
           # attention batched before the ring's wrap and per token across
           # and after it), with and without v3's arms; the chunked logits
-          # within 1e-5 of Model.bend's decode
-          bend-prefill-dense = pkgs.runCommand "bend-prefill-dense" { nativeBuildInputs = [ (bendFor pkgs) pkgs.gawk ]; } ''
+          # within 1e-5 of Model.bend's decode (tests/prefill-dense.bend
+          # decides)
+          bend-prefill-dense = pkgs.runCommand "bend-prefill-dense" { nativeBuildInputs = [ (bendFor pkgs) ]; } ''
             export HOME=$TMPDIR
             cp -r ${bendSrc}/bend src
             chmod -R u+w src
-            (cd src && bend tests/prefill-dense.bend -o $TMPDIR/pd) && $TMPDIR/pd --threads 4 | tee pd.out
-            if grep -q '^FAIL' pd.out; then exit 1; fi
-            test "$(grep -c '^ok ' pd.out)" = 12
-            awk '/against Model.bend decode/ { r = $(NF); gsub(/[()]/, "", r); k++; if (r + 0 > 1e-5) { print "logits differ: " $0; bad = 1 } }
-                 END { if (k != 2) { print "expected 2 logit checks, got " k; bad = 1 } exit bad }' pd.out
+            bend src/tests/prefill-dense.bend -o pd
+            ./pd --threads 4
             touch $out
           '';
           # CPU bulk ops refine the Base definitions without changing F32
           # bits. Small cases compare to JS; seeded and adversarial cases
           # cover SIMD tails, threaded reductions, aliases and wrapping.
+          # Checks.bend bulk-cpu runs every lane and compares the bytes.
           bend-bulk-cpu = pkgs.runCommand "bend-bulk-cpu" { nativeBuildInputs = [ (bendFor pkgs) ]; } ''
             export HOME=$TMPDIR
             cp -r ${bendSrc}/bend src
             chmod -R u+w src
-            for name in GemmConf EinsumConf; do
-              bend src/gpu/$name.bend > $name.js
-              bend src/gpu/$name.bend -o $TMPDIR/$name
-              BEND_FT=loop $TMPDIR/$name --gpu off --threads 1 > $name.loop
-              cmp $name.js $name.loop
-              $TMPDIR/$name --gpu off --threads 8 > $name.fast
-              cmp $name.loop $name.fast
-            done
-            bend src/tests/bulk-cpu.bend -o $TMPDIR/bulk
-            BEND_FT=loop $TMPDIR/bulk --gpu off --threads 1 > reference
-            BEND_FT=c $TMPDIR/bulk --gpu off --threads 8 > actual
-            cmp reference actual
-            for threads in 1 8 16; do
-              $TMPDIR/bulk --gpu off --threads $threads > actual
-              cmp reference actual
-            done
+            bend src/tests/Checks.bend bulk-cpu src
             touch $out
           '';
         }

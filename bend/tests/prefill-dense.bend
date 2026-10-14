@@ -105,12 +105,34 @@ def tp.ref(+k: Dd.Dd, +ws: List<&2, F32>, +ts: List<&2, U32>) -> TpOut:
 def tp.chunked(+k: Dd.Dd, +ws: List<&2, F32>, +pre: Nat, +ts: List<&2, U32>) -> TpOut:
   tp.out(k, Dd.dd.feeds(k, List.drop(&2, U32, ts, pre), pre, tp.each(List.take(&2, U32, ts, pre), k, 0n, tp.fresh(k, ws))))
 
-def tp.check(+name: String, a: TpOut, b: TpOut) -> IO(Unit):
+# The tally the verdict reads: exact laws checked and failed, logit
+# comparisons against Model.bend made and failed (each within 1e-5
+# relative, the F32 its line shows; a NaN fails)
+type TpT is Data:
+  TpT{ex: Nat, exbad: Nat, lg: Nat, lgbad: Nat}
+
+def tp.add(a: TpT, b: TpT) -> TpT:
+  match a b:
+    case TpT{e1, eb1, l1, lb1} TpT{e2, eb2, l2, lb2}:
+      TpT{Nat.add(e1, e2), Nat.add(eb1, eb2), Nat.add(l1, l2), Nat.add(lb1, lb2)}
+
+def tp.bad(b: Bool) -> Nat:
+  Bool.pick(Nat, b, 0n, 1n)
+
+def tp.ok(+e: TpErr) -> Bool:
+  match e:
+    case TpErr{d, s}:
+      F32.is_le(F32.div(d, s), 1.0e-5)
+
+def tp.check(+name: String, a: TpOut, b: TpOut) -> IO(TpT):
   match a b:
     case TpOut{+sa, +la, +ta} TpOut{+sb, +lb, +tb}:
-      IO.print(Bool.pick(String, Bool.and(Bool.and(tp.same(sa, sb), tp.same(la, lb)), U32.is_eq(ta, tb)), "ok ", "FAIL ") ++ name
-        ++ ": states " ++ tp.show(tp.err(sa, sb, TpErr{0.0, 0.0})) ++ "; logits " ++ tp.show(tp.err(la, lb, TpErr{0.0, 0.0}))
-        ++ "; pick " ++ U32.show(ta) ++ " and " ++ U32.show(tb))
+      +ok = Bool.and(Bool.and(tp.same(sa, sb), tp.same(la, lb)), U32.is_eq(ta, tb))
+      do IO<TpT>:
+        IO.print(Bool.pick(String, ok, "ok ", "FAIL ") ++ name
+          ++ ": states " ++ tp.show(tp.err(sa, sb, TpErr{0.0, 0.0})) ++ "; logits " ++ tp.show(tp.err(la, lb, TpErr{0.0, 0.0}))
+          ++ "; pick " ++ U32.show(ta) ++ " and " ++ U32.show(tb))
+        return TpT{1n, tp.bad(ok), 0n, 0n}
 
 # Model.bend's decode: the logits after every token
 def tp.o.logits(o: Md.Out) -> T.V:
@@ -131,27 +153,47 @@ def tp.tree(ts: List<&2, U32>, +dm: Md.Dims, +w: Md.Weights, o: Md.Out, +pos: Na
       tp.tree(rest, dm, w, Md.decode(dm, w, tp.o.sts(o), pos, t), 1n+pos)
 
 # the first n tokens: pre steps, then chunks, against n steps
-def tp.run(+name: String, +k: Dd.Dd, +ws: List<&2, F32>, +pre: Nat, +n: Nat, +ts: List<&2, U32>) -> IO(Unit):
+def tp.run(+name: String, +k: Dd.Dd, +ws: List<&2, F32>, +pre: Nat, +n: Nat, +ts: List<&2, U32>) -> IO(TpT):
   +xs = List.take(&2, U32, ts, n)
   tp.check(name, tp.ref(k, ws, xs), tp.chunked(k, ws, pre, xs))
 
-def tp.case(+name: String, +c: C.Config, +ts: List<&2, U32>) -> IO(Unit):
+def tp.case(+name: String, +c: C.Config, +ts: List<&2, U32>) -> IO(TpT):
   +k = Dd.dd.of.n(c, 16)
   +ws = K.Weights.flat(I.init(c))
   +dm = Md.Dims.of(c)
   +whole = tp.chunked(k, ws, 0n, ts)
   +tree = T.V.to_list(tp.o.logits(tp.tree(ts, dm, I.init(c), {Md.Out{T.VZ{}, Md.states.zero(C.Config.layers(c), dm, 0n)} : Md.Out}, 0n)))
-  do IO<Unit>:
-    tp.check(name ++ " 96 from 0: 6 chunks", tp.ref(k, ws, ts), whole)
-    tp.run(name ++ " 95 from 0: 5 chunks and one of 15", k, ws, 0n, 95n, ts)
-    tp.run(name ++ " 40 from 0: 2 chunks and one of 8", k, ws, 0n, 40n, ts)
-    tp.run(name ++ " 50 from 0: 3 chunks and 2 steps", k, ws, 0n, 50n, ts)
-    tp.run(name ++ " 96 from 5: 5 steps, 5 chunks (one across the wrap) and one of 11", k, ws, 5n, 96n, ts)
-    tp.run(name ++ " 67 from 5: 5 steps, 3 chunks and one of 14 across the wrap", k, ws, 5n, 67n, ts)
-    IO.print(name ++ " chunked logits against Model.bend decode: " ++ tp.show(tp.err(tree, tp.lg(whole), TpErr{0.0, 0.0})))
+  +e = tp.err(tree, tp.lg(whole), TpErr{0.0, 0.0})
+  do IO<TpT>:
+    r1 : TpT <- tp.check(name ++ " 96 from 0: 6 chunks", tp.ref(k, ws, ts), whole)
+    r2 : TpT <- tp.run(name ++ " 95 from 0: 5 chunks and one of 15", k, ws, 0n, 95n, ts)
+    r3 : TpT <- tp.run(name ++ " 40 from 0: 2 chunks and one of 8", k, ws, 0n, 40n, ts)
+    r4 : TpT <- tp.run(name ++ " 50 from 0: 3 chunks and 2 steps", k, ws, 0n, 50n, ts)
+    r5 : TpT <- tp.run(name ++ " 96 from 5: 5 steps, 5 chunks (one across the wrap) and one of 11", k, ws, 5n, 96n, ts)
+    r6 : TpT <- tp.run(name ++ " 67 from 5: 5 steps, 3 chunks and one of 14 across the wrap", k, ws, 5n, 67n, ts)
+    IO.print(Bool.pick(String, tp.ok(e), "", "FAIL ") ++ name ++ " chunked logits against Model.bend decode: " ++ tp.show(e))
+    return tp.add(tp.add(tp.add(r1, r2), tp.add(r3, r4)), tp.add(tp.add(r5, r6), TpT{0n, 0n, 1n, tp.bad(tp.ok(e))}))
+
+def tp.verdict.if(ok: Bool, msg: String) -> IO(Unit):
+  match ok:
+    case True{}:
+      IO.print("ok 12 runs bit for bit, 2 logit comparisons within 1e-5 relative")
+    case False{}:
+      IO.die(Unit, 1, msg)
+
+# The verdict (the flake's bend-prefill-dense check is this exit status):
+# the 12 runs (6 a config) bit for bit, and both configs' chunked logits
+# within 1e-5 relative of Model.bend's decode
+def tp.verdict(t: TpT) -> IO(Unit):
+  match t:
+    case TpT{+ex, +exbad, +lg, +lgbad}:
+      tp.verdict.if(Bool.and(Bool.and(Nat.is_eq(ex, 12n), Nat.is_eq(exbad, 0n)), Bool.and(Nat.is_eq(lg, 2n), Nat.is_eq(lgbad, 0n))),
+        "prefill-dense: " ++ Nat.show(exbad) ++ " of " ++ Nat.show(ex) ++ " runs differ (12 expected), "
+          ++ Nat.show(lgbad) ++ " of " ++ Nat.show(lg) ++ " logit comparisons past 1e-5 relative (2 expected)")
 
 def main() -> IO(Unit):
   +ts = tp.window(95n, 7)
   do IO<Unit>:
-    tp.case("v3 arms", C.Config.small4_v3(), ts)
-    tp.case("no arms", {C.Config{U32.to_nat(258), 64n, 64n, U32.to_nat(192), 4n, 4n, False{}, False{}, False{}, True{}} : C.Config}, ts)
+    a : TpT <- tp.case("v3 arms", C.Config.small4_v3(), ts)
+    b : TpT <- tp.case("no arms", {C.Config{U32.to_nat(258), 64n, 64n, U32.to_nat(192), 4n, 4n, False{}, False{}, False{}, True{}} : C.Config}, ts)
+    tp.verdict(tp.add(a, b))
