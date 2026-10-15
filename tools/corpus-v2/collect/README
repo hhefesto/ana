@@ -1,0 +1,23 @@
+tools/corpus-v2/collect: configs for `bend-corpus-v2 collect` (bend/CorpusV2/Collect.bend,
+whose header is the full reference). A collection of new Bend code is a config here, never
+a new script. Run from the repository root:
+
+  bend-corpus-v2 collect CFG STEP...      STEP: fetch list gate-bend nul keys pre gate split check, or all
+
+The config: one directive a line, `#` starts a comment.
+
+  out DIR / src DIR / lang bend / pins FILE / known FILE... / bend2 DIR
+  upstream OWNER/NAME BASE                 the upstream's .bend files added or changed BASE..pin
+  repo OWNER/NAME RULE [exclude PREFIX...] RULE: all | lt100k | novendor
+  growth OWNER/NAME RULE [exclude ...]     a repository an earlier collection took
+  sibling OWNER/NAME LINK                  SRC/LINK -> OWNER__NAME (the loader's ../Link imports)
+  loader PATH / loader-secs N / procs N / order find|bytes / big N
+  verdicts FILE [CLASS...]                 an earlier bend.check.tsv's verdicts (those classes) reused
+  vault quarter|none / vault-min N / vault-known FILE... / big-known FILE...
+  corpus FILE... / streams FILE / keycache DIR / raw-cap NAME=CPS...
+
+Configs:
+
+  bend-run3-replay.cfg   run 3's Bend inputs (tools/corpus-v2/raw-new3.sh, 2026-10-07) from its own
+                         pinned clones, without fetch; reproduces run/v2/raw-new3's Bend outputs
+  bend-run4.cfg          run 4's: the 19 new repositories, upstream since 1d895ca0, growth of run 3's 43

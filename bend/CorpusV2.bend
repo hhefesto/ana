@@ -11,6 +11,7 @@ import ./CorpusV2/Steps.bend as St
 import ./CorpusV2/Agent.bend as Ea
 import ./CorpusV2/Stats.bend as As
 import ./CorpusV2/Behaviour.bend as Bh
+import ./CorpusV2/Collect.bend as Co
 
 # bend-corpus-v2: corpus v2's tools (docs/CORPUS-V2.md), one subcommand each,
 # ported from the Python they replaced, each byte-identical to it on the
@@ -40,6 +41,7 @@ import ./CorpusV2/Behaviour.bend as Bh
 #   agent-stats DIR [DIR2]  compare A B   E5's statistics; E1 or behaviour paired by prompt   (CorpusV2/Stats.bend)
 #   behaviour tasks [--check] [LANG...] | run CKPT|REF TAG [LANG...] | selftest [LANG...]
 #                                   the behaviour test   (CorpusV2/Behaviour.bend)
+#   collect CFG STEP...             new Bend code from a config: fetch list gate-bend nul keys pre gate split check | all   (CorpusV2/Collect.bend)
 
 # A record stream ---------------------------------------------------------------
 #
@@ -128,7 +130,7 @@ def c2.code(+c: String) -> Nat:
   Bool.pick(Nat, String.eq(c, "nul-jsonl"), 19n, Bool.pick(Nat, String.eq(c, "per"), 20n, Bool.pick(Nat, String.eq(c, "specs-mixnew"), 21n,
   Bool.pick(Nat, String.eq(c, "specs-next"), 22n, Bool.pick(Nat, String.eq(c, "replay-filler"), 23n, Bool.pick(Nat, String.eq(c, "drop-repos"), 24n,
   Bool.pick(Nat, String.eq(c, "insert-stage"), 25n, Bool.pick(Nat, String.eq(c, "vault-sample"), 26n, Bool.pick(Nat, String.eq(c, "agent-tool"), 27n, Bool.pick(Nat, String.eq(c, "agent-eval"), 28n, Bool.pick(Nat, String.eq(c, "agent-stats"), 29n, Bool.pick(Nat, String.eq(c, "compare"), 30n,
-  Bool.pick(Nat, String.eq(c, "behaviour"), 31n, 0n)))))))))))))))))))))))))))))))
+  Bool.pick(Nat, String.eq(c, "behaviour"), 31n, Bool.pick(Nat, String.eq(c, "collect"), 32n, 0n))))))))))))))))))))))))))))))))
 
 def c2.keys.cmd(xs: List<String>) -> IO(Unit):
   match xs:
@@ -201,6 +203,8 @@ def c2.run(k: Nat, +c: String, xs: List<String>) -> IO(Unit):
       As.cm.compare(xs)
     case 31n:
       Bh.bhv.main(xs)
+    case 32n:
+      Co.col.main(xs)
     case _:
       c2.usage()
 

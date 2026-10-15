@@ -482,6 +482,10 @@ def chk.tests() -> List<&2, ChkTest>:
    # JSON, the lint's rules and flake bodies, st.f.floor, and the processes
    # (background, which, find, stat, sha256sum, markers); reads fixtures/ops
    ChkTest{"ops.bend", False{}, ROks{61n}},
+   # collect's pure parts (bend/CorpusV2/Collect.bend): the config grammar,
+   # the repo rules and excludes, the loader-verdict classes, notbase, growth
+   # routing and the vault quarter
+   ChkTest{"collect.bend", False{}, ROks{35n}},
    # bend-box's and `bend-ops stage`'s readers (bend/Box/OnBox.bend,
    # Stage.bend) against fp.sh's awk, grep, sort, tail and sed on real logs
    # (gate.log, time.log, dmon.txt, a plan; reads fixtures/box)
