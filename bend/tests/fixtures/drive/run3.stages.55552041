@@ -1,0 +1,8 @@
+# run 3 (vast 55552041, from 2026-10-12 UTC-6): S1, run 3's steady plan (run/v3/S1: format 2's
+# transcript windows, the synthetic chains, the steady raw slices) from scratch,
+# TRAIN_MASK=kinds, 56,497 steps planned, to the boundary 36696 (STEPS=36696, segment 486's
+# start, 65.0%); pull every 5000.
+# S2's line is appended once tools/corpus-v2/s2.sh has built it on the box (the chain
+# waits WAIT, 2 h, at the end of this list):
+#   s2 traind-next 5000 run/v3/S2/plan-fp100m-b16-windows.tsv run/v3/S2 fp100m   (relative: the chain looks under ~/formalTransformer/; run/v3/run3/s2-driver.sh appends it)
+s1 traind 5000

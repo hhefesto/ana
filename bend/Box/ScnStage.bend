@@ -1296,10 +1296,18 @@ def sst.s.chain(+t: SstT, +base: String, +s: Sc.Scn) -> IO(List<&2, Sc.ScnRes>):
 # bend-train-dense, built) on the CPU (--gpu off: no GPU needed): their OUT directories, byte for
 # byte, and what they print.
 
+# the store path is nix's stdout alone: its stderr carries warnings such as
+# "Git tree ... has uncommitted changes", which S.must's combined text put into
+# the path (2026-10-15)
+def sst.trainer.built(+o: Lc.LclOut) -> IO(String):
+  Bool.pick(IO(String), Lc.lcl.ok(o),
+    IO.pure(String, S.str(S.chomp(Lc.lcl.out(o))) ++ "/bin/bend-train-dense"),
+    IO.die(String, 1, "sim stage: nix build bend-train-dense failed: " ++ S.str(Lc.lcl.err(o))))
+
 def sst.trainer.got(+given: String, +repo: String) -> IO(String):
   Bool.pick(IO(String), String.is_empty(given),
-    IO.bind(List<&2, U32>, String, S.must("nix build bend-train-dense", "nix", ["build", "--no-link", "--print-out-paths", repo ++ "#bend-train-dense"]),
-      (o => IO.pure(String, S.str(S.chomp(o)) ++ "/bin/bend-train-dense"))),
+    IO.bind(Lc.LclOut, String, Lc.lcl.run(7200, "nix", ["build", "--no-link", "--print-out-paths", repo ++ "#bend-train-dense"]),
+      (o => sst.trainer.built(o))),
     IO.pure(String, given))
 
 def sst.fx.ident(+c: SstC) -> IO(Unit):

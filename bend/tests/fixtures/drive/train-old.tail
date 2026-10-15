@@ -1,0 +1,8 @@
+[2026-10-12 08:58:28 UTC-6] step=3999/56497 progress=7.078% lr=0.00029680438 train_loss=0.76027125 train_loss_ema=1.1126577 gradient_norm=0.65393656 clipped=False ms=2019 tok/s=16229
+[2026-10-12 08:58:30 UTC-6] step=4000/56497 progress=7.08% lr=0.00029680267 train_loss=0.45653573 train_loss_ema=1.0995352 gradient_norm=0.50545347 clipped=False ms=2014 tok/s=16270
+[2026-10-12 08:58:34 UTC-6] step=4000 validation_loss=1.2514917 validation_delta=-0.8704933 best_validation_loss=1.2514917 new_best=True bits_per_byte=0.62181705 remaining=32696 eta=18h18m
+[2026-10-12 08:58:35 UTC-6] saved out/s1-step4000.checkpoint (638 ms)
+[2026-10-12 08:58:37 UTC-6] step=4001/56497 progress=7.082% lr=0.00029680095 train_loss=0.69435525 train_loss_ema=1.0914316 gradient_norm=0.6583948 clipped=False ms=2114 tok/s=15500
+[2026-10-12 08:58:39 UTC-6] step=4002/56497 progress=7.084% lr=0.00029679923 train_loss=0.73929006 train_loss_ema=1.0843887 gradient_norm=0.56751907 clipped=False ms=2011 tok/s=16294
+[2026-10-12 08:58:41 UTC-6] step=4003/56497 progress=7.085% lr=0.0002967975 train_loss=0.7521082 train_loss_ema=1.0777432 gradient_norm=0.5694408 clipped=False ms=2013 tok/s=16278
+[2026-10-12 08:58:43 UTC-6] step=4004/56497 progress=7.087% lr=0.00029679577 train_loss=0.5840265 train_loss_ema=1.0678688 gradient_norm=0.5919494 clipped=False ms=2016 tok/s=16253

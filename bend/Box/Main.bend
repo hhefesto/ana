@@ -14,6 +14,11 @@ import ./Stage.bend as Sg
 import ./Drive.bend as Dr
 import ./Evals.bend as Ev
 import ./Act.bend as Ac
+import ./Unit.bend as Un
+import ./Guard.bend as Gd
+import ./Handover.bend as Hv
+import ./Move.bend as Mv
+import ./ScnDrive.bend as Sd
 
 # bend-ops: the box operations, run from this machine (2026-10-14, the plan
 # "all logic in Bend, shell only a thin shim"; docs in bend/Box/*.bend).
@@ -48,8 +53,24 @@ import ./Act.bend as Ac
 #   bend-ops act setup|ckpt|check|start|pull|ensure HOST PORT ... | --dry-run OUT | procs NPROC [CPU_MAX]
 #                       ana's act rounds on a box (bend/Box/Act.bend: act-box.sh, act-restart.sh)
 #
-# Later phases add guard, handover, move and unit.  The `probe`
-# subcommands run one primitive each,
+#   bend-ops guard CFG [install|--dry-run]
+#                       a run's units (chain, watch, hand-over) back after a boot; install: the
+#                       persistent user unit that runs it (bend/Box/Guard.bend: boot-guard.sh)
+#   bend-ops handover CFG
+#                       at the boundary: the act round stopped and cut, accept and fixed, S2 built
+#                       on the box and appended to STAGES (bend/Box/Handover.bend: s2-driver.sh)
+#   bend-ops move CFG old-stop|old-pull|restage|resume|watch|act|old-check
+#                       a run from one box to another (bend/Box/Move.bend: move.sh, act-restart.sh)
+#   bend-ops unit start NAME [--mem X] [--out FILE] [--env K=V]... [--] CMD... | restart NAME | stop NAME... | list
+#                       a long job as a systemd user unit, its line recorded for a restart after a
+#                       reboot (bend/Box/Unit.bend)
+#   bend-ops sim drive N|all DIR
+#                       guard, handover and move against a sandbox box, old drivers against new
+#                       (bend/Box/ScnDrive.bend)
+#
+# A run's drivers are one tracked config, tools/runs/*.cfg (TEMPLATE.cfg says
+# what each key does), not new scripts.  The `probe` subcommands run one
+# primitive each,
 # for a person checking a box or a fixture by hand:
 #
 #   bend-ops probe saved LOG          the saves a trainer's log records: `STEP FILE` lines (fp-chain's saved())
@@ -131,7 +152,10 @@ def ops.usage() -> String:
     ++ "       bend-ops dense-identity OUT_DIR [TRAINER]\n"
     ++ "       bend-ops stage next | stage raw mix|mixnew FILE...|build K|push K HOST PORT | feed HOST PORT STAGES [FIRST] [LAST]\n"
     ++ "       bend-ops evals CFG\n"
-    ++ "       bend-ops act setup|ckpt|check|start|pull|ensure HOST PORT ... | --dry-run OUT | procs NPROC [CPU_MAX]"
+    ++ "       bend-ops act setup|ckpt|check|start|pull|ensure HOST PORT ... | --dry-run OUT | procs NPROC [CPU_MAX]\n"
+    ++ "       bend-ops guard CFG [install|--dry-run] | handover CFG | move CFG old-stop|old-pull|restage|resume|watch|act|old-check\n"
+    ++ "       bend-ops unit start NAME [--mem X] [--out FILE] [--env K=V]... [--] CMD... | restart NAME | stop NAME... | list\n"
+    ++ "       bend-ops sim drive N|all DIR"
 
 def ops.args(xs: List<String>) -> IO(Unit):
   match xs:
@@ -157,6 +181,14 @@ def ops.args(xs: List<String>) -> IO(Unit):
       Sg.stg.ident.main(rest)
     case "act" <> rest:
       Ac.acb.main(rest)
+    case "guard" <> rest:
+      Gd.grd.main(rest)
+    case "handover" <> rest:
+      Hv.hov.main(rest)
+    case "move" <> rest:
+      Mv.mov.main(rest)
+    case "unit" <> rest:
+      Un.unt.main(rest)
     case _:
       IO.die(Unit, 2, ops.usage())
 
@@ -165,6 +197,8 @@ def ops.main(xs: List<String>) -> IO(Unit):
   match xs:
     case +a0 <> "sim" <> "stage" <> rest:
       Ss.sst.main(a0, rest)
+    case +a0 <> "sim" <> "drive" <> rest:
+      Sd.sdr.main(a0, rest)
     case +a0 <> "sim" <> rest:
       Sc.scn.main(a0, rest)
     case a0 <> rest:

@@ -2,6 +2,7 @@ import Base
 import ../Sys.bend as S
 import ../Clock.bend as Ck
 import ../Box/Local.bend as Lc
+import ./SimDrive.bend as Sd
 
 # bend-sim: a box in a sandbox (2026-10-14, the plan's Phase 0), for testing
 # bend-ops' chain, watch and stage against a local sshd without a GPU or
@@ -36,7 +37,11 @@ import ../Box/Local.bend as Lc
 #   pgrep, pkill          (on the box's PATH) the real tools (from SIM_BOX_PATH) limited to
 #                         the processes whose environment holds SIM_BOX=<this box>, so boxes
 #                         in other sandboxes, or the machine's own processes, are never seen
-#                         or signalled: -c, -x, -f, -SIG and --signal SIG
+#                         or signalled: -c, -x, -f, -SIG and --signal SIG; -o (here: the lowest
+#                         pid) and -s SID (2026-10-15, for bend-box act-stop)
+#   systemd-run, systemctl, bend-corpus-v2, deploy, bend-episode
+#                         with SIM_DRIVE set (2026-10-15, Phase 4b): the run drivers' sandbox's
+#                         (bend/tests/SimDrive.bend), before any part of the same name here
 #
 #   bend-sim links DIR    those names in DIR, linked to this binary
 #   bend-sim ROLE ARGS..  one part by its name
@@ -1112,17 +1117,66 @@ def sim.pg.flags(o: SimPg) -> List<&2, String>:
     case SimPg{c, x, f, s, p}:
       List.concat(&2, String, [Bool.pick(List<&2, String>, x, ["-x"], Nil{}), Bool.pick(List<&2, String>, f, ["-f"], Nil{}), ["--", p]])
 
+# -o (the oldest: here the lowest pid of this box's) and -s SID (a session),
+# taken out of the words before the rest are read (2026-10-15, Phase 4b:
+# bend-box act-stop's `pgrep -o -x NAME` and `pkill -TERM -s SID`)
+type SimPgX is Data:
+  SimPgX{oldest: Bool, sess: String, rest: List<&2, String>}
+
+def sim.pg.x(ws: List<&2, String>, o: SimPgX) -> SimPgX:
+  match ws o:
+    case Nil{} _:
+      o
+    case "-o" <> more SimPgX{a, s, r}:
+      sim.pg.x(more, SimPgX{True{}, s, r})
+    case "-s" <> +sid <> more SimPgX{a, s, r}:
+      sim.pg.x(more, SimPgX{a, sid, r})
+    case +w <> more SimPgX{a, s, r}:
+      sim.pg.x(more, SimPgX{a, s, List.append(&2, String, r, [w])})
+
+def sim.pg.x.rest(+x: SimPgX) -> List<&2, String>:
+  match x:
+    case SimPgX{a, s, r}:
+      r
+
+def sim.pg.x.flags(+x: SimPgX) -> List<&2, String>:
+  match x:
+    case SimPgX{a, s, r}:
+      Bool.pick(List<&2, String>, String.is_empty(s), Nil{}, ["-s", s])
+
+def sim.pg.x.oldest(+x: SimPgX) -> Bool:
+  match x:
+    case SimPgX{a, s, r}:
+      a
+
+def sim.pg.low(ps: List<&2, List<&2, U32>>, +best: List<&2, U32>) -> List<&2, U32>:
+  match ps:
+    case Nil{}:
+      best
+    case +p <> t:
+      +n = Maybe.default(&2, Nat, Lc.lcl.nat(p), 0n)
+      +b = Maybe.default(&2, Nat, Lc.lcl.nat(best), 0n)
+      sim.pg.low(t, Bool.pick(List<&2, U32>, Bool.or(Nat.is_eq(S.len(best), 0n), Nat.is_lt(n, b)), p, best))
+
+def sim.pg.pick(oldest: Bool, +ps: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match oldest:
+    case False{}:
+      ps
+    case True{}:
+      Bool.pick(List<&2, List<&2, U32>>, List.is_empty(&2, List<&2, U32>, ps), Nil{}, [sim.pg.low(ps, Nil{})])
+
 # pgrep (kill False) or pkill (True), limited to this box's processes
 def sim.pg(kill: Bool, +args: List<&2, String>) -> IO(Unit):
-  +o = sim.pg.opt(args, SimPg{False{}, False{}, False{}, "TERM", ""})
+  +x = sim.pg.x(args, SimPgX{False{}, "", Nil{}})
+  +o = sim.pg.opt(sim.pg.x.rest(x), SimPg{False{}, False{}, False{}, "TERM", ""})
   do IO<Unit>:
     +box : String <- S.env("SIM_BOX", "")
     +bp : String <- S.env("SIM_BOX_PATH", "")
     path : String <- S.env("PATH", "")
     +rp : String = Bool.pick(String, String.is_empty(bp), path, bp)
-    +r : Lc.LclOut <- Lc.lcl.run(60, "env", sim.l1(List.append(&2, String, ["PATH=" ++ rp, "pgrep"], sim.pg.flags(o))))
+    +r : Lc.LclOut <- Lc.lcl.run(60, "env", sim.l1(List.concat(&2, String, [["PATH=" ++ rp, "pgrep"], sim.pg.x.flags(x), sim.pg.flags(o)])))
     ps : List<&2, List<&2, U32>> <- sim.pg.filter(String.is_empty(box), Lc.lcl.words(Lc.lcl.out(r)), S.b("SIM_BOX=" ++ box))
-    sim.pg.fin(kill, o, ps, rp)
+    sim.pg.fin(kill, o, sim.pg.pick(sim.pg.x.oldest(x), ps), rp)
 
 # Recorded stubs (2026-10-15, Phase 1c: the staging, feed and act paths; the header) ----------------
 
@@ -1392,7 +1446,9 @@ def sim.main(+argv0: String, +args: List<&2, String>) -> IO(Unit):
   do IO<Unit>:
     +dump : String <- S.env("SIM_DUMP", "")
     sim.dump(String.is_empty(dump), dump, argv0 ++ " " ++ sim.join2(args))
-    sim.part(argv0, S.base(argv0) <> args)
+    # SIM_DRIVE set: the run drivers' sandbox's parts first (bend/tests/SimDrive.bend)
+    drive : String <- S.env("SIM_DRIVE", "")
+    Bool.pick(IO(Unit), Bool.and(Bool.not(String.is_empty(drive)), Sd.sdf.known(S.base(argv0))), Sd.sdf.part(S.base(argv0), args), sim.part(argv0, S.base(argv0) <> args))
 
 def main() -> IO(Unit):
   do IO<Unit>:

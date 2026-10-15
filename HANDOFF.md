@@ -108,7 +108,27 @@ export PATH=$PWD/run/gcroot-bend-ops/bin:$PWD/run/v2/gcroot-bend-corpus-v2/bin:$
 
 Unwire fp.sh once bend-box has trained on a real box.
 
-**Phase 4b** (in progress): `bend-ops guard`, `handover`, `move` and `unit start|restart|list`, driven by tools/runs/*.cfg; documented here when it lands.
+**A run's drivers are one config file** (tools/runs/*.cfg; TEMPLATE.cfg explains each key, and run3.cfg reproduces run 3's drivers). Copy TEMPLATE.cfg to tools/runs/run4.cfg and fill in the host, port, instance, DEST, STAGES and the boundary. Then:
+```sh
+nix build --max-jobs 1 .#bend-ops -o run/gcroot-bend-ops   # the config's `ops` key names this path
+bend-ops guard tools/runs/run4.cfg --dry-run    # the units it would start
+bend-ops guard tools/runs/run4.cfg install      # a persistent user unit that brings them back after a boot
+bend-ops guard tools/runs/run4.cfg              # starts chain, watch and handover units that are not running
+```
+- **`bend-ops unit start NAME [--mem X] [--out FILE] [--env K=V]... CMD...`** replaces the hand-written systemd-run lines in step 2 above.
+  - It runs CMD as a user unit with MemoryMax (4G by default) and OOMPolicy=continue.
+  - It records the command line under ~/.local/state/bend-ops/units.
+  - After a reboot, `unit restart NAME` runs a recorded unit again; `unit list` shows each one and whether it is running.
+- **`bend-ops handover CFG`** (bend/Box/Handover.bend) does step 5 by itself, in s2-driver.sh's order:
+  - It waits for S1's `done at step BOUNDARY`.
+  - It stops the act round unless the round finished, cuts its frames, and runs accept and fixed.
+  - It builds S2 on the box with `corpus-v2 s2` and appends its line to STAGES.
+  - It exits 1 and leaves STAGES alone if S1 died or s2 failed.
+  - It exits at once if STAGES already has the stage.
+- **`bend-ops move CFG STEP`** (bend/Box/Move.bend) takes a run from a failing box to a new one, step by step: `old-stop`, `old-pull`, `restage`, `resume`, `watch`, `act`, `old-check`.
+  - old-stop checks the save before stopping anything.
+  - resume rewrites the stage's STAGES line and keeps the old one as STAGES.OLD_INSTANCE.
+- `bend-ops sim drive all run/sim-drive` runs 7 scenarios against run 3's boot-guard.sh, s2-driver.sh and move.sh. Not yet shown: act-ensure, act-pull, `move restage` and `move act`, which need real nix on a box, and `guard install` against real systemd.
 
 ## ▶ CONTINUE HERE (2026-10-06, 23:05 UTC-6): run 2 ends ≈ 01:20; at step 40000 it passes run 1 on every eval
 
