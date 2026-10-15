@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-15: replaced by `bend-corpus-v2 windows` (bend/CorpusV2/Recipes.bend, the plan's Phase 4); kept for reference
+exit 2
 # windows.sh: format 2's train transcripts as transcript windows (bend-plan-windows):
 # every language's transcripts interleaved by count (each round PER of each, so they
 # run dry together), packed whole into 2,046-token windows, each window's gap the

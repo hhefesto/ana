@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-15: `build K` is replaced by `bend-corpus-v2 raw-build K` (bend/CorpusV2/Recipes.bend, the plan's Phase 4); `mix` was unwired 2026-10-14 for steady-mix; kept for reference
+exit 2
 # rawshards.sh: `bend-corpus-v2 raw`'s pool as raw-code shards for corpus v2's one mix (docs/CORPUS-V2.md, C5).
 #   tools/corpus-v2/rawshards.sh mix        (UNWIRED 2026-10-14: exits 2; steady-mix.sh) the languages interleaved by tokens (Haskell 35 :
 #                                            Lean 25 : Agda 15; the few raw Bend and Nix files

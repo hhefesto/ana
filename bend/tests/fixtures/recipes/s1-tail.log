@@ -1,0 +1,6 @@
+[2026-10-13 05:01:42 UTC-6] step=36695/56497 progress=64.95% lr=0.00008289737 train_loss=1.3669393 train_loss_ema=1.336788 gradient_norm=0.41622287 clipped=False ms=1995 tok/s=16425
+[2026-10-13 05:01:44 UTC-6] step=36696/56497 progress=64.952% lr=0.00008288989 train_loss=1.3203049 train_loss_ema=1.3364583 gradient_norm=0.46728387 clipped=False ms=1995 tok/s=16425
+oss=1.3669393 train_loss_ema=1.336788 gradient_norm=0.41622287 clipped=False ms=1995 tok/s=16425
+[2026-10-13 05:01:44 UTC-6] step=36696/56497 progress=64.952% lr=0.00008288989 train_loss=1.3203049 train_loss_ema=1.3364583 gradient_norm=0.46728387 clipped=False ms=1995 tok/s=16425
+[2026-10-13 05:01:46 UTC-6] saved out/s1-step36696.checkpoint (1468 ms)
+[2026-10-13 05:01:46 UTC-6] done at step 36696

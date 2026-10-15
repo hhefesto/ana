@@ -22,16 +22,12 @@ bend/tests/dense-identity.sh
 bend/gpu/act-box.sh
 tools/corpus-v2/agent-act.sh
 
-# Phase 4: corpus recipes and run drivers
+# Phase 4: corpus recipes and run drivers (2026-10-15: s2, actset, steady-mix,
+# render, evals, windows and rawshards are ported and unwired; raw-stage.sh
+# (bend-ops stage raw) and raw-driver.sh (bend-ops feed) stay live until
+# their push, ssh and credit paths pass the Phase 1a sandbox)
 bend/gpu/raw-stage.sh
 bend/gpu/raw-driver.sh
-tools/corpus-v2/s2.sh
-tools/corpus-v2/actset.sh
-tools/corpus-v2/steady-mix.sh
-tools/corpus-v2/render.sh
-tools/corpus-v2/evals.sh
-tools/corpus-v2/windows.sh
-tools/corpus-v2/rawshards.sh
 
 
 # Phase 6: the flake checks decide in Bend (bend/tests/Checks.bend); the

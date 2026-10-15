@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-15: replaced by `bend-corpus-v2 render` (bend/CorpusV2/Recipes.bend, the plan's Phase 4); kept for reference
+exit 2
 # render.sh: `bend-corpus-v2 pool`'s units as format 2 transcripts (bend-transcript, TRANSCRIPT_FORMAT=2),
 # COPIES presentations a unit (Bend 4, the rest 2: the presentations replace run 1's four
 # identical Bend copies), each language's train and holdout cut into shards rendered in

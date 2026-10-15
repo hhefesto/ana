@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-15: replaced by `bend-corpus-v2 evals` (bend/CorpusV2/Recipes.bend, the plan's Phase 4); kept for reference
+exit 2
 # evals.sh: corpus v2's bits-per-byte eval corpora (docs/CORPUS-V2.md, E3), packed to 128 KB and
 # tokenized as the waves' were (deploy pack, deploy prepare), for `fp.sh eval` (ECORPUS):
 #   run/eval/v2-tr-LANG.corpus, run/eval/v2-tr.corpus   format 2's held-out transcripts (`bend-corpus-v2 pool`'s

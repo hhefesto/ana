@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-15: replaced by `bend-corpus-v2 steady-mix OUT SRC:BYTES...` (bend/CorpusV2/Steady.bend, the plan's Phase 4); kept for reference
+exit 2
 # steady-mix.sh OUT.jsonl SRC.jsonl:BYTES ... (2026-10-07): a raw mix whose
 # language shares hold from its first line to its last.
 #

@@ -489,7 +489,13 @@ def chk.tests() -> List<&2, ChkTest>:
    # bend-box's and `bend-ops stage`'s readers (bend/Box/OnBox.bend,
    # Stage.bend) against fp.sh's awk, grep, sort, tail and sed on real logs
    # (gate.log, time.log, dmon.txt, a plan; reads fixtures/box)
-   ChkTest{"box.bend", False{}, ROks{21n}}]
+   ChkTest{"box.bend", False{}, ROks{21n}},
+   # the run recipes (bend/CorpusV2/{Keyed,S2,ActSet,Steady,Recipes}.bend,
+   # bend/Box/{Drive,Evals}.bend): keyed-order against sha256sum's order,
+   # s2's share and McNemar's p against awk's, NLR against run 3's lr= at
+   # its boundary, the rest of a plan against awk's lines (reads fixtures/box,
+   # fixtures/recipes)
+   ChkTest{"recipes.bend", False{}, ROks{41n}}]
 
 def chk.rule(r: ChkRule, +out: List<&2, U32>) -> Bool:
   match r:

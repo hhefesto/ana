@@ -7,6 +7,8 @@ import ./Vast.bend as Vs
 import ./Alert.bend as Al
 import ./Lint.bend as Ln
 import ./Stage.bend as Sg
+import ./Drive.bend as Dr
+import ./Evals.bend as Ev
 
 # bend-ops: the box operations, run from this machine (2026-10-14, the plan
 # "all logic in Bend, shell only a thin shim"; docs in bend/Box/*.bend).
@@ -19,6 +21,13 @@ import ./Stage.bend as Sg
 #                       fp-restage.sh); bend-box, the driver on the box, is built there from box.c
 #   bend-ops dense-identity OUT_DIR [TRAINER]
 #                       the dense trainer's six-step trajectories as bytes (dense-identity.sh)
+#   bend-ops stage next | stage raw mix|mixnew FILE...|build K|push K HOST PORT
+#                       a stage built here (bend/Box/Drive.bend: next-stage.sh build, raw-stage.sh)
+#   bend-ops feed HOST PORT STAGES [FIRST] [LAST]
+#                       raw slices built, credit-guarded, pushed and appended to STAGES (raw-driver.sh)
+#   bend-ops evals CFG  a run's evals from a tracked config (tools/evals/run3.cfg), skipping
+#                       what is done, then paired by prompt with exact McNemar (bend/Box/Evals.bend:
+#                       eval-run3.sh, eval-run2.sh)
 #
 # Later phases add chain, watch, stage, act, guard, handover, move, evals,
 # unit and dense-identity.  The `probe` subcommands run one primitive each,
@@ -97,7 +106,9 @@ def ops.usage() -> String:
   "usage: bend-ops lint [--tree DIR] [--allow FILE] [--report FILE] [--bend] [--run-since DATE] [-v] [PATH...]\n"
     ++ "       bend-ops probe saved LOG | sums DIR NAME... | listed INST | credit MIN | which NAME | alert LOG MSG | ssh HOST PORT CMD\n"
     ++ "       bend-ops stage box HOST PORT | push NAME RUN HOST PORT | restage HOST PORT CKPT STAGE... | shards PLAN\n"
-    ++ "       bend-ops dense-identity OUT_DIR [TRAINER]"
+    ++ "       bend-ops dense-identity OUT_DIR [TRAINER]\n"
+    ++ "       bend-ops stage next | stage raw mix|mixnew FILE...|build K|push K HOST PORT | feed HOST PORT STAGES [FIRST] [LAST]\n"
+    ++ "       bend-ops evals CFG"
 
 def ops.args(xs: List<String>) -> IO(Unit):
   match xs:
@@ -105,6 +116,14 @@ def ops.args(xs: List<String>) -> IO(Unit):
       Ln.lnt.main(rest)
     case "probe" <> rest:
       ops.probe(rest)
+    case "stage" <> "next" <> Nil{}:
+      Dr.drv.next()
+    case "stage" <> "raw" <> rest:
+      Dr.drv.raw.main(rest)
+    case "feed" <> rest:
+      Dr.drv.feed.args(rest)
+    case "evals" <> rest:
+      Ev.evr.main(rest)
     case "stage" <> rest:
       Sg.stg.main(rest)
     case "dense-identity" <> rest:

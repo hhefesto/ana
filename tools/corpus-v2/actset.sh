@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-15: replaced by `bend-corpus-v2 actset [OUT_DIR]` (bend/CorpusV2/ActSet.bend, the plan's Phase 4); kept for reference
+exit 2
 # actset.sh [OUT_DIR] (2026-10-07): the prompts ana's own episodes are drawn
 # from (agent-act.sh): train units only, each with its direct and its repair
 # prompt as E5 asks them (corpus-v2 evalset's cut), the languages shuffled

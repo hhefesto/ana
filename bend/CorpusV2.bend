@@ -12,6 +12,11 @@ import ./CorpusV2/Agent.bend as Ea
 import ./CorpusV2/Stats.bend as As
 import ./CorpusV2/Behaviour.bend as Bh
 import ./CorpusV2/Collect.bend as Co
+import ./CorpusV2/Keyed.bend as Ko
+import ./CorpusV2/S2.bend as S2
+import ./CorpusV2/ActSet.bend as As2
+import ./CorpusV2/Steady.bend as Sm
+import ./CorpusV2/Recipes.bend as Rc
 
 # bend-corpus-v2: corpus v2's tools (docs/CORPUS-V2.md), one subcommand each,
 # ported from the Python they replaced, each byte-identical to it on the
@@ -42,6 +47,17 @@ import ./CorpusV2/Collect.bend as Co
 #   behaviour tasks [--check] [LANG...] | run CKPT|REF TAG [LANG...] | selftest [LANG...]
 #                                   the behaviour test   (CorpusV2/Behaviour.bend)
 #   collect CFG STEP...             new Bend code from a config: fetch list gate-bend nul keys pre gate split check | all   (CorpusV2/Collect.bend)
+#
+# The run recipes (2026-10-15, the plan "all logic in Bend", Phase 4: the
+# tools/corpus-v2 scripts they replace in brackets):
+#   keyed-order nul|lines SALT [N] IN OUT   records in sha256(SALT NUL id) order, the first N
+#                                   (every `shuf --random-source`)   (CorpusV2/Keyed.bend)
+#   s2 S1_DIR BOUNDARY OUT ACT_DIR...   a run's second stage (s2.sh)   (CorpusV2/S2.bend)
+#   actset [OUT_DIR]                the act set's prompts (actset.sh)   (CorpusV2/ActSet.bend)
+#   steady-mix OUT.jsonl SRC.jsonl:BYTES...   a raw mix whose shares hold (steady-mix.sh)   (CorpusV2/Steady.bend)
+#   render | evals | windows | raw-build K   format 2's transcripts, the eval corpora, the
+#                                   transcript windows, a raw slice's shards (render.sh,
+#                                   evals.sh, windows.sh, rawshards.sh build)   (CorpusV2/Recipes.bend)
 
 # A record stream ---------------------------------------------------------------
 #
@@ -210,6 +226,22 @@ def c2.run(k: Nat, +c: String, xs: List<String>) -> IO(Unit):
 
 def c2.args(xs: List<String>) -> IO(Unit):
   match xs:
+    case "keyed-order" <> more:
+      Ko.kor.main(more)
+    case "s2" <> more:
+      S2.s2s.main(more)
+    case "actset" <> more:
+      As2.ast.main(more)
+    case "steady-mix" <> more:
+      Sm.smx.main(more)
+    case "render" <> more:
+      Rc.rcp.render(more)
+    case "evals" <> more:
+      Rc.rcp.evals(more)
+    case "windows" <> more:
+      Rc.rcp.windows(more)
+    case "raw-build" <> more:
+      Rc.rcp.raw.build(more)
     case +c <> more:
       c2.run(c2.code(c), c, more)
     case _:

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-15: replaced by `bend-corpus-v2 s2 S1_DIR BOUNDARY OUT ACT_DIR...` (bend/CorpusV2/S2.bend, the plan's Phase 4), which checks NLR against S1_LOG before any work; kept for reference
+exit 2
 # s2.sh S1_DIR BOUNDARY OUT ACT_DIR... (2026-10-07): run 3's second stage, built on the
 # box at the step S1 stops at (docs/AGENT.md):
 # - the steady plan's segments from BOUNDARY on;

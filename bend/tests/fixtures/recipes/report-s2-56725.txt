@@ -1,0 +1,14 @@
+agda    direct pass   1/  4   closed   4   lifted   4
+agda    repair pass   2/  3   closed   3   lifted   3
+bend    direct pass   2/  4   closed   3   lifted   4
+bend    repair pass   2/  2   closed   2   lifted   2
+haskell direct pass   7/ 17   closed  14   lifted  17
+haskell repair pass   8/ 14   closed  13   lifted  14
+lean    direct pass   2/ 25   closed  19   lifted  25
+lean    repair pass   7/ 21   closed  20   lifted  21
+nix     repair pass   1/  9   closed   1   lifted   9
+all pass 32/99
+
+PASS haskell direct hackage:amazonka-fis/gen/Amazonka/FIS/Types/CreateExperimentTemplateTargetInput.hs#createExperimentT
+fail haskell direct hackage:OpenCLWrappers/System/OpenCL/Wrappers/Utils.hs#nest@50
+PASS haskell direct hackage:WringTwistree/src/Cryptography/WringTwistree/KeySchedule.hs#mul65537@42
