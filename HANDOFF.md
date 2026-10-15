@@ -130,7 +130,51 @@ bend-ops guard tools/runs/run4.cfg              # starts chain, watch and handov
   - resume rewrites the stage's STAGES line and keeps the old one as STAGES.OLD_INSTANCE.
 - `bend-ops sim drive all run/sim-drive` runs 7 scenarios against run 3's boot-guard.sh, s2-driver.sh and move.sh. Not yet shown: act-ensure, act-pull, `move restage` and `move act`, which need real nix on a box, and `guard install` against real systemd.
 
-## ▶ CONTINUE HERE (2026-10-06, 23:05 UTC-6): run 2 ends ≈ 01:20; at step 40000 it passes run 1 on every eval
+## ▶ CONTINUE HERE (2026-10-15): run 3 beat run 2; every box step is a Bend command; run 4 is not yet planned
+
+- **No box is rented.** Run 3's box was destroyed on 2026-10-13, and its 15 checkpoints are local in run/v3/run3/out.
+- **The tools:** every step of a run is a Bend command (the section above). The bend2 fork is on upstream 2.0.37+: hhefesto/bend2 ft-kernels 37e80669, with the old head tagged ft-kernels-2.0.35.
+- **New raw Bend for run 4:** run/v4/collect/bend.
+  - bend.jsonl holds 801 files (6.9 MB); vault/bend.jsonl holds 33.
+  - It covers 19 new repositories, upstream bendlang/bend since 1d895ca0, and the growth of the known repositories.
+  - The run-4 raw build must take it.
+- **Before run 4's rental:**
+  - Pick an offer whose `duration` covers the job; check its `end_date` (run 3's first box expired after 3 h).
+  - Run the act round's setup afresh: round 1 had no Haskell episodes, because the box lacked the GHC harness and the tarballs. act's check now fails such a language.
+  - Validate bend-box on the GPU with `./bend-box gate`, `time` and `run`, and keep fp.sh as the fallback until it has trained.
+  - No shadow watch (decided 2026-10-15). The plan wanted the old credit watch beside the new one in alert-only mode, but credit-watch.sh never had such a mode. Its decisions are covered instead by the sandbox runs against the old script: the low-credit stop, the destroy after GRACE when a wanted checkpoint is missing, the destroy that does not take, and the failed listing (`bend-ops sim 5`, `6`, `8` and `9`). On the first rental, watch `journalctl --user -u <watch unit>` and the credit by hand during the first hour.
+
+## Run 3 (2026-10-07 to 10-13): turn-based compiler episodes; at the end it beats run 2 on E1 and E5
+
+- **The plan** (approved 2026-10-07):
+  - ana writes a Term, the compiler answers, and ana writes again, up to 4 turns; a retry is role RoTry, with weight 0.
+  - S1 is the steady plan run/v3/S1: 56,497 steps, 82.8% raw.
+  - At S1's boundary (step 36,696) an act round on the box turns ana's own episodes into S2's on-policy data. That data is ana's successes plus `bend-episode fixed`: ana's rejected Terms followed by the known fix.
+- **Boxes:**
+  - vast 55552041, from 2026-10-12 06:20: an RTX 5090 at $0.671/h. Its contract ended after about 3 h, so the run moved (run/v3/run3/move.sh) to vast 55567872 (RTX 5090, $0.551/h with disk). It resumed from s1-step4000; validation reloaded exactly (1.2514915 against 1.2514917).
+  - The new box reported nproc 192 under a 46-core cgroup quota; `bend-ops act` now counts the quota.
+  - Ingress was about 2 MB/s, and sshd's keepalive dropped saturated links.
+- **Act round 1:** v2-step40000, about 3,600 episodes/h on 48 vCPUs, 9,029 accepted. **No Haskell:** the box lacked run/check-cache/ghc-harness and run/code-sources/tarballs.
+- **S2:**
+  - It started 2026-10-13 06:33 with NLR 8.288989e-05, equal to S1's last lr; episodes are 1.0% of its windows.
+  - s2.sh failed three ways, all fixed by hand on the box and then in the repo (26e4fbc):
+    - episodes longer than a window;
+    - a filler slice with no long file;
+    - Combine's hard-coded gcroot.
+- **The end:** 2026-10-13 18:33 at step 56,725. The chain verified all 13 box checkpoints against the local copies, then destroyed the box at 23:48. $1.59 of credit was left.
+- **Final evals** (2026-10-14; `bend-ops evals tools/evals/run3.cfg` reproduces them; paired, exact McNemar):
+
+  | Comparison | E1 | E5 | Behaviour |
+  |---|---|---|---|
+  | run 3 s2-50000 vs run 2 v2-50000 | 33 vs 20 (p 0.01) | 38 vs 26 (p 0.02) | 15 vs 15 |
+  | run 3 s2-56725 vs run 2 v2-53880 | 32 vs 19 (p 0.00) | 37 vs 25 (p 0.01) | 18 vs 17 |
+  | run 3 s2-56725 vs run 2's best, v2-40000 | 32 vs 26 (p 0.26) | 37 vs 32 (p 0.36) | |
+
+  - Within run 3, 40k → 56725: E1 18 → 32 and E5 25 → 37, both p 0.00. The gain came in the lr tail.
+  - E1 by language at the final checkpoint: Haskell 15/31, Lean 9/46 (run 2: 1–4), Agda 3/7, Nix 1/9, Bend 4/6.
+  - Retries still copy the previous Term 84–98% of the time.
+
+## Previous (2026-10-06, 23:05 UTC-6): run 2 ends ≈ 01:20; at step 40000 it passes run 1 on every eval
 
 **Run 2** (vast 54410376; the box and the chain are described in the 10-05 section below):
 - **State at 23:05:** step 49,749 of 53,880 (92%). It averages 1.99 s/step with saves, so it ends ≈ **01:20 on 2026-10-07**. Then the chain scores on the box, pulls the last checkpoint, checks every sha256 and destroys the box.
