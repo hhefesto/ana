@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-14: the run-1 finisher (wait, score, pull, destroy), superseded by bend/gpu/fp-chain.sh's end and, from Phase 1a, `bend-ops chain`; kept for reference
+exit 2
 # Finish a box run without a person present: wait for the trainer to end,
 # score every checkpoint on the held-out transcripts, pull everything, and
 # DESTROY the instance (a box bills until it is destroyed; the rule is

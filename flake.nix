@@ -31,6 +31,13 @@
         };
       # Every .bend source, nothing else.
       bendSrc = sourceOf [ (nixpkgs.lib.fileset.fileFilter (f: f.hasExt "bend") ./bend) ];
+      # What the shell lint reads (2026-10-14): every *.sh, every file without
+      # an extension (its shebang may name a shell), flake.nix, the allowlist.
+      lintSrc = sourceOf [
+        (nixpkgs.lib.fileset.fileFilter (f: f.hasExt "sh" || !(nixpkgs.lib.hasInfix "." f.name)) ./.)
+        ./flake.nix
+        ./tools/lint
+      ];
       # the pinned bend command (clang on its PATH, telemetry off)
       bendFor = pkgs: bend2.packages.${pkgs.stdenv.hostPlatform.system}.default;
       # A Bend2 program compiled to a native binary (C via clang).
@@ -124,6 +131,32 @@
           bend-agent-tool = bendBinary pkgs "bend-agent-tool" "Agent/Tools.bend";
           bend-episode = bendBinary pkgs "bend-episode" "Agent/EpTool.bend";
           bend-agent-laws = bendBinary pkgs "bend-agent-laws" "Agent/Laws.bend";
+          # bend-ops (bend/Box/, 2026-10-14: all logic in Bend, shell a thin
+          # shim): the box operations from this machine, and `bend-ops lint`.
+          # The programs it drives are on its PATH, as ana's wrapper does for
+          # find; vastai stays the venv's ($V, ~/.local/share/vastai-venv).
+          bend-ops = pkgs.writeShellApplication {
+            name = "bend-ops";
+            runtimeInputs = [
+              pkgs.bash
+              pkgs.openssh
+              pkgs.rsync
+              pkgs.coreutils
+              pkgs.findutils
+              pkgs.procps
+              pkgs.util-linux
+              pkgs.libnotify
+              pkgs.git
+              pkgs.gh
+            ];
+            text = ''
+              exec ${bendBinary pkgs "bend-ops" "Box/Main.bend"}/bin/bend-ops "$@"
+            '';
+          };
+          # the box in a sandbox: one binary whose argv[0] picks its part
+          # (traind, traind-next, dense, nvidia-smi, clang, vastai); `bend-sim
+          # links DIR` makes those names in DIR (bend/tests/Sim.bend)
+          bend-sim = bendBinary pkgs "bend-sim" "tests/Sim.bend";
           # the GHC `bend-check haskell` drives: the common Hackage
           # packages, so a module importing only these checks on its own
           ghc-harness = ghcHarness pkgs;
@@ -155,6 +188,7 @@
                 "bend-push"
                 "bend-legere"
                 "bend-corpus-v2"
+                "bend-ops"
               ])
               ++ [
                 (bendFor pkgs)
@@ -169,14 +203,10 @@
                 pkgs.rsync
                 pkgs.openssh
               ];
+            # the one line the plan keeps (2026-10-14: shell a thin shim; the
+            # usage when no TOOL is given, exit 1)
             text = ''
-              if [ "$#" -eq 0 ]; then
-                echo "usage: deploy TOOL [ARGS...]   (TOOL: extract, plan-corpus, code-evals, mix, push, transcripts, check, units, clean, transcript, windows, plan-windows, pack, prepare, plan-segment, legere, corpus-v2)" >&2
-                exit 2
-              fi
-              tool=$1
-              shift
-              exec "bend-$tool" "$@"
+              exec "bend-''${1:?usage: deploy TOOL [ARGS...]   (TOOL: extract, plan-corpus, code-evals, mix, push, transcripts, check, units, clean, transcript, windows, plan-windows, pack, prepare, plan-segment, legere, corpus-v2, ops)}" "''${@:2}"
             '';
           };
           # `ana`: the Haskell-era app of the same name, on the Bend2 decoder.
@@ -224,8 +254,18 @@
             mkdir -p src/tests/weights
             cp ${./weights/code32k.bpe} src/tests/weights/code32k.bpe
             cd src/tests
+            # bend-ops' primitives (bend/tests/ops.bend) read their fixtures from
+            # bend/tests/fixtures (bendSrc holds .bend files only)
+            cp -r ${./bend/tests/fixtures} fixtures
             bend Checks.bend suite
             touch $out
+          '';
+          # shell stays a thin shim (2026-10-14): bend-ops lint over lintSrc
+          # (every shell file and flake.nix's shell bodies) against the
+          # ratchet in tools/lint/shell-allow.txt; the report is $out
+          shell-lint = pkgs.runCommand "shell-lint" { } ''
+            cd ${lintSrc}
+            exec ${self.packages.${system}.bend-ops}/bin/bend-ops lint --tree . --report "$out"
           '';
           # the training stack: the hand-written pullbacks agree with central
           # finite differences (f32: 5% relative plus 3e-5 absolute, the

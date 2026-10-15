@@ -5,7 +5,7 @@ import Base
 #   the JS lane (bend GemmConf.bend) runs that definition itself;
 #   a C build with BEND_GEMM=loop runs ft_gemm_loop: must print the same;
 #   a CUDA build runs cuBLAS where the views fit: equal within the numerics'
-#   tolerance (bend/gpu/g0.sh compares).
+#   tolerance (bend/gpu/g0.sh compared; unwired 2026-10-14, G0 done).
 # The cases cover both transposes, offsets, padded leading dimensions,
 # batch strides, alpha/beta (beta 0 over NaN-free garbage), and views that
 # wrap past the array's end or overlap, which must stay on the loop.

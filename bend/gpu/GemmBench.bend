@@ -3,7 +3,7 @@ import Base
 # Array.gemm timing (gate G0): REPS calls of one shape, the arrays filled
 # on the host once (0.125 everywhere, so every C entry is exactly k/64),
 # timed by the runtime (BEND_PROFILE=2 prints each call; the first carries
-# the arrays' migration to the GPU). g0.sh runs it next to a direct cuBLAS
+# the arrays' migration to the GPU). g0.sh (unwired 2026-10-14, G0 done) ran it next to a direct cuBLAS
 # call on the same shapes.
 #   M N K BATCH  op(A) M×K, op(B) K×N, BATCH of them (default 1)
 #   TA TB        transpose flags (default 0)

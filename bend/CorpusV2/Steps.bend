@@ -6,7 +6,7 @@ import ./Lib.bend as L
 
 # Steps: what the chain's shell scripts once computed in inline Python
 # (bend/gpu/raw-driver.sh, credit-watch.sh, raw-stage.sh, next-stage.sh;
-# tools/corpus-v2/restage-ns.sh, evals.sh) and bend/gpu/insert-stage.py, as
+# tools/corpus-v2/restage-ns.sh (unwired 2026-10-14), evals.sh) and bend/gpu/insert-stage.py, as
 # bend-corpus-v2 subcommands.  Each `st.<name>(args)` is one subcommand (args:
 # what follows its name) and gives what the Python gave, byte for byte:
 #
@@ -720,6 +720,21 @@ def st.f.read(+xs: List<&2, U32>) -> Maybe<&2, StF>:
   +neg = S.head.is(t, 45)
   st.f.read.int(neg, st.span(Bool.pick(List<&2, U32>, Bool.or(neg, S.head.is(t, 43)), List.drop(&2, U32, t, 1n), t)))
 
+# math.floor(x) as a double (2026-10-14, for bend-ops): the integer part of
+# m * 2^(e - bias), one less when a negative x has a fraction; exact, since
+# an integer part of at most 53 bits (plus one) is a double.  An integral x
+# (e >= bias, or zero) is itself, so floor(-0.0) is -0.0.
+def st.f.floor(+x: StF) -> StF:
+  +e = st.f.e(x)
+  +b = st.f.bias()
+  +m = st.f.m(x)
+  +neg = st.f.neg(x)
+  +k = Nat.sub(b, e)
+  +q = List.drop(&2, U32, m, k)
+  +frac = Bool.not(st.bn.is.zero(List.take(&2, U32, m, k)))
+  +q1 = Bool.pick(List<&2, U32>, Bool.and(neg, frac), st.bn.add(q, [1]), q)
+  Bool.pick(StF, Nat.is_le(b, e), x, st.f.round(neg, q1, [1], b))
+
 # UTF-8 as Python decodes it with "replace" ---------------------------------------
 
 def st.u8.in(+c: U32, +lo: U32, +hi: U32) -> Bool:
@@ -1136,6 +1151,207 @@ def st.credit(xs: List<String>) -> IO(Unit):
   do IO<Unit>:
     j : List<&2, U32> <- S.read("/dev/stdin")
     st.credit.got(st.credit.tok(j), xs)
+
+# JSON at any depth (2026-10-14, for bend-ops' vastai calls) --------------------------
+#
+# st.js.values(TEXT): every value of a JSON text that holds no other (a
+# string, a number, true, false, null; NaN and Infinity, which Python's
+# json.dumps writes; an empty object or array, as StTkP{123} or StTkP{91}),
+# in document order, each with the path to it: an object member by its key
+# (decoded, as json.loads gives it), an array element by its index.  None
+# when TEXT is not one JSON value: a bracket left open or closed twice, a
+# member without its colon, a missing or trailing comma, a word that is not
+# a number or a literal, text after the value.  The tokens are st.js.toks'
+# (credit's), so a string keeps its raw text (escapes as written).
+#
+# `vastai show user --raw` is {"credit": 1.59, "rights": {"api": {...}}, ...}:
+# the credit is the value at [credit]; `vastai show instances --raw` is a
+# list of objects, an instance's id the value at [K, id].
+
+type StJk is Data:
+  StJkK{k: List<&2, U32>}
+  StJkI{i: Nat}
+
+type StJv is Data:
+  StJv{path: List<&2, StJk>, v: StTk}
+
+# a token's part in the grammar
+type StJt is Data:
+  StJtOpen{}
+  StJtShut{}
+  StJtArr{}
+  StJtEnd{}
+  StJtCol{}
+  StJtCom{}
+  StJtStr{raw: List<&2, U32>}
+  StJtVal{raw: List<&2, U32>}
+  StJtBad{}
+
+# what the parser expects next: a value; a value or ] (after [); a key
+# (after a comma in an object); a key or } (after {); the colon after a key;
+# after a value, a comma, a closing bracket, or the end at the top
+type StJq is Data:
+  StJqV{}
+  StJqA{}
+  StJqK{}
+  StJqO{}
+  StJqL{}
+  StJqN{}
+
+# a JSON number: -?D+(.D+)?([eE][+-]?D+)?
+def st.js.num.end(sp: StJs) -> Bool:
+  match sp:
+    case StJs{+ds, +rest}:
+      Bool.and(Nat.is_ne(S.len(ds), 0n), Nat.is_eq(S.len(rest), 0n))
+
+def st.js.num.exp(+xs: List<&2, U32>, has: Bool) -> Bool:
+  match has:
+    case False{}:
+      Nat.is_eq(S.len(xs), 0n)
+    case True{}:
+      +r = List.drop(&2, U32, xs, 1n)
+      st.js.num.end(st.span(Bool.pick(List<&2, U32>, Bool.or(S.head.is(r, 43), S.head.is(r, 45)), List.drop(&2, U32, r, 1n), r)))
+
+def st.js.num.e(+xs: List<&2, U32>) -> Bool:
+  Bool.or(S.head.is(xs, 101), S.head.is(xs, 69))
+
+def st.js.num.frac2(sp: StJs) -> Bool:
+  match sp:
+    case StJs{+ds, +rest}:
+      Bool.and(Nat.is_ne(S.len(ds), 0n), st.js.num.exp(rest, st.js.num.e(rest)))
+
+def st.js.num.frac(+xs: List<&2, U32>, dot: Bool) -> Bool:
+  match dot:
+    case False{}:
+      st.js.num.exp(xs, st.js.num.e(xs))
+    case True{}:
+      st.js.num.frac2(st.span(List.drop(&2, U32, xs, 1n)))
+
+def st.js.num.int(sp: StJs) -> Bool:
+  match sp:
+    case StJs{+ds, +rest}:
+      Bool.and(Nat.is_ne(S.len(ds), 0n), st.js.num.frac(rest, S.head.is(rest, 46)))
+
+def st.js.num(+xs: List<&2, U32>) -> Bool:
+  st.js.num.int(st.span(Bool.pick(List<&2, U32>, S.head.is(xs, 45), List.drop(&2, U32, xs, 1n), xs)))
+
+def st.js.word.ok(+t: List<&2, U32>) -> Bool:
+  Bool.or(Bool.or(Bool.or(S.eq(t, S.b("true")), S.eq(t, S.b("false"))), Bool.or(S.eq(t, S.b("null")), S.eq(t, S.b("NaN")))),
+    Bool.or(Bool.or(S.eq(t, S.b("Infinity")), S.eq(t, S.b("-Infinity"))), st.js.num(t)))
+
+def st.js.punct(+c: U32) -> StJt:
+  Bool.pick(StJt, U32.is_eq(c, 123), StJtOpen{}, Bool.pick(StJt, U32.is_eq(c, 125), StJtShut{},
+    Bool.pick(StJt, U32.is_eq(c, 91), StJtArr{}, Bool.pick(StJt, U32.is_eq(c, 93), StJtEnd{},
+      Bool.pick(StJt, U32.is_eq(c, 58), StJtCol{}, Bool.pick(StJt, U32.is_eq(c, 44), StJtCom{}, StJtBad{}))))))
+
+def st.js.class(t: StTk) -> StJt:
+  match t:
+    case StTkP{+c}:
+      st.js.punct(c)
+    case StTkS{r}:
+      StJtStr{r}
+    case StTkV{+r}:
+      Bool.pick(StJt, st.js.word.ok(r), StJtVal{r}, StJtBad{})
+
+def st.js.classes(ts: List<&2, StTk>) -> List<&2, StJt>:
+  match ts:
+    case Nil{}:
+      Nil{}
+    case t <> more:
+      st.js.class(t) <> st.js.classes(more)
+
+def st.js.leaf(+fs: List<&2, StJk>, v: StTk) -> StJv:
+  StJv{List.reverse(&2, StJk, fs), v}
+
+# a member's key as json.loads decodes it (its raw text when it does not decode)
+def st.js.key(+raw: List<&2, U32>) -> List<&2, U32>:
+  Maybe.default(&2, List<&2, U32>, J.string(L.v2.concat([[34], raw, [34]])), raw)
+
+# fs: the open objects and arrays, innermost first (an object's frame holds
+# the key last read, an array's the index of the element being read)
+def st.js.go(fuel: Nat, ts: List<&2, StJt>, q: StJq, fs: List<&2, StJk>, acc: List<&2, StJv>) -> Maybe<&2, List<&2, StJv>>:
+  match fuel ts q fs:
+    case 1n+f Nil{} StJqN{} Nil{}:
+      Some{List.reverse(&2, StJv, acc)}
+    case 1n+f StJtOpen{} <> t StJqV{} fs2:
+      st.js.go(f, t, StJqO{}, StJkK{Nil{}} <> fs2, acc)
+    case 1n+f StJtOpen{} <> t StJqA{} fs2:
+      st.js.go(f, t, StJqO{}, StJkK{Nil{}} <> fs2, acc)
+    case 1n+f StJtArr{} <> t StJqV{} fs2:
+      st.js.go(f, t, StJqA{}, StJkI{0n} <> fs2, acc)
+    case 1n+f StJtArr{} <> t StJqA{} fs2:
+      st.js.go(f, t, StJqA{}, StJkI{0n} <> fs2, acc)
+    case 1n+f StJtStr{r} <> t StJqV{} +fs2:
+      st.js.go(f, t, StJqN{}, fs2, st.js.leaf(fs2, StTkS{r}) <> acc)
+    case 1n+f StJtStr{r} <> t StJqA{} +fs2:
+      st.js.go(f, t, StJqN{}, fs2, st.js.leaf(fs2, StTkS{r}) <> acc)
+    case 1n+f StJtVal{r} <> t StJqV{} +fs2:
+      st.js.go(f, t, StJqN{}, fs2, st.js.leaf(fs2, StTkV{r}) <> acc)
+    case 1n+f StJtVal{r} <> t StJqA{} +fs2:
+      st.js.go(f, t, StJqN{}, fs2, st.js.leaf(fs2, StTkV{r}) <> acc)
+    case 1n+f StJtEnd{} <> t StJqA{} StJkI{i} <> +fs2:
+      st.js.go(f, t, StJqN{}, fs2, st.js.leaf(fs2, StTkP{91}) <> acc)
+    case 1n+f StJtShut{} <> t StJqO{} StJkK{k} <> +fs2:
+      st.js.go(f, t, StJqN{}, fs2, st.js.leaf(fs2, StTkP{123}) <> acc)
+    case 1n+f StJtStr{+r} <> t StJqO{} StJkK{k} <> fs2:
+      st.js.go(f, t, StJqL{}, StJkK{st.js.key(r)} <> fs2, acc)
+    case 1n+f StJtStr{+r} <> t StJqK{} StJkK{k} <> fs2:
+      st.js.go(f, t, StJqL{}, StJkK{st.js.key(r)} <> fs2, acc)
+    case 1n+f StJtCol{} <> t StJqL{} fs2:
+      st.js.go(f, t, StJqV{}, fs2, acc)
+    case 1n+f StJtCom{} <> t StJqN{} StJkK{k} <> fs2:
+      st.js.go(f, t, StJqK{}, StJkK{k} <> fs2, acc)
+    case 1n+f StJtCom{} <> t StJqN{} StJkI{+i} <> fs2:
+      st.js.go(f, t, StJqV{}, StJkI{1n+i} <> fs2, acc)
+    case 1n+f StJtShut{} <> t StJqN{} StJkK{k} <> fs2:
+      st.js.go(f, t, StJqN{}, fs2, acc)
+    case 1n+f StJtEnd{} <> t StJqN{} StJkI{i} <> fs2:
+      st.js.go(f, t, StJqN{}, fs2, acc)
+    case _ _ _ _:
+      None{}
+
+def st.js.values(+json: List<&2, U32>) -> Maybe<&2, List<&2, StJv>>:
+  +ts = st.js.classes(st.js.toks(1n+S.len(json), json, st.js.kind(json)))
+  st.js.go(1n+List.length(&2, StJt, ts), ts, StJqV{}, Nil{}, Nil{})
+
+def st.jk.eq(a: StJk, b: StJk) -> Bool:
+  match a b:
+    case StJkK{+x} StJkK{+y}:
+      S.eq(x, y)
+    case StJkI{+i} StJkI{+j}:
+      Nat.is_eq(i, j)
+    case _ _:
+      False{}
+
+def st.js.path.is(xs: List<&2, StJk>, ys: List<&2, StJk>) -> Bool:
+  match xs ys:
+    case Nil{} Nil{}:
+      True{}
+    case x <> xt y <> yt:
+      Bool.and(st.jk.eq(x, y), st.js.path.is(xt, yt))
+    case _ _:
+      False{}
+
+def st.js.at.go(vs: List<&2, StJv>, +p: List<&2, StJk>, found: Maybe<&2, StTk>) -> Maybe<&2, StTk>:
+  match vs:
+    case Nil{}:
+      found
+    case StJv{path, v} <> t:
+      st.js.at.go(t, p, st.js.keep(st.js.path.is(path, p), Some{v}, found))
+
+# the value at exactly path p (the last one: json.loads keeps a key's last)
+def st.js.at(vs: List<&2, StJv>, +p: List<&2, StJk>) -> Maybe<&2, StTk>:
+  st.js.at.go(vs, p, None{})
+
+# a value's text: a string's raw body, a scalar's word, a bracket's byte
+def st.js.text(t: StTk) -> List<&2, U32>:
+  match t:
+    case StTkS{r}:
+      r
+    case StTkV{r}:
+      r
+    case StTkP{c}:
+      [c]
 
 # credit-ok -------------------------------------------------------------------------
 #
@@ -2003,7 +2219,7 @@ def st.replay.filler(xs: List<String>) -> IO(Unit):
 
 # drop-repos ------------------------------------------------------------------------------
 #
-# restage-ns.sh's: SRC's lines (verbatim) to DST less those whose id's
+# restage-ns.sh's (unwired 2026-10-14; the subcommand stays): SRC's lines (verbatim) to DST less those whose id's
 # repository is in VAULT.tsv's second column (its first line a header); the
 # id is what Python cut: `i = line.find(b'"id":'); i = line.find(b'"', i + 5)
 # + 1; line[i:line.find(b'"', i)]`, decoded with "replace".

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-14: the py2bend transcripts went into corpus v2 once (2026-10-05, run/v2/transcripts/bend/.py2bend); one-off, done; kept for reference
+exit 2
 # py2bend.sh: the Bend translations of the project's old one-off Python scripts
 # (run/code-sources-py2bend/own/py2bend/run/..., the user 2026-10-04: "Translate
 # them to bend and add them to the corpus, then delete") into corpus v2 as one

@@ -632,3 +632,95 @@ def Rd.next(r: Rd) -> IO(Rd & Maybe<&2, List<&2, U32>>):
   match r:
     case Rd{f, sep, buf, eof}:
       Rd.go(4096n, Rq{f, sep, buf, eof, True{}, None{}})
+
+# Background processes and the PATH -----------------------------------------
+#
+# `background(dir, env, log, append, prog, args)` starts PROG in the
+# background and answers its pid: the shell line
+#
+#   cd DIR; nohup env K=V.. PROG ARGS.. > LOG 2>&1 < /dev/null & echo $!
+#
+# (>> LOG when append).  Process.run returns as soon as its direct child
+# (this sh) exits, and the started program holds none of sh's pipes, so it
+# outlives the call; `nohup` keeps it from a hangup.  `background.setsid`
+# also gives it a session of its own (`nohup setsid ...`), so a signal to
+# our process group or session does not reach it.  sh is not a group leader
+# there, so setsid execs in place and $! stays the program's pid.  A line
+# that does not answer a pid (DIR missing, PROG not found by sh) stops the
+# tool: a launch that failed must not read as one that ran.
+
+def bg.line(sid: Bool, append: Bool) -> String:
+  "cd \"$1\" || exit 97; o=$2; shift 2; " ++ Bool.pick(String, sid, "nohup setsid", "nohup") ++ " \"$@\" "
+    ++ Bool.pick(String, append, ">>", ">") ++ " \"$o\" 2>&1 < /dev/null & echo $!"
+
+def bg.all.digits(xs: List<&2, U32>) -> Bool:
+  match xs:
+    case Nil{}:
+      True{}
+    case +c <> t:
+      Bool.and(Bool.and(U32.is_le(48, c), U32.is_le(c, 57)), bg.all.digits(t))
+
+def bg.digits(+xs: List<&2, U32>) -> Bool:
+  Bool.and(Nat.is_ne(len(xs), 0n), bg.all.digits(xs))
+
+def bg.fin(ok: Bool, +pid: List<&2, U32>, +o: Out, +prog: String) -> IO(String):
+  match ok:
+    case True{}:
+      IO.pure(String, str(pid))
+    case False{}:
+      IO.die(String, 1, "sys: could not start " ++ prog ++ " in the background (exit " ++ U32.show(Out.status(o)) ++ "): "
+        ++ str(lines.take(Out.text(o), 5n)))
+
+def bg.got(+pid: List<&2, U32>, +o: Out, +prog: String) -> IO(String):
+  bg.fin(bg.digits(pid), pid, o, prog)
+
+def bg.run(sid: Bool, append: Bool, dir: String, env: List<String>, log: String, +prog: String, args: List<String>) -> IO(String):
+  do IO<String>:
+    r : Result<&1, &1, U32 & String, U32 & (String & String)> <-
+      Process.run("sh", List.append(&1, String, ["-c", bg.line(sid, append), "sh", dir, log], argv.env(env, prog <> args)),
+        "", cap.bytes(), 60000)
+    +o : Out <- run.got(r)
+    bg.got(chomp(lines.first(Out.text(o))), o, prog)
+
+def background(dir: String, env: List<String>, log: String, append: Bool, +prog: String, args: List<String>) -> IO(String):
+  bg.run(False{}, append, dir, env, log, prog, args)
+
+def background.setsid(dir: String, env: List<String>, log: String, append: Bool, +prog: String, args: List<String>) -> IO(String):
+  bg.run(True{}, append, dir, env, log, prog, args)
+
+# the places a name is found on $PATH, in order (an empty entry is the
+# current directory); a name with a slash is itself.  A candidate counts
+# when it opens for reading (Bend has no stat: the execute bit is not seen)
+def which.all(ds: List<&2, List<&2, U32>>, +name: String) -> IO(List<&2, String>):
+  match ds:
+    case Nil{}:
+      IO.pure(List<&2, String>, Nil{})
+    case +d <> t:
+      +p = Bool.pick(String, Nat.is_eq(len(d), 0n), ".", str(d)) ++ "/" ++ name
+      do IO<List<&2, String>>:
+        ok : Bool <- exists(p)
+        +rest : List<&2, String> <- which.all(t, name)
+        return Bool.pick(List<&2, String>, ok, p <> rest, rest)
+
+def which.first(ps: List<&2, String>) -> Maybe<&2, String>:
+  match ps:
+    case Nil{}:
+      None{}
+    case p <> t:
+      Some{p}
+
+# `command -v NAME`, over $PATH (Some: the first hit)
+def which.go(slash: Bool, +name: String) -> IO(Maybe<&2, String>):
+  match slash:
+    case True{}:
+      do IO<Maybe<&2, String>>:
+        ok : Bool <- exists(name)
+        return Bool.pick(Maybe<&2, String>, ok, Some{name}, None{})
+    case False{}:
+      do IO<Maybe<&2, String>>:
+        path : String <- env("PATH", "")
+        ps : List<&2, String> <- which.all(split(b(path), 58), name)
+        return which.first(ps)
+
+def which(+name: String) -> IO(Maybe<&2, String>):
+  which.go(infix(b(name), [47]), name)

@@ -153,7 +153,7 @@ Term` is only ever the assistant's best answer.
   Bend 300,759 transcripts from 80,748 units (263 MB), Haskell 115,698 from
   57,858 (123 MB), Agda 67,512 from 33,770 (66 MB), Lean 65,644 from 32,856
   (82 MB), Nix 25,016 from 12,572 (36 MB); no text twice.
-  Added 2026-10-05 (`tools/corpus-v2/py2bend.sh`; the user: "Translate them
+  Added 2026-10-05 (`tools/corpus-v2/py2bend.sh`, unwired 2026-10-14 as a done one-off; the user: "Translate them
   to bend and add them to the corpus, then delete"): `own:py2bend`, the Bend
   translations of the project's 58 one-off Python scripts (24,436 lines; the
   Python is deleted), not held out (its unit scores 764): 3,086 units, every
@@ -202,7 +202,7 @@ first presentation is repair 80, verify 20; its second the other.
   holds (`run/v2/holdout/stream-index.json`: code-train-v3, every raw-new
   delivery, every wave's transcripts and filler), chosen by sha256 of the name:
   Agda from mix 2's agda-2f (5,670 files, 40 MB; taken out of mix 2 and
-  ns1–ns4 rebuilt before any trained, `tools/corpus-v2/restage-ns.sh`), Lean from the
+  ns1–ns4 rebuilt before any trained, `tools/corpus-v2/restage-ns.sh`, unwired 2026-10-14 as a done one-off), Lean from the
   undelivered pool (13,930 files, 170 MB), Haskell from the leftover HF pool
   (5,322 files, 16 MB). Files in `run/v2/vault/LANG.jsonl`, names in
   `run/v2/holdout/vault.tsv`. Bend has no untrained source: its vault takes
@@ -241,7 +241,7 @@ from the same fresh start (30% and 60% raw), judged by E1–E3 below (~$1.30 on 
 
 The raw mix (2026-10-05) is run/v2/raw's languages plus every run/v2/raw-*
  file, each weighted by its document count against run/v2/raw's Haskell
-(`tools/corpus-v2/rawshards.sh mix`). Its sources must not share an id:
+(`tools/corpus-v2/rawshards.sh mix`; unwired 2026-10-14, run 3 mixed with steady-mix.sh). Its sources must not share an id:
 `run/v2/dedupe-ids.sh` drops a Stack v1 file whose repository path is already
 in run/v2/raw (1,104: older versions of files the pool has; identical content
 was dropped at the build) or earlier in the Stack (6), and renames the 15
@@ -302,7 +302,7 @@ real checker (Bend per source tree). E3: `tools/corpus-v2/evals.sh` builds
 `run/eval/v2-tr-LANG.corpus` (held-out format 2 transcripts) and
 `run/eval/v2-vault-LANG.corpus` (~2 MB of each vault language, up to 5 files a
 repository); run 1's fp100m-8803, w1-19080, w3-40731 and last checkpoint are
-scored on them on box 2 before it is destroyed (`box-baseline.sh`).
+scored on them on box 2 before it is destroyed (`box-baseline.sh`, unwired 2026-10-14 as a done one-off).
 **Run 1's E3 baseline (2026-10-04 13:14–13:23, box 2, bits per byte):**
 
 | corpus | fp100m-8803 | w1-19080 | w3-40731 | nr9-67717 |

@@ -1,0 +1,73 @@
+[
+ {
+  "actual_status": "running",
+  "cpu_ram": 257588,
+  "cur_state": "running",
+  "dph_total": 0.5216666666666666,
+  "end_date": null,
+  "extra_env": [
+   [
+    "-p",
+    "22:22"
+   ]
+  ],
+  "gpu_name": "RTX 5090",
+  "host_id": 31337,
+  "id": 55567872,
+  "image_uuid": "vastai/base-image:cuda-12.8.1-auto",
+  "intended_status": "running",
+  "is_bid": false,
+  "label": null,
+  "local_ipaddrs": [
+   "172.17.0.2",
+   "10.0.0.5"
+  ],
+  "machine_id": 41250,
+  "num_gpus": 1,
+  "onstart": "env | grep _ >> /etc/environment; echo \"starting up\"\n",
+  "ports": {
+   "22/tcp": [
+    {
+     "HostIp": "0.0.0.0",
+     "HostPort": "27872"
+    }
+   ]
+  },
+  "public_ipaddr": "203.0.113.7",
+  "reliability2": 0.9984,
+  "ssh_host": "ssh5.vast.ai",
+  "ssh_port": 27872,
+  "start_date": 1781234567.123456,
+  "status_msg": "success, running vastai/base-image_cuda-12.8.1/ssh"
+ },
+ {
+  "actual_status": "exited",
+  "cpu_ram": 128794,
+  "cur_state": "stopped",
+  "dph_total": 0.4033333333333333,
+  "end_date": 1781300000.5,
+  "extra_env": [],
+  "gpu_name": "RTX 4090",
+  "host_id": 27182,
+  "host_meta": {
+   "id": 9999,
+   "tags": {}
+  },
+  "id": 55552041,
+  "image_uuid": "vastai/base-image:cuda-12.8.1-auto",
+  "intended_status": "stopped",
+  "is_bid": true,
+  "label": "run 3 été",
+  "local_ipaddrs": [],
+  "machine_id": 39916,
+  "num_gpus": 1,
+  "onstart": null,
+  "ports": {},
+  "public_ipaddr": "198.51.100.23",
+  "reliability2": -1.5e-3,
+  "ssh_host": "ssh2.vast.ai",
+  "ssh_port": 12041,
+  "start_date": 1781111111.0,
+  "status_msg": "Error: no such container: C.55552041"
+ }
+]

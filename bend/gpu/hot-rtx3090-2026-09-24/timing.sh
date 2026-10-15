@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-14: a timing on the 2026-09-24 hot-start box (one-off, done); timing is fp.sh time, `bend-box time` from Phase 1b; kept for reference
+exit 2
 # after evalwatch is done: 20 cold steps of bpe100m-v3 (the G3 setting) with
 # the run binary, then with the timestamped one
 cd /root/hot

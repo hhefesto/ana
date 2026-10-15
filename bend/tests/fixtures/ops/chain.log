@@ -1,0 +1,87 @@
+[2026-10-12 06:37:53 UTC-6] boot-guard: restarted ft-fp-chain-v3 after a boot
+[2026-10-12 06:37:53 UTC-6] boot-guard: restarted ft-credit-watch-v3 after a boot
+[2026-10-12 06:39:55 UTC-6] train.log running: 16047 bytes, 1 trainer(s); rain_loss=8.297575 train_loss_ema=9.778272 gradient_norm=4.5372458 clipped=True ms=1993 tok/s=16441 
+[2026-10-12 06:40:44 UTC-6] s2-driver: waiting for S1's 'done at step 36696' in /root/formalTransformer/train.log
+[2026-10-12 11:03:24 UTC-6] pulled s1-step5000.checkpoint
+[2026-10-12 13:21:44 UTC-6] pulled s1-step10000.checkpoint
+[2026-10-12 16:20:38 UTC-6] pulled s1-step15000.checkpoint
+[2026-10-12 19:18:53 UTC-6] pulled s1-step20000.checkpoint
+[2026-10-12 22:16:58 UTC-6] pulled s1-step25000.checkpoint
+[2026-10-13 01:18:16 UTC-6] pulled s1-step30000.checkpoint
+[2026-10-13 05:03:33 UTC-6] s2-driver: act round run/v3/act/r1 had finished by itself
+[2026-10-13 05:05:08 UTC-6] pulled s1-step35000.checkpoint
+[2026-10-13 05:09:10 UTC-6] train.log done: 6834803 bytes, 0 trainer(s); 6 UTC-6] saved out/s1-step36696.checkpoint (1468 ms) [2026-10-13 05:01:46 UTC-6] done at step 36696 
+[2026-10-13 05:11:08 UTC-6] train.log: done
+[2026-10-13 05:11:12 UTC-6] no stage 2 yet; waiting up to 7200 s for one to be appended to run/v3/run3.stages
+[2026-10-13 06:33:19 UTC-6] stage s2: from out/s1-step36696.checkpoint on run/v3/S2/plan-fp100m-b16-windows.tsv
+trainer pid 2034640; tail -f s2.log
+[2026-10-13 06:36:31 UTC-6] s2.log running: 17619 bytes, 1 trainer(s); _loss=0.66408134 train_loss_ema=0.6960602 gradient_norm=0.3982624 clipped=False ms=1974 tok/s=16599 
+[2026-10-13 06:38:42 UTC-6] s2.log running: 29988 bytes, 1 trainer(s); n_loss=1.1433505 train_loss_ema=1.0887264 gradient_norm=0.4209669 clipped=False ms=1970 tok/s=16633 
+[2026-10-13 09:52:16 UTC-6] pulled s2-step40000.checkpoint
+[2026-10-13 11:44:24 UTC-6] pulled s2-step45000.checkpoint
+[2026-10-13 14:46:36 UTC-6] pulled s2-step50000.checkpoint
+[2026-10-13 17:48:03 UTC-6] pulled s2-step55000.checkpoint
+[2026-10-13 18:36:52 UTC-6] s2.log done: 3768631 bytes, 0 trainer(s); 9 UTC-6] saved out/s2-step56725.checkpoint (1401 ms) [2026-10-13 18:33:59 UTC-6] done at step 56725 
+[2026-10-13 18:38:43 UTC-6] s2.log: done
+[2026-10-13 18:38:46 UTC-6] no stage 3 yet; waiting up to 7200 s for one to be appended to run/v3/run3.stages
+[2026-10-13 20:38:47 UTC-6] no more stages
+[2026-10-13 20:38:53 UTC-6] eval: out/s1-step5000.checkpoint out/s1-step10000.checkpoint out/s1-step15000.checkpoint out/s1-step20000.checkpoint out/s1-step25000.checkpoint out/s1-step30000.checkpoint out/s1-step35000.checkpoint  out/s2-step40000.checkpoint out/s2-step45000.checkpoint out/s2-step50000.checkpoint out/s2-step55000.checkpoint  out/s1-step36696.checkpoint out/s2-step56725.checkpoint
+== out/s1-step5000.checkpoint
+[2026-10-13 20:39:57 UTC-6] bits_per_byte: 0.67581356
+== out/s1-step10000.checkpoint
+[2026-10-13 20:40:54 UTC-6] bits_per_byte: 0.60536504
+== out/s1-step15000.checkpoint
+[2026-10-13 20:41:49 UTC-6] bits_per_byte: 0.5726351
+== out/s1-step20000.checkpoint
+[2026-10-13 20:42:44 UTC-6] bits_per_byte: 0.5545067
+== out/s1-step25000.checkpoint
+[2026-10-13 20:43:41 UTC-6] bits_per_byte: 0.57060295
+== out/s1-step30000.checkpoint
+[2026-10-13 20:44:38 UTC-6] bits_per_byte: 0.55645066
+== out/s1-step35000.checkpoint
+[2026-10-13 20:45:36 UTC-6] bits_per_byte: 0.56946063
+== out/s2-step40000.checkpoint
+[2026-10-13 20:46:32 UTC-6] bits_per_byte: 0.5690987
+== out/s2-step45000.checkpoint
+[2026-10-13 20:58:00 UTC-6] bits_per_byte: 0.54582584
+== out/s2-step50000.checkpoint
+[2026-10-13 20:58:54 UTC-6] bits_per_byte: 0.5318892
+== out/s2-step55000.checkpoint
+[2026-10-13 20:59:49 UTC-6] bits_per_byte: 0.5321879
+== out/s1-step36696.checkpoint
+[2026-10-13 21:00:46 UTC-6] bits_per_byte: 0.5786715
+== out/s2-step56725.checkpoint
+[2026-10-13 21:01:41 UTC-6] bits_per_byte: 0.53300995
+next:
+== out/s1-step5000.checkpoint
+[2026-10-13 21:12:00 UTC-6] bits_per_byte: 0.6512535
+== out/s1-step10000.checkpoint
+[2026-10-13 21:22:16 UTC-6] bits_per_byte: 0.5864448
+== out/s1-step15000.checkpoint
+[2026-10-13 21:32:33 UTC-6] bits_per_byte: 0.57724094
+== out/s1-step20000.checkpoint
+[2026-10-13 21:42:50 UTC-6] bits_per_byte: 0.558085
+== out/s1-step25000.checkpoint
+[2026-10-13 21:53:04 UTC-6] bits_per_byte: 0.5706488
+== out/s1-step30000.checkpoint
+[2026-10-13 22:03:17 UTC-6] bits_per_byte: 0.5596447
+== out/s1-step35000.checkpoint
+[2026-10-13 22:13:32 UTC-6] bits_per_byte: 0.5748481
+== out/s2-step40000.checkpoint
+[2026-10-13 22:24:36 UTC-6] bits_per_byte: 0.5855239
+== out/s2-step45000.checkpoint
+[2026-10-13 22:34:52 UTC-6] bits_per_byte: 0.5718961
+== out/s2-step50000.checkpoint
+[2026-10-13 22:45:19 UTC-6] bits_per_byte: 0.5530736
+== out/s2-step55000.checkpoint
+[2026-10-13 22:55:36 UTC-6] bits_per_byte: 0.55766314
+== out/s1-step36696.checkpoint
+[2026-10-13 23:06:28 UTC-6] bits_per_byte: 0.5822409
+== out/s2-step56725.checkpoint
+[2026-10-13 23:17:01 UTC-6] bits_per_byte: 0.5588949
+[2026-10-13 23:31:26 UTC-6] pulled s1-step36696.checkpoint
+[2026-10-13 23:45:54 UTC-6] pulled s2-step56725.checkpoint
+[2026-10-13 23:48:35 UTC-6] pulled: 13 checkpoints on the box, each matching its copy here; none of the 13 wanted missing
+[2026-10-13 23:48:35 UTC-6] destroy instance 55567872
+destroying instance 55567872.
+[2026-10-13 23:48:48 UTC-6] finished

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-14: run 2's ns1-ns4 restage (one-off, done); restaging is `bend-ops stage` from Phase 1b; kept for reference
+exit 2
 # mix 2 less the Agda vault, rebuilt as ns1..ns4 and re-pushed (the chain reaches ns1 after nr6)
 set -u
 log() { echo "[$(TZ=Etc/GMT+6 date '+%Y-%m-%d %H:%M:%S') UTC-6] restage-ns: $*"; }

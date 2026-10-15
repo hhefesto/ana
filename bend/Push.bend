@@ -816,7 +816,7 @@ def done.say(+pc: Pc, +sent: Nat, +sk: Nat) -> IO(Unit):
     IO.print("push-corpus: done — " ++ Nat.show(sent) ++ " shard(s) sent, " ++ Nat.show(sk) ++ " already present.")
     IO.print("")
     IO.print("On the box, from ~/" ++ Pc.remote(pc) ++ ", point the dense Bend trainer at what landed")
-    IO.print("(bend/gpu/hot.sh sets the rest of its environment):")
+    IO.print("(the box driver sets the rest of its environment: see bend-box (Phase 1b) / bend/gpu/fp.sh):")
     IO.print("")
     IO.print("  PLAN=" ++ rd ++ "/" ++ S.base(Pc.plan(pc)) ++ " RUN_DIR=" ++ rd ++ " SHARD_SIZE=" ++ Pc.size(pc) ++ " TOKENIZER_FILE=" ++ Pc.tok(pc))
 

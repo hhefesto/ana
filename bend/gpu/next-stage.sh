@@ -3,7 +3,7 @@
 # LANG, one pass) mixed with replay of fp100m's languages (run/transcripts-final/
 # LANG, cycled), as windows, shards and a plan; the held-out new transcripts
 # as an eval corpus; then everything onto the box under the names fp.sh next
-# and fp-relay.sh expect, and the STAGED marker last. Run from the repository
+# and fp-relay.sh (unwired 2026-10-14: fp-chain.sh) expect, and the STAGED marker last. Run from the repository
 # root:
 #   bend/gpu/next-stage.sh build              the mix, the shards and plan, the eval corpus (local)
 #   bend/gpu/next-stage.sh push HOST PORT     to the box

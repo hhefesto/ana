@@ -1,0 +1,20 @@
+[2026-10-13 06:33:34 UTC-6] loaded out/s1-step36696.checkpoint (12266 ms)
+[2026-10-13 06:33:34 UTC-6] train (dense, next plan): from step 36696 of mixed-v2:sha256=3ef4c2e49bdeb420df61afafa3d9e22e85666918d0d42695d76036a50df69c79:raw=0.8277:windows=898395:batch=16:size=fp100m:tokenizer=1e2238cedf08623ed2cf1750aa71f949dee2e5c9977ad3a02cc22edb2bf44a24 onto 20029 steps of mixed-v2:sha256=36a691f25a56a7a1987f8b953723ebd6a777d4c9bde7f1b567654962c0e6f0a4:raw=0.0101:windows=318237:batch=16:size=fp100m:tokenizer=1e2238cedf08623ed2cf1750aa71f949dee2e5c9977ad3a02cc22edb2bf44a24; the schedule restarts (warmup 10, lr 0.00008288989), the optimizer state carries over
+[2026-10-13 06:33:34 UTC-6] training targets: by role (TRAIN_MASK=kinds: a tool's echo and a given attempt weigh 0)
+[2026-10-13 06:33:34 UTC-6] train (dense, hot start): formal-transformer-futhark-hybrid-gla-v3:Config {vocabSize = 32768, contextSize = 2048, modelDim = 768, ffDim = 2048, layerCount = 12, headCount = 12, gateKind = GateRgLru, qkNorm = True, headSinks = True, tiedHead = True} from step 36696 to 56725 of 56725; lr 0.00008288989, warmup 10, Muon, clip 1, micro-batch 4, 297 segments left
+[2026-10-13 06:33:34 UTC-6] reading run/v3/S2/shard-0-fp100m.corpus
+[2026-10-13 06:33:34 UTC-6] parsed (12 ms)
+[2026-10-13 06:33:35 UTC-6] shard 0: 89 training windows, global 36696..36702; running 36696..36702
+[2026-10-13 06:33:36 UTC-6] step=36696 validation_loss=1.3045936 validation_delta=na best_validation_loss=1.3045936 new_best=True bits_per_byte=0.6016305 remaining=6 eta=na
+[2026-10-13 06:33:40 UTC-6] step=36697/56725 progress=64.693% lr=0.000008288989 train_loss=0.9590317 train_loss_ema=0.9590317 gradient_norm=0.9389281 clipped=False ms=3440 tok/s=9525
+[2026-10-13 06:33:42 UTC-6] step=36698/56725 progress=64.695% lr=0.000016577978 train_loss=1.2544062 train_loss_ema=0.96493924 gradient_norm=0.898981 clipped=False ms=1921 tok/s=17057
+[2026-10-13 06:33:44 UTC-6] step=36699/56725 progress=64.696% lr=0.000024866968 train_loss=0.80450964 train_loss_ema=0.96173066 gradient_norm=0.8081685 clipped=False ms=1925 tok/s=17022
+[2026-10-13 06:33:45 UTC-6] step=36700/56725 progress=64.698% lr=0.000033155957 train_loss=0.7942436 train_loss_ema=0.95838094 gradient_norm=0.78620166 clipped=False ms=1929 tok/s=16987
+[2026-10-13 06:43:49 UTC-6] step=37000 validation_loss=1.4597656 validation_delta=0.3511938 best_validation_loss=1.1085718 new_best=False bits_per_byte=0.6177161 remaining=19725 eta=10h47m
+[2026-10-13 06:43:51 UTC-6] saved out/s2-step37000.checkpoint (1407 ms)
+[2026-10-13 07:01:01 UTC-6] step=37500 validation_loss=1.3630766 validation_delta=-0.015636563 best_validation_loss=1.1085718 new_best=False bits_per_byte=0.5627018 remaining=19225 eta=10h33m
+[2026-10-13 07:01:02 UTC-6] saved out/s2-step37500.checkpoint (1422 ms)
+[2026-10-13 18:33:56 UTC-6] step=56724/56725 progress=99.998% lr=0 train_loss=0.89067245 train_loss_ema=1.2026024 gradient_norm=0.5090961 clipped=False ms=2000 tok/s=16384
+[2026-10-13 18:33:58 UTC-6] step=56725/56725 progress=100% lr=0 train_loss=1.0716419 train_loss_ema=1.1999832 gradient_norm=0.51235974 clipped=False ms=1999 tok/s=16392
+[2026-10-13 18:33:59 UTC-6] saved out/s2-step56725.checkpoint (1401 ms)
+[2026-10-13 18:33:59 UTC-6] done at step 56725

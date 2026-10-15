@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-14: the run-1 relay (fp100m then next), superseded by bend/gpu/fp-chain.sh (any list of stages) and, from the plan's Phase 1a, `bend-ops chain`; kept for reference
+exit 2
 # The box's runs without a person present: fp100m, then (when it is staged)
 # the continuation on the next plan, then the scores, the pull and the
 # DESTROY. Runs on this machine, outside any session, from a copy (bash reads

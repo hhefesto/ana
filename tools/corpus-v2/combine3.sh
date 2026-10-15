@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-14: run 3's S1 plan (done, run/v3/S1); a run's plan comes from its run config and Bend in Phase 4; kept for reference
+exit 2
 # combine3.sh (2026-10-07): run 3's S1 plan, run/v3/S1: every transcript window (run/v3/T,
 # windows3.sh's: format 2's and the synthetic chains) and every steady raw slice
 # (run/v3/R/1..n, raw3.sh's) in one mix, the raw share R / (T + R) in training windows

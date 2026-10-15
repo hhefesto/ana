@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-14: run 3's raw build (done, run/v3/R); `bend-corpus-v2 raw-build` replaces it in Phase 4; kept for reference
+exit 2
 # raw3.sh (2026-10-07): run 3's raw code, steady (steady-mix.sh: every source runs dry in
 # the last round) and cut into rawshards slices, run/v3/R/1..n, for combine.
 #

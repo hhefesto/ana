@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-14: run 3's transcript windows (done, run/v3/T); `bend-corpus-v2 windows` replaces it in Phase 4; kept for reference
+exit 2
 # windows3.sh (2026-10-07): run 3's transcript windows (bend-plan-windows):
 # run 2's format-2 train transcripts without verify (run/v2/transcripts-nv,
 # windows.sh's, at run 2's PER: bend 113, haskell 45, lean 25, agda 26, nix 5),

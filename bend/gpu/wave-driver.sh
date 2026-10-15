@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-14: run 2's transcript-wave driver (a one-off), superseded by insert-stage and, from Phase 4, run drivers that are config files; kept for reference
+exit 2
 # Finalize a transcript wave and put it ahead of the raw slices not yet
 # started: run the agents' finalize scripts (they stop their checks and
 # render what is kept), build and push the wave, and insert its stage in

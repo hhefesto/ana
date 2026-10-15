@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-14: gate G0 (Array.gemm against cuBLAS, 2026-09-23) passed and is done; the live gate is fp.sh gate (G2), `bend-box gate` from Phase 1b; kept for reference
+exit 2
 # Gate G0 on a GPU box: Array.gemm from Bend against cuBLAS called directly.
 # Expects in the working directory: bench.c conf.c (bend X.bend -o X.c from
 # the ft-kernels fork), cublas_direct.c, conf.loop.txt is written here.

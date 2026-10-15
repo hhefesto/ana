@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-14: a watcher on the 2026-09-24 hot-start box (one-off, done); evals run through fp.sh eval, `bend-ops evals` from Phase 4; kept for reference
+exit 2
 # score every saved checkpoint on the enwik8 test split, once, after its save completed
 cd /root/hot
 while true; do

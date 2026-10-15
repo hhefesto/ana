@@ -476,7 +476,12 @@ def chk.tests() -> List<&2, ChkTest>:
    # code32k window's weights (compiled: the interpreter's stack is too
    # small for the tokenizer's parse)
    ChkTest{"agent.bend", True{}, RHead{chk.oks(["direct", "repair", "term-to-type", "verify", "trap", "weights direct", "weights repair", "unfold",
-     "chain", "chain-repair", "label drift", "tries weigh 0", "v1 direct", "v1 repair", "v1 term-to-type", "v1 verify", "v1 trap", "verdict"]), "ok window"}}]
+     "chain", "chain-repair", "label drift", "tries weigh 0", "v1 direct", "v1 repair", "v1 term-to-type", "v1 verify", "v1 trap", "verdict"]), "ok window"}},
+   # bend-ops' primitives (bend/Box): its parsers on run 3's files
+   # (chain.log, the sha256 listings, a trainer's log) and on vastai's --raw
+   # JSON, the lint's rules and flake bodies, st.f.floor, and the processes
+   # (background, which, find, stat, sha256sum, markers); reads fixtures/ops
+   ChkTest{"ops.bend", False{}, ROks{61n}}]
 
 def chk.rule(r: ChkRule, +out: List<&2, U32>) -> Bool:
   match r:

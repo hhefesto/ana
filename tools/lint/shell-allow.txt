@@ -1,0 +1,51 @@
+# The shell lint's ratchet (bend-ops lint, bend/Box/Lint.bend; the flake check
+# shell-lint).  2026-10-14, the user: "I want all logic to be in bend. I want sh
+# to only be a thin shim."  Each line names a live file (or a flake.nix body,
+# flake.nix:NAME) that still holds shell logic and may fail the lint until its
+# phase of the plan ports it to Bend; take a line off when its file passes (the
+# lint says so).  A file not listed here must pass: a new script with logic
+# fails at once.  Dead scripts are not listed: they are unwired (`# UNWIRED
+# DATE: why` and `exit 2` after the shebang) and the lint skips them.
+
+# Phase 1a: bend-ops chain, bend-ops watch
+bend/gpu/fp-chain.sh
+bend/gpu/credit-watch.sh
+
+# Phase 1b: bend-box, bend-ops stage, bend-ops dense-identity
+bend/gpu/fp.sh
+bend/gpu/fp-stage.sh
+bend/gpu/fp-restage.sh
+bend/gpu/next-stage.sh
+bend/tests/dense-identity.sh
+
+# Phase 3: bend-ops act, corpus-v2 agent-act
+bend/gpu/act-box.sh
+tools/corpus-v2/agent-act.sh
+
+# Phase 4: corpus recipes and run drivers
+bend/gpu/raw-stage.sh
+bend/gpu/raw-driver.sh
+tools/corpus-v2/s2.sh
+tools/corpus-v2/actset.sh
+tools/corpus-v2/steady-mix.sh
+tools/corpus-v2/render.sh
+tools/corpus-v2/evals.sh
+tools/corpus-v2/windows.sh
+tools/corpus-v2/rawshards.sh
+
+# Phase 5: corpus-v2 behaviour
+tools/corpus-v2/behaviour/run.sh
+tools/corpus-v2/behaviour/selftest.sh
+tools/corpus-v2/behaviour/tasks.sh
+
+# Phase 6: the flake checks decide in Bend (bend/tests/Checks.bend); the
+# derivations keep a two-line boilerplate
+flake.nix:bendBinary
+flake.nix:ana
+flake.nix:bend-spec
+flake.nix:bend-tests
+flake.nix:bend-train
+flake.nix:bend-dense
+flake.nix:bend-decode-dense
+flake.nix:bend-prefill-dense
+flake.nix:bend-bulk-cpu

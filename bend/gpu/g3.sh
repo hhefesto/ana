@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-14: gates G1-G3 of the dense trainer (2026-09-24) passed and are done; the live gate is fp.sh gate (G2), `bend-box gate` from Phase 1b; kept for reference
+exit 2
 # Gates G1-G3 on a GPU box, for the dense Bend trainer built with the
 # ft-kernels fork. Expects in the working directory: einsum.c, dense.c,
 # traind.c (bend X.bend -o X.c), corpus.txt and tok.bpe. Needs clang

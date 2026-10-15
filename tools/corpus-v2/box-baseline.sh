@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-14: run 1's baseline on the v2 eval corpora (done 2026-10-04, docs/CORPUS-V2.md); paired evals are `bend-ops evals` in Phase 4; kept for reference
+exit 2
 # box-baseline.sh HOST PORT DEST CAP_EPOCH: run 1's baseline on corpus v2's clean eval corpora
 # (docs/CORPUS-V2.md, E3), on the chain's box before it is destroyed. It holds the chain's
 # destroy (DEST/HOLD, fp-chain.sh) at CAP_EPOCH at the latest; once the chain has scored and

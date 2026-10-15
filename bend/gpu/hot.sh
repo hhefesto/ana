@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-14: the 2026-09-24 hot start of master's bpe100m-v3 run, finished (merged into master); the box driver is bend/gpu/fp.sh, `bend-box` from Phase 1b; kept for reference
+exit 2
 # Hot start on a GPU box: the dense Bend trainer continues master's
 # bpe100m-v3 run from its step-8000 checkpoint, on master's plan and
 # shards, with master's schedule (lr, warmup, total from the manifest).

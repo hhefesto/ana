@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-14: run 3's new raw code (done 2026-10-07, run/v2/raw-new3); `bend-corpus-v2 collect CFG` replaces it in the plan's Phase 2; kept for reference
+exit 2
 # raw-new3.sh (2026-10-07, plan item 7, approved by the user): new raw code for run 3, through the
 # corpus's raw gates (docs/CORPUS-V2.md C3, C6) into run/v2/raw-new3/. Shell and bend-corpus-v2 only.
 #

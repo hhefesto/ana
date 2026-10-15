@@ -2,7 +2,7 @@
 # steady-mix.sh OUT.jsonl SRC.jsonl:BYTES ... (2026-10-07): a raw mix whose
 # language shares hold from its first line to its last.
 #
-# Run 2's mix (rawshards.sh mix: `deploy mix` with per-round shares set by
+# Run 2's mix (rawshards.sh mix, unwired 2026-10-14 since this file replaced it: `deploy mix` with per-round shares set by
 # token share) ran raw Agda dry at 72.8% of its output and Lean at 94.1%, so
 # the last quarter of run 2, its whole low-learning-rate phase, trained on
 # almost no Agda and, at the end, half the Lean (run/v2/remix-mix.log,
