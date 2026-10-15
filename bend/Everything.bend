@@ -5,6 +5,14 @@ import Base
 # check." only when every law in them is proven (the trainer included:
 # its pullbacks, optimizers, init, data and checkpoint modules).  Master's
 # `agda -i . Everything.agda` is its counterpart.
+#
+# TrainDense.bend is not imported (2026-10-15): it logs through Clock.bend,
+# whose wall clock ck.wall is our own effect (bend/effs/wall.c), and the
+# gate counts a foreign def outside Base as a promise, like @unsafe (bend2
+# main.ts book_promises: SOME PROOFS FAIL).  The modules only it brought in
+# (Dense/Step, Dense/Plan, Mask) are imported here instead, so every law
+# stays in the gate; TrainDense itself has no laws and is type-checked
+# wherever it is compiled (bend-train-dense, the bend-dense check).
 
 import ./Spec/Nat.bend as SNat
 import ./Spec/Order.bend as SOrder
@@ -31,6 +39,8 @@ import ./Generate.bend as Generate
 import ./Train.bend as Train
 import ./Evaluate.bend as Evaluate
 import ./Spec/Dense.bend as SDense
-import ./TrainDense.bend as TrainDense
+import ./Dense/Step.bend as DStep
+import ./Dense/Plan.bend as DPlan
+import ./Mask.bend as Mask
 import ./Legere/Spec.bend as SLegere
 import ./Agent/Episode.bend as AEpisode

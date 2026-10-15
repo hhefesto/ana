@@ -187,7 +187,7 @@ def unt.err(+xs: List<&2, U32>) -> IO(Unit):
 
 def unt.mark(+dir: String, +what: String) -> IO(Unit):
   do IO<Unit>:
-    +t : Nat <- IO.time()
+    +t : Nat <- Ck.ck.wall()
     S.add(dir ++ "/starts.log", S.b(Ck.stamp(t) ++ " " ++ what ++ "\n"))
 
 def unt.record(+dir: String, +name: String, +argv: List<&2, String>) -> IO(Unit):

@@ -156,7 +156,7 @@ def select(+lang: Nat, +pct: U32, +id: List<&2, U32>) -> Nat:
 # a stamped line on stderr and at the end of the language's log
 def say(+dir: String, +msg: String) -> IO(Unit):
   do IO<Unit>:
-    +t : Nat <- IO.time()
+    +t : Nat <- Ck.ck.wall()
     +line : String = Ck.stamp(t) ++ " " ++ msg
     S.add(dir ++ "/log", S.b(line ++ "\n"))
     IO.print_err(line)

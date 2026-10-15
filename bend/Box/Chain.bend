@@ -4,6 +4,7 @@ import ./Local.bend as Lc
 import ./Remote.bend as Rm
 import ./Vast.bend as Vs
 import ./Alert.bend as Al
+import ../Clock.bend as Ck
 
 # Chain: a chain of runs on one box without a person present, then the
 # scores, the pull and the DESTROY (2026-10-14, the plan's Phase 1a: the port
@@ -972,7 +973,7 @@ def chn.died(ok: Bool, +c: ChnCfg, +lg: String) -> IO(Unit):
       IO.pure(Unit, Unit{})
     case False{}:
       do IO<Unit>:
-        +t : Nat <- IO.time()
+        +t : Nat <- Ck.ck.wall()
         S.add(chn.dest(c) ++ "/DIED", Lc.lcl.mark.line(t, lg ++ ": the trainer died"))
         chn.alert(c, lg ++ ": the trainer died (no trainer, the log still for " ++ Nat.show(chn.dead(c))
           ++ " s); DEST/DIED written, no later stage starts, the chain goes on to the scores, the pulls and the destroy")

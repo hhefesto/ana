@@ -3,6 +3,7 @@ import ../Sys.bend as S
 import ../Json.bend as J
 import ../Sha256.bend as H
 import ./Lib.bend as L
+import ../Clock.bend as Ck
 
 # Corpus v2's raw code (docs/CORPUS-V2.md, C4, C6; the old raw.py, byte for
 # byte), and the two splitters the run scripts used Python for.
@@ -188,7 +189,7 @@ def rw.stamp(+ms: Nat) -> String:
 
 def rw.log(+line: String) -> IO(Unit):
   do IO<Unit>:
-    +t : Nat <- IO.time()
+    +t : Nat <- Ck.ck.wall()
     IO.print_err(rw.stamp(t) ++ " " ++ line)
 
 # Languages and fates --------------------------------------------------------------

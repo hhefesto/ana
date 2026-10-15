@@ -172,7 +172,7 @@ def lcl.stat(+path: String) -> IO(Maybe<&2, LclSt>):
 
 def lcl.now() -> IO(Nat):
   do IO<Nat>:
-    +t : Nat <- IO.time()
+    +t : Nat <- Ck.ck.wall()
     return Nat.div(t, U32.to_nat(1000))
 
 def lcl.age.of(+now: Nat, m: Maybe<&2, LclSt>) -> Maybe<&2, Nat>:
@@ -207,7 +207,7 @@ def lcl.mark.line(+ms: Nat, +line: String) -> List<&2, U32>:
 
 def lcl.mark(+path: String, +line: String) -> IO(Unit):
   do IO<Unit>:
-    +t : Nat <- IO.time()
+    +t : Nat <- Ck.ck.wall()
     S.write(path, lcl.mark.line(t, line))
 
 def lcl.marked(+path: String) -> IO(Bool):

@@ -2,10 +2,13 @@
 
 Everything under `bend/` is Bend2 alone: the specification (ported from the Agda
 modules), the decoder, the tokenizer, the trainer and the evaluator. There is
-no FFI and no custom C/JS effect. The Bend2 toolchain is pinned in `flake.nix`
+no FFI and one custom C/JS effect: the wall clock, `ck.wall` in `bend/Clock.bend`
+over `bend/effs/wall.c` and `wall.js` (the fork's `IO.time` until 2026-10-15;
+`Everything.bend` leaves out `TrainDense.bend`, which logs through it, since the
+proof gate counts a foreign def outside Base as a promise). The Bend2 toolchain is pinned in `flake.nix`
 (input `bend2`, the fork `github:hhefesto/bend2/ft-kernels`, consumed as a flake:
 upstream 2.0.35+ (53fc961d) plus one squashed commit with the bulk ops and their
-bit-exact CPU kernels, the F32 file effects, `IO.time`, and a `default` package
+bit-exact CPU kernels, the F32 file effects (and `IO.time` until 2026-10-15), and a `default` package
 that runs the fork's own source with Bun, since upstream's `default` fetches the
 release archive; rebased 2026-10-06, the earlier bases kept as the tags
 `ft-kernels-2.0.34`, `ft-kernels-2.0.28`, `ft-kernels-2.0.27` and

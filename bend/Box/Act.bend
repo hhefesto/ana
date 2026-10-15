@@ -498,7 +498,7 @@ def acb.at(+c: AcbCx, +p: String) -> String:
 
 def acb.log(+msg: String) -> IO(Unit):
   do IO<Unit>:
-    +t : Nat <- IO.time()
+    +t : Nat <- Ck.ck.wall()
     +l : String = Ck.stamp(t) ++ " act-box: " ++ msg
     IO.print(l)
     +f : String <- S.env("ACT_LOG", "")
@@ -1072,7 +1072,7 @@ def acb.lake(+c: AcbCx, +b: Rm.RmtBox) -> IO(Unit):
 
 def acb.setup(+host: String, +port: String) -> IO(Unit):
   do IO<Unit>:
-    +t0 : Nat <- IO.time()
+    +t0 : Nat <- Ck.ck.wall()
     +c : AcbCx <- acb.cx()
     +b : Rm.RmtBox <- Rm.rmt.box(host, port)
     +tmp : String <- S.mktemp()
@@ -1089,7 +1089,7 @@ def acb.setup(+host: String, +port: String) -> IO(Unit):
     acb.trees.send(c, b, tmp, us)
     acb.lake(c, b)
     S.rm(tmp)
-    +t1 : Nat <- IO.time()
+    +t1 : Nat <- Ck.ck.wall()
     acb.log("setup done in " ++ Nat.show(Nat.div(Nat.sub(t1, t0), 60000n)) ++ " min")
 
 # ckpt -------------------------------------------------------------------------------------------

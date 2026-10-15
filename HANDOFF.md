@@ -493,7 +493,7 @@ Later, not v1:
 - **Git:**
   - Commits carry no Co-Authored-By. Nothing is pushed without asking.
   - `private/*` branches push only to the `private` remote. Never push to `origin` in `~/src/bend2`.
-- **Logs:** every log line is stamped in Mexico City time (UTC-6), from the fork's `IO.time`.
+- **Logs:** every log line is stamped in Mexico City time (UTC-6), from our own wall-clock effect, `ck.wall` in bend/Clock.bend (bend/effs/wall.c and wall.js; the fork's `IO.time` until 2026-10-15).
 - **Subagents:** they run on Opus 5.5 only, never another model.
 - **Shell is a thin shim (2026-10-14, the user: "I want all logic to be in bend"):** `bend-ops lint` (bend/Box/Lint.bend; the flake check `shell-lint`) allows a shell file at most 12 lines of `set -euo pipefail`, `export`, `cd` and one final `exec`; `tools/lint/shell-allow.txt` lists the live scripts still to port (a ratchet: an unlisted file with logic fails); since 2026-10-15 it holds only bend/gpu/fp.sh, BOX_DRIVER's fallback until bend-box has run on a GPU. A dead script is unwired, not deleted: `# UNWIRED DATE: why` and `exit 2` after its shebang. Since 2026-10-15 a flake.nix body may hold plain sequential commands, and the check runs `--bend` strictly: an `sh -c` string with logic in a Bend source fails it.
 - **Byte identity:** every layout or corpus-tool change is held to it, with `bend-ops dense-identity` for the trainer (bend/tests/dense-identity.sh until 2026-10-15, when it was unwired) and `cmp` of `.corpus`, plan and results files for the tools.

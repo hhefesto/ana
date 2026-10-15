@@ -1,5 +1,6 @@
 import Base
 import ./Sys.bend as S
+import ./Clock.bend as Ck
 
 # bend-push: stream the sharded corpus to a rented box, in the order the
 # trainer consumes it.
@@ -466,7 +467,7 @@ def link.sent.if(ok: Bool, +host: String, +port: String, +mb: String, +want: Nat
       IO.pure(Lk, Lk{False{}, "", "check-link: FAILED — the transfer did not complete.\n  This box will not carry the closure or the corpus. Destroy it."})
     case True{}:
       do IO<Lk>:
-        +t1 : Nat <- IO.time()
+        +t1 : Nat <- Ck.ck.wall()
         link.after(host, port, mb, want, Nat.sub(t1, t0), min, o)
 
 # MB megabytes of zeros through ssh into the box's /tmp/.link-probe, whose
@@ -481,7 +482,7 @@ def link.check(+host: String, +port: String, +mb: String) -> IO(Lk):
     IO.print("check-link: sustained " ++ mb ++ " MB transfer to " ++ host ++ ":" ++ port ++ " ...")
     +tmp : String <- S.mktemp()
     z : S.Out <- S.run.quiet(".", [], 300, "dd", ["if=/dev/zero", "of=" ++ tmp ++ "/zeros", "bs=1M", "count=" ++ mb], Nil{})
-    +t0 : Nat <- IO.time()
+    +t0 : Nat <- Ck.ck.wall()
     +o : S.Out <- S.run.from(".", [], 300, "ssh", List.append(&1, String, link.opts(port), [host, "cat > /tmp/.link-probe && stat -c %s /tmp/.link-probe"]), tmp ++ "/zeros")
     S.rm(tmp)
     link.sent.if(U32.is_eq(S.Out.status(o), 0), host, port, mb, want, t0, min, o)

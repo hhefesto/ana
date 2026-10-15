@@ -23,7 +23,7 @@ def alr.line(+ms: Nat, +msg: String) -> String:
 
 def alr.log(+path: String, +msg: String) -> IO(Unit):
   do IO<Unit>:
-    +t : Nat <- IO.time()
+    +t : Nat <- Ck.ck.wall()
     +l : String = alr.line(t, msg)
     S.add(path, S.b(l ++ "\n"))
     IO.print_err(l)

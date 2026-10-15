@@ -1,7 +1,16 @@
 import Base
 
 # Every log line is stamped in the user's local time, Mexico City: UTC-6
-# with no daylight saving (since 2022). IO.time is the wall clock in ms.
+# with no daylight saving (since 2022). ck.wall is the wall clock in ms.
+
+# The wall clock: milliseconds since the Unix epoch (IO.now is a monotonic
+# stopwatch, for durations; this one is for timestamps). Our own effect,
+# bend/effs/wall.c and wall.js; it was the Bend2 fork's IO.time until
+# 2026-10-15. A def outside Base with a foreign body is a promise to the
+# proof gate, so Everything.bend does not import this file.
+def ck.wall() -> IO(Nat):
+  import "./effs/wall.c"
+  import "./effs/wall.js"
 
 def pad2(+x: U32) -> String:
   Bool.pick(String, U32.is_lt(x, 10), "0", "") ++ U32.show(x)
@@ -31,11 +40,11 @@ def stamp(+ms: Nat) -> String:
 # `stdbuf -oL`, IO.print does not flush)
 def say(+line: String) -> IO(Unit):
   do IO<Unit>:
-    +t : Nat <- IO.time()
+    +t : Nat <- ck.wall()
     IO.print(stamp(t) ++ " " ++ line)
 
 # the same on stderr, which is flushed line by line (the corpus tools)
 def log(+line: String) -> IO(Unit):
   do IO<Unit>:
-    +t : Nat <- IO.time()
+    +t : Nat <- ck.wall()
     IO.print_err(stamp(t) ++ " " ++ line)

@@ -5,7 +5,9 @@
   # Bend 2: the ft-kernels fork of bendlang/bend (github:hhefesto/bend2),
   # which adds the bulk GPU ops the dense trainer runs on (Array.gemm/mm on
   # cuBLAS, Array.einsum as generated CUDA kernels; each op's meaning is its
-  # base.bend definition), F32 file I/O and IO.time.  Bend is a flake; the
+  # base.bend definition) and F32 file I/O (the wall clock, its IO.time until
+  # 2026-10-15, is our own effect now: bend/Clock.bend's ck.wall over
+  # bend/effs/wall.c and wall.js).  Bend is a flake; the
   # fork's `default` package runs its own source with Bun (upstream's
   # `default` fetches the release archive, which cannot carry the fork).
   inputs.bend2 = {
@@ -29,8 +31,12 @@
           root = ./.;
           fileset = nixpkgs.lib.fileset.unions paths;
         };
-      # Every .bend source, nothing else.
-      bendSrc = sourceOf [ (nixpkgs.lib.fileset.fileFilter (f: f.hasExt "bend") ./bend) ];
+      # Every .bend source, and the C and JS of our own effects (bend/effs:
+      # Clock.bend's wall clock, 2026-10-15), which a build splices in.
+      bendSrc = sourceOf [
+        (nixpkgs.lib.fileset.fileFilter (f: f.hasExt "bend") ./bend)
+        ./bend/effs
+      ];
       # What the shell lint reads (2026-10-14): every *.sh, every file without
       # an extension (its shebang may name a shell), flake.nix, the allowlist,
       # and every .bend (2026-10-15: --bend reads the sh -c strings in Bend).

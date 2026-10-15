@@ -178,7 +178,7 @@ def stg.send(+b: Rm.RmtBox, srcs: List<&2, String>, +dst: String) -> IO(Unit):
 
 def stg.log(+msg: String) -> IO(Unit):
   do IO<Unit>:
-    +t : Nat <- IO.time()
+    +t : Nat <- Ck.ck.wall()
     IO.print(Ck.stamp(t) ++ " " ++ msg)
 
 # The C ------------------------------------------------------------------------------------------
