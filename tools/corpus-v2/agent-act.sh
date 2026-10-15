@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# 2026-10-15: ported to Bend as `bend-corpus-v2 agent-act CKPT DIR [K]` (bend/CorpusV2/AgentAct.bend:
+# the same commands, arguments and environment); kept live until the box's deploy is rebuilt with it.
 # agent-act.sh CKPT DIR [K] (2026-10-07): ana's own episodes on train units,
 # the turn-based training data (docs/AGENT.md): the act set's prompts
 # (actset.sh) answered through the tool loop as E5 answers its own (the

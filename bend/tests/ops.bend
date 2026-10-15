@@ -278,6 +278,30 @@ def ops.pure(+box: List<&2, U32>, +here: List<&2, U32>, +s2: List<&2, U32>, +cha
          ops.has(ops.reps.probs(fk, "flake.nix:bad"), "a text tool: grep"))))},
    OpsCk{"lint allowlist", ops.names.eq(Ln.lnt.allow.of(S.b("# the ratchet\n\nbend/gpu/fp.sh\n  flake.nix:bend-tests  # phase 6\n")), ["bend/gpu/fp.sh", "flake.nix:bend-tests"])}]
 
+# a file a background job writes, read until it equals WANT: every 100 ms, at
+# most 100 times (a fixed 500 ms sleep, with both jobs on one log, raced under
+# load, 2026-10-15)
+type OpsRd is Data:
+  OpsRd{done: Bool, got: List<&2, U32>}
+
+def ops.rd.step(+path: String, +want: List<&2, U32>, r: OpsRd) -> IO(OpsRd):
+  match r:
+    case OpsRd{d, g}:
+      do IO<OpsRd>:
+        IO.sleep(100)
+        +got : List<&2, U32> <- S.read(path)
+        return OpsRd{S.eq(got, want), got}
+
+def ops.rd.go(fuel: Nat, +path: String, +want: List<&2, U32>, r: OpsRd) -> IO(List<&2, U32>):
+  match fuel r:
+    case 1n+f OpsRd{False{}, g}:
+      IO.bind(OpsRd, List<&2, U32>, ops.rd.step(path, want, OpsRd{False{}, g}), ops.rd.go(f, path, want))
+    case _ OpsRd{d, g}:
+      IO.pure(List<&2, U32>, g)
+
+def ops.wait.read(+path: String, +want: List<&2, U32>) -> IO(List<&2, U32>):
+  ops.rd.go(100n, path, want, OpsRd{False{}, Nil{}})
+
 def ops.io(+dir: String) -> IO(List<&2, OpsCk>):
   do IO<List<&2, OpsCk>>:
     w : Maybe<&2, String> <- S.which("sh")
@@ -297,10 +321,12 @@ def ops.io(+dir: String) -> IO(List<&2, OpsCk>):
     +ss : List<&2, Lc.LclSum> <- Lc.lcl.sums(dir, [S.b("a"), S.b("zz"), S.b("b")])
     ha : Bool <- Lc.lcl.have(dir, "a")
     hc : Bool <- Lc.lcl.have(dir ++ "/sub", "c")
+    S.write(dir ++ "/bg.log", S.b("stale\n"))
+    S.write(dir ++ "/bg2.log", S.b("one\n"))
     pid : String <- S.background(dir, ["OPS_TEST=bar"], "bg.log", False{}, "printenv", ["OPS_TEST"])
-    pid2 : String <- S.background(dir, [], "bg.log", True{}, "echo", ["two"])
-    IO.sleep(500)
-    +bg : List<&2, U32> <- S.read(dir ++ "/bg.log")
+    pid2 : String <- S.background(dir, [], "bg2.log", True{}, "echo", ["two"])
+    +bg : List<&2, U32> <- ops.wait.read(dir ++ "/bg.log", S.b("bar\n"))
+    +bg2 : List<&2, U32> <- ops.wait.read(dir ++ "/bg2.log", S.b("one\ntwo\n"))
     Lc.lcl.mark(dir ++ "/HOLD", "held")
     +mk : List<&2, U32> <- S.read(dir ++ "/HOLD")
     Al.alr.log(dir ++ "/chain.log", "pulled s1-step5000.checkpoint")
@@ -314,7 +340,7 @@ def ops.io(+dir: String) -> IO(List<&2, OpsCk>):
       OpsCk{"sha256", S.eq(Maybe.default(&2, List<&2, U32>, h, Nil{}), S.b("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"))},
       OpsCk{"sums", ops.names.eq(ops.sum.names(ss), ["a", "b"])},
       OpsCk{"have (and not while partial)", Bool.and(ha, Bool.not(hc))},
-      OpsCk{"background", Bool.and(S.eq(bg, S.b("bar\ntwo\n")), Bool.and(Ln.lnt.is.digit(Lc.lcl.at(S.b(pid), 0n)), Ln.lnt.is.digit(Lc.lcl.at(S.b(pid2), 0n))))},
+      OpsCk{"background", Bool.and(Bool.and(S.eq(bg, S.b("bar\n")), S.eq(bg2, S.b("one\ntwo\n"))), Bool.and(Ln.lnt.is.digit(Lc.lcl.at(S.b(pid), 0n)), Ln.lnt.is.digit(Lc.lcl.at(S.b(pid2), 0n))))},
       OpsCk{"mark", Bool.and(S.prefix(mk, S.b("[")), S.suffix(mk, S.b(" UTC-6] held\n")))},
       OpsCk{"log", Bool.and(S.prefix(cl, S.b("[")), Bool.and(S.suffix(cl, S.b(" UTC-6] pulled s1-step5000.checkpoint\n")),
         ops.names.eq(Lc.lcl.pulled.of(cl), ["s1-step5000.checkpoint"])))}]

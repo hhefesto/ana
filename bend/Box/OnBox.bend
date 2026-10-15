@@ -4,6 +4,7 @@ import ../Clock.bend as Ck
 import ./Local.bend as Lc
 import ../CorpusV2/Steps.bend as St
 import ../Push.bend as Pu
+import ./ActBox.bend as Ab
 
 # OnBox: bend-box, the driver on a rented GPU box (2026-10-14, the plan's
 # Phase 1b: all logic in Bend, the shell a thin shim).  It is bend/gpu/fp.sh
@@ -25,6 +26,8 @@ import ../Push.bend as Pu
 #                                  eval-next.log, as a detached job; eval.done when it ends (new, for the chain)
 #   bend-box probe gate|time|dmon|ctx FILE [STEPS]
 #                                  one reader on a file: gate.log's verdict, time.log's summary, ...
+#   bend-box act-stop | cut-frames EPLOG | cut-pairs NULFILE
+#                                  an act round stopped, its files cut to whole records (bend/Box/ActBox.bend)
 #
 # A box's shell runs it in that directory (`cd formalTransformer && ./bend-box
 # gate`, or `env -C formalTransformer ./bend-box gate` as one command line
@@ -1184,6 +1187,7 @@ def obx.eval.job(+argv0: String, +t: List<&2, String>) -> IO(Unit):
 def obx.usage() -> String:
   "usage: bend-box build | gate | time [STEPS] | run | eval [CKPT...] | eval-both [CKPT...]\n"
     ++ "       bend-box next CKPT | again CKPT PLAN RUN_DIR SHARD_SIZE NAME | resume CKPT PLAN RUN_DIR SHARD_SIZE NAME STEPS\n"
+    ++ "       bend-box act-stop | cut-frames EPLOG | cut-pairs NULFILE   (an act round: bend/Box/ActBox.bend)\n"
     ++ "  (bend/Box/OnBox.bend: fp.sh's modes and environment; run it in the box's working directory)"
 
 # bend-box probe gate|time|dmon|ctx FILE [STEPS]: one of the readers above on
@@ -1242,6 +1246,12 @@ def obx.mode(+cx: ObxCx, +argv0: String, xs: List<&2, String>) -> IO(Unit):
       obx.eval.both(argv0, t)
     case "eval-job" <> +t:
       obx.eval.job(argv0, t)
+    case "act-stop" <> t:
+      Ab.abx.act.stop()
+    case "cut-frames" <> +f <> Nil{}:
+      Ab.abx.cut.frames(f)
+    case "cut-pairs" <> +f <> Nil{}:
+      Ab.abx.cut.pairs(f)
     case _:
       IO.die(Unit, 2, obx.usage())
 

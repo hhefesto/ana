@@ -1,0 +1,3785 @@
+EP1 397
+142 10 2
+n=12
+lang=haskell
+unit=hackage:shakers/src/Development/Shakers.hs#fakeDir@105
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=0
+tool-error0 0 0 188
+## User
+
+Build directory where "touch" files are kept.
+
+## Context
+
+```haskell
+buildFile :: FilePath -> FilePath
+```
+
+## Type
+
+type
+```haskell
+fakeDir :: FilePath
+```
+
+## Term
+
+```haskell
+1 0 0 29
+fakeDir = "bash"
+```
+
+## ghc
+EP1 398
+142 10 2
+n=13
+lang=haskell
+unit=hackage:shakers/src/Development/Shakers.hs#fakeDir@105
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=1
+tool-error0 0 0 188
+## User
+
+Build directory where "touch" files are kept.
+
+## Context
+
+```haskell
+buildFile :: FilePath -> FilePath
+```
+
+## Type
+
+type
+```haskell
+fakeDir :: FilePath
+```
+
+## Term
+
+```haskell
+1 0 0 30
+fakeDir = "touch"
+```
+
+## ghc
+EP1 579
+166 10 2
+n=2
+lang=haskell
+unit=hackage:limcalc/src/LimCalc/Integration/Risch/Primitive.hs#algNumToRational@247
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=0
+tool-error0 0 0 320
+## User
+
+Approximate an 'AlgNum' as a 'Rational' via its 'Double' midpoint.
+Used to construct approximate input for Durand-Kerner.
+
+## Context
+
+```haskell
+toRational :: Real a => a -> Rational
+algToDouble :: AlgNum -> Double
+```
+
+## Type
+
+type
+```haskell
+algNumToRational :: AlgNum -> Rational
+```
+
+## Term
+
+```haskell
+1 0 0 55
+algNumToRational (AlgNum a) = toRational a
+```
+
+## ghc
+EP1 574
+146 10 2
+n=8
+lang=bend
+unit=curated:shi3z__bend_web_server/server.bend#check_hstate_cl@271
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=0
+tool-error0 0 0 320
+## User
+
+Define `check_hstate_cl`.
+
+## Context
+
+```bend
+def check_hstate_cl_step(has_body: Bool, path: String) -> String
+def U32.is_gt(a: U32, b: U32) -> Bool
+def route_path(+path: String) -> String
+```
+
+## Type
+
+type
+```bend
+def check_hstate_cl(has_cl: Bool, cl_val: U32, path: String) -> String:
+```
+
+## Term
+
+```bend
+1 0 0 70
+check_hstate_cl_step(U32.is_gt(has_cl, 1), path, cl_val)
+```
+
+## bend
+EP1 605
+166 10 2
+n=3
+lang=haskell
+unit=hackage:limcalc/src/LimCalc/Integration/Risch/Primitive.hs#algNumToRational@247
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=1
+tool-error0 0 0 320
+## User
+
+Approximate an 'AlgNum' as a 'Rational' via its 'Double' midpoint.
+Used to construct approximate input for Durand-Kerner.
+
+## Context
+
+```haskell
+toRational :: Real a => a -> Rational
+algToDouble :: AlgNum -> Double
+```
+
+## Type
+
+type
+```haskell
+algNumToRational :: AlgNum -> Rational
+```
+
+## Term
+
+```haskell
+1 0 0 81
+algNumToRational (AlgNum fx fy) = (toRational fx) / (toRational fy)
+```
+
+## ghc
+EP1 671
+136 10 2
+n=10
+lang=haskell
+unit=hackage:puresat/src/PureSAT/Stats.hs#newStats@20
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=0
+tool-error0 0 0 404
+## User
+
+Define `newStats`.
+
+## Context
+
+```haskell
+newPrimArray
+  :: (Control.Monad.Primitive.PrimMonad m, Prim a) =>
+     Int -> m (MutablePrimArray (Control.Monad.Primitive.PrimState m) a)
+setPrimArray
+  :: (HasCallStack, Prim a) =>
+     MutablePrimArray s a -> Int -> Int -> a -> ST s ()
+return :: Monad m => a -> m a
+```
+
+## Type
+
+type
+```haskell
+newStats :: ST s (Stats s)
+```
+
+## Term
+
+```haskell
+1 0 0 93
+newStats = do
+    v <- newPrimArray (0, 10)
+    setPrimArray v 0 10
+    return v
+```
+
+## ghc
+EP1 675
+136 10 2
+n=11
+lang=haskell
+unit=hackage:puresat/src/PureSAT/Stats.hs#newStats@20
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=1
+tool-error0 0 0 404
+## User
+
+Define `newStats`.
+
+## Context
+
+```haskell
+newPrimArray
+  :: (Control.Monad.Primitive.PrimMonad m, Prim a) =>
+     Int -> m (MutablePrimArray (Control.Monad.Primitive.PrimState m) a)
+setPrimArray
+  :: (HasCallStack, Prim a) =>
+     MutablePrimArray s a -> Int -> Int -> a -> ST s ()
+return :: Monad m => a -> m a
+```
+
+## Type
+
+type
+```haskell
+newStats :: ST s (Stats s)
+```
+
+## Term
+
+```haskell
+1 0 0 97
+newStats = do
+  st <- newPrimArray 0
+  setPrimArray st 0 0 1
+  return $ Stats.new st
+```
+
+## ghc
+EP1 586
+146 10 2
+n=9
+lang=bend
+unit=curated:shi3z__bend_web_server/server.bend#check_hstate_cl@271
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=1
+tool-error0 0 0 320
+## User
+
+Define `check_hstate_cl`.
+
+## Context
+
+```bend
+def check_hstate_cl_step(has_body: Bool, path: String) -> String
+def U32.is_gt(a: U32, b: U32) -> Bool
+def route_path(+path: String) -> String
+```
+
+## Type
+
+type
+```bend
+def check_hstate_cl(has_cl: Bool, cl_val: U32, path: String) -> String:
+```
+
+## Term
+
+```bend
+1 0 0 82
+check_hstate_cl_step(U32.is_gt(cl_val, 0), path, "GET / HTTP/2/1.0")
+```
+
+## bend
+EP1 599
+125 10 2
+n=22
+lang=haskell
+unit=hackage:brick/src/Brick/Util.hs#bg@57
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=0
+tool-error0 0 0 401
+## User
+
+Create an attribute from the specified background color (the
+foreground color is the "default").
+
+This attempt fails. Fix it.
+
+## Type
+
+type
+```haskell
+bg :: Color -> Attr
+```
+
+## Attempt
+
+```haskell
+bg = ( `withBackColor`)
+```
+
+## ghc
+
+```
+Unit.hs:58:23: error: [GHC-58481] parse error on input ‘)’
+   |
+58 | bg = ( `withBackColor`)
+   |                       ^
+```
+
+## Term
+
+```haskell
+1 0 0 35
+bg = (`withBackColor`)
+```
+
+## ghc
+EP1 600
+125 10 2
+n=23
+lang=haskell
+unit=hackage:brick/src/Brick/Util.hs#bg@57
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=1
+tool-error0 0 0 401
+## User
+
+Create an attribute from the specified background color (the
+foreground color is the "default").
+
+This attempt fails. Fix it.
+
+## Type
+
+type
+```haskell
+bg :: Color -> Attr
+```
+
+## Attempt
+
+```haskell
+bg = ( `withBackColor`)
+```
+
+## ghc
+
+```
+Unit.hs:58:23: error: [GHC-58481] parse error on input ‘)’
+   |
+58 | bg = ( `withBackColor`)
+   |                       ^
+```
+
+## Term
+
+```haskell
+1 0 0 36
+bg = ( `withBackColor`)
+```
+
+## ghc
+EP1 1511
+135 10 2
+n=17
+lang=haskell
+unit=hackage:gridbox/test/GridBox/BoxSpec.hs#spec@10
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=1
+tool-error0 0 0 1166
+## User
+
+Define `spec`.
+
+This attempt fails. Fix it.
+
+## Context
+
+```haskell
+describe :: HasCallStack => String -> SpecWith a -> SpecWith a
+it :: (HasCallStack, Example a) => String -> a -> SpecWith (Arg a)
+box :: Box
+makeBox
+  :: Double -> Double -> Int -> Int -> (Double, Double) -> Box
+```
+
+## Type
+
+type
+```haskell
+spec :: Spec
+```
+
+## Attempt
+
+```haskell
+spec = do
+  describe "makeBox" $ do
+    it "should create box" 
+      created `shouldBe` box
+        where
+          created = makeBox 0.5 0.5 0 0 (1.0, 1.0)
+```
+
+## ghc
+
+```
+Unit.hs:13:5: error: [GHC-83865]
+    • Couldn't match type: IO ()
+                     with: hspec-core-2.11.17:Test.Hspec.Core.Spec.Monad.SpecM () ()
+      Expected: SpecWith ()
+        Actual: Expectation
+    • In a stmt of a 'do' block:
+        it "should create box" created `shouldBe` box
+      In the second argument of ‘($)’, namely
+        ‘do it "should create box" created `shouldBe` box’
+      In a stmt of a 'do' block:
+        describe "makeBox"
+          $ do it "should create box" created `shouldBe` box
+   |
+13 |     it "should create box" 
+   |     ^^^^^^^^^^^^^^^^^^^^^^^...
+```
+
+## Term
+
+```haskell
+1 0 0 170
+spec = do
+  describe "makeBox" $ do
+    it "should create box" 
+      created `shouldBe` box
+        where
+          created = makeBox 0.5 0.5 0 0 (1.0, 1.0)
+```
+
+## ghc
+EP1 1563
+135 10 2
+n=16
+lang=haskell
+unit=hackage:gridbox/test/GridBox/BoxSpec.hs#spec@10
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=0
+tool-error0 0 0 1166
+## User
+
+Define `spec`.
+
+This attempt fails. Fix it.
+
+## Context
+
+```haskell
+describe :: HasCallStack => String -> SpecWith a -> SpecWith a
+it :: (HasCallStack, Example a) => String -> a -> SpecWith (Arg a)
+box :: Box
+makeBox
+  :: Double -> Double -> Int -> Int -> (Double, Double) -> Box
+```
+
+## Type
+
+type
+```haskell
+spec :: Spec
+```
+
+## Attempt
+
+```haskell
+spec = do
+  describe "makeBox" $ do
+    it "should create box" 
+      created `shouldBe` box
+        where
+          created = makeBox 0.5 0.5 0 0 (1.0, 1.0)
+```
+
+## ghc
+
+```
+Unit.hs:13:5: error: [GHC-83865]
+    • Couldn't match type: IO ()
+                     with: hspec-core-2.11.17:Test.Hspec.Core.Spec.Monad.SpecM () ()
+      Expected: SpecWith ()
+        Actual: Expectation
+    • In a stmt of a 'do' block:
+        it "should create box" created `shouldBe` box
+      In the second argument of ‘($)’, namely
+        ‘do it "should create box" created `shouldBe` box’
+      In a stmt of a 'do' block:
+        describe "makeBox"
+          $ do it "should create box" created `shouldBe` box
+   |
+13 |     it "should create box" 
+   |     ^^^^^^^^^^^^^^^^^^^^^^^...
+```
+
+## Term
+
+```haskell
+1 0 0 222
+spec = do
+  describe "makeBox" $ do
+    it "should create box" $ do
+      created <- makeBox 0.5 0.5 0 0 (1.0, 1.0)
+      created `shouldBe` box
+        where
+          created = makeBox 0.5 0.5 0 0 (1.0, 1.0)
+```
+
+## ghc
+EP1 770
+142 3 4
+n=25
+lang=lean
+unit=repo:mathlib4/Mathlib/Algebra/Ring/AddAut.lean#mulLeft@32
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=1
+eos0 0 0 352
+## User
+
+Left multiplication by a unit of a semiring as an additive automorphism.
+
+## Context
+
+```lean
+DistribMulAction.toAddAut.{u_1, u_3} (G : Type u_1) (A : Type u_3) [Group G] [AddMonoid A] [DistribMulAction G A] :
+  G →* Multiplicative (AddAut A)
+```
+
+## Type
+
+type
+```lean
+def mulLeft : Rˣ →* Multiplicative (AddAut R)
+```
+
+## Term
+
+```lean
+1 0 0 45
+⟨MulAut.toAddAut, toAddAut⟩
+```
+
+## lean
+2 1 4 179
+lean
+```
+Unit.lean:33:3: error(lean.unknownIdentifier): Unknown constant `MulAut.toAddAut`
+Unit.lean:33:20: error(lean.unknownIdentifier): Unknown identifier `toAddAut`
+[exit 1]
+```
+
+1 0 0 0
+EP1 712
+159 10 2
+n=34
+lang=haskell
+unit=hackage:jsonlogic/src/JsonLogic/Operation/String.hs#stringOperations@16
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=0
+tool-error0 0 0 464
+## User
+
+Define `stringOperations`.
+
+This attempt fails. Fix it.
+
+## Context
+
+```haskell
+cat :: Monad m => Operation m
+substr :: Monad m => Operation m
+```
+
+## Type
+
+type
+```haskell
+stringOperations :: Monad m => Operations m
+```
+
+## Attempt
+
+```haskell
+stringOperations cat [=, substr]
+```
+
+## ghc
+
+```
+Unit.hs:17:23: error: [GHC-58481] parse error on input ‘=’
+   |
+17 | stringOperations cat [=, substr]
+   |                       ^
+```
+
+## Term
+
+```haskell
+1 0 0 51
+stringOperations = cat `substr` substr
+```
+
+## ghc
+EP1 640
+134 6 3
+n=20
+lang=bend
+unit=own:bend2/tests/parse/fork_arity_cap_001.bend#w@6
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=0
+solved0 0 0 140
+## User
+
+Prove `w`.
+
+## Context
+
+```bend
+type U32 is Data
+```
+
+## Type
+
+proposition
+```bend
+law w:
+  for n: U32
+  U32
+```
+
+## Term
+
+```bend
+1 0 0 242
+def w(n):
+  match n:
+    case 1:
+      (0 : U32)
+    case 2:
+      ((((327 + 1 : U32) + 1 : U32) + 1 : U32) + 1 : U32)
+    case 3:
+      (((((327 + 1 : U32) + 1 : U32) + 1 : U32) + 1 : U32) + 1 : U32)
+    case _:
+      (0 : U32)
+```
+
+## bend
+2 0 4 77
+bend
+```
+ALL PROOFS CHECK
+Use --verdict for mathematical validity.
+[exit 0]
+```
+
+EP1 713
+159 10 2
+n=35
+lang=haskell
+unit=hackage:jsonlogic/src/JsonLogic/Operation/String.hs#stringOperations@16
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=1
+tool-error0 0 0 464
+## User
+
+Define `stringOperations`.
+
+This attempt fails. Fix it.
+
+## Context
+
+```haskell
+cat :: Monad m => Operation m
+substr :: Monad m => Operation m
+```
+
+## Type
+
+type
+```haskell
+stringOperations :: Monad m => Operations m
+```
+
+## Attempt
+
+```haskell
+stringOperations cat [=, substr]
+```
+
+## ghc
+
+```
+Unit.hs:17:23: error: [GHC-58481] parse error on input ‘=’
+   |
+17 | stringOperations cat [=, substr]
+   |                       ^
+```
+
+## Term
+
+```haskell
+1 0 0 52
+stringOperations = cat [substr, substr]
+```
+
+## ghc
+EP1 746
+145 10 2
+n=37
+lang=haskell
+unit=curated:chiro_tcchs/src/SemanticChecker.hs#modifyLevel@72
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=1
+tool-error0 0 0 471
+## User
+
+Define `modifyLevel`.
+
+## Context
+
+```haskell
+CSS
+  :: SStack
+     -> SymbolTable -> [CompileLog] -> Integer -> CollectSymbolState
+stack :: CollectSymbolState -> SStack
+popCurrentLevel :: Integer -> SStack -> SStack
+stable :: CollectSymbolState -> SymbolTable
+clog :: CollectSymbolState -> [CompileLog]
+lev :: CollectSymbolState -> Integer
+```
+
+## Type
+
+type
+```haskell
+modifyLevel :: CollectSymbolState -> Integer -> CollectSymbolState
+```
+
+## Term
+
+```haskell
+1 0 0 92
+modifyLevel st i =
+  st{stack = SStack (stack st), popCurrentLevel = stable st}
+```
+
+## ghc
+EP1 1447
+142 3 8
+n=24
+lang=lean
+unit=repo:mathlib4/Mathlib/Algebra/Ring/AddAut.lean#mulLeft@32
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=0
+eos0 0 0 352
+## User
+
+Left multiplication by a unit of a semiring as an additive automorphism.
+
+## Context
+
+```lean
+DistribMulAction.toAddAut.{u_1, u_3} (G : Type u_1) (A : Type u_3) [Group G] [AddMonoid A] [DistribMulAction G A] :
+  G →* Multiplicative (AddAut A)
+```
+
+## Type
+
+type
+```lean
+def mulLeft : Rˣ →* Multiplicative (AddAut R)
+```
+
+## Term
+
+```lean
+1 0 0 75
+⟨MulAut.lift.{u_1, u_3} (AddAut R) (AddAut R) (AddAut R)⟩
+```
+
+## lean
+2 1 4 227
+lean
+```
+Unit.lean:33:2: error: Insufficient number of fields for `⟨...⟩` constructor: Constructor `MonoidHom.mk` has 2 explicit field, but only 1 was provided
+Unit.lean:33:21: error: unknown universe level `u_3`
+[exit 1]
+```
+
+1 0 0 92
+## Term
+
+```lean
+⟨MulAut.lift.{u_1, u_3} (AddAut R) (AddAut R) (AddAut R)⟩
+```
+
+## lean
+2 1 4 227
+lean
+```
+Unit.lean:33:2: error: Insufficient number of fields for `⟨...⟩` constructor: Constructor `MonoidHom.mk` has 2 explicit field, but only 1 was provided
+Unit.lean:33:21: error: unknown universe level `u_3`
+[exit 1]
+```
+
+1 0 0 8
+## lean
+2 1 4 227
+lean
+```
+Unit.lean:33:2: error: Insufficient number of fields for `⟨...⟩` constructor: Constructor `MonoidHom.mk` has 2 explicit field, but only 1 was provided
+Unit.lean:33:21: error: unknown universe level `u_3`
+[exit 1]
+```
+
+1 0 0 0
+EP1 1893
+145 6 3
+n=19
+lang=nix
+unit=repo:nixpkgs/pkgs/development/tools/vendir/default.nix#file@1
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=1
+solved0 0 0 1029
+## User
+
+Write this Nix expression.
+
+This attempt fails. Fix it.
+
+## Attempt
+
+```nix
+{ lib, buildGoModule, fetchFromGitHub }:
+
+buildGoModule rec {
+  pname = "vendir";
+  version = "0.26.0";
+
+  src = fetchFromGitHub {
+    owner = "vmware-tanzu";
+    repo = "carvel-vendir";
+    rev = "v${version}";
+    sha256 = "sha256-a/fftMJuN6YnjPP0Gk6bMckoCouwgtxhf23OuyLR5Tk=";
+  };
+
+  vendorSha256 = null;
+
+  subPackages = [ "cmd/vendir" ];
+
+  meta = with lib; {
+    description = "CLI tool to vendor portions of git repos, github releases, helm charts, docker image contents, etc. declaratively";
+    homepage = "https://carvel.dev/vendir/";
+    license = licenses.asl20;
+    maintainers = repo maintainers; [ russell ];
+  };
+}
+```
+
+## nix
+
+```
+error: syntax error, unexpected '[', expecting 'inherit'
+       at Unit.nix:22:37:
+           21|     license = licenses.asl20;
+           22|     maintainers = repo maintainers; [ russell ];
+             |                                     ^
+           23|   };
+[exit 1]
+```
+
+## Term
+
+```nix
+1 0 0 644
+{ lib, buildGoModule, fetchFromGitHub }:
+
+buildGoModule rec {
+  pname = "vendir";
+  version = "0.26.0";
+
+  src = fetchFromGitHub {
+    owner = "vmware-tanzu";
+    repo = "carvel-vendir";
+    rev = "v${version}";
+    sha256 = "sha256-a/fftMJuN6YnjPP0Gk6bMckoCouwgtxhf23OuyLR5Tk=";
+  };
+
+  vendorSha256 = null;
+
+  subPackages = [ "cmd/vendir" ];
+
+  meta = with lib; {
+    description = "CLI tool to vendor portions of git repos, github releases, helm charts, docker image contents, etc. declaratively";
+    homepage = "https://carvel.dev/vendir/";
+    license = licenses.asl20;
+    maintainers = with maintainers; [ russell ];
+  };
+}
+```
+
+## nix
+2 0 3 28
+nix
+```
+<LAMBDA>
+[exit 0]
+```
+
+EP1 1893
+145 6 3
+n=18
+lang=nix
+unit=repo:nixpkgs/pkgs/development/tools/vendir/default.nix#file@1
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=0
+solved0 0 0 1029
+## User
+
+Write this Nix expression.
+
+This attempt fails. Fix it.
+
+## Attempt
+
+```nix
+{ lib, buildGoModule, fetchFromGitHub }:
+
+buildGoModule rec {
+  pname = "vendir";
+  version = "0.26.0";
+
+  src = fetchFromGitHub {
+    owner = "vmware-tanzu";
+    repo = "carvel-vendir";
+    rev = "v${version}";
+    sha256 = "sha256-a/fftMJuN6YnjPP0Gk6bMckoCouwgtxhf23OuyLR5Tk=";
+  };
+
+  vendorSha256 = null;
+
+  subPackages = [ "cmd/vendir" ];
+
+  meta = with lib; {
+    description = "CLI tool to vendor portions of git repos, github releases, helm charts, docker image contents, etc. declaratively";
+    homepage = "https://carvel.dev/vendir/";
+    license = licenses.asl20;
+    maintainers = repo maintainers; [ russell ];
+  };
+}
+```
+
+## nix
+
+```
+error: syntax error, unexpected '[', expecting 'inherit'
+       at Unit.nix:22:37:
+           21|     license = licenses.asl20;
+           22|     maintainers = repo maintainers; [ russell ];
+             |                                     ^
+           23|   };
+[exit 1]
+```
+
+## Term
+
+```nix
+1 0 0 644
+{ lib, buildGoModule, fetchFromGitHub }:
+
+buildGoModule rec {
+  pname = "vendir";
+  version = "0.26.0";
+
+  src = fetchFromGitHub {
+    owner = "vmware-tanzu";
+    repo = "carvel-vendir";
+    rev = "v${version}";
+    sha256 = "sha256-a/fftMJuN6YnjPP0Gk6bMckoCouwgtxhf23OuyLR5Tk=";
+  };
+
+  vendorSha256 = null;
+
+  subPackages = [ "cmd/vendir" ];
+
+  meta = with lib; {
+    description = "CLI tool to vendor portions of git repos, github releases, helm charts, docker image contents, etc. declaratively";
+    homepage = "https://carvel.dev/vendir/";
+    license = licenses.asl20;
+    maintainers = with maintainers; [ russell ];
+  };
+}
+```
+
+## nix
+2 0 3 28
+nix
+```
+<LAMBDA>
+[exit 0]
+```
+
+EP1 949
+145 10 2
+n=36
+lang=haskell
+unit=curated:chiro_tcchs/src/SemanticChecker.hs#modifyLevel@72
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=0
+tool-error0 0 0 471
+## User
+
+Define `modifyLevel`.
+
+## Context
+
+```haskell
+CSS
+  :: SStack
+     -> SymbolTable -> [CompileLog] -> Integer -> CollectSymbolState
+stack :: CollectSymbolState -> SStack
+popCurrentLevel :: Integer -> SStack -> SStack
+stable :: CollectSymbolState -> SymbolTable
+clog :: CollectSymbolState -> [CompileLog]
+lev :: CollectSymbolState -> Integer
+```
+
+## Type
+
+type
+```haskell
+modifyLevel :: CollectSymbolState -> Integer -> CollectSymbolState
+```
+
+## Term
+
+```haskell
+1 0 0 294
+modifyLevel stack oldLevel =
+  let newStack = stack ++ popCurrentLevel oldStack
+      newSStack = stack ++ popCurrentSStack oldStack
+      newLevel = newStack { currentLevel = newLevel }
+   in case stack of
+        [] -> newSStack
+        _ -> newSStack { currentLevel = newLevel }
+```
+
+## ghc
+EP1 2035
+150 6 3
+n=7
+lang=nix
+unit=repo:nixpkgs/pkgs/applications/video/losslesscut-bin/dmg.nix#file@1
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=1
+solved0 0 0 1088
+## User
+
+Write this Nix expression.
+
+This attempt fails. Fix it.
+
+## Attempt
+
+```nix
+{ stdenvNoCC, lib, fetchurl, undmg, version , sha256 }:
+
+let
+  pname = "losslesscut";
+  nameRepo = "lossless-cut";
+  nameCamel = "LosslessCut";
+  nameSource = "${nameCamel}-mac.dmg";
+  nameApp = nameCamel + ".app";
+  owner = "mifi";
+  src = fetchurl {
+    url = "https://github.com/${owner}/${nameRepo}/releases/download/v${version}/${nameSource}";
+    name = nameSource;
+    inherit sha256;
+  };
+in stdenvNoCC.mkDerivation {
+  inherit pname version src;
+
+  nativeBuildInputs = [ undmg ];
+
+  unpackPhase = ''
+    undmg ${src}
+  '';
+  sourceRoot = nameApp;
+
+  installPhase  ''
+    mkdir -p $out/Applications/${nameApp}
+    cp -R . $out/Applications/${nameApp}
+  '';
+
+  meta.platforms = lib.platforms.darwin;
+}
+```
+
+## nix
+
+```
+error: syntax error, unexpected start of an indented string, expecting '.' or '='
+       at Unit.nix:25:17:
+           24|
+           25|   installPhase  ''
+             |                 ^
+           26|     mkdir -p $out/Applications/${nameApp}
+[exit 1]
+```
+
+## Term
+
+```nix
+1 0 0 722
+{ stdenvNoCC, lib, fetchurl, undmg, version , sha256 }:
+
+let
+  pname = "losslesscut";
+  nameRepo = "lossless-cut";
+  nameCamel = "LosslessCut";
+  nameSource = "${nameCamel}-mac.dmg";
+  nameApp = nameCamel + ".app";
+  owner = "mifi";
+  src = fetchurl {
+    url = "https://github.com/${owner}/${nameRepo}/releases/download/v${version}/${nameSource}";
+    name = nameSource;
+    inherit sha256;
+  };
+in stdenvNoCC.mkDerivation {
+  inherit pname version src;
+
+  nativeBuildInputs = [ undmg ];
+
+  unpackPhase = ''
+    undmg ${src}
+  '';
+  sourceRoot = nameApp;
+
+  installPhase = ''
+    mkdir -p $out/Applications/${nameApp}
+    cp -R . $out/Applications/${nameApp}
+  '';
+
+  meta.platforms = lib.platforms.darwin;
+}
+```
+
+## nix
+2 0 3 28
+nix
+```
+<LAMBDA>
+[exit 0]
+```
+
+EP1 2035
+150 6 3
+n=6
+lang=nix
+unit=repo:nixpkgs/pkgs/applications/video/losslesscut-bin/dmg.nix#file@1
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=0
+solved0 0 0 1088
+## User
+
+Write this Nix expression.
+
+This attempt fails. Fix it.
+
+## Attempt
+
+```nix
+{ stdenvNoCC, lib, fetchurl, undmg, version , sha256 }:
+
+let
+  pname = "losslesscut";
+  nameRepo = "lossless-cut";
+  nameCamel = "LosslessCut";
+  nameSource = "${nameCamel}-mac.dmg";
+  nameApp = nameCamel + ".app";
+  owner = "mifi";
+  src = fetchurl {
+    url = "https://github.com/${owner}/${nameRepo}/releases/download/v${version}/${nameSource}";
+    name = nameSource;
+    inherit sha256;
+  };
+in stdenvNoCC.mkDerivation {
+  inherit pname version src;
+
+  nativeBuildInputs = [ undmg ];
+
+  unpackPhase = ''
+    undmg ${src}
+  '';
+  sourceRoot = nameApp;
+
+  installPhase  ''
+    mkdir -p $out/Applications/${nameApp}
+    cp -R . $out/Applications/${nameApp}
+  '';
+
+  meta.platforms = lib.platforms.darwin;
+}
+```
+
+## nix
+
+```
+error: syntax error, unexpected start of an indented string, expecting '.' or '='
+       at Unit.nix:25:17:
+           24|
+           25|   installPhase  ''
+             |                 ^
+           26|     mkdir -p $out/Applications/${nameApp}
+[exit 1]
+```
+
+## Term
+
+```nix
+1 0 0 722
+{ stdenvNoCC, lib, fetchurl, undmg, version , sha256 }:
+
+let
+  pname = "losslesscut";
+  nameRepo = "lossless-cut";
+  nameCamel = "LosslessCut";
+  nameSource = "${nameCamel}-mac.dmg";
+  nameApp = nameCamel + ".app";
+  owner = "mifi";
+  src = fetchurl {
+    url = "https://github.com/${owner}/${nameRepo}/releases/download/v${version}/${nameSource}";
+    name = nameSource;
+    inherit sha256;
+  };
+in stdenvNoCC.mkDerivation {
+  inherit pname version src;
+
+  nativeBuildInputs = [ undmg ];
+
+  unpackPhase = ''
+    undmg ${src}
+  '';
+  sourceRoot = nameApp;
+
+  installPhase = ''
+    mkdir -p $out/Applications/${nameApp}
+    cp -R . $out/Applications/${nameApp}
+  '';
+
+  meta.platforms = lib.platforms.darwin;
+}
+```
+
+## nix
+2 0 3 28
+nix
+```
+<LAMBDA>
+[exit 0]
+```
+
+EP1 935
+149 10 2
+n=38
+lang=haskell
+unit=hackage:poly-control/src/Control/Monad/Shuffle.hs#deepBind@25
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=0
+tool-error0 0 0 687
+## User
+
+Define `deepBind`.
+
+This attempt fails. Fix it.
+
+## Context
+
+```haskell
+fmap :: Functor f => (a -> b) -> f a -> f b
+join :: Monad m => m (m a) -> m a
+shuffle :: Shuffle m1 m2 => m1 (m2 a) -> m2 (m1 a)
+return :: Monad m => a -> m a
+```
+
+## Type
+
+type
+```haskell
+deepBind :: (Monad m, Monad t, Functor t, Shuffle m t) => t (m a) -> (a -> t (m b)) -> t (m b)
+```
+
+## Attempt
+
+```haskell
+deepBind tma f = tma >>= 
+    where mf ma = fmap join . shuffle $ do
+              a <- ma
+              return $ f a
+```
+
+## ghc
+
+```
+Unit.hs:27:5: error: [GHC-58481] parse error on input ‘where’
+   |
+27 |     where mf ma = fmap join . shuffle $ do
+   |     ^^^^^
+```
+
+## Term
+
+```haskell
+1 0 0 61
+deepBind tma f = tma >>= join . fmap shuffle . f
+```
+
+## ghc
+EP1 1006
+149 10 2
+n=39
+lang=haskell
+unit=hackage:poly-control/src/Control/Monad/Shuffle.hs#deepBind@25
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=1
+tool-error0 0 0 687
+## User
+
+Define `deepBind`.
+
+This attempt fails. Fix it.
+
+## Context
+
+```haskell
+fmap :: Functor f => (a -> b) -> f a -> f b
+join :: Monad m => m (m a) -> m a
+shuffle :: Shuffle m1 m2 => m1 (m2 a) -> m2 (m1 a)
+return :: Monad m => a -> m a
+```
+
+## Type
+
+type
+```haskell
+deepBind :: (Monad m, Monad t, Functor t, Shuffle m t) => t (m a) -> (a -> t (m b)) -> t (m b)
+```
+
+## Attempt
+
+```haskell
+deepBind tma f = tma >>= 
+    where mf ma = fmap join . shuffle $ do
+              a <- ma
+              return $ f a
+```
+
+## ghc
+
+```
+Unit.hs:27:5: error: [GHC-58481] parse error on input ‘where’
+   |
+27 |     where mf ma = fmap join . shuffle $ do
+   |     ^^^^^
+```
+
+## Term
+
+```haskell
+1 0 0 131
+deepBind tma f = tma >>= f
+    where mf ma = fmap join . shuffle $ do
+              a <- ma
+              return $ f a
+```
+
+## ghc
+EP1 2012
+213 10 2
+n=41
+lang=haskell
+unit=hackage:amazonka-cloudwatch-events/gen/Amazonka/CloudWatchEvents/Types/RedshiftDataParameters.hs#newRedshiftDataParameters@77
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=1
+tool-error0 0 0 1650
+## User
+
+Create a value of 'RedshiftDataParameters' with all optional fields omitted.
+
+Use <https://hackage.haskell.org/package/generic-lens generic-lens> or <https://hackage.haskell.org/package/optics optics> to modify other optional fields.
+
+The following record fields are available, with the corresponding lenses provided
+for backwards compatibility:
+
+'dbUser', 'redshiftDataParameters_dbUser' - The database user name. Required when authenticating using temporary
+credentials.
+
+'secretManagerArn', 'redshiftDataParameters_secretManagerArn' - The name or ARN of the secret that enables access to the database.
+Required when authenticating using Amazon Web Services Secrets Manager.
+
+'statementName', 'redshiftDataParameters_statementName' - The name of the SQL statement. You can name the SQL statement when you
+create it to identify the query.
+
+'withEvent', 'redshiftDataParameters_withEvent' - Indicates whether to send an event back to EventBridge after the SQL
+statement runs.
+
+'database', 'redshiftDataParameters_database' - The name of the database. Required when authenticating using temporary
+credentials.
+
+'sql', 'redshiftDataParameters_sql' - The SQL statement text to run.
+
+## Context
+
+```haskell
+dbUser :: RedshiftDataParameters -> Maybe Data.Text.Internal.Text
+Prelude.Nothing :: Maybe a
+withEvent :: RedshiftDataParameters -> Maybe Bool
+database :: RedshiftDataParameters -> Data.Text.Internal.Text
+sql :: RedshiftDataParameters -> Data.Text.Internal.Text
+```
+
+## Type
+
+type
+```haskell
+newRedshiftDataParameters ::
+  -- | 'database'
+  Prelude.Text ->
+  -- | 'sql'
+  Prelude.Text ->
+  RedshiftDataParameters
+```
+
+## Term
+
+```haskell
+1 0 0 109
+newRedshiftDataParameters database sql =
+  RedshiftDataParameters {dbUser = database, sql = sql}
+```
+
+## ghc
+EP1 1603
+134 5 10
+n=21
+lang=bend
+unit=own:bend2/tests/parse/fork_arity_cap_001.bend#w@6
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=1
+calls0 0 0 140
+## User
+
+Prove `w`.
+
+## Context
+
+```bend
+type U32 is Data
+```
+
+## Type
+
+proposition
+```bend
+law w:
+  for n: U32
+  U32
+```
+
+## Term
+
+```bend
+1 0 0 52
+def w(n):
+  (n, a) = n
+  (a + 1 : U32)
+```
+
+## bend
+2 1 4 236
+bend
+```
+SOME PROOFS FAIL
+Error:
+- expected : a constructor of U32 (missing, or already matched)
+- observed : \{Tuple: (n => a => U32.add(a, 1))}
+Location: w
+10 | def w(n):
+11>|   (n, a) = n
+   |   ^^^^^^
+12 |   (a + 1 : U32)
+[exit 1]
+```
+
+1 0 0 69
+## Term
+
+```bend
+def w(n):
+  (n, a) = n
+  (a + 1 : U32)
+```
+
+## bend
+2 1 4 236
+bend
+```
+SOME PROOFS FAIL
+Error:
+- expected : a constructor of U32 (missing, or already matched)
+- observed : \{Tuple: (n => a => U32.add(a, 1))}
+Location: w
+10 | def w(n):
+11>|   (n, a) = n
+   |   ^^^^^^
+12 |   (a + 1 : U32)
+[exit 1]
+```
+
+1 0 0 68
+## Type
+
+proposition
+```bend
+law w:
+  for n: U32
+  U32
+```
+
+## bend
+2 1 4 170
+bend
+```
+SOME PROOFS FAIL
+Error:
+- expected : a fresh name (duplicate declaration: w)
+- observed : 'w'
+Location:
+ 9 | 
+10>| law w:
+   |     ^
+11 |   for n: U32
+[exit 1]
+```
+
+1 0 0 69
+## Term
+
+```bend
+def w(n):
+  (n, a) = n
+  (a + 1 : U32)
+```
+
+## bend
+2 1 4 236
+bend
+```
+SOME PROOFS FAIL
+Error:
+- expected : a constructor of U32 (missing, or already matched)
+- observed : \{Tuple: (n => a => U32.add(a, 1))}
+Location: w
+10 | def w(n):
+11>|   (n, a) = n
+   |   ^^^^^^
+12 |   (a + 1 : U32)
+[exit 1]
+```
+
+1 0 0 68
+## Type
+
+proposition
+```bend
+law w:
+  for n: U32
+  U32
+```
+
+## bend
+EP1 1946
+141 6 2
+n=4
+lang=haskell
+unit=hackage:IntFormats/src/Text/IntFormats.hs#parseBase@47
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=0
+budget0 0 0 937
+## User
+
+Define `parseBase`.
+
+This attempt fails. Fix it.
+
+## Context
+
+```haskell
+char :: Stream s m Char => Char -> ParsecT s u m Char
+return :: Monad m => a -> m a
+```
+
+## Type
+
+type
+```haskell
+parseBase :: (Integral a, Stream s m Char) => ParsecT s u m a
+```
+
+## Attempt
+
+```haskell
+parseBase = (char 'x' >> parseHex) <|> (char 'o' >> parseOct) <|> (char 'b' >> parseBin) <|> (char 'd' >> parseDec) <|>
+            (char 'X' >> parseHex) <|> (char 'O' >> parseOct) <|> (char 'B' >> parseBin) <|> (char 'D' >> parseDec) <|> <|> parseDec return 0
+```
+
+## ghc
+
+```
+Unit.hs:49:121: error: [GHC-58481] parse error on input ‘<|>’
+   |
+49 |             (char 'X' >> parseHex) <|> (char 'O' >> parseOct) <|> (char 'B' >> parseBin) <|> (char 'D' >> parseDec) <|> <|> parseDec return 0
+   |                                                                                                                         ^^^
+```
+
+## Term
+
+```haskell
+1 0 0 834
+parseBase = (char 'x' >> parseHex) <|> (char 'o' >> parseOct) <|> (char 'b' >> parseBin) <|> (char 'd' >> parseDec) <|>
+            (char 'X' >> parseHex) <|> (char 'O' >> parseOct) <|> (char 'B' >> parseBin) <|> (char 'D' >> parseDec) <|>
+            (char 'X' >> parseHex) <|> (char 'O' >> parseOct) <|> (char 'B' >> parseBin) <|> (char 'D' >> parseDec) <|>
+            (char 'X' >> parseHex) <|> (char 'O' >> parseOct) <|> (char 'B' >> parseBin) <|> (char 'D' >> parseDec) <|>
+            (char 'X' >> parseHex) <|> (char 'O' >> parseOct) <|> (char 'B' >> parseBin) <|> (char 'D' >> parseDec) <|>
+            (char 'X' >> parseHex) <|> (char 'O' >> parseOct) <|> (char 'B' >> parseBin) <|> (char 'D' >> parseDec) <|>
+            (char 'X' >> parseHex) <|> (char 'O' >> parseOct) <|> (char 'B' >> parseBin) <|> (char 'D' >> parseDecEP1 1525
+170 6 2
+n=15
+lang=lean
+unit=repo:mathlib4/Mathlib/Algebra/Order/ToIntervalMod.lean#toIocMod_eq_sub_fract_mul@1380
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=1
+budget0 0 0 661
+## User
+
+Prove `toIocMod_eq_sub_fract_mul`.
+
+## Context
+
+```lean
+toIocMod.{u_1} {α : Type u_1} [AddCommGroup α] [LinearOrder α] [IsOrderedAddMonoid α] [hα : Archimedean α] {p : α}
+  (hp : 0 < p) (a b : α) : α
+toIocDiv_eq_neg_floor.{u_1} {α : Type u_1} [Field α] [LinearOrder α] [IsStrictOrderedRing α] [FloorRing α] {p : α}
+  (hp : 0 < p) (a b : α) : toIocDiv hp a b = -⌊(a + p - b) / p⌋
+Int.fract.{u_1} {α : Type u_1} [Ring α] [LinearOrder α] [FloorRing α] (a : α) : α
+```
+
+## Type
+
+proposition
+```lean
+theorem toIocMod_eq_sub_fract_mul (a b : α) :
+    toIocMod hp a b = a + p - Int.fract ((a + p - b) / p) * p
+```
+
+## Term
+
+```lean
+1 0 0 660
+by
+  rw [toIocMod, toIocDiv_eq_neg_floor, toIocDiv_eq_neg_floor, Int.fract, toIocDiv_eq_neg_floor,
+    toIocDiv_eq_neg_floor, toIocDiv_eq_neg_floor, toIocDiv_eq_neg_floor, toIocDiv_eq_neg_floor,
+    toIocDiv_eq_neg_floor, toIocDiv_eq_neg_floor, toIocDiv_eq_neg_floor, toIocDiv_eq_neg_floor,
+    toIocDiv_eq_neg_floor, toIocDiv_eq_neg_floor, toIocDiv_eq_neg_floor, toIocDiv_eq_neg_floor,
+    toIocDiv_eq_neg_floor, toIocDiv_eq_neg_floor, toIocDiv_eq_neg_floor, toIocDiv_eq_neg_floor,
+    toIocDiv_eq_neg_floor, toIocDiv_eq_neg_floor, toIocDiv_eq_neg_floor, toIocDiv_eq_neg_floor,
+    toIocDiv_eq_neg_floor, toIocDiv_eq_neg_floor, toIocDiv_eq_neg_floor, toIocDivEP1 1845
+161 3 6
+n=26
+lang=lean
+unit=repo:mathlib4/Mathlib/Algebra/Order/SuccPred.lean#monotone_of_le_add_one@330
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=0
+eos0 0 0 556
+## User
+
+Prove `monotone_of_le_add_one`.
+
+## Context
+
+```lean
+Order.succ_eq_add_one.{u_1} {α : Type u_1} [Preorder α] [Add α] [One α] [SuccAddOrder α] (x : α) : Order.succ x = x + 1
+monotone_of_le_succ.{u_3, u_4} {α : Type u_3} {β : Type u_4} [PartialOrder α] [Preorder β] [SuccOrder α]
+  [IsSuccArchimedean α] {f : α → β} (hf : ∀ (a : α), ¬IsMax a → f a ≤ f (Order.succ a)) : Monotone f
+```
+
+## Type
+
+proposition
+```lean
+lemma monotone_of_le_add_one : (∀ a, ¬ IsMax a → f a ≤ f (a + 1)) → Monotone f
+```
+
+## Term
+
+```lean
+1 0 0 197
+by
+  intro ha
+  refine ⟨⟨fun a ↦ ?_, fun b hb ↦ ?_⟩, fun _ _ ↦ by simp⟩
+  · exact IsMax.comp ha (fun _ ↦ IsMax.le hb)
+  · exact IsMax.comp hb (fun _ ↦ IsMax.le ha)
+```
+
+## lean
+2 1 4 316
+lean
+```
+Unit.lean:332:9: error: Invalid `⟨...⟩` notation: The expected type `∀ ⦃a b : α⦄, a ≤ b → f a ≤ f b` is not an inductive type
+
+Note: This notation can only be used when the expected type is an inductive type with a single constructor
+Unit.lean:333:2: error: No goals to be solved
+[exit 1]
+```
+
+1 0 0 203
+## Term
+
+```lean
+by
+  refine ⟨⟨fun a ↦ ?_, fun b hb ↦ ?_⟩, fun _ _ ↦ by simp⟩
+  · exact IsMax.comp ha (fun _ ↦ IsMax.le hb)
+  · exact IsMax.comp hb (fun _ ↦ IsMax.le ha)
+```
+
+## lean
+2 1 4 335
+lean
+```
+Unit.lean:331:9: error: Invalid `⟨...⟩` notation: The expected type
+  (∀ (a : α), ¬IsMax a → f a ≤ f (a + 1)) → Monotone f
+is not an inductive type
+
+Note: This notation can only be used when the expected type is an inductive type with a single constructor
+Unit.lean:332:2: error: No goals to be solved
+[exit 1]
+```
+
+1 0 0 0
+EP1 1946
+141 6 2
+n=5
+lang=haskell
+unit=hackage:IntFormats/src/Text/IntFormats.hs#parseBase@47
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=1
+budget0 0 0 937
+## User
+
+Define `parseBase`.
+
+This attempt fails. Fix it.
+
+## Context
+
+```haskell
+char :: Stream s m Char => Char -> ParsecT s u m Char
+return :: Monad m => a -> m a
+```
+
+## Type
+
+type
+```haskell
+parseBase :: (Integral a, Stream s m Char) => ParsecT s u m a
+```
+
+## Attempt
+
+```haskell
+parseBase = (char 'x' >> parseHex) <|> (char 'o' >> parseOct) <|> (char 'b' >> parseBin) <|> (char 'd' >> parseDec) <|>
+            (char 'X' >> parseHex) <|> (char 'O' >> parseOct) <|> (char 'B' >> parseBin) <|> (char 'D' >> parseDec) <|> <|> parseDec return 0
+```
+
+## ghc
+
+```
+Unit.hs:49:121: error: [GHC-58481] parse error on input ‘<|>’
+   |
+49 |             (char 'X' >> parseHex) <|> (char 'O' >> parseOct) <|> (char 'B' >> parseBin) <|> (char 'D' >> parseDec) <|> <|> parseDec return 0
+   |                                                                                                                         ^^^
+```
+
+## Term
+
+```haskell
+1 0 0 834
+parseBase = (char 'x' >> parseHex) <|> (char 'o' >> parseOct) <|> (char 'b' >> parseBin) <|> (char 'd' >> parseDec) <|>
+            (char 'X' >> parseHex) <|> (char 'O' >> parseOct) <|> (char 'B' >> parseBin) <|> (char 'D' >> parseDec) <|>
+            (char 'X' >> parseHex) <|> (char 'O' >> parseOct) <|> (char 'B' >> parseBin) <|> (char 'D' >> parseDec) <|>
+            (char 'X' >> parseHex) <|> (char 'O' >> parseOct) <|> (char 'B' >> parseBin) <|> (char 'D' >> parseDec) <|>
+            (char 'X' >> parseHex) <|> (char 'O' >> parseOct) <|> (char 'B' >> parseBin) <|> (char 'D' >> parseDec) <|>
+            (char 'X' >> parseHex) <|> (char 'O' >> parseOct) <|> (char 'B' >> parseBin) <|> (char 'D' >> parseDec) <|>
+            (char 'X' >> parseHex) <|> (char 'O' >> parseOct) <|> (char 'B' >> parseBin) <|> (char 'D' >> parseDecEP1 2410
+162 5 10
+n=31
+lang=lean
+unit=repo:mathlib4/Mathlib/Topology/Ultrafilter.lean#continuous_iff_ultrafilter@56
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=1
+calls0 0 0 656
+## User
+
+Prove `continuous_iff_ultrafilter`.
+
+## Context
+
+```lean
+continuous_iff_continuousAt.{u_1, u_2} {X : Type u_1} {Y : Type u_2} [TopologicalSpace X] [TopologicalSpace Y]
+  {f : X → Y} : Continuous f ↔ ∀ (x : X), ContinuousAt f x
+continuousAt_iff_ultrafilter.{u, v} {X : Type u} {Y : Type v} {x : X} [TopologicalSpace X] [TopologicalSpace Y]
+  {f : X → Y} : ContinuousAt f x ↔ ∀ (g : Ultrafilter X), ↑g ≤ 𝓝 x → Tendsto f (↑g) (𝓝 (f x))
+```
+
+## Type
+
+proposition
+```lean
+theorem continuous_iff_ultrafilter :
+    Continuous f ↔ ∀ (x) (g : Ultrafilter X), ↑g ≤ 𝓝 x → Tendsto f g (𝓝 (f x))
+```
+
+## Term
+
+```lean
+1 0 0 92
+by
+  exact continuous_iff_continuousAt.comp (continuousAt_iff_ultrafilter _ _)
+```
+
+## lean
+2 1 4 311
+lean
+```
+Unit.lean:58:36: error(lean.invalidField): Invalid field `comp`: The environment does not contain `Iff.comp`, so it is not possible to project the field `comp` from an expression
+  continuous_iff_continuousAt
+of type
+  Continuous[?m.23, ?m.24] ?m.25 ↔ ∀ (x : ?m.21), ContinuousAt ?m.25 x
+[exit 1]
+```
+
+1 0 0 109
+## Term
+
+```lean
+by
+  exact continuous_iff_continuousAt.comp (continuousAt_iff_ultrafilter _ _)
+```
+
+## lean
+2 1 4 311
+lean
+```
+Unit.lean:58:36: error(lean.invalidField): Invalid field `comp`: The environment does not contain `Iff.comp`, so it is not possible to project the field `comp` from an expression
+  continuous_iff_continuousAt
+of type
+  Continuous[?m.23, ?m.24] ?m.25 ↔ ∀ (x : ?m.21), ContinuousAt ?m.25 x
+[exit 1]
+```
+
+1 0 0 8
+## lean
+2 1 4 311
+lean
+```
+Unit.lean:58:36: error(lean.invalidField): Invalid field `comp`: The environment does not contain `Iff.comp`, so it is not possible to project the field `comp` from an expression
+  continuous_iff_continuousAt
+of type
+  Continuous[?m.23, ?m.24] ?m.25 ↔ ∀ (x : ?m.21), ContinuousAt ?m.25 x
+[exit 1]
+```
+
+1 0 0 8
+## lean
+2 1 4 311
+lean
+```
+Unit.lean:58:36: error(lean.invalidField): Invalid field `comp`: The environment does not contain `Iff.comp`, so it is not possible to project the field `comp` from an expression
+  continuous_iff_continuousAt
+of type
+  Continuous[?m.23, ?m.24] ?m.25 ↔ ∀ (x : ?m.21), ContinuousAt ?m.25 x
+[exit 1]
+```
+
+1 0 0 8
+## lean
+EP1 2335
+141 6 2
+n=0
+lang=lean
+unit=repo:mathlib4/Mathlib/Data/DFinsupp/Module.lean#module@69
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=0
+budget0 0 0 1266
+## User
+
+Dependent functions with finite support inherit a module structure from such a structure on
+each coordinate.
+
+## Context
+
+```lean
+inferInstance.{u} {α : Sort u} [i : α] : α
+DistribMulAction.{u_12, u_13} (M : Type u_12) (A : Type u_13) [Monoid M] [AddMonoid A] : Type (max u_12 u_13)
+γ : Type w
+β : ι → Type v
+zero_smul.{u_2, u_7} (M₀ : Type u_2) {A : Type u_7} [Zero M₀] [Zero A] [SMulWithZero M₀ A] (m : A) : 0 • m = 0
+DFinsupp.smul_apply.{u, v, w} {ι : Type u} {γ : Type w} {β : ι → Type v} [(i : ι) → Zero (β i)]
+  [(i : ι) → SMulZeroClass γ (β i)] (b : γ) (v : Π₀ (i : ι), β i) (i : ι) : (b • v) i = b • v i
+DFinsupp.zero_apply.{u, v} {ι : Type u} {β : ι → Type v} [(i : ι) → Zero (β i)] (i : ι) : 0 i = 0
+add_smul.{u_1, u_2} {R : Type u_1} {M : Type u_2} [Semiring R] [AddCommMonoid M] [Module R M] (r s : R) (x : M) :
+  (r + s) • x = r • x + s • x
+DFinsupp.add_apply.{u, v} {ι : Type u} {β : ι → Type v} [(i : ι) → AddZeroClass (β i)] (g₁ g₂ : Π₀ (i : ι), β i)
+  (i : ι) : (g₁ + g₂) i = g₁ i + g₂ i
+```
+
+## Type
+
+type
+```lean
+instance module [Semiring γ] [∀ i, AddCommMonoid (β i)] [∀ i, Module γ (β i)] :
+    Module γ (Π₀ i, β i)
+```
+
+## Term
+
+```lean
+1 0 0 893
+by
+  refine .of_basis fun i => do
+    let i : ι := i.succ
+    let l : β i := i + 1
+    let m : β i := i.succ + 1
+    let d : β i := i.castSucc i
+    let _ : d ≠ 0 := by
+      intro h
+      have h1 : l = 0 := by
+        simpa [l] using congrArg Fin.succ h
+      rw [h1] at m
+      exact m
+    let _ : d ≠ 0 := by
+      intro h
+      have h1 : l = 1 := by
+        simpa [l] using congrArg Fin.succ h
+      rw [h1] at m
+      exact m
+    let _ : d ≠ 0 := by
+      intro h
+      have h1 : l = 0 := by
+        simpa [l] using congrArg Fin.succ h
+      rw [h1] at m
+      exact m
+    let _ : d ≠ 0 := by
+      intro h
+      have h1 : l = 1 := by
+        simpa [l] using congrArg Fin.succ h
+      rw [h1] at m
+      exact m
+    let _ : d ≠ 0 := by
+      intro h
+      have h1 : l = 0 := by
+        simpa [l] using congrArg Fin.succ h
+      rw [h1] at m
+      exact m
+    let _ : d ≠ 0EP1 2326
+141 6 2
+n=1
+lang=lean
+unit=repo:mathlib4/Mathlib/Data/DFinsupp/Module.lean#module@69
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=1
+budget0 0 0 1266
+## User
+
+Dependent functions with finite support inherit a module structure from such a structure on
+each coordinate.
+
+## Context
+
+```lean
+inferInstance.{u} {α : Sort u} [i : α] : α
+DistribMulAction.{u_12, u_13} (M : Type u_12) (A : Type u_13) [Monoid M] [AddMonoid A] : Type (max u_12 u_13)
+γ : Type w
+β : ι → Type v
+zero_smul.{u_2, u_7} (M₀ : Type u_2) {A : Type u_7} [Zero M₀] [Zero A] [SMulWithZero M₀ A] (m : A) : 0 • m = 0
+DFinsupp.smul_apply.{u, v, w} {ι : Type u} {γ : Type w} {β : ι → Type v} [(i : ι) → Zero (β i)]
+  [(i : ι) → SMulZeroClass γ (β i)] (b : γ) (v : Π₀ (i : ι), β i) (i : ι) : (b • v) i = b • v i
+DFinsupp.zero_apply.{u, v} {ι : Type u} {β : ι → Type v} [(i : ι) → Zero (β i)] (i : ι) : 0 i = 0
+add_smul.{u_1, u_2} {R : Type u_1} {M : Type u_2} [Semiring R] [AddCommMonoid M] [Module R M] (r s : R) (x : M) :
+  (r + s) • x = r • x + s • x
+DFinsupp.add_apply.{u, v} {ι : Type u} {β : ι → Type v} [(i : ι) → AddZeroClass (β i)] (g₁ g₂ : Π₀ (i : ι), β i)
+  (i : ι) : (g₁ + g₂) i = g₁ i + g₂ i
+```
+
+## Type
+
+type
+```lean
+instance module [Semiring γ] [∀ i, AddCommMonoid (β i)] [∀ i, Module γ (β i)] :
+    Module γ (Π₀ i, β i)
+```
+
+## Term
+
+```lean
+1 0 0 884
+by
+  refine (inferInstance : Module α ((Π i, β i) → γ)).codRestrict (fun _ => 0)
+    (fun _ => by simp [zero_smul]) fun _ _ _ _ _ => ?_
+  exactDFinsupp.smul_apply.{u, v, w, u, v}
+    (fun _ _ _ => by simp) (fun _ _ _ => by simp) (fun _ _ => by simp)
+    (fun _ _ => by simp) (fun _ _ => by simp) (fun _ _ => by simp)
+    (fun _ _ => by simp) (fun _ _ => by simp) (fun _ _ => by simp)
+    (fun _ _ => by simp) (fun _ _ => by simp) (fun _ _ => by simp)
+    (fun _ _ => by simp) (fun _ _ => by simp) (fun _ _ => by simp) (fun _ _ => by simp)
+    (fun _ _ => by simp) (fun _ _ => by simp) (fun _ _ => by simp) (fun _ _ => by simp)
+    (fun _ _ => by simp) (fun _ _ => by simp) (fun _ _ => by simp) (fun _ _ => by simp)
+    (fun _ _ => by simp) (fun _ _ => by simp) (fun _ _ => by simp) (fun _ _ => by simp)
+    (fun _ _ => by simp) (fun _ _ => by simp) (fun _ _ => by simp) (fun _ _EP1 2173
+213 10 2
+n=40
+lang=haskell
+unit=hackage:amazonka-cloudwatch-events/gen/Amazonka/CloudWatchEvents/Types/RedshiftDataParameters.hs#newRedshiftDataParameters@77
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=0
+tool-error0 0 0 1650
+## User
+
+Create a value of 'RedshiftDataParameters' with all optional fields omitted.
+
+Use <https://hackage.haskell.org/package/generic-lens generic-lens> or <https://hackage.haskell.org/package/optics optics> to modify other optional fields.
+
+The following record fields are available, with the corresponding lenses provided
+for backwards compatibility:
+
+'dbUser', 'redshiftDataParameters_dbUser' - The database user name. Required when authenticating using temporary
+credentials.
+
+'secretManagerArn', 'redshiftDataParameters_secretManagerArn' - The name or ARN of the secret that enables access to the database.
+Required when authenticating using Amazon Web Services Secrets Manager.
+
+'statementName', 'redshiftDataParameters_statementName' - The name of the SQL statement. You can name the SQL statement when you
+create it to identify the query.
+
+'withEvent', 'redshiftDataParameters_withEvent' - Indicates whether to send an event back to EventBridge after the SQL
+statement runs.
+
+'database', 'redshiftDataParameters_database' - The name of the database. Required when authenticating using temporary
+credentials.
+
+'sql', 'redshiftDataParameters_sql' - The SQL statement text to run.
+
+## Context
+
+```haskell
+dbUser :: RedshiftDataParameters -> Maybe Data.Text.Internal.Text
+Prelude.Nothing :: Maybe a
+withEvent :: RedshiftDataParameters -> Maybe Bool
+database :: RedshiftDataParameters -> Data.Text.Internal.Text
+sql :: RedshiftDataParameters -> Data.Text.Internal.Text
+```
+
+## Type
+
+type
+```haskell
+newRedshiftDataParameters ::
+  -- | 'database'
+  Prelude.Text ->
+  -- | 'sql'
+  Prelude.Text ->
+  RedshiftDataParameters
+```
+
+## Term
+
+```haskell
+1 0 0 270
+newRedshiftDataParameters database sql =
+  RedshiftDataParameters
+    { database = database,
+      sql = sql,
+      database_user = dbUser,
+      database_secretManagerArn = Prelude.Nothing,
+      withEvent = Prelude.Nothing,
+      database = database
+    }
+```
+
+## ghc
+EP1 560
+166 10 2
+n=47
+lang=haskell
+unit=curated:megabytesofrem_ibis-lang/src/Category/Grothendieck.hs#pullbackSieve@52
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=1
+tool-error0 0 0 322
+## User
+
+Pullback a sieve @F@ along a morphism @g: d -> c@ to obtain a sieve on @d@.
+
+## Context
+
+```haskell
+Sieve
+  :: forall cat (c :: cat).
+     (forall (d :: cat). Arrow cat d c -> Bool) -> Sieve cat c
+```
+
+## Type
+
+type
+```haskell
+pullbackSieve :: Arrow cat d c -> Sieve cat c -> Sieve cat d
+```
+
+## Term
+
+```haskell
+1 0 0 34
+pullbackSieve = Sieve
+```
+
+## ghc
+EP1 592
+166 10 2
+n=46
+lang=haskell
+unit=curated:megabytesofrem_ibis-lang/src/Category/Grothendieck.hs#pullbackSieve@52
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=0
+tool-error0 0 0 322
+## User
+
+Pullback a sieve @F@ along a morphism @g: d -> c@ to obtain a sieve on @d@.
+
+## Context
+
+```haskell
+Sieve
+  :: forall cat (c :: cat).
+     (forall (d :: cat). Arrow cat d c -> Bool) -> Sieve cat c
+```
+
+## Type
+
+type
+```haskell
+pullbackSieve :: Arrow cat d c -> Sieve cat c -> Sieve cat d
+```
+
+## Term
+
+```haskell
+1 0 0 66
+pullbackSieve g = Sieve g . pullbacks g . pullbacks g
+```
+
+## ghc
+EP1 807
+164 10 2
+n=48
+lang=haskell
+unit=hackage:reflex-dom-svg/src/Reflex/Dom/Widget/SVG/Types/Pos.hs#_PosCenterX@69
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=0
+tool-error0 0 0 570
+## User
+
+Specific Iso for describing a centered X coordinate
+
+This attempt fails. Fix it.
+
+## Context
+
+```haskell
+_Wrapped
+  :: Control.Lens.Wrapped.Rewrapping s t =>
+     Control.Lens.Type.Iso s t (Unwrapped s) (Unwrapped t)
+```
+
+## Type
+
+type
+```haskell
+_PosCenterX :: Iso' (Pos CenterX) Float
+```
+
+## Attempt
+
+```haskell
+_PosCenterX  _Wrapped
+```
+
+## ghc
+
+```
+Unit.hs:70:1: error: [GHC-25277]
+    Parse error: module header, import declaration
+    or top-level declaration expected.
+   |
+70 | _PosCenterX  _Wrapped
+   | ^^^^^^^^^^^^^^^^^^^^^
+```
+
+## Term
+
+```haskell
+1 0 0 35
+_PosCenterX = _Wrapped
+```
+
+## ghc
+EP1 807
+164 10 2
+n=49
+lang=haskell
+unit=hackage:reflex-dom-svg/src/Reflex/Dom/Widget/SVG/Types/Pos.hs#_PosCenterX@69
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=1
+tool-error0 0 0 570
+## User
+
+Specific Iso for describing a centered X coordinate
+
+This attempt fails. Fix it.
+
+## Context
+
+```haskell
+_Wrapped
+  :: Control.Lens.Wrapped.Rewrapping s t =>
+     Control.Lens.Type.Iso s t (Unwrapped s) (Unwrapped t)
+```
+
+## Type
+
+type
+```haskell
+_PosCenterX :: Iso' (Pos CenterX) Float
+```
+
+## Attempt
+
+```haskell
+_PosCenterX  _Wrapped
+```
+
+## ghc
+
+```
+Unit.hs:70:1: error: [GHC-25277]
+    Parse error: module header, import declaration
+    or top-level declaration expected.
+   |
+70 | _PosCenterX  _Wrapped
+   | ^^^^^^^^^^^^^^^^^^^^^
+```
+
+## Term
+
+```haskell
+1 0 0 35
+_PosCenterX = _Wrapped
+```
+
+## ghc
+EP1 325
+147 10 2
+n=54
+lang=haskell
+unit=hackage:babynf/lib/Data/BAByNF/ABNF/Rules/Element.hs#ref@23
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=0
+tool-error0 0 0 96
+## User
+
+Define `ref`.
+
+## Type
+
+type
+```haskell
+ref :: Model.Rulename
+```
+
+## Term
+
+```haskell
+1 0 0 45
+ref = Model.Rulename "ref" "ref"
+```
+
+## ghc
+EP1 4428
+161 5 10
+n=32
+lang=lean
+unit=repo:mathlib4/Mathlib/Algebra/GroupWithZero/NeZero.lean#domain_nontrivial@38
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=0
+calls0 0 0 1202
+## User
+
+Pullback a `Nontrivial` instance along a function sending `0` to `0` and `1` to `1`.
+
+This attempt fails. Fix it.
+
+## Context
+
+```lean
+mt {a b : Prop} (h₁ : a → b) (h₂ : ¬b) : ¬a
+congr_arg.{u, v} {α : Sort u} {β : Sort v} {a₁ a₂ : α} (f : α → β) (h : a₁ = a₂) : f a₁ = f a₂
+```
+
+## Type
+
+proposition
+```lean
+theorem domain_nontrivial [Zero M₀'] [One M₀'] (f : M₀' → M₀) (zero : f 0 = 0) (one : f 1 = 1) :
+    Nontrivial M₀'
+```
+
+## Attempt
+
+```lean
+  ⟨⟨0, 1, congr_arg (congr_arg f) <| by
+    rw [zero, one]
+    exact zero_ne_one⟩⟩
+```
+
+## lean
+
+```
+Unit.lean:40:10: error: Application type mismatch: The argument
+  congr_arg (congr_arg f) ?m.28
+has type
+  ⋯ = ⋯
+but is expected to have type
+  0 ≠ 1
+in the application
+  Exists.intro 1 (congr_arg (congr_arg f) ?m.28)
+Unit.lean:41:8: error: Tactic `rewrite` failed: Did not find an occurrence of the pattern
+  f 0
+in the target expression
+  ?m.22 = ?m.23
+
+M₀ : Type u_1
+M₀' : Type u_2
+inst✝³ : MulZeroOneClass M₀
+inst✝² : Nontrivial M₀
+inst✝¹ : Zero M₀'
+inst✝ : One M₀'
+f : M₀' → M₀
+zero : f 0 = 0
+one : f 1 = 1
+⊢ ?m.22 = ?m.23
+[exit 1]
+```
+
+## Term
+
+```lean
+1 0 0 99
+⟨0, 1, congr_arg (congr_arg f) <| by
+    rw [zero, one]
+    exact zero_ne_one⟩⟩
+```
+
+## lean
+2 1 4 648
+lean
+```
+Unit.lean:40:9: error: Application type mismatch: The argument
+  congr_arg (congr_arg f) ?m.28
+has type
+  ⋯ = ⋯
+but is expected to have type
+  0 ≠ 1
+in the application
+  Exists.intro 1 (congr_arg (congr_arg f) ?m.28)
+Unit.lean:41:8: error: Tactic `rewrite` failed: Did not find an occurrence of the pattern
+  f 0
+in the target expression
+  ?m.22 = ?m.23
+
+M₀ : Type u_1
+M₀' : Type u_2
+inst✝³ : MulZeroOneClass M₀
+inst✝² : Nontrivial M₀
+inst✝¹ : Zero M₀'
+inst✝ : One M₀'
+f : M₀' → M₀
+zero : f 0 = 0
+one : f 1 = 1
+⊢ ?m.22 = ?m.23
+Unit.lean:42:22: error: unexpected token '⟩'; expected command
+[exit 1]
+```
+
+1 0 0 116
+## Term
+
+```lean
+⟨0, 1, congr_arg (congr_arg f) <| by
+    rw [zero, one]
+    exact zero_ne_one⟩⟩
+```
+
+## lean
+2 1 4 648
+lean
+```
+Unit.lean:40:9: error: Application type mismatch: The argument
+  congr_arg (congr_arg f) ?m.28
+has type
+  ⋯ = ⋯
+but is expected to have type
+  0 ≠ 1
+in the application
+  Exists.intro 1 (congr_arg (congr_arg f) ?m.28)
+Unit.lean:41:8: error: Tactic `rewrite` failed: Did not find an occurrence of the pattern
+  f 0
+in the target expression
+  ?m.22 = ?m.23
+
+M₀ : Type u_1
+M₀' : Type u_2
+inst✝³ : MulZeroOneClass M₀
+inst✝² : Nontrivial M₀
+inst✝¹ : Zero M₀'
+inst✝ : One M₀'
+f : M₀' → M₀
+zero : f 0 = 0
+one : f 1 = 1
+⊢ ?m.22 = ?m.23
+Unit.lean:42:22: error: unexpected token '⟩'; expected command
+[exit 1]
+```
+
+1 0 0 116
+## Term
+
+```lean
+⟨0, 1, congr_arg (congr_arg f) <| by
+    rw [zero, one]
+    exact zero_ne_one⟩⟩
+```
+
+## lean
+2 1 4 648
+lean
+```
+Unit.lean:40:9: error: Application type mismatch: The argument
+  congr_arg (congr_arg f) ?m.28
+has type
+  ⋯ = ⋯
+but is expected to have type
+  0 ≠ 1
+in the application
+  Exists.intro 1 (congr_arg (congr_arg f) ?m.28)
+Unit.lean:41:8: error: Tactic `rewrite` failed: Did not find an occurrence of the pattern
+  f 0
+in the target expression
+  ?m.22 = ?m.23
+
+M₀ : Type u_1
+M₀' : Type u_2
+inst✝³ : MulZeroOneClass M₀
+inst✝² : Nontrivial M₀
+inst✝¹ : Zero M₀'
+inst✝ : One M₀'
+f : M₀' → M₀
+zero : f 0 = 0
+one : f 1 = 1
+⊢ ?m.22 = ?m.23
+Unit.lean:42:22: error: unexpected token '⟩'; expected command
+[exit 1]
+```
+
+1 0 0 8
+## lean
+2 1 4 648
+lean
+```
+Unit.lean:40:9: error: Application type mismatch: The argument
+  congr_arg (congr_arg f) ?m.28
+has type
+  ⋯ = ⋯
+but is expected to have type
+  0 ≠ 1
+in the application
+  Exists.intro 1 (congr_arg (congr_arg f) ?m.28)
+Unit.lean:41:8: error: Tactic `rewrite` failed: Did not find an occurrence of the pattern
+  f 0
+in the target expression
+  ?m.22 = ?m.23
+
+M₀ : Type u_1
+M₀' : Type u_2
+inst✝³ : MulZeroOneClass M₀
+inst✝² : Nontrivial M₀
+inst✝¹ : Zero M₀'
+inst✝ : One M₀'
+f : M₀' → M₀
+zero : f 0 = 0
+one : f 1 = 1
+⊢ ?m.22 = ?m.23
+Unit.lean:42:22: error: unexpected token '⟩'; expected command
+[exit 1]
+```
+
+1 0 0 8
+## lean
+EP1 2630
+162 5 10
+n=30
+lang=lean
+unit=repo:mathlib4/Mathlib/Topology/Ultrafilter.lean#continuous_iff_ultrafilter@56
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=0
+calls0 0 0 656
+## User
+
+Prove `continuous_iff_ultrafilter`.
+
+## Context
+
+```lean
+continuous_iff_continuousAt.{u_1, u_2} {X : Type u_1} {Y : Type u_2} [TopologicalSpace X] [TopologicalSpace Y]
+  {f : X → Y} : Continuous f ↔ ∀ (x : X), ContinuousAt f x
+continuousAt_iff_ultrafilter.{u, v} {X : Type u} {Y : Type v} {x : X} [TopologicalSpace X] [TopologicalSpace Y]
+  {f : X → Y} : ContinuousAt f x ↔ ∀ (g : Ultrafilter X), ↑g ≤ 𝓝 x → Tendsto f (↑g) (𝓝 (f x))
+```
+
+## Type
+
+proposition
+```lean
+theorem continuous_iff_ultrafilter :
+    Continuous f ↔ ∀ (x) (g : Ultrafilter X), ↑g ≤ 𝓝 x → Tendsto f g (𝓝 (f x))
+```
+
+## Term
+
+```lean
+1 0 0 99
+by
+  refine ⟨fun _ ↦ continuous_iff_continuousAt, continuousAt_iff_ultrafilter⟩
+```
+
+## lean
+2 1 4 285
+lean
+```
+Unit.lean:58:18: error: Type mismatch
+  continuous_iff_continuousAt
+has type
+  Continuous[?m.26, ?m.27] ?m.28 ↔ ∀ (x : ?m.24), ContinuousAt ?m.28 x
+but is expected to have type
+  ∀ (x : X) (g : Ultrafilter X), ↑g ≤ 𝓝 x → Tendsto f (↑g) (𝓝 (f x))
+[exit 1]
+```
+
+1 0 0 153
+## Term
+
+```lean
+by
+  refine continuous_iff_continuousAt.mpr fun _ ↦ continuousAt_iff_ultrafilter ?_
+  exact continuousAt_iff_ultrafilter
+```
+
+## lean
+2 1 4 327
+lean
+```
+Unit.lean:58:49: error: Function expected at
+  continuousAt_iff_ultrafilter
+but this term has type
+  ContinuousAt ?m.34 ?m.31 ↔ ∀ (g : Ultrafilter ?m.29), ↑g ≤ 𝓝 ?m.31 → Tendsto ?m.34 (↑g) (𝓝 (?m.34 ?m.31))
+
+Note: Expected a function because this term is being applied to the argument
+  ?_
+[exit 1]
+```
+
+1 0 0 153
+## Term
+
+```lean
+by
+  refine continuous_iff_continuousAt.mpr fun _ ↦ continuousAt_iff_ultrafilter ?_
+  exact continuousAt_iff_ultrafilter
+```
+
+## lean
+2 1 4 327
+lean
+```
+Unit.lean:58:49: error: Function expected at
+  continuousAt_iff_ultrafilter
+but this term has type
+  ContinuousAt ?m.34 ?m.31 ↔ ∀ (g : Ultrafilter ?m.29), ↑g ≤ 𝓝 ?m.31 → Tendsto ?m.34 (↑g) (𝓝 (?m.34 ?m.31))
+
+Note: Expected a function because this term is being applied to the argument
+  ?_
+[exit 1]
+```
+
+1 0 0 8
+## lean
+2 1 4 327
+lean
+```
+Unit.lean:58:49: error: Function expected at
+  continuousAt_iff_ultrafilter
+but this term has type
+  ContinuousAt ?m.34 ?m.31 ↔ ∀ (g : Ultrafilter ?m.29), ↑g ≤ 𝓝 ?m.31 → Tendsto ?m.34 (↑g) (𝓝 (?m.34 ?m.31))
+
+Note: Expected a function because this term is being applied to the argument
+  ?_
+[exit 1]
+```
+
+1 0 0 8
+## lean
+EP1 4428
+161 5 10
+n=33
+lang=lean
+unit=repo:mathlib4/Mathlib/Algebra/GroupWithZero/NeZero.lean#domain_nontrivial@38
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=1
+calls0 0 0 1202
+## User
+
+Pullback a `Nontrivial` instance along a function sending `0` to `0` and `1` to `1`.
+
+This attempt fails. Fix it.
+
+## Context
+
+```lean
+mt {a b : Prop} (h₁ : a → b) (h₂ : ¬b) : ¬a
+congr_arg.{u, v} {α : Sort u} {β : Sort v} {a₁ a₂ : α} (f : α → β) (h : a₁ = a₂) : f a₁ = f a₂
+```
+
+## Type
+
+proposition
+```lean
+theorem domain_nontrivial [Zero M₀'] [One M₀'] (f : M₀' → M₀) (zero : f 0 = 0) (one : f 1 = 1) :
+    Nontrivial M₀'
+```
+
+## Attempt
+
+```lean
+  ⟨⟨0, 1, congr_arg (congr_arg f) <| by
+    rw [zero, one]
+    exact zero_ne_one⟩⟩
+```
+
+## lean
+
+```
+Unit.lean:40:10: error: Application type mismatch: The argument
+  congr_arg (congr_arg f) ?m.28
+has type
+  ⋯ = ⋯
+but is expected to have type
+  0 ≠ 1
+in the application
+  Exists.intro 1 (congr_arg (congr_arg f) ?m.28)
+Unit.lean:41:8: error: Tactic `rewrite` failed: Did not find an occurrence of the pattern
+  f 0
+in the target expression
+  ?m.22 = ?m.23
+
+M₀ : Type u_1
+M₀' : Type u_2
+inst✝³ : MulZeroOneClass M₀
+inst✝² : Nontrivial M₀
+inst✝¹ : Zero M₀'
+inst✝ : One M₀'
+f : M₀' → M₀
+zero : f 0 = 0
+one : f 1 = 1
+⊢ ?m.22 = ?m.23
+[exit 1]
+```
+
+## Term
+
+```lean
+1 0 0 99
+⟨0, 1, congr_arg (congr_arg f) <| by
+    rw [zero, one]
+    exact zero_ne_one⟩⟩
+```
+
+## lean
+2 1 4 648
+lean
+```
+Unit.lean:40:9: error: Application type mismatch: The argument
+  congr_arg (congr_arg f) ?m.28
+has type
+  ⋯ = ⋯
+but is expected to have type
+  0 ≠ 1
+in the application
+  Exists.intro 1 (congr_arg (congr_arg f) ?m.28)
+Unit.lean:41:8: error: Tactic `rewrite` failed: Did not find an occurrence of the pattern
+  f 0
+in the target expression
+  ?m.22 = ?m.23
+
+M₀ : Type u_1
+M₀' : Type u_2
+inst✝³ : MulZeroOneClass M₀
+inst✝² : Nontrivial M₀
+inst✝¹ : Zero M₀'
+inst✝ : One M₀'
+f : M₀' → M₀
+zero : f 0 = 0
+one : f 1 = 1
+⊢ ?m.22 = ?m.23
+Unit.lean:42:22: error: unexpected token '⟩'; expected command
+[exit 1]
+```
+
+1 0 0 116
+## Term
+
+```lean
+⟨0, 1, congr_arg (congr_arg f) <| by
+    rw [zero, one]
+    exact zero_ne_one⟩⟩
+```
+
+## lean
+2 1 4 648
+lean
+```
+Unit.lean:40:9: error: Application type mismatch: The argument
+  congr_arg (congr_arg f) ?m.28
+has type
+  ⋯ = ⋯
+but is expected to have type
+  0 ≠ 1
+in the application
+  Exists.intro 1 (congr_arg (congr_arg f) ?m.28)
+Unit.lean:41:8: error: Tactic `rewrite` failed: Did not find an occurrence of the pattern
+  f 0
+in the target expression
+  ?m.22 = ?m.23
+
+M₀ : Type u_1
+M₀' : Type u_2
+inst✝³ : MulZeroOneClass M₀
+inst✝² : Nontrivial M₀
+inst✝¹ : Zero M₀'
+inst✝ : One M₀'
+f : M₀' → M₀
+zero : f 0 = 0
+one : f 1 = 1
+⊢ ?m.22 = ?m.23
+Unit.lean:42:22: error: unexpected token '⟩'; expected command
+[exit 1]
+```
+
+1 0 0 116
+## Term
+
+```lean
+⟨0, 1, congr_arg (congr_arg f) <| by
+    rw [zero, one]
+    exact zero_ne_one⟩⟩
+```
+
+## lean
+2 1 4 648
+lean
+```
+Unit.lean:40:9: error: Application type mismatch: The argument
+  congr_arg (congr_arg f) ?m.28
+has type
+  ⋯ = ⋯
+but is expected to have type
+  0 ≠ 1
+in the application
+  Exists.intro 1 (congr_arg (congr_arg f) ?m.28)
+Unit.lean:41:8: error: Tactic `rewrite` failed: Did not find an occurrence of the pattern
+  f 0
+in the target expression
+  ?m.22 = ?m.23
+
+M₀ : Type u_1
+M₀' : Type u_2
+inst✝³ : MulZeroOneClass M₀
+inst✝² : Nontrivial M₀
+inst✝¹ : Zero M₀'
+inst✝ : One M₀'
+f : M₀' → M₀
+zero : f 0 = 0
+one : f 1 = 1
+⊢ ?m.22 = ?m.23
+Unit.lean:42:22: error: unexpected token '⟩'; expected command
+[exit 1]
+```
+
+1 0 0 8
+## lean
+2 1 4 648
+lean
+```
+Unit.lean:40:9: error: Application type mismatch: The argument
+  congr_arg (congr_arg f) ?m.28
+has type
+  ⋯ = ⋯
+but is expected to have type
+  0 ≠ 1
+in the application
+  Exists.intro 1 (congr_arg (congr_arg f) ?m.28)
+Unit.lean:41:8: error: Tactic `rewrite` failed: Did not find an occurrence of the pattern
+  f 0
+in the target expression
+  ?m.22 = ?m.23
+
+M₀ : Type u_1
+M₀' : Type u_2
+inst✝³ : MulZeroOneClass M₀
+inst✝² : Nontrivial M₀
+inst✝¹ : Zero M₀'
+inst✝ : One M₀'
+f : M₀' → M₀
+zero : f 0 = 0
+one : f 1 = 1
+⊢ ?m.22 = ?m.23
+Unit.lean:42:22: error: unexpected token '⟩'; expected command
+[exit 1]
+```
+
+1 0 0 8
+## lean
+EP1 4077
+161 5 10
+n=27
+lang=lean
+unit=repo:mathlib4/Mathlib/Algebra/Order/SuccPred.lean#monotone_of_le_add_one@330
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=1
+calls0 0 0 556
+## User
+
+Prove `monotone_of_le_add_one`.
+
+## Context
+
+```lean
+Order.succ_eq_add_one.{u_1} {α : Type u_1} [Preorder α] [Add α] [One α] [SuccAddOrder α] (x : α) : Order.succ x = x + 1
+monotone_of_le_succ.{u_3, u_4} {α : Type u_3} {β : Type u_4} [PartialOrder α] [Preorder β] [SuccOrder α]
+  [IsSuccArchimedean α] {f : α → β} (hf : ∀ (a : α), ¬IsMax a → f a ≤ f (Order.succ a)) : Monotone f
+```
+
+## Type
+
+proposition
+```lean
+lemma monotone_of_le_add_one : (∀ a, ¬ IsMax a → f a ≤ f (a + 1)) → Monotone f
+```
+
+## Term
+
+```lean
+1 0 0 159
+fun h => by
+  cases a
+  case zero =>
+    refine monotone_of_le_succ ?_
+    exact h
+  case succ a =>
+    refine monotone_of_le_succ ?_
+    exact h
+```
+
+## lean
+2 1 4 720
+lean
+```
+Unit.lean:331:8: error(lean.unknownIdentifier): Unknown identifier `a`
+Unit.lean:331:2: error: Tactic `cases` failed: major premise type is not an inductive type
+  ?m.25
+
+Explanation: the `cases` tactic is for constructor-based reasoning as well as for applying custom cases principles with a 'using' clause or a registered '@[cases_eliminator]' theorem. The above type neither is an inductive type nor has a registered theorem.
+
+α : Type u_2
+β : Type u_3
+inst✝⁵ : PartialOrder α
+inst✝⁴ : Preorder β
+inst✝³ : Add α
+inst✝² : One α
+inst✝¹ : SuccAddOrder α
+inst✝ : IsSuccArchimedean α
+f : α → β
+h : ∀ (a : α), ¬IsMax a → f a ≤ f (a + 1)
+x✝ : ?m.25
+⊢ Monotone f
+[exit 1]
+```
+
+1 0 0 167
+## Term
+
+```lean
+by
+  cases a
+  case zero =>
+    refine monotone_of_le_succ ?_
+    exact h
+  case succ a =>
+    refine monotone_of_le_succ ?_
+    exact h
+```
+
+## lean
+2 1 4 722
+lean
+```
+Unit.lean:331:8: error(lean.unknownIdentifier): Unknown identifier `a`
+Unit.lean:331:2: error: Tactic `cases` failed: major premise type is not an inductive type
+  ?m.23
+
+Explanation: the `cases` tactic is for constructor-based reasoning as well as for applying custom cases principles with a 'using' clause or a registered '@[cases_eliminator]' theorem. The above type neither is an inductive type nor has a registered theorem.
+
+α : Type u_2
+β : Type u_3
+inst✝⁵ : PartialOrder α
+inst✝⁴ : Preorder β
+inst✝³ : Add α
+inst✝² : One α
+inst✝¹ : SuccAddOrder α
+inst✝ : IsSuccArchimedean α
+f : α → β
+x✝ : ?m.23
+⊢ (∀ (a : α), ¬IsMax a → f a ≤ f (a + 1)) → Monotone f
+[exit 1]
+```
+
+1 0 0 8
+## lean
+2 1 4 722
+lean
+```
+Unit.lean:331:8: error(lean.unknownIdentifier): Unknown identifier `a`
+Unit.lean:331:2: error: Tactic `cases` failed: major premise type is not an inductive type
+  ?m.23
+
+Explanation: the `cases` tactic is for constructor-based reasoning as well as for applying custom cases principles with a 'using' clause or a registered '@[cases_eliminator]' theorem. The above type neither is an inductive type nor has a registered theorem.
+
+α : Type u_2
+β : Type u_3
+inst✝⁵ : PartialOrder α
+inst✝⁴ : Preorder β
+inst✝³ : Add α
+inst✝² : One α
+inst✝¹ : SuccAddOrder α
+inst✝ : IsSuccArchimedean α
+f : α → β
+x✝ : ?m.23
+⊢ (∀ (a : α), ¬IsMax a → f a ≤ f (a + 1)) → Monotone f
+[exit 1]
+```
+
+1 0 0 8
+## lean
+2 1 4 722
+lean
+```
+Unit.lean:331:8: error(lean.unknownIdentifier): Unknown identifier `a`
+Unit.lean:331:2: error: Tactic `cases` failed: major premise type is not an inductive type
+  ?m.23
+
+Explanation: the `cases` tactic is for constructor-based reasoning as well as for applying custom cases principles with a 'using' clause or a registered '@[cases_eliminator]' theorem. The above type neither is an inductive type nor has a registered theorem.
+
+α : Type u_2
+β : Type u_3
+inst✝⁵ : PartialOrder α
+inst✝⁴ : Preorder β
+inst✝³ : Add α
+inst✝² : One α
+inst✝¹ : SuccAddOrder α
+inst✝ : IsSuccArchimedean α
+f : α → β
+x✝ : ?m.23
+⊢ (∀ (a : α), ¬IsMax a → f a ≤ f (a + 1)) → Monotone f
+[exit 1]
+```
+
+1 0 0 8
+## lean
+EP1 1391
+147 10 2
+n=63
+lang=haskell
+unit=hackage:Hawk/src/Hawk/Model/Criteria/Types.hs#toExprPair@37
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=1
+tool-error0 0 0 1153
+## User
+
+Converts a ExprPair for HDBC
+
+This attempt fails. Fix it.
+
+## Context
+
+```haskell
+showSql :: ShowSql p => p -> String
+getValues :: GetValues c => c -> [SqlValue]
+```
+
+## Type
+
+type
+```haskell
+toExprPair :: (GetValues c, ShowSql c) => c -> SqlExprPair
+```
+
+## Attempt
+
+```haskell
+toExprPair c = (showSql getValues, c c)
+```
+
+## ghc
+
+```
+Unit.hs:38:36: error: [GHC-25897]
+    • Couldn't match expected type ‘c -> [SqlValue]’
+                  with actual type ‘c’
+      ‘c’ is a rigid type variable bound by
+        the type signature for:
+          toExprPair :: forall c.
+                        (GetValues c, ShowSql c) =>
+                        c -> SqlExprPair
+        at Unit.hs:37:1-58
+    • The function ‘c’ is applied to one visible argument,
+        but its type ‘c’ has none
+      In the expression: c c
+      In the expression: (showSql getValues, c c)
+    • Relevant bindings include
+        c :: c (bound at Unit.hs:38:12)
+        toExprPair :: c -> SqlExprPair (bound at Unit.hs:38:1)
+   |
+38 | toExprPair c = (showSql getValues, c c)
+   |                                    ^^^
+```
+
+## Term
+
+```haskell
+1 0 0 52
+toExprPair c = (showSql getValues, c c)
+```
+
+## ghc
+EP1 1397
+147 10 2
+n=62
+lang=haskell
+unit=hackage:Hawk/src/Hawk/Model/Criteria/Types.hs#toExprPair@37
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=0
+tool-error0 0 0 1153
+## User
+
+Converts a ExprPair for HDBC
+
+This attempt fails. Fix it.
+
+## Context
+
+```haskell
+showSql :: ShowSql p => p -> String
+getValues :: GetValues c => c -> [SqlValue]
+```
+
+## Type
+
+type
+```haskell
+toExprPair :: (GetValues c, ShowSql c) => c -> SqlExprPair
+```
+
+## Attempt
+
+```haskell
+toExprPair c = (showSql getValues, c c)
+```
+
+## ghc
+
+```
+Unit.hs:38:36: error: [GHC-25897]
+    • Couldn't match expected type ‘c -> [SqlValue]’
+                  with actual type ‘c’
+      ‘c’ is a rigid type variable bound by
+        the type signature for:
+          toExprPair :: forall c.
+                        (GetValues c, ShowSql c) =>
+                        c -> SqlExprPair
+        at Unit.hs:37:1-58
+    • The function ‘c’ is applied to one visible argument,
+        but its type ‘c’ has none
+      In the expression: c c
+      In the expression: (showSql getValues, c c)
+    • Relevant bindings include
+        c :: c (bound at Unit.hs:38:12)
+        toExprPair :: c -> SqlExprPair (bound at Unit.hs:38:1)
+   |
+38 | toExprPair c = (showSql getValues, c c)
+   |                                    ^^^
+```
+
+## Term
+
+```haskell
+1 0 0 58
+toExprPair c = (showSql getValues, showSql c)
+```
+
+## ghc
+EP1 415
+154 10 2
+n=66
+lang=haskell
+unit=curated:elm_compiler/compiler/src/AST/Prim/Operator.hs#fromAddr@74
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=0
+tool-error0 0 0 189
+## User
+
+Define `fromAddr`.
+
+## Context
+
+```haskell
+S.fromAddr :: Addr# -> Addr# -> IO S.String
+```
+
+## Type
+
+type
+```haskell
+fromAddr :: Addr# -> Addr# -> IO Name
+```
+
+## Term
+
+```haskell
+1 0 0 34
+fromAddr = S.fromAddr
+```
+
+## ghc
+EP1 423
+154 10 2
+n=67
+lang=haskell
+unit=curated:elm_compiler/compiler/src/AST/Prim/Operator.hs#fromAddr@74
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=1
+tool-error0 0 0 189
+## User
+
+Define `fromAddr`.
+
+## Context
+
+```haskell
+S.fromAddr :: Addr# -> Addr# -> IO S.String
+```
+
+## Type
+
+type
+```haskell
+fromAddr :: Addr# -> Addr# -> IO Name
+```
+
+## Term
+
+```haskell
+1 0 0 42
+fromAddr a b = S.fromAddr a b
+```
+
+## ghc
+EP1 1200
+163 6 3
+n=64
+lang=lean
+unit=curated:goedel-workbook/lean_workbook_plus_4804.lean#lean_workbook_plus_4804@9
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=0
+solved0 0 0 276
+## User
+
+Prove `lean_workbook_plus_4804`.
+
+## Context
+
+```lean
+Bool.and (x y : Bool) : Bool
+```
+
+## Type
+
+proposition
+```lean
+theorem lean_workbook_plus_4804 (a b c : ℤ) : (a + b) * (b + c) * (c + a) = (a + b + c) * (a * b + b * c + c * a) - a * b * c
+```
+
+## Term
+
+```lean
+1 0 0 40
+by
+  rw [mul_assoc]
+  ring
+```
+
+## lean
+2 0 4 674
+lean
+```
+Unit.lean:20:6: warning: this tactic is never executed
+
+Note: This linter can be disabled with `set_option linter.unreachableTactic false`
+Unit.lean:21:6: warning: this tactic is never executed
+
+Note: This linter can be disabled with `set_option linter.unreachableTactic false`
+Unit.lean:20:6: warning: Unused tactic linter: `simp_all only [add_assoc, add_left_comm, add_comm, mul_assoc, mul_left_comm,
+  mul_comm]` does nothing
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+Unit.lean:21:6: warning: Unused tactic linter: `omega` does nothing
+
+Note: This linter can be disabled with `set_option linter.unusedTactic false`
+[exit 0]
+```
+
+EP1 1530
+151 10 2
+n=68
+lang=haskell
+unit=hackage:graphviz/Data/GraphViz/Internal/Util.hs#stringToInt@116
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=0
+tool-error0 0 0 1183
+## User
+
+Determine if this String represents an integer.
+
+This attempt fails. Fix it.
+
+## Context
+
+```haskell
+T.signed :: Num a => T.Reader a -> T.Reader a
+T.decimal :: Integral a => T.Reader a
+Right :: b -> Either a b
+Just :: a -> Maybe a
+Nothing :: Maybe a
+```
+
+## Type
+
+type
+```haskell
+stringToInt     :: Text -> Maybe Int
+```
+
+## Attempt
+
+```haskell
+stringToInt str = case T.signed T.decimal T.decimal of
+                       Right (n, "") -> Just n
+                       _             -> Nothing
+```
+
+## ghc
+
+```
+Unit.hs:117:43: error: [GHC-83865]
+    • Couldn't match type ‘Text -> Either String (a0, Text)’
+                     with ‘Text’
+      Expected: Text
+        Actual: T.Reader a0
+    • Probable cause: ‘T.decimal’ is applied to too few arguments
+      In the second argument of ‘T.signed’, namely ‘T.decimal’
+      In the expression: T.signed T.decimal T.decimal
+      In the expression:
+        case T.signed T.decimal T.decimal of
+          Right (n, "") -> Just n
+          _ -> Nothing
+    |
+117 | stringToInt str = case T.signed T.decimal T.decimal of
+    |                                           ^^^^^^^^^
+```
+
+## Term
+
+```haskell
+1 0 0 156
+stringToInt str = case T.signed T.decimal str of
+                       Right (n, "") -> Just n
+                       _             -> Nothing
+```
+
+## ghc
+EP1 1536
+151 10 2
+n=69
+lang=haskell
+unit=hackage:graphviz/Data/GraphViz/Internal/Util.hs#stringToInt@116
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=1
+tool-error0 0 0 1183
+## User
+
+Determine if this String represents an integer.
+
+This attempt fails. Fix it.
+
+## Context
+
+```haskell
+T.signed :: Num a => T.Reader a -> T.Reader a
+T.decimal :: Integral a => T.Reader a
+Right :: b -> Either a b
+Just :: a -> Maybe a
+Nothing :: Maybe a
+```
+
+## Type
+
+type
+```haskell
+stringToInt     :: Text -> Maybe Int
+```
+
+## Attempt
+
+```haskell
+stringToInt str = case T.signed T.decimal T.decimal of
+                       Right (n, "") -> Just n
+                       _             -> Nothing
+```
+
+## ghc
+
+```
+Unit.hs:117:43: error: [GHC-83865]
+    • Couldn't match type ‘Text -> Either String (a0, Text)’
+                     with ‘Text’
+      Expected: Text
+        Actual: T.Reader a0
+    • Probable cause: ‘T.decimal’ is applied to too few arguments
+      In the second argument of ‘T.signed’, namely ‘T.decimal’
+      In the expression: T.signed T.decimal T.decimal
+      In the expression:
+        case T.signed T.decimal T.decimal of
+          Right (n, "") -> Just n
+          _ -> Nothing
+    |
+117 | stringToInt str = case T.signed T.decimal T.decimal of
+    |                                           ^^^^^^^^^
+```
+
+## Term
+
+```haskell
+1 0 0 162
+stringToInt str = case T.signed T.decimal T.decimal of
+                       Right (n, "") -> Just n
+                       _             -> Nothing
+```
+
+## ghc
+EP1 4479
+175 5 10
+n=29
+lang=lean
+unit=repo:mathlib4/Mathlib/GroupTheory/Congruence/Basic.lean#quotientKerEquivOfRightInverse@206
+temperature=0.7
+top_p=0.95
+calls=4
+tokens=256
+step=40000
+seed=1
+calls0 0 0 1633
+## User
+
+Define `quotientKerEquivOfRightInverse`.
+
+This attempt fails. Fix it.
+
+## Context
+
+```lean
+Con.kerLift.{u_1, u_3} {M : Type u_1} {P : Type u_3} [MulOneClass M] [MulOneClass P] (f : M →* P) :
+  (ker f).Quotient →* P
+Function.invFun.{u, u_3} {α : Sort u} {β : Sort u_3} [Nonempty α] (f : α → β) : β → α
+Con.kerLift_injective.{u_1, u_3} {M : Type u_1} {P : Type u_3} [MulOneClass M] [MulOneClass P] (f : M →* P) :
+  Injective ⇑(kerLift f)
+Function.comp_apply.{u_1, u_2, u_3} {β : Sort u_1} {δ : Sort u_2} {α : Sort u_3} {f : β → δ} {g : α → β} {x : α} :
+  (f ∘ g) x = f (g x)
+Con.kerLift_mk.{u_1, u_3} {M : Type u_1} {P : Type u_3} [MulOneClass M] [MulOneClass P] {f : M →* P} (x : M) :
+  (kerLift f) ↑x = f x
+```
+
+## Type
+
+type
+```lean
+def quotientKerEquivOfRightInverse (f : M →* P) (g : P → M) (hf : Function.RightInverse g f) :
+    (ker f).Quotient ≃* P
+```
+
+## Attempt
+
+```lean
+  { kerLift f with
+    toFun := kerLift f
+    invFun := (↑) ∘ g
+    conv_rhs := fun x => kerLift_injective _ (by rw [Function.comp_apply, kerLift_mk, hf])
+    right_inv := fun x => by (conv_rhs => rw [← hf x]); rfl }
+```
+
+## lean
+
+```
+Unit.lean:211:4: error: `conv_rhs` is not a field of structure `MulEquiv`
+Unit.lean:208:2: error: could not synthesize default value for field 'left_inv' of 'MulEquiv' using tactics
+Unit.lean:208:2: error: No applicable extensionality theorem found for type
+  (ker f).Quotient
+
+Note: Extensionality theorems can be registered by marking them with the `[ext]` attribute
+Unit.lean:206:4: error: unknown free variable `_fvar.15460`
+[exit 1]
+```
+
+## Term
+
+```lean
+1 0 0 234
+{ kerLift f with
+    toFun := kerLift f
+    invFun := (↑) ∘ g
+    conv_rhs := fun x => kerLift_injective _ (by rw [Function.comp_apply, kerLift_mk, hf])
+    right_inv := fun x => by (conv_rhs => rw [← hf x]); rfl }
+```
+
+## lean
+2 1 4 448
+lean
+```
+Unit.lean:211:4: error: `conv_rhs` is not a field of structure `MulEquiv`
+Unit.lean:208:2: error: could not synthesize default value for field 'left_inv' of 'MulEquiv' using tactics
+Unit.lean:208:2: error: No applicable extensionality theorem found for type
+  (ker f).Quotient
+
+Note: Extensionality theorems can be registered by marking them with the `[ext]` attribute
+Unit.lean:206:4: error: unknown free variable `_fvar.15460`
+[exit 1]
+```
+
+1 0 0 251
+## Term
+
+```lean
+{ kerLift f with
+    toFun := kerLift f
+    invFun := (↑) ∘ g
+    conv_rhs := fun x => kerLift_injective _ (by rw [Function.comp_apply, kerLift_mk, hf])
+    right_inv := fun x => by (conv_rhs => rw [← hf x]); rfl }
+```
+
+## lean
+2 1 4 448
+lean
+```
+Unit.lean:211:4: error: `conv_rhs` is not a field of structure `MulEquiv`
+Unit.lean:208:2: error: could not synthesize default value for field 'left_inv' of 'MulEquiv' using tactics
+Unit.lean:208:2: error: No applicable extensionality theorem found for type
+  (ker f).Quotient
+
+Note: Extensionality theorems can be registered by marking them with the `[ext]` attribute
+Unit.lean:206:4: error: unknown free variable `_fvar.15460`
+[exit 1]
+```
+
+1 0 0 251
+## Term
+
+```lean
+{ kerLift f with
+    toFun := kerLift f
+    invFun := (↑) ∘ g
+    conv_rhs := fun x => kerLift_injective _ (by rw [Function.comp_apply, kerLift_mk, hf])
+    right_inv := fun x => by (conv_rhs => rw [← hf x]); rfl }
+```
+
+## lean
+2 1 4 448
+lean
+```
+Unit.lean:211:4: error: `conv_rhs` is not a field of structure `MulEquiv`
+Unit.lean:208:2: error: could not synthesize default value for field 'left_inv' of 'MulEquiv' using tactics
+Unit.lean:208:2: error: No applicable extensionality theorem found for type
+  (ker f).Quotient
+
+Note: Extensionality theorems can be registered by marking them with the `[ext]` attribute
+Unit.lean:206:4: error: unknown free variable `_fvar.15460`
+[exit 1]
+```
+
+1 0 0 8
+## lean
+2 1 4 448
+lean
+```
+Unit.lean:211:4: error: `conv_rhs` is not a field of structure `MulEquiv`
+Unit.lean:208:2: error: could not synthesize default value for field 'left_inv' of 'MulEquiv' using tactics
+Unit.lean:208:2: error: No applicable extensionality theorem found for type
+  (ker f).Quotient
+
+Note: Extensionality theorems can be registered by marking them with the `[ext]` attribute
+Unit.lean:206:4: error: unknown free variable `_fvar.15460`
+[exit 1]
+```
+
+1 0 0 8
+## lean

@@ -12,6 +12,7 @@ import ./Scenario.bend as Sc
 import ./Stage.bend as Sg
 import ./Drive.bend as Dr
 import ./Evals.bend as Ev
+import ./Act.bend as Ac
 
 # bend-ops: the box operations, run from this machine (2026-10-14, the plan
 # "all logic in Bend, shell only a thin shim"; docs in bend/Box/*.bend).
@@ -39,8 +40,10 @@ import ./Evals.bend as Ev
 #   bend-ops evals CFG  a run's evals from a tracked config (tools/evals/run3.cfg), skipping
 #                       what is done, then paired by prompt with exact McNemar (bend/Box/Evals.bend:
 #                       eval-run3.sh, eval-run2.sh)
+#   bend-ops act setup|ckpt|check|start|pull|ensure HOST PORT ... | --dry-run OUT | procs NPROC [CPU_MAX]
+#                       ana's act rounds on a box (bend/Box/Act.bend: act-box.sh, act-restart.sh)
 #
-# Later phases add act, guard, handover, move and unit.  The `probe`
+# Later phases add guard, handover, move and unit.  The `probe`
 # subcommands run one primitive each,
 # for a person checking a box or a fixture by hand:
 #
@@ -122,7 +125,8 @@ def ops.usage() -> String:
     ++ "       bend-ops stage box HOST PORT | push NAME RUN HOST PORT | restage HOST PORT CKPT STAGE... | shards PLAN\n"
     ++ "       bend-ops dense-identity OUT_DIR [TRAINER]\n"
     ++ "       bend-ops stage next | stage raw mix|mixnew FILE...|build K|push K HOST PORT | feed HOST PORT STAGES [FIRST] [LAST]\n"
-    ++ "       bend-ops evals CFG"
+    ++ "       bend-ops evals CFG\n"
+    ++ "       bend-ops act setup|ckpt|check|start|pull|ensure HOST PORT ... | --dry-run OUT | procs NPROC [CPU_MAX]"
 
 def ops.args(xs: List<String>) -> IO(Unit):
   match xs:
@@ -146,6 +150,8 @@ def ops.args(xs: List<String>) -> IO(Unit):
       Sg.stg.main(rest)
     case "dense-identity" <> rest:
       Sg.stg.ident.main(rest)
+    case "act" <> rest:
+      Ac.acb.main(rest)
     case _:
       IO.die(Unit, 2, ops.usage())
 

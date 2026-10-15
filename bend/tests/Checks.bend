@@ -500,7 +500,14 @@ def chk.tests() -> List<&2, ChkTest>:
    # decisions on run 3's chain.log, s2.log and sha256 listings (the per-poll
    # line and the eval line byte for byte), follow, verify, HOLD, the watch's
    # due/silent/safe; bend-sim's ssh reading and the scenarios' event lines
-   ChkTest{"chain.bend", False{}, ROks{45n}}]
+   ChkTest{"chain.bend", False{}, ROks{45n}},
+   # the act round's pure parts (bend/Box/Act.bend, ActBox.bend, CorpusV2/AgentAct.bend,
+   # bend-episode langs) against act-box.sh, agent-act.sh, s2-driver.sh and move.sh: PROCS
+   # under a cgroup quota, the check's verdict on run 3's check.txt, the per-language table on
+   # round 1's eplog head, setup's unit and tree rules, the frame and pair cuts, agent-act's
+   # command lines; reads fixtures/act (compiled: the interpreter's stack is too small for the
+   # eplog's parse)
+   ChkTest{"act.bend", True{}, ROks{45n}}]
 
 def chk.rule(r: ChkRule, +out: List<&2, U32>) -> Bool:
   match r:

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# 2026-10-15: ported to Bend as `bend-ops act setup|ckpt|check|start|pull|ensure` (bend/Box/Act.bend;
+# act-restart.sh's `ensure` too); kept live until that passes the sandbox box's ssh test (Phase 1a).
 # act-box.sh (2026-10-07): run 3's turn-based work on the rented box, beside
 # the trainer (docs/AGENT.md). ana's own episodes (tools/corpus-v2/agent-act.sh)
 # and the box evals need ana's CPU decoder, the checkers (ghc with its

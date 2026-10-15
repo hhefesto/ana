@@ -11,6 +11,8 @@ import ../CorpusV2/Eval.bend as Ev
 #   bend-episode text LOG     each record's text (the episode as ana read it), each followed by NUL
 #   bend-episode why LOG K    a line a record: N END WHY TRIES CALLS (WHY `ok`, or why the record
 #                             is not a training episode under at most K calls)
+#   bend-episode langs LOG K  a line a language: LANG TOOL_ERRORS ANSWERED EPISODES (act-box.sh
+#                             check's table, below)
 #   bend-episode accept K CAP OUT LOG...   the episodes that train, at most CAP a unit, as
 #                             each language's transcripts (below)
 #   bend-episode fixed K CAP OUT LOG...    the unsolved ones with the unit's own fix (below)
@@ -469,6 +471,209 @@ def et.fixed(+k: Nat, +cap: Nat, +out: String, ps: List<String>) -> IO(Unit):
     IO.print("fixed: " ++ Nat.show(List.length(&2, E.EpRec, rs)) ++ " episodes; " ++ Nat.show(n)
       ++ " fixed episodes (at most the cap a unit) into " ++ out ++ "/LANG-fix")
 
+# The checkers' table ----------------------------------------------------------------------
+#
+#   bend-episode langs LOG K
+#
+# act-box.sh check's table (2026-10-13; the plan's Phase 3), which decides
+# whether every language's checker answers ana:
+#
+#   paste <(grep -a '^lang=' LOG) <(bend-episode why LOG K) \
+#     | awk '{ n[$1]++; if ($3 == "tool-error") e[$1]++; if ($6 > 0) a[$1]++ }
+#            END { for (l in n) print l, e[l] + 0, a[l] + 0, n[l] }'
+#
+# A line a language, `LANG TOOL_ERRORS ANSWERED EPISODES`: LANG is the
+# metadata line as grep printed it (`lang=haskell`), TOOL_ERRORS the episodes
+# that ended `tool-error`, ANSWERED those with a call the tool answered (why's
+# CALLS > 0).  It is that pipeline's own reading: every line of LOG that
+# starts with `lang=` beside the why line of the same position (paste: a TAB
+# between, a side that ran out empty), cut into awk's fields (runs of
+# blanks), $1 the key, $3 compared as a string, $6 > 0 as awk compares (a
+# number when it looks like one, else as a string against "0").  Run 3's act
+# round 1 (r1's eplog, K 4) gives exactly the pipeline's lines.
+#
+# Differences, on purpose: the lines come sorted bytewise by LANG (awk's
+# `for (l in n)` order is its hash's: gawk's here, mawk's on the box); a log
+# that does not read exits 1 (`why` did, and the pipeline went on with the
+# grep's side alone: every language 0 tool errors, 0 answered, and the check
+# passed); a log whose `lang=` lines are not one a record says so on stderr
+# (the table pairs them by position, as paste did).
+
+type EtL is Data:
+  EtL{key: List<&2, U32>, e: Nat, a: Nat, n: Nat}
+
+def et.lg.sep(+c: U32) -> Bool:
+  Bool.or(Bool.or(U32.is_eq(c, 32), U32.is_eq(c, 9)), U32.is_eq(c, 10))
+
+def et.lg.put(+w: List<&2, U32>, +ws: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  Bool.pick(List<&2, List<&2, U32>>, List.is_empty(&2, U32, w), ws, List.reverse(&2, U32, w) <> ws)
+
+def et.lg.fields.go(xs: List<&2, U32>, +cur: List<&2, U32>, +acc: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match xs:
+    case Nil{}:
+      List.reverse(&2, List<&2, U32>, et.lg.put(cur, acc))
+    case +c <> t:
+      +sp = et.lg.sep(c)
+      et.lg.fields.go(t, Bool.pick(List<&2, U32>, sp, Nil{}, c <> cur), Bool.pick(List<&2, List<&2, U32>>, sp, et.lg.put(cur, acc), acc))
+
+# awk's fields under its default FS (runs of spaces, tabs and newlines)
+def et.lg.fields(+xs: List<&2, U32>) -> List<&2, List<&2, U32>>:
+  et.lg.fields.go(xs, Nil{}, Nil{})
+
+def et.lg.nth(xs: List<&2, List<&2, U32>>, +n: Nat) -> List<&2, U32>:
+  Maybe.default(&2, List<&2, U32>, List.get(&2, List<&2, U32>, xs, n), Nil{})
+
+def et.lg.digit(+c: U32) -> Bool:
+  Bool.and(U32.is_le(48, c), U32.is_le(c, 57))
+
+def et.lg.lead.go(xs: List<&2, U32>, +n: Nat, at: Bool) -> Nat:
+  match xs at:
+    case h <> +t True{}:
+      et.lg.lead.go(t, 1n+n, et.lg.digit(Maybe.default(&2, U32, List.head(&2, U32, t), 0)))
+    case _ _:
+      n
+
+# how many digits xs starts with
+def et.lg.lead(+xs: List<&2, U32>) -> Nat:
+  et.lg.lead.go(xs, 0n, et.lg.digit(Maybe.default(&2, U32, List.head(&2, U32, xs), 0)))
+
+def et.lg.nonzero(xs: List<&2, U32>) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case +c <> t:
+      Bool.or(Bool.and(et.lg.digit(c), U32.is_ne(c, 48)), et.lg.nonzero(t))
+
+def et.lg.sign(+xs: List<&2, U32>) -> Nat:
+  Bool.pick(Nat, Bool.or(S.head.is(xs, 43), S.head.is(xs, 45)), 1n, 0n)
+
+# the exponent's length at the head of xs: [eE][+-]?digits, or 0
+def et.lg.exp(+xs: List<&2, U32>) -> Nat:
+  +r = List.drop(&2, U32, xs, 1n)
+  +s = et.lg.sign(r)
+  +d = et.lg.lead(List.drop(&2, U32, r, s))
+  Bool.pick(Nat, Bool.and(Bool.or(S.head.is(xs, 101), S.head.is(xs, 69)), Nat.is_lt(0n, d)), Nat.add(Nat.add(1n, s), d), 0n)
+
+# the length of the mantissa [+-]?digits[.digits] at the head of xs (0: none)
+def et.lg.mant(+xs: List<&2, U32>) -> Nat:
+  +s = et.lg.sign(xs)
+  +a = List.drop(&2, U32, xs, s)
+  +d1 = et.lg.lead(a)
+  +b = List.drop(&2, U32, a, d1)
+  +dot = S.head.is(b, 46)
+  +d2 = Bool.pick(Nat, dot, et.lg.lead(List.drop(&2, U32, b, 1n)), 0n)
+  Bool.pick(Nat, Nat.is_eq(Nat.add(d1, d2), 0n), 0n, Nat.add(Nat.add(s, d1), Bool.pick(Nat, dot, Nat.add(1n, d2), 0n)))
+
+# does a field look like a number to awk (the whole field)
+def et.lg.numeric(+xs: List<&2, U32>) -> Bool:
+  +m = et.lg.mant(xs)
+  Bool.and(Nat.is_lt(0n, m), Nat.is_eq(Nat.add(m, et.lg.exp(List.drop(&2, U32, xs, m))), S.len(xs)))
+
+# bytewise a <= b
+def et.lg.le(a: List<&2, U32>, b: List<&2, U32>) -> Bool:
+  match a b:
+    case Nil{} _:
+      True{}
+    case _ Nil{}:
+      False{}
+    case +x <> xt +y <> yt:
+      Bool.or(U32.is_lt(x, y), Bool.and(U32.is_eq(x, y), et.lg.le(xt, yt)))
+
+# awk's `$6 > 0`: a missing field is 0; a number, its value; else a string
+# against "0"
+def et.lg.pos(+f: List<&2, U32>) -> Bool:
+  Bool.pick(Bool, List.is_empty(&2, U32, f), False{},
+    Bool.pick(Bool, et.lg.numeric(f), Bool.and(Bool.not(S.head.is(f, 45)), et.lg.nonzero(List.take(&2, U32, f, et.lg.mant(f)))),
+      Bool.not(et.lg.le(f, [48]))))
+
+def et.lg.bump(ls: List<&2, EtL>, +k: List<&2, U32>, +e: Nat, +a: Nat) -> List<&2, EtL>:
+  match ls:
+    case Nil{}:
+      [EtL{k, e, a, 1n}]
+    case EtL{+x, +xe, +xa, +xn} <> +t:
+      Bool.pick(List<&2, EtL>, S.eq(x, k), EtL{x, Nat.add(xe, e), Nat.add(xa, a), 1n+xn} <> t, EtL{x, xe, xa, xn} <> et.lg.bump(t, k, e, a))
+
+# one pasted line counted
+def et.lg.line(+l: List<&2, U32>, ls: List<&2, EtL>) -> List<&2, EtL>:
+  +fs = et.lg.fields(l)
+  et.lg.bump(ls, et.lg.nth(fs, 0n), Bool.pick(Nat, S.eq(et.lg.nth(fs, 2n), S.b("tool-error")), 1n, 0n),
+    Bool.pick(Nat, et.lg.pos(et.lg.nth(fs, 5n)), 1n, 0n))
+
+def et.lg.count(ps: List<&2, List<&2, U32>>, ls: List<&2, EtL>) -> List<&2, EtL>:
+  match ps:
+    case Nil{}:
+      ls
+    case +p <> t:
+      et.lg.count(t, et.lg.line(p, ls))
+
+# paste: the two sides' lines joined by a TAB (a side that ran out is empty)
+def et.lg.paste(gs: List<&2, List<&2, U32>>, ws: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match gs ws:
+    case Nil{} Nil{}:
+      Nil{}
+    case +g <> gt Nil{}:
+      List.append(&2, U32, g, [9]) <> et.lg.paste(gt, Nil{})
+    case Nil{} +w <> wt:
+      (9 <> w) <> et.lg.paste(Nil{}, wt)
+    case +g <> gt +w <> wt:
+      List.concat(&2, U32, [g, [9], w]) <> et.lg.paste(gt, wt)
+
+# grep -a '^lang=': the log's lines that start with lang=
+def et.lg.grep(ls: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> t:
+      +rest = et.lg.grep(t)
+      Bool.pick(List<&2, List<&2, U32>>, S.prefix(l, S.b("lang=")), l <> rest, rest)
+
+def et.lg.whys(rs: List<&2, E.EpRec>, +i: Nat, +k: Nat) -> List<&2, List<&2, U32>>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case +r <> t:
+      S.b(et.why.line(i, k, r)) <> et.lg.whys(t, 1n+i, k)
+
+def et.lg.key.le(a: EtL, b: EtL) -> Bool:
+  match a b:
+    case EtL{+x, ae, aa, an} EtL{+y, be, ba, bn}:
+      et.lg.le(x, y)
+
+def et.lg.text(ls: List<&2, EtL>) -> List<&2, U32>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case EtL{+k, +e, +a, +n} <> t:
+      List.concat(&2, U32, [k, S.b(" " ++ Nat.show(e) ++ " " ++ Nat.show(a) ++ " " ++ Nat.show(n) ++ "\n"), et.lg.text(t)])
+
+# the table for a log's bytes and its records (pure; bend/tests/act.bend)
+def et.langs.of(+log: List<&2, U32>, +rs: List<&2, E.EpRec>, +k: Nat) -> List<&2, U32>:
+  +ps = et.lg.paste(et.lg.grep(S.split.lines(log)), et.lg.whys(rs, 0n, k))
+  et.lg.text(List.sort(~EtL, ~et.lg.key.le, List.reverse(&2, EtL, et.lg.count(ps, Nil{}))))
+
+def et.lg.warn(same: Bool, +g: Nat, +n: Nat) -> IO(Unit):
+  match same:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      IO.print_err("bend-episode langs: " ++ Nat.show(g) ++ " lang= lines beside " ++ Nat.show(n) ++ " records: paired by position, as paste did")
+
+def et.langs.with(+log: List<&2, U32>, +k: Nat, m: Maybe<&2, List<&2, E.EpRec>>) -> IO(Unit):
+  match m:
+    case None{}:
+      IO.die(Unit, 1, "bend-episode: not a log, or a record is cut short")
+    case Some{+rs}:
+      +g = List.length(&2, List<&2, U32>, et.lg.grep(S.split.lines(log)))
+      +n = List.length(&2, E.EpRec, rs)
+      do IO<Unit>:
+        et.lg.warn(Nat.is_eq(g, n), g, n)
+        IO.write(S.str(et.langs.of(log, rs, k)))
+
+def et.langs.run(+path: String, +k: Nat) -> IO(Unit):
+  do IO<Unit>:
+    +xs : List<&2, U32> <- S.read(path)
+    et.langs.with(xs, k, E.ep.get(xs))
+
 def et.read(+mode: Nat, +k: Nat, +path: String) -> IO(Unit):
   do IO<Unit>:
     xs : List<&2, U32> <- S.read(path)
@@ -480,12 +685,14 @@ def et.args(xs: List<String>) -> IO(Unit):
       et.read(0n, 0n, path)
     case "why" <> +path <> +k <> Nil{}:
       et.read(1n, S.env.nat.got(Nat.read(k), 4n), path)
+    case "langs" <> +path <> +k <> Nil{}:
+      et.langs.run(path, S.env.nat.got(Nat.read(k), 4n))
     case "accept" <> +k <> +cap <> +out <> logs:
       et.accept(S.env.nat.got(Nat.read(k), 4n), S.env.nat.got(Nat.read(cap), 2n), out, logs)
     case "fixed" <> +k <> +cap <> +out <> logs:
       et.fixed(S.env.nat.got(Nat.read(k), 4n), S.env.nat.got(Nat.read(cap), 2n), out, logs)
     case _:
-      IO.die(Unit, 2, "usage: bend-episode text LOG | why LOG K | accept K CAP OUT LOG... | fixed K CAP OUT LOG...")
+      IO.die(Unit, 2, "usage: bend-episode text LOG | why LOG K | langs LOG K | accept K CAP OUT LOG... | fixed K CAP OUT LOG...")
 
 def main() -> IO(Unit):
   do IO<Unit>:

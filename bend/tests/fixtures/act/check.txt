@@ -1,0 +1,15 @@
+  haskell direct, solved within 1:0/2 2:0/2 3:0/2 4:0/2
+  haskell repair, solved within 1:0/2 2:0/2 3:0/2 4:0/2
+  agda direct, solved within 1:0/2 2:0/2 3:0/2 4:0/2
+  agda repair, solved within 1:2/2 2:2/2 3:2/2 4:2/2
+  lean direct, solved within 1:0/2 2:0/2 3:0/2 4:0/2
+  lean repair, solved within 1:0/2 2:0/2 3:0/2 4:0/2
+  nix direct, solved within 1:0/0 2:0/0 3:0/0 4:0/0
+  nix repair, solved within 1:2/2 2:2/2 3:2/2 4:2/2
+  bend direct, solved within 1:0/2 2:0/2 3:0/2 4:0/2
+  bend repair, solved within 1:0/2 2:0/2 3:0/2 4:0/2
+all solved 4/18
+render law 18/18
+fixed: bend 2 into run/v3/act/check/accepted/bend-fix/transcripts.train.nul; episodes by reason: no-call 2 ok 2
+fixed: 18 episodes; 6 fixed episodes (at most the cap a unit) into run/v3/act/check/accepted/LANG-fix
+[2026-10-12 12:50:08 UTC-6] agent-act: done

@@ -17,6 +17,7 @@ import ./CorpusV2/S2.bend as S2
 import ./CorpusV2/ActSet.bend as As2
 import ./CorpusV2/Steady.bend as Sm
 import ./CorpusV2/Recipes.bend as Rc
+import ./CorpusV2/AgentAct.bend as Aa
 
 # bend-corpus-v2: corpus v2's tools (docs/CORPUS-V2.md), one subcommand each,
 # ported from the Python they replaced, each byte-identical to it on the
@@ -43,6 +44,7 @@ import ./CorpusV2/Recipes.bend as Rc
 #   replay-filler DIR SRC NEW...  drop-repos VAULT SRC DST  insert-stage STAGES LOG AFTER LINE...
 #   vault-sample SRC DST            the run scripts' steps   (CorpusV2/Steps.bend)
 #   agent-tool TASK  agent-eval CKPT DIR FORMAT [K]   the tool loop's checker; E5, agent-act   (CorpusV2/Agent.bend)
+#   agent-act CKPT DIR [K]          ana's own episodes on train units, accepted and fixed   (CorpusV2/AgentAct.bend)
 #   agent-stats DIR [DIR2]  compare A B   E5's statistics; E1 or behaviour paired by prompt   (CorpusV2/Stats.bend)
 #   behaviour tasks [--check] [LANG...] | run CKPT|REF TAG [LANG...] | selftest [LANG...]
 #                                   the behaviour test   (CorpusV2/Behaviour.bend)
@@ -226,6 +228,8 @@ def c2.run(k: Nat, +c: String, xs: List<String>) -> IO(Unit):
 
 def c2.args(xs: List<String>) -> IO(Unit):
   match xs:
+    case "agent-act" <> more:
+      Aa.aac.main(more)
     case "keyed-order" <> more:
       Ko.kor.main(more)
     case "s2" <> more:
