@@ -16,7 +16,7 @@ checker.  A checkpoint's score is the number of tasks that pass.
 The Haskell tasks moved here from run/v2/evalruns/behaviour/ (untracked).
 Their prompts, sigs, pres, tests and refs are byte-identical to the old ones,
 and re-checking the old v2-step40000 and v2-step53880 outputs through this
-run.sh gives the old verdicts exactly.  The old results stay in that
+run.sh (now `behaviour run`, below) gives the old verdicts exactly.  The old results stay in that
 directory (they were generated with bend-generate; runs here use ana, and
 ana's greedy answers to the Haskell tasks are byte-identical to
 bend-generate's for both checkpoints).
@@ -77,7 +77,7 @@ Layout
   tasks/LANG/NAME/kind     `type` or `proposition` (the Type turn's first word)
   refs/LANG/NAME           the reference answer followed by the closing fence
   Check.lean               the Lean check's driver
-  tasks.sh, run.sh, selftest.sh   the shell originals of `behaviour`
+  tasks.sh, run.sh, selftest.sh   the shell originals of `behaviour` (unwired 2026-10-14)
   results/TAG/LANG/        verdicts.tsv (NAME<TAB>VERDICT, sorted), summary.txt,
                            NAME.out (ana's stdout: header line, prompt, answer),
                            NAME.err (ana's stderr); rebuilt by a check and not

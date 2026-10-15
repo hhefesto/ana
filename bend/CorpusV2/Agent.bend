@@ -432,7 +432,8 @@ def ea.rep(qs: List<&2, Ev.EvQ>, +n: Nat) -> List<&2, Ev.EvQ>:
       ea.rep.go(q, n, ea.rep(more, n))
 
 # The settings agent-eval (E5: greedy, the held-out units, one seed, check
-# tags from 100000) and agent-act (tools/corpus-v2/agent-act.sh: ana's own
+# tags from 100000) and agent-act (`bend-corpus-v2 agent-act`, AgentAct.bend;
+# tools/corpus-v2/agent-act.sh until its unwiring on 2026-10-15: ana's own
 # episodes on train units, sampled, several seeds, tags from 200000) differ
 # in: TEMPERATURE (0), AGENT_SEEDS (1), AGENT_TAG (100000), AGENT_RECORDS
 # (holdout, Eval.bend `ev.holdout`) and EVALSET.

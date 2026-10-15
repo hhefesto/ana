@@ -30,7 +30,8 @@ sampling is its unfold into the trie of continuations (`bend/Spec/Trie.bend`).
 | `bend/Pack.bend`, `bend/Prepare.bend`, `bend/PlanSegment.bend` | the corpus tools, byte-identical to the Haskell ones they replaced (`docs/BEND-CORPUS-TOOLS.md`) |
 | `bend/Extract.bend`, `PlanCorpus`, `CodeEvals`, `Mix`, `Push` | the corpus drivers: extraction, shards and plan, eval corpora, mixing, box transfers (they run programs through `bend/Sys.bend`) |
 | `bend/Units.bend`, `Check.bend` + `Check/`, `Transcript.bend`, `Transcripts.bend`, `Windows.bend` | the transcript corpus: units, the real checkers, rendering, the stages, one-context windows (`docs/TRANSCRIPT-FORMAT.md`) |
-| `bend/gpu/` | GPU conformance programs, box scripts and the logs of the runs |
+| `bend/Box/` | a run's operations: `bend-ops` from this machine (stage, chain, watch, feed, act, evals, the sandbox, the shell lint) and `bend-box`, the driver on the box (`HANDOFF.md`, "Operating a run with the Bend tools") |
+| `bend/gpu/` | GPU conformance programs, the logs of the runs, the box env files, and `fp.sh` (bend-box's fallback); the old box scripts are unwired |
 | `deploy/check/` | `Harness.lean` (the Lean checker's driver, the one program only Lean can be) and the harness GHC's package list |
 | `weights/` | the two tokenizers: `enwiki-fineweb-32k.bpe` (v2/v3) and `code32k.bpe` (code) |
 | `references/` | the papers the specification formalizes |

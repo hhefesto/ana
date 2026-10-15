@@ -628,7 +628,7 @@ type EvLu is Data:
 
 # EVALSET_SRC (run/v2/transcripts): where the transcripts are cut from,
 # SRC/LANG/transcripts.holdout.nul (agent-act: a sample of train units,
-# tools/corpus-v2/actset.sh)
+# `bend-corpus-v2 actset`; tools/corpus-v2/actset.sh until 2026-10-15)
 def ev.load.units(ls: List<&2, String>, acc: List<&2, EvLu>) -> IO(List<&2, EvLu>):
   match ls:
     case Nil{}:

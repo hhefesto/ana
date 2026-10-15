@@ -149,7 +149,7 @@ Term` is only ever the assistant's best answer.
   its verify, the other verify, repair m2. `bend/tests/transcript.bend` (in
   `bend-tests`): each shape's turns, the direct shape byte for byte, every
   Term the original, distinct presentations, Nix never direct.
-  Rendered (`tools/corpus-v2/render.sh` from `bend-corpus-v2 pool`'s units, train):
+  Rendered (`tools/corpus-v2/render.sh`, unwired 2026-10-15: `bend-corpus-v2 render`; from `bend-corpus-v2 pool`'s units, train):
   Bend 300,759 transcripts from 80,748 units (263 MB), Haskell 115,698 from
   57,858 (123 MB), Agda 67,512 from 33,770 (66 MB), Lean 65,644 from 32,856
   (82 MB), Nix 25,016 from 12,572 (36 MB); no text twice.
@@ -159,7 +159,7 @@ Term` is only ever the assistant's best answer.
   Python is deleted), not held out (its unit scores 764): 3,086 units, every
   one checked, 2,743 after clean (23 exact and 320 near duplicates), 10,431
   transcripts appended to Bend's train (now 311,190), its files to the
-  filler. `windows.sh` interleaves `bend:124` (was 120) so the five
+  filler. `windows.sh` (unwired 2026-10-15: `bend-corpus-v2 windows`) interleaves `bend:124` (was 120) so the five
   languages still run dry together (~2,510 rounds each). Measured on 600
   units a language at COPIES 2: every unit gives a direct transcript and most
   a repair; fill and verify 3–5% each; verify passes 41–54% (Nix 300/600).
@@ -241,7 +241,7 @@ from the same fresh start (30% and 60% raw), judged by E1–E3 below (~$1.30 on 
 
 The raw mix (2026-10-05) is run/v2/raw's languages plus every run/v2/raw-*
  file, each weighted by its document count against run/v2/raw's Haskell
-(`tools/corpus-v2/rawshards.sh mix`; unwired 2026-10-14, run 3 mixed with steady-mix.sh). Its sources must not share an id:
+(`tools/corpus-v2/rawshards.sh mix`; unwired 2026-10-14, run 3 mixed with steady-mix.sh, itself unwired 2026-10-15 for `bend-corpus-v2 steady-mix`). Its sources must not share an id:
 `run/v2/dedupe-ids.sh` drops a Stack v1 file whose repository path is already
 in run/v2/raw (1,104: older versions of files the pool has; identical content
 was dropped at the build) or earlier in the Stack (6), and renames the 15
@@ -298,7 +298,7 @@ language (Nix: 40 repair): the direct prompt is the same text in format 1 and
 for run 1 (the ask alone, the mutant under `## Term`). `bend-corpus-v2 gen CKPT
 DIR FORMAT` answers (greedy, 100 tokens, bend-generate on the CPU) and
 `bend-corpus-v2 check DIR` lifts each answer into its held-out unit and runs the
-real checker (Bend per source tree). E3: `tools/corpus-v2/evals.sh` builds
+real checker (Bend per source tree). E3: `tools/corpus-v2/evals.sh` (unwired 2026-10-15: `bend-corpus-v2 evals`, byte-identical) builds
 `run/eval/v2-tr-LANG.corpus` (held-out format 2 transcripts) and
 `run/eval/v2-vault-LANG.corpus` (~2 MB of each vault language, up to 5 files a
 repository); run 1's fp100m-8803, w1-19080, w3-40731 and last checkpoint are
@@ -357,6 +357,7 @@ what format 2 targets. The post-raw checkpoints are not fair on these units
 - **Run 2's v2-step45000** (84%, the learning rate down to 2.0e-5 from 4.7e-5 at 40000) scores 22/99: direct 9/50 (Agda 1/4, Bend 1/4, Haskell 5/17, Lean 2/25) and repair 13/49 (Agda 2/3, Bend 2/2, Haskell 8/14, Lean 1/21, Nix 0/9). Most of the drop from 26 is Haskell direct (8 → 5): at 99 prompts, noise.
 - **Logs:** `run/v2/evalruns/both-v2-step{15000,20000,21000,40000,45000}.check.log`, run by
   `run/v2/evalruns/run2-e1.sh STEP` (`eval-run2.sh STEP` runs E1, the behaviour test and E5).
+  Since 2026-10-15 the same evals are `TAGS=v2-stepSTEP bend-ops evals tools/evals/run2.cfg`.
 
 E4 (verdict calibration) is not built: it needs the probability of `[exit 0]`
 after a verify prompt, which the trainer's eval does not print.

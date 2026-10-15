@@ -18,6 +18,6 @@ The config: one directive a line, `#` starts a comment.
 
 Configs:
 
-  bend-run3-replay.cfg   run 3's Bend inputs (tools/corpus-v2/raw-new3.sh, 2026-10-07) from its own
+  bend-run3-replay.cfg   run 3's Bend inputs (tools/corpus-v2/raw-new3.sh, 2026-10-07; unwired 2026-10-14) from its own
                          pinned clones, without fetch; reproduces run/v2/raw-new3's Bend outputs
   bend-run4.cfg          run 4's: the 19 new repositories, upstream since 1d895ca0, growth of run 3's 43

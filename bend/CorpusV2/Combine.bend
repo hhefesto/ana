@@ -7,8 +7,9 @@ import ./Lib.bend as L
 # (docs/CORPUS-V2.md, C5) as one run directory and plan (the old combine.py,
 # output for output).
 #
-# The transcript windows' shards (T_DIR, windows.sh's) and the raw shards
-# (each R_DIR, rawshards.sh's), each in its own plan's order, are
+# The transcript windows' shards (T_DIR, `bend-corpus-v2 windows`'s; windows.sh's
+# until 2026-10-15) and the raw shards (each R_DIR, `bend-corpus-v2
+# raw-build`'s; rawshards.sh's until 2026-10-15), each in its own plan's order, are
 # interleaved: the next shard is raw while raw's training windows are under
 # RAW_SHARE of all so far, cr < RAW_SHARE * (ct + cr + 1) (and raw has a
 # shard left), else transcripts; the mix ends where the transcripts end, or

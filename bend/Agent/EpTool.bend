@@ -290,7 +290,8 @@ def et.accept(+k: Nat, +cap: Nat, +out: String, ps: List<String>) -> IO(Unit):
 # no checked Term, one whose unit's original has an escape hatch, or one
 # over the window at every j gives none; at most CAP a unit,
 # in log order. The records are run/v2/results/LANG.R.nul, R AGENT_RECORDS
-# (holdout unless set; agent-act.sh: train), read for the log's units only.
+# (holdout unless set; `bend-corpus-v2 agent-act`, agent-act.sh until
+# 2026-10-15: train), read for the log's units only.
 # OUT/LANG-fix/transcripts.train.nul gets each of LANG's as
 # `UNIT/fixed-N\0TEXT\0` (N its job).
 

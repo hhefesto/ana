@@ -32,6 +32,8 @@ import ./Local.bend as Lc
 #   behaviour-langs LANG...  the languages run and compared (haskell, as eval-run3.sh)
 #   pair A B               a comparison
 #   report FILE            the comparisons also written there
+#   wait LOG MINUTES       a tag with an eval to run waits, up to MINUTES, until LOG (the
+#                          chain's chain.log) says `pulled NAME.checkpoint` (eval-run2.sh's wait)
 #
 # An eval already done is skipped, as eval-run3.sh skipped it: behaviour when
 # each language has its verdicts.tsv (or, Haskell alone, the legacy one), E1

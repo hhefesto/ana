@@ -997,7 +997,7 @@ def acb.records.send(+c: AcbCx, +b: Rm.RmtBox, +tmp: String) -> IO(List<&2, List
     +as : String <- acb.actset()
     acb.mkdirs(b, [S.parent(acb.at(c, as))])
     acb.send(b, Nil{}, [acb.at(c, as)], acb.to(b, S.parent(acb.at(c, as)) ++ "/"))
-    # S2's episode windows take their gaps' filler from here (tools/corpus-v2/s2.sh)
+    # S2's episode windows take their gaps' filler from here (`bend-corpus-v2 s2`; tools/corpus-v2/s2.sh until 2026-10-15)
     acb.send(b, Nil{}, [acb.at(c, "run/v3/s2fill")], acb.to(b, acb.at(c, "run/v3") ++ "/"))
     +t1 : List<&2, String> <- acb.tr.glob(c, "transcripts.holdout.nul")
     +t2 : List<&2, String> <- acb.tr.glob(c, "results.holdout.nul")

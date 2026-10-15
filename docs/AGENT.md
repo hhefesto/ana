@@ -91,7 +91,7 @@ target weighs 1 and the run logs as before.
 - A micro-batch whose weights sum to 0 would give NaN; a transcript window
   cannot (its first target after BOS is filler or EOS, weight 1).
 
-**The verify shape is dropped** (`tools/corpus-v2/windows.sh`): its target
+**The verify shape is dropped** (`tools/corpus-v2/windows.sh`, unwired 2026-10-15: `bend-corpus-v2 windows`): its target
 was the checker's own turn. 46,806 of the 585,060 train transcripts (half of
 Nix's), leaving 538,254; run/v2/T is rebuilt from
 `run/v2/transcripts-nv` (the old T is `run/v2/T-with-verify`). A calibrated

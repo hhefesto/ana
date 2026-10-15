@@ -7,7 +7,9 @@ import ./Lib.bend as L
 # Steps: what the chain's shell scripts once computed in inline Python
 # (bend/gpu/raw-driver.sh, credit-watch.sh, raw-stage.sh, next-stage.sh;
 # tools/corpus-v2/restage-ns.sh (unwired 2026-10-14), evals.sh) and bend/gpu/insert-stage.py, as
-# bend-corpus-v2 subcommands.  Each `st.<name>(args)` is one subcommand (args:
+# bend-corpus-v2 subcommands.  Those scripts were all unwired by 2026-10-15; bend-ops
+# (bend/Box/Drive.bend, Vast.bend) and bend-corpus-v2 evals (Recipes.bend) use these steps now.
+# Each `st.<name>(args)` is one subcommand (args:
 # what follows its name) and gives what the Python gave, byte for byte:
 #
 #   credit [MIN]                  the top-level "credit" of `vastai show user --raw` (stdin), as
