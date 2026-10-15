@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-14: ported to Bend (shell→Bend port, phase 5): `bend-corpus-v2 behaviour run` (bend/CorpusV2/Behaviour.bend), byte-identical on every tracked result; kept for reference
+exit 2
 # run.sh CKPT TAG [LANG...]: greedy answers of CKPT to every task of each LANG
 # (haskell, lean, agda; all three by default), each then checked against its
 # tests.  CKPT REF is the control: the reference answers in refs/ go through

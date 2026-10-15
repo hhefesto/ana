@@ -2,7 +2,7 @@ import Lean
 open Lean Elab
 
 /-!
-The Lean side of run.sh's behaviour check:
+The Lean side of the behaviour check (bend-corpus-v2 behaviour run):
 
   LEAN_PATH=… lean --run Check.lean FILE CUT
 

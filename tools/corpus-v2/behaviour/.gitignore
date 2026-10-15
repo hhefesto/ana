@@ -1,6 +1,6 @@
 # A run keeps its outputs (NAME.out, ana's NAME.err), verdicts.tsv and
 # summary.txt; everything else under results/ is rebuilt from the outputs by
-# CHECK_ONLY=1 run.sh CKPT TAG LANG.
+# CHECK_ONLY=1 bend-corpus-v2 behaviour run CKPT TAG LANG.
 results/**/build/
 results/**/*.out.tmp
 results/**/*.body

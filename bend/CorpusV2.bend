@@ -10,6 +10,7 @@ import ./CorpusV2/Eval.bend as Ev
 import ./CorpusV2/Steps.bend as St
 import ./CorpusV2/Agent.bend as Ea
 import ./CorpusV2/Stats.bend as As
+import ./CorpusV2/Behaviour.bend as Bh
 
 # bend-corpus-v2: corpus v2's tools (docs/CORPUS-V2.md), one subcommand each,
 # ported from the Python they replaced, each byte-identical to it on the
@@ -37,6 +38,8 @@ import ./CorpusV2/Stats.bend as As
 #   vault-sample SRC DST            the run scripts' steps   (CorpusV2/Steps.bend)
 #   agent-tool TASK  agent-eval CKPT DIR FORMAT [K]   the tool loop's checker; E5, agent-act   (CorpusV2/Agent.bend)
 #   agent-stats DIR [DIR2]  compare A B   E5's statistics; E1 or behaviour paired by prompt   (CorpusV2/Stats.bend)
+#   behaviour tasks [--check] [LANG...] | run CKPT|REF TAG [LANG...] | selftest [LANG...]
+#                                   the behaviour test   (CorpusV2/Behaviour.bend)
 
 # A record stream ---------------------------------------------------------------
 #
@@ -124,7 +127,8 @@ def c2.code(+c: String) -> Nat:
   Bool.pick(Nat, String.eq(c, "credit"), 16n, Bool.pick(Nat, String.eq(c, "credit-ok"), 17n, Bool.pick(Nat, String.eq(c, "split-lang"), 18n,
   Bool.pick(Nat, String.eq(c, "nul-jsonl"), 19n, Bool.pick(Nat, String.eq(c, "per"), 20n, Bool.pick(Nat, String.eq(c, "specs-mixnew"), 21n,
   Bool.pick(Nat, String.eq(c, "specs-next"), 22n, Bool.pick(Nat, String.eq(c, "replay-filler"), 23n, Bool.pick(Nat, String.eq(c, "drop-repos"), 24n,
-  Bool.pick(Nat, String.eq(c, "insert-stage"), 25n, Bool.pick(Nat, String.eq(c, "vault-sample"), 26n, Bool.pick(Nat, String.eq(c, "agent-tool"), 27n, Bool.pick(Nat, String.eq(c, "agent-eval"), 28n, Bool.pick(Nat, String.eq(c, "agent-stats"), 29n, Bool.pick(Nat, String.eq(c, "compare"), 30n, 0n))))))))))))))))))))))))))))))
+  Bool.pick(Nat, String.eq(c, "insert-stage"), 25n, Bool.pick(Nat, String.eq(c, "vault-sample"), 26n, Bool.pick(Nat, String.eq(c, "agent-tool"), 27n, Bool.pick(Nat, String.eq(c, "agent-eval"), 28n, Bool.pick(Nat, String.eq(c, "agent-stats"), 29n, Bool.pick(Nat, String.eq(c, "compare"), 30n,
+  Bool.pick(Nat, String.eq(c, "behaviour"), 31n, 0n)))))))))))))))))))))))))))))))
 
 def c2.keys.cmd(xs: List<String>) -> IO(Unit):
   match xs:
@@ -195,6 +199,8 @@ def c2.run(k: Nat, +c: String, xs: List<String>) -> IO(Unit):
       As.as.stats(xs)
     case 30n:
       As.cm.compare(xs)
+    case 31n:
+      Bh.bhv.main(xs)
     case _:
       c2.usage()
 

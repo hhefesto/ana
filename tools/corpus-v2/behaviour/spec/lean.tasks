@@ -1,5 +1,5 @@
 @@# Lean 4 behaviour tasks, checked with Lean v4.34.0-rc2 and the project's Mathlib
-@@# (run/harness/mathlib4): run.sh writes Task.lean as `import Mathlib`, the pre, the Type
+@@# (run/harness/mathlib4): behaviour run writes Task.lean as `import Mathlib`, the pre, the Type
 @@# joined to the answer by ` :=` (as bend/Agent/Tools.bend at.file does), then the tests.
 @@# A `type` task's tests are `#guard` lines (evaluated); a `proposition` task has none:
 @@# the kernel checking the proof is the test.  Format: see ../README.txt.

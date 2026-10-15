@@ -33,10 +33,6 @@ tools/corpus-v2/evals.sh
 tools/corpus-v2/windows.sh
 tools/corpus-v2/rawshards.sh
 
-# Phase 5: corpus-v2 behaviour
-tools/corpus-v2/behaviour/run.sh
-tools/corpus-v2/behaviour/selftest.sh
-tools/corpus-v2/behaviour/tasks.sh
 
 # Phase 6: the flake checks decide in Bend (bend/tests/Checks.bend); the
 # derivations keep a two-line boilerplate
@@ -49,3 +45,4 @@ flake.nix:bend-dense
 flake.nix:bend-decode-dense
 flake.nix:bend-prefill-dense
 flake.nix:bend-bulk-cpu
+flake.nix:behaviour-tasks

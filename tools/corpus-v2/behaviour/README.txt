@@ -24,22 +24,39 @@ bend-generate's for both checkpoints).
 Running
 -------
 
-  ./tasks.sh [LANG...]          spec/LANG.tasks -> tasks/LANG/ and refs/LANG/
-  ./run.sh CKPT TAG [LANG...]   generate and check (all three languages by default)
-  ./run.sh REF control [LANG]   the control: the reference answers, same checks
-  ./selftest.sh [LANG...]       known-verdict answers (see below); exits 1 on a mismatch
+The harness is `bend-corpus-v2 behaviour` (bend/CorpusV2/Behaviour.bend;
+`deploy corpus-v2 behaviour ...` or `nix run .#bend-corpus-v2 -- behaviour
+...`), run from the repository root:
 
-  e.g. from the repository root:
-  tools/corpus-v2/behaviour/run.sh run/v2/run2/out/v2-step40000.checkpoint v2-step40000 lean agda
+  behaviour tasks [LANG...]          spec/LANG.tasks -> tasks/LANG/ and refs/LANG/
+  behaviour tasks --check [LANG...]  writes nothing; exits 1 when a file under tasks/
+                                     or refs/ is not what the spec makes, or an
+                                     entry there is not in the spec
+  behaviour run CKPT TAG [LANG...]   generate and check (all three languages by default)
+  behaviour run REF control [LANG]   the control: the reference answers, same checks
+  behaviour selftest [LANG...]       known-verdict answers (see below); exits 1 on a mismatch
+
+  e.g. bend-corpus-v2 behaviour run run/v2/run2/out/v2-step40000.checkpoint v2-step40000 lean agda
+
+It is the port (2026-10-14: all logic in Bend) of tasks.sh, run.sh and
+selftest.sh, and writes every file they wrote byte for byte: the same
+tasks/ and refs/, the same verdicts.tsv and summary.txt, the same
+NAME.body/.gen/.term/.hs/.lean/.agda.  Its messages say `behaviour tasks:`
+and `behaviour run:` where the scripts said `tasks.sh:` and `run.sh:`.
+selftest's broken answers live in spec/selftest.mut (not in heredocs), and
+its `mutated:` lists follow that file's order (selftest.sh's followed bash's
+associative-array hashing).
 
 Environment: TOKENS (160), ANA (run/gcroot-ana/bin/ana), ANA_THREADS (4),
-GEN_JOBS (1 generation at a time), JOBS (3 checks at a time), CHECK_ONLY=1
-(re-check the outputs already in results/TAG/LANG without generating),
-REUSE=1 (generate only the missing outputs), KEEP_BUILD=1, GHC, MATHLIB,
-LEAN_BIN (default ~/.elan/toolchains/<MATHLIB's lean-toolchain>/bin),
-LEAN_TIMEOUT (300 s), AGDA (default: the agda behind the nix wrapper on PATH,
-as bend/Check.bend finds it), AGDA_LIBS (run/check-cache/agda/libraries),
-AGDA_TIMEOUT (300 s).  Log lines are stamped in UTC-6.
+GEN_JOBS (1 generation at a time), JOBS (3 checks at a time; 0: all at
+once), CHECK_ONLY=1 (re-check the outputs already in results/TAG/LANG
+without generating), REUSE=1 (generate only the missing outputs),
+KEEP_BUILD=1, GHC, MATHLIB, LEAN_BIN (default ~/.elan/toolchains/<MATHLIB's
+lean-toolchain>/bin), LEAN_TIMEOUT (300 s), AGDA (default: the agda behind
+the nix wrapper on PATH, as bend/Check.bend finds it), AGDA_LIBS
+(run/check-cache/agda/libraries), AGDA_TIMEOUT (300 s), BEHAVIOUR_DIR
+(tools/corpus-v2/behaviour: where tasks, refs and results are).  A variable
+set to the empty string counts as unset.  Log lines are stamped in UTC-6.
 
 Cost: ana takes 6-30 s per task depending on the machine's load.  A Lean
 check loads all of Mathlib: 20 s warm and 70 s cold on a loaded machine,
@@ -51,14 +68,16 @@ Layout
 ------
 
   spec/LANG.tasks          the tasks (the only hand-edited task source)
-  tasks.sh                 writes tasks/ and refs/ from spec/
+  spec/selftest.mut        selftest's broken answers and their verdicts
+  behaviour tasks          writes tasks/ and refs/ from spec/
   tasks/LANG/NAME/prompt   the prompt, byte for byte
   tasks/LANG/NAME/sig      the Type turn's code
   tasks/LANG/NAME/pre      declarations the checked file needs before the Type
   tasks/LANG/NAME/tests    the tests (empty for a proposition)
   tasks/LANG/NAME/kind     `type` or `proposition` (the Type turn's first word)
   refs/LANG/NAME           the reference answer followed by the closing fence
-  run.sh, selftest.sh, Check.lean (the Lean check's driver)
+  Check.lean               the Lean check's driver
+  tasks.sh, run.sh, selftest.sh   the shell originals of `behaviour`
   results/TAG/LANG/        verdicts.tsv (NAME<TAB>VERDICT, sorted), summary.txt,
                            NAME.out (ana's stdout: header line, prompt, answer),
                            NAME.err (ana's stderr); rebuilt by a check and not
@@ -166,9 +185,12 @@ countTrue.  Agda failures include Haskell-isms out of scope in Agda
 Checks of the checks
 --------------------
 
-The control (run.sh REF control) passes 30/30, 21/21 and 21/21.
-selftest.sh gives every task its reference answer except a set of broken
-ones and expects each verdict: well-typed but wrong answers (Haskell merge,
+The control (behaviour run REF control) passes 30/30, 21/21 and 21/21.
+behaviour selftest gives every task its reference answer except the broken
+ones of spec/selftest.mut (`@@ mut LANG NAME VERDICT`, then the answer's
+lines up to the next `@@` line, trailing blank lines dropped; closed by a
+fence unless VERDICT is unclosed) and expects each verdict, `pass` for the
+others: well-typed but wrong answers (Haskell merge,
 fib, dedup, safeHead; Lean double, fib, dedup as Mathlib's List.dedup, which
 keeps the last occurrence, everyOther as a filter on odd values, isPrime as
 oddness; Agda double, fib, rev, maxList) must be `wrong`; a Haskell

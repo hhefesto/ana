@@ -1,5 +1,5 @@
 @@# Haskell behaviour tasks: answers compiled with GHC and run against `tests` (a [Bool] expression).
-@@# Format: see ../README.txt.  tasks.sh turns this file into tasks/haskell/NAME/ and refs/haskell/NAME.
+@@# Format: see ../README.txt.  behaviour tasks turns this file into tasks/haskell/NAME/ and refs/haskell/NAME.
 
 @@ task merge type
 @@ user

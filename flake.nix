@@ -267,6 +267,22 @@
             cd ${lintSrc}
             exec ${self.packages.${system}.bend-ops}/bin/bend-ops lint --tree . --report "$out"
           '';
+          # the behaviour test's tasks and references are what its spec says
+          # (2026-10-14: bend-corpus-v2 behaviour tasks --check, the Bend port
+          # of tasks.sh, regenerates them in memory and compares byte for byte)
+          behaviour-tasks =
+            let
+              src = sourceOf [
+                ./tools/corpus-v2/behaviour/spec
+                ./tools/corpus-v2/behaviour/tasks
+                ./tools/corpus-v2/behaviour/refs
+              ];
+            in
+            pkgs.runCommand "behaviour-tasks" { } ''
+              export BEHAVIOUR_DIR=${src}/tools/corpus-v2/behaviour
+              ${self.packages.${system}.bend-corpus-v2}/bin/bend-corpus-v2 behaviour tasks --check
+              touch $out
+            '';
           # the training stack: the hand-written pullbacks agree with central
           # finite differences (f32: 5% relative plus 3e-5 absolute, the
           # difference quotient's resolution at eps 0.01), the training

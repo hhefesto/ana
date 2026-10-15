@@ -1,0 +1,109 @@
+@@# The behaviour self-test's broken answers (bend-corpus-v2 behaviour selftest;
+@@# README.txt).  Every other task gets its reference answer and must pass.
+@@# `@@ mut LANG NAME VERDICT` starts a record; its answer is the lines up to the
+@@# next `@@` line, trailing blank lines dropped, each with its newline, then the
+@@# closing fence unless VERDICT is unclosed.  `@@#` lines are comments.
+@@#
+@@# Expected verdicts: well-typed but wrong answers `wrong` (the tests tell a
+@@# wrong answer from a right one), a division by zero `crash`, ill-typed or
+@@# unfinished answers and failing proofs `compile`, giving up `refused`, no
+@@# closing fence `unclosed`.
+
+@@ mut haskell merge wrong
+merge xs ys = xs ++ ys
+
+@@ mut haskell fib wrong
+fib 0 = 1
+fib 1 = 1
+fib n = fib (n - 1) + fib (n - 2)
+
+@@ mut haskell dedup wrong
+dedup = map head . group
+
+@@ mut haskell safeHead wrong
+safeHead xs = Just (head xs)
+
+@@ mut haskell myGcd crash
+myGcd a b = myGcd b (a `mod` b)
+
+@@ mut haskell myReverse compile
+myReverse = reverse 1
+
+@@ mut haskell quicksort unclosed
+quicksort [] = []
+
+@@ mut lean double wrong
+n + 2
+
+@@ mut lean fib wrong
+match n with
+  | 0 => 1
+  | 1 => 1
+  | k + 2 => fib k + fib (k + 1)
+
+@@# Mathlib's List.dedup keeps the last occurrence
+@@ mut lean dedup wrong
+l.dedup
+
+@@# a filter on odd values (the tests gained [2, 4, 6] when it passed the first four)
+@@ mut lean everyOther wrong
+l.filter (fun x => x % 2 == 1)
+
+@@# primality as oddness
+@@ mut lean isPrime wrong
+n % 2 == 1
+
+@@ mut lean maxList compile
+l.foldl max
+
+@@ mut lean fact compile
+match n with
+  | 0 =>
+
+@@ mut lean two_mul_self refused
+by sorry
+
+@@ mut lean add_self_even compile
+by rfl
+
+@@# fails its termination check: must not hang in a #guard
+@@ mut lean sumList compile
+sumList l
+
+@@ mut lean power unclosed
+b ^ e
+
+@@ mut agda double wrong
+double n = n * 3
+
+@@ mut agda fib wrong
+fib zero = 1
+fib (suc zero) = 1
+fib (suc (suc n)) = fib n + fib (suc n)
+
+@@ mut agda rev wrong
+rev xs = xs
+
+@@ mut agda maxList wrong
+maxList [] = 0
+maxList (x ∷ xs) = x
+
+@@ mut agda fact compile
+fact zero = 1
+fact (suc n) = suc (
+
+@@ mut agda plus-zero compile
+plus-zero n = refl
+
+@@ mut agda not-not refused
+postulate not-not′ : ∀ (b : Bool) → not (not b) ≡ b
+not-not = not-not′
+
+@@ mut agda isEven refused
+isEven n = {! !}
+
+@@ mut agda copies refused
+copies n x = ?
+
+@@ mut agda sumList compile
+sumList xs = xs

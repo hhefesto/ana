@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-14: ported to Bend (shell→Bend port, phase 5): `bend-corpus-v2 behaviour tasks` (bend/CorpusV2/Behaviour.bend), byte-identical on every tracked result; kept for reference
+exit 2
 # tasks.sh [LANG...]: turn spec/LANG.tasks into tasks/LANG/NAME/{prompt,sig,pre,tests,kind}
 # and refs/LANG/NAME (the reference answer followed by the closing fence), for
 # haskell, lean and agda by default.  The prompt is the training layout

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-14: ported to Bend (shell→Bend port, phase 5): `bend-corpus-v2 behaviour selftest` (bend/CorpusV2/Behaviour.bend), byte-identical on every tracked result; kept for reference
+exit 2
 # selftest.sh [LANG...]: the checks against answers whose verdicts are known.
 # Every task gets its reference answer (expected: pass) except the ones below,
 # which get a deliberately broken one: well-typed but wrong (expected: wrong,

@@ -1,6 +1,6 @@
-@@# Agda behaviour tasks, checked with Agda 2.8.0 and standard-library-2.3: run.sh writes
+@@# Agda behaviour tasks, checked with Agda 2.8.0 and standard-library-2.3: behaviour run writes
 @@# Task.agda as `{-# OPTIONS --safe #-}`, the module header and the shared imports (in
-@@# run.sh), the pre, the Type, the answer (a line equal to the Type is dropped), then the
+@@# bend/CorpusV2/Behaviour.bend), the pre, the Type, the answer (a line equal to the Type is dropped), then the
 @@# tests.  A `type` task's tests are `_ : f x ≡ y` / `_ = refl` pairs (checked by
 @@# normalisation); a `proposition` task has none: type-checking the proof is the test.
 @@# Format: see ../README.txt.
