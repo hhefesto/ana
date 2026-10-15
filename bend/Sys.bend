@@ -640,9 +640,12 @@ def Rd.next(r: Rd) -> IO(Rd & Maybe<&2, List<&2, U32>>):
 #
 #   cd DIR; nohup env K=V.. PROG ARGS.. > LOG 2>&1 < /dev/null & echo $!
 #
-# (>> LOG when append).  Process.run returns as soon as its direct child
-# (this sh) exits, and the started program holds none of sh's pipes, so it
-# outlives the call; `nohup` keeps it from a hangup.  `background.setsid`
+# (>> LOG when append).  Process.run returns when its direct child (this
+# sh) has exited and, since Bend 2.0.37 (upstream 3f80b064), only once its
+# stdout and stderr have closed: a program left holding either pipe would
+# hold the call until it exits.  The started program holds none of sh's
+# pipes (the redirections above), so the call returns at once and the
+# program outlives it; `nohup` keeps it from a hangup.  `background.setsid`
 # also gives it a session of its own (`nohup setsid ...`), so a signal to
 # our process group or session does not reach it.  sh is not a group leader
 # there, so setsid execs in place and $! stays the program's pid.  A line
