@@ -148,11 +148,20 @@
               pkgs.libnotify
               pkgs.git
               pkgs.gh
+              # `stage box|restage` emit the trainer, the gate and bend-box as C
+              # with the pinned compiler and push the corpus with bend-push
+              (bendFor pkgs)
+              self.packages.${system}.bend-push
             ];
             text = ''
               exec ${bendBinary pkgs "bend-ops" "Box/Main.bend"}/bin/bend-ops "$@"
             '';
           };
+          # bend-box (bend/Box/OnBox.bend, 2026-10-14): the driver on a rented
+          # box (fp.sh's modes, and eval-both).  A box builds it from box.c
+          # with its own clang (`bend-ops stage box`); this package is for
+          # running it here (tests, a sandbox box).
+          bend-box = bendBinary pkgs "bend-box" "Box/BoxMain.bend";
           # the box in a sandbox: one binary whose argv[0] picks its part
           # (traind, traind-next, dense, nvidia-smi, clang, vastai); `bend-sim
           # links DIR` makes those names in DIR (bend/tests/Sim.bend)

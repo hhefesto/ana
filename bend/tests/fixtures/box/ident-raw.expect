@@ -1,0 +1,7 @@
+step=1/6 progress=16.667% lr=0.0015 train_loss=5.5
+eval store 1234 floats end
+train (dense): small4-v3, micro 4 (2 a step), chunk 16
+no stamp
+[open stamp no space]x
+[b] step=6/6
+last line without newline

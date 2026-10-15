@@ -1,0 +1,38 @@
+[2026-10-05 19:32:19 UTC-6] train (dense, plan start): formal-transformer-futhark-hybrid-gla-v3:Config {vocabSize = 32768, contextSize = 2048, modelDim = 768, ffDim = 2048, layerCount = 12, headCount = 12, gateKind = GateRgLru, qkNorm = True, headSinks = True, tiedHead = True}; 53880 global steps at batch 16 on mixed-v2:sha256=3d13f5457443517427e268836943ea833f6129b61ee3ce6fc328957eca838f15:raw=0.8899:windows=854041:batch=16:size=fp100m:tokenizer=1e2238cedf08623ed2cf1750aa71f949dee2e5c9977ad3a02cc22edb2bf44a24
+[2026-10-05 19:32:41 UTC-6] training targets: by role (TRAIN_MASK=kinds: a tool's echo and a given attempt weigh 0)
+[2026-10-05 19:32:41 UTC-6] train (dense, hot start): formal-transformer-futhark-hybrid-gla-v3:Config {vocabSize = 32768, contextSize = 2048, modelDim = 768, ffDim = 2048, layerCount = 12, headCount = 12, gateKind = GateRgLru, qkNorm = True, headSinks = True, tiedHead = True} from step 0 to 30 of 53880; lr 0.0003, warmup 300, Muon, clip 1, micro-batch 4, 1037 segments left
+[2026-10-05 19:32:41 UTC-6] reading run/v2/mixall/shard-0-fp100m.corpus
+[2026-10-05 19:32:41 UTC-6] parsed (40 ms)
+[2026-10-05 19:32:41 UTC-6] shard 0: 739 training windows, global 0..47; running 0..30
+[2026-10-05 19:32:55 UTC-6] step=1/53880 progress=0.002% lr=0.000001 train_loss=10.429667 train_loss_ema=10.429667 gradient_norm=2.5030851 clipped=True ms=14042 tok/s=2333
+[2026-10-05 19:32:57 UTC-6] step=2/53880 progress=0.004% lr=0.000002 train_loss=10.432338 train_loss_ema=10.429721 gradient_norm=3.547708 clipped=True ms=1827 tok/s=17935
+[2026-10-05 19:32:59 UTC-6] step=3/53880 progress=0.006% lr=0.000003 train_loss=10.436896 train_loss_ema=10.429865 gradient_norm=3.2098117 clipped=True ms=1830 tok/s=17906
+[2026-10-05 19:33:01 UTC-6] step=4/53880 progress=0.007% lr=0.000004 train_loss=10.433752 train_loss_ema=10.429943 gradient_norm=2.7063284 clipped=True ms=1831 tok/s=17896
+[2026-10-05 19:33:03 UTC-6] step=5/53880 progress=0.009% lr=0.000005 train_loss=10.426054 train_loss_ema=10.429865 gradient_norm=3.1727426 clipped=True ms=1835 tok/s=17857
+[2026-10-05 19:33:05 UTC-6] step=6/53880 progress=0.011% lr=0.000006 train_loss=10.432227 train_loss_ema=10.429913 gradient_norm=3.075809 clipped=True ms=1838 tok/s=17828
+[2026-10-05 19:33:06 UTC-6] step=7/53880 progress=0.013% lr=0.0000070000006 train_loss=10.424383 train_loss_ema=10.429802 gradient_norm=2.741428 clipped=True ms=1838 tok/s=17828
+[2026-10-05 19:33:08 UTC-6] step=8/53880 progress=0.015% lr=0.000008 train_loss=10.443832 train_loss_ema=10.430082 gradient_norm=3.926113 clipped=True ms=1840 tok/s=17808
+[2026-10-05 19:33:10 UTC-6] step=9/53880 progress=0.017% lr=0.000009 train_loss=10.428671 train_loss_ema=10.430055 gradient_norm=2.8458524 clipped=True ms=1839 tok/s=17818
+[2026-10-05 19:33:12 UTC-6] step=10/53880 progress=0.019% lr=0.00001 train_loss=10.423918 train_loss_ema=10.429932 gradient_norm=2.8087742 clipped=True ms=1842 tok/s=17789
+[2026-10-05 19:33:14 UTC-6] step=11/53880 progress=0.02% lr=0.000011000001 train_loss=10.427429 train_loss_ema=10.429882 gradient_norm=2.7280183 clipped=True ms=1842 tok/s=17789
+[2026-10-05 19:33:16 UTC-6] step=12/53880 progress=0.022% lr=0.000012 train_loss=10.423604 train_loss_ema=10.429757 gradient_norm=2.5136948 clipped=True ms=1843 tok/s=17779
+[2026-10-05 19:33:17 UTC-6] step=13/53880 progress=0.024% lr=0.000013000001 train_loss=10.417578 train_loss_ema=10.429513 gradient_norm=2.6215389 clipped=True ms=1842 tok/s=17789
+[2026-10-05 19:33:19 UTC-6] step=14/53880 progress=0.026% lr=0.000014000001 train_loss=10.411254 train_loss_ema=10.429148 gradient_norm=2.605787 clipped=True ms=1844 tok/s=17770
+[2026-10-05 19:33:21 UTC-6] step=15/53880 progress=0.028% lr=0.0000150000005 train_loss=10.404942 train_loss_ema=10.428663 gradient_norm=4.446743 clipped=True ms=1846 tok/s=17750
+[2026-10-05 19:33:23 UTC-6] step=16/53880 progress=0.03% lr=0.000016 train_loss=10.405063 train_loss_ema=10.428191 gradient_norm=3.3669033 clipped=True ms=1845 tok/s=17760
+[2026-10-05 19:33:25 UTC-6] step=17/53880 progress=0.032% lr=0.000017 train_loss=10.397981 train_loss_ema=10.427587 gradient_norm=2.6575117 clipped=True ms=1845 tok/s=17760
+[2026-10-05 19:33:27 UTC-6] step=18/53880 progress=0.033% lr=0.000018 train_loss=10.395445 train_loss_ema=10.426944 gradient_norm=2.727409 clipped=True ms=1846 tok/s=17750
+[2026-10-05 19:33:29 UTC-6] step=19/53880 progress=0.035% lr=0.000019000001 train_loss=10.387203 train_loss_ema=10.426148 gradient_norm=2.6429112 clipped=True ms=1847 tok/s=17741
+[2026-10-05 19:33:30 UTC-6] step=20/53880 progress=0.037% lr=0.00002 train_loss=10.372572 train_loss_ema=10.425077 gradient_norm=3.6670854 clipped=True ms=1847 tok/s=17741
+[2026-10-05 19:33:32 UTC-6] step=21/53880 progress=0.039% lr=0.000021000002 train_loss=10.396366 train_loss_ema=10.424503 gradient_norm=2.4664347 clipped=True ms=1848 tok/s=17731
+[2026-10-05 19:33:34 UTC-6] step=22/53880 progress=0.041% lr=0.000022000002 train_loss=10.373694 train_loss_ema=10.423488 gradient_norm=3.2749805 clipped=True ms=1849 tok/s=17722
+[2026-10-05 19:33:36 UTC-6] step=23/53880 progress=0.043% lr=0.000023 train_loss=10.369026 train_loss_ema=10.422399 gradient_norm=2.5496256 clipped=True ms=1850 tok/s=17712
+[2026-10-05 19:33:38 UTC-6] step=24/53880 progress=0.045% lr=0.000024 train_loss=10.36796 train_loss_ema=10.42131 gradient_norm=2.627358 clipped=True ms=1851 tok/s=17702
+[2026-10-05 19:33:40 UTC-6] step=25/53880 progress=0.046% lr=0.000025000001 train_loss=10.344013 train_loss_ema=10.4197645 gradient_norm=2.6068113 clipped=True ms=1853 tok/s=17683
+[2026-10-05 19:33:41 UTC-6] step=26/53880 progress=0.048% lr=0.000026000002 train_loss=10.366203 train_loss_ema=10.418694 gradient_norm=3.394284 clipped=True ms=1854 tok/s=17674
+[2026-10-05 19:33:43 UTC-6] step=27/53880 progress=0.05% lr=0.000027 train_loss=10.3458 train_loss_ema=10.417235 gradient_norm=2.6926737 clipped=True ms=1855 tok/s=17664
+[2026-10-05 19:33:45 UTC-6] step=28/53880 progress=0.052% lr=0.000028000002 train_loss=10.332523 train_loss_ema=10.415542 gradient_norm=2.6071143 clipped=True ms=1855 tok/s=17664
+[2026-10-05 19:33:47 UTC-6] step=29/53880 progress=0.054% lr=0.000029 train_loss=10.305047 train_loss_ema=10.413332 gradient_norm=2.853283 clipped=True ms=1855 tok/s=17664
+[2026-10-05 19:33:49 UTC-6] step=30/53880 progress=0.056% lr=0.000030000001 train_loss=10.321792 train_loss_ema=10.411502 gradient_norm=2.7058911 clipped=True ms=1856 tok/s=17655
+[2026-10-05 19:33:54 UTC-6] saved out/timing-step30.checkpoint (4669 ms)
+[2026-10-05 19:33:54 UTC-6] done at step 30

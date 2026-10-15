@@ -1,0 +1,7 @@
+[2026-10-14 19:00:00 UTC-6] step=1/6 progress=16.667% lr=0.0015 train_loss=5.5 ms=123 tok/s=456
+[x] eval remaining=5 eta=3m, store 1234 floats end
+train (dense): small4-v3, micro 4 (2 a step), store 30081024 floats, chunk 16
+no stamp ms= ms=4 tok/s=
+[open stamp no space]x
+[a] [b] step=6/6 remaining=0 eta=0s
+last line ms=9 without newline

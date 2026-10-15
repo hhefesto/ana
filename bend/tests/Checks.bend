@@ -481,7 +481,11 @@ def chk.tests() -> List<&2, ChkTest>:
    # (chain.log, the sha256 listings, a trainer's log) and on vastai's --raw
    # JSON, the lint's rules and flake bodies, st.f.floor, and the processes
    # (background, which, find, stat, sha256sum, markers); reads fixtures/ops
-   ChkTest{"ops.bend", False{}, ROks{61n}}]
+   ChkTest{"ops.bend", False{}, ROks{61n}},
+   # bend-box's and `bend-ops stage`'s readers (bend/Box/OnBox.bend,
+   # Stage.bend) against fp.sh's awk, grep, sort, tail and sed on real logs
+   # (gate.log, time.log, dmon.txt, a plan; reads fixtures/box)
+   ChkTest{"box.bend", False{}, ROks{21n}}]
 
 def chk.rule(r: ChkRule, +out: List<&2, U32>) -> Bool:
   match r:

@@ -1,0 +1,34 @@
+==============NVSMI LOG==============
+
+Timestamp : x
+
+Attached GPUs : 1
+GPU 00000000:01:00.0
+    Performance State : P2
+    Clocks Event Reasons
+        Reason 1 : Not Active
+        Reason 2 : Not Active
+        Reason 3 : Not Active
+        Reason 4 : Not Active
+        Reason 5 : Not Active
+        Reason 6 : Not Active
+        HW Slowdown : Active
+        a
+        b
+        c
+        d
+        e
+        SW SLOWDOWN x
+        f
+    Clocks Event Reasons Counters
+        g
+        h
+        thermal slowdown
+        i
+        j
+        k
+        l
+        m
+        n
+        o slowdown
+        p

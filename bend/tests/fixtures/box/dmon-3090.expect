@@ -1,0 +1,5 @@
+# gpu    pwr  gtemp  mtemp     sm    mem    enc    dec    jpg    ofa   mclk   pclk     fb   bar1   ccpm 
+# Idx      W      C      C      %      %      %      %      %      %    MHz    MHz     MB     MB     MB 
+    0    284     76      -    100     17      0      0      0      0   9501   1590   6935      5      0 
+    0    284     77      -    100     15      0      0      0      0   9501   1590   6935      5      0 
+    0    284     77      -    100     37      0      0      0      0   9501   1455   6935      5      0 

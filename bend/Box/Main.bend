@@ -6,6 +6,7 @@ import ./Remote.bend as Rm
 import ./Vast.bend as Vs
 import ./Alert.bend as Al
 import ./Lint.bend as Ln
+import ./Stage.bend as Sg
 
 # bend-ops: the box operations, run from this machine (2026-10-14, the plan
 # "all logic in Bend, shell only a thin shim"; docs in bend/Box/*.bend).
@@ -13,6 +14,11 @@ import ./Lint.bend as Ln
 #   bend-ops lint [--tree DIR] [--allow FILE] [--report FILE] [--bend] [--run-since DATE] [-v] [PATH...]
 #                       tracked shell stays a thin shim (bend/Box/Lint.bend); exit 1 on a file
 #                       with shell logic that tools/lint/shell-allow.txt does not list
+#   bend-ops stage box HOST PORT | push NAME RUN HOST PORT | restage HOST PORT CKPT STAGE... | shards PLAN
+#                       a run onto a box (bend/Box/Stage.bend: fp-stage.sh, next-stage.sh push,
+#                       fp-restage.sh); bend-box, the driver on the box, is built there from box.c
+#   bend-ops dense-identity OUT_DIR [TRAINER]
+#                       the dense trainer's six-step trajectories as bytes (dense-identity.sh)
 #
 # Later phases add chain, watch, stage, act, guard, handover, move, evals,
 # unit and dense-identity.  The `probe` subcommands run one primitive each,
@@ -89,7 +95,9 @@ def ops.probe(xs: List<String>) -> IO(Unit):
 
 def ops.usage() -> String:
   "usage: bend-ops lint [--tree DIR] [--allow FILE] [--report FILE] [--bend] [--run-since DATE] [-v] [PATH...]\n"
-    ++ "       bend-ops probe saved LOG | sums DIR NAME... | listed INST | credit MIN | which NAME | alert LOG MSG | ssh HOST PORT CMD"
+    ++ "       bend-ops probe saved LOG | sums DIR NAME... | listed INST | credit MIN | which NAME | alert LOG MSG | ssh HOST PORT CMD\n"
+    ++ "       bend-ops stage box HOST PORT | push NAME RUN HOST PORT | restage HOST PORT CKPT STAGE... | shards PLAN\n"
+    ++ "       bend-ops dense-identity OUT_DIR [TRAINER]"
 
 def ops.args(xs: List<String>) -> IO(Unit):
   match xs:
@@ -97,6 +105,10 @@ def ops.args(xs: List<String>) -> IO(Unit):
       Ln.lnt.main(rest)
     case "probe" <> rest:
       ops.probe(rest)
+    case "stage" <> rest:
+      Sg.stg.main(rest)
+    case "dense-identity" <> rest:
+      Sg.stg.ident.main(rest)
     case _:
       IO.die(Unit, 2, ops.usage())
 

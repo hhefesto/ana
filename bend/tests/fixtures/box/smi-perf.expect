@@ -1,0 +1,20 @@
+    Clocks Event Reasons
+        Reason 1 : Not Active
+        Reason 2 : Not Active
+        Reason 3 : Not Active
+--
+        HW Slowdown : Active
+        a
+        b
+        c
+--
+        SW SLOWDOWN x
+        f
+    Clocks Event Reasons Counters
+        g
+        h
+        thermal slowdown
+        i
+        j
+        k
+--

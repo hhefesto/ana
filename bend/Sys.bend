@@ -647,10 +647,13 @@ def Rd.next(r: Rd) -> IO(Rd & Maybe<&2, List<&2, U32>>):
 # our process group or session does not reach it.  sh is not a group leader
 # there, so setsid execs in place and $! stays the program's pid.  A line
 # that does not answer a pid (DIR missing, PROG not found by sh) stops the
-# tool: a launch that failed must not read as one that ran.
+# tool: a launch that failed must not read as one that ran.  sh ignores a
+# hangup before it forks (2026-10-14, bend-box): the program is born
+# ignoring it, so a hangup that comes the moment the call returns (`ssh -t`
+# ending), before nohup or setsid ran, does not kill it either.
 
 def bg.line(sid: Bool, append: Bool) -> String:
-  "cd \"$1\" || exit 97; o=$2; shift 2; " ++ Bool.pick(String, sid, "nohup setsid", "nohup") ++ " \"$@\" "
+  "trap '' HUP; cd \"$1\" || exit 97; o=$2; shift 2; " ++ Bool.pick(String, sid, "nohup setsid", "nohup") ++ " \"$@\" "
     ++ Bool.pick(String, append, ">>", ">") ++ " \"$o\" 2>&1 < /dev/null & echo $!"
 
 def bg.all.digits(xs: List<&2, U32>) -> Bool:

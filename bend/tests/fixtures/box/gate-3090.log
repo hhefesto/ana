@@ -1,0 +1,10 @@
+tree loss  5.5636816
+chunk 64 (one per window): dense loss 5.5636806
+chunk 64 (one per window): gradient max |diff| 2.6077032e-8 of max |g| 0.06403036 (relative 4.0726044e-7)
+chunk 16 (four per window): dense loss 5.5636806
+chunk 16 (four per window): gradient max |diff| 2.514571e-8 of max |g| 0.06403036 (relative 3.9271544e-7)
+small4 tree loss 5.570061
+small4, chunk 16: dense loss 5.5700607
+small4, chunk 16: gradient max |diff| 1.8626451e-8 of max |g| 0.06248855 (relative 2.9807785e-7)
+bend profile: gemm 441 calls (0 as loops), 116.044 ms, 0.727 GFLOP, 6.3 GFLOP/s
+bend profile: einsum 976 calls, 18735.477 ms
