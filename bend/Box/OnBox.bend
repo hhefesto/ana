@@ -991,6 +991,8 @@ def obx.need.if(empty: Bool, +v: String, +usage: String) -> IO(String):
       IO.pure(String, v)
 
 # ${N:?usage}: the argument, or the usage and exit 2 when it is missing or empty
+# (next, again and resume read their arguments before they build traind-next, so
+# a wrong call stops at once with the usage; fp.sh built first, 2026-10-15)
 def obx.need(m: Maybe<&2, String>, +usage: String) -> IO(String):
   match m:
     case Some{+v}:
@@ -1009,31 +1011,31 @@ def obx.u.resume() -> String:
 
 def obx.next(+cx: ObxCx, +t: List<&2, String>) -> IO(Unit):
   do IO<Unit>:
-    obx.compile(cx, "traind-next")
     +ckpt : String <- obx.need(obx.arg(t, 0n), obx.u.next())
+    obx.compile(cx, "traind-next")
     obx.cont(cx, ckpt, "run/next/plan-next-b16-windows.tsv", "run/next", "next", "next")
 
 def obx.again(+cx: ObxCx, +t: List<&2, String>) -> IO(Unit):
   do IO<Unit>:
-    obx.compile(cx, "traind-next")
     +ckpt : String <- obx.need(obx.arg(t, 0n), obx.u.next())
     +plan : String <- obx.need(obx.arg(t, 1n), obx.u.next())
     +rdir : String <- obx.need(obx.arg(t, 2n), obx.u.next())
     +ssz : String <- obx.need(obx.arg(t, 3n), obx.u.next())
     +name : String <- obx.need(obx.arg(t, 4n), obx.u.next())
+    obx.compile(cx, "traind-next")
     obx.cont(cx, ckpt, plan, rdir, ssz, name)
 
 # resume: a save of NAME on its own plan and schedule (a plain hot start),
 # STEPS steps, appended to NAME.log
 def obx.resume(+cx: ObxCx, +t: List<&2, String>) -> IO(Unit):
   do IO<Unit>:
-    obx.compile(cx, "traind-next")
     +ckpt : String <- obx.need(obx.arg(t, 0n), obx.u.resume())
     +plan : String <- obx.need(obx.arg(t, 1n), obx.u.resume())
     +rdir : String <- obx.need(obx.arg(t, 2n), obx.u.resume())
     +ssz : String <- obx.need(obx.arg(t, 3n), obx.u.resume())
     +name : String <- obx.need(obx.arg(t, 4n), obx.u.resume())
     +steps : String <- obx.need(obx.arg(t, 5n), obx.u.resume())
+    obx.compile(cx, "traind-next")
     S.mkdir("out")
     mask : Maybe<&2, String> <- obx.get("MASK")
     +micro : String <- obx.env.or("MICRO", "4")
