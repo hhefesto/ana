@@ -7,10 +7,6 @@
 # fails at once.  Dead scripts are not listed: they are unwired (`# UNWIRED
 # DATE: why` and `exit 2` after the shebang) and the lint skips them.
 
-# Phase 1a: bend-ops chain, bend-ops watch
-bend/gpu/fp-chain.sh
-bend/gpu/credit-watch.sh
-
 # Phase 1b: bend-box, bend-ops stage, bend-ops dense-identity
 bend/gpu/fp.sh
 bend/gpu/fp-stage.sh

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-15: replaced by `bend-ops chain HOST PORT INSTANCE DEST STAGES` (bend/Box/Chain.bend, the plan's Phase 1a; same event lines in the sandbox scenarios 1, 2, 4 and 7, which run a copy of this script without these two lines); kept for reference
+exit 2
 # A chain of runs on one box without a person present, then the scores, the
 # pull and the DESTROY. Runs on this machine, outside any session, from a
 # copy (bash reads a script as it runs, so the file it runs from must not

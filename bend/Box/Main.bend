@@ -6,6 +6,9 @@ import ./Remote.bend as Rm
 import ./Vast.bend as Vs
 import ./Alert.bend as Al
 import ./Lint.bend as Ln
+import ./Chain.bend as Ch
+import ./Watch.bend as Wt
+import ./Scenario.bend as Sc
 import ./Stage.bend as Sg
 import ./Drive.bend as Dr
 import ./Evals.bend as Ev
@@ -16,6 +19,14 @@ import ./Evals.bend as Ev
 #   bend-ops lint [--tree DIR] [--allow FILE] [--report FILE] [--bend] [--run-since DATE] [-v] [PATH...]
 #                       tracked shell stays a thin shim (bend/Box/Lint.bend); exit 1 on a file
 #                       with shell logic that tools/lint/shell-allow.txt does not list
+#   bend-ops chain HOST PORT INSTANCE DEST STAGES
+#                       a chain of stages on one box, then the scores, the pulls, the sha256
+#                       check and the DESTROY (bend/Box/Chain.bend; fp-chain.sh's port)
+#   bend-ops watch HOST PORT DEST [MIN]
+#                       the credit and the box under a chain (bend/Box/Watch.bend; credit-watch.sh's)
+#   bend-ops sim N DIR | sim all DIR | sim soak DIR SECONDS
+#                       the chain and the watch against a box in a sandbox (bend-sim's ssh,
+#                       rsync, vastai, ...), old scripts against new (bend/Box/Scenario.bend)
 #   bend-ops stage box HOST PORT | push NAME RUN HOST PORT | restage HOST PORT CKPT STAGE... | shards PLAN
 #                       a run onto a box (bend/Box/Stage.bend: fp-stage.sh, next-stage.sh push,
 #                       fp-restage.sh); bend-box, the driver on the box, is built there from box.c
@@ -29,8 +40,8 @@ import ./Evals.bend as Ev
 #                       what is done, then paired by prompt with exact McNemar (bend/Box/Evals.bend:
 #                       eval-run3.sh, eval-run2.sh)
 #
-# Later phases add chain, watch, stage, act, guard, handover, move, evals,
-# unit and dense-identity.  The `probe` subcommands run one primitive each,
+# Later phases add act, guard, handover, move and unit.  The `probe`
+# subcommands run one primitive each,
 # for a person checking a box or a fixture by hand:
 #
 #   bend-ops probe saved LOG          the saves a trainer's log records: `STEP FILE` lines (fp-chain's saved())
@@ -104,6 +115,9 @@ def ops.probe(xs: List<String>) -> IO(Unit):
 
 def ops.usage() -> String:
   "usage: bend-ops lint [--tree DIR] [--allow FILE] [--report FILE] [--bend] [--run-since DATE] [-v] [PATH...]\n"
+    ++ "       bend-ops chain HOST PORT INSTANCE DEST STAGES\n"
+    ++ "       bend-ops watch HOST PORT DEST [MIN]\n"
+    ++ "       bend-ops sim N DIR | sim all DIR | sim soak DIR SECONDS\n"
     ++ "       bend-ops probe saved LOG | sums DIR NAME... | listed INST | credit MIN | which NAME | alert LOG MSG | ssh HOST PORT CMD\n"
     ++ "       bend-ops stage box HOST PORT | push NAME RUN HOST PORT | restage HOST PORT CKPT STAGE... | shards PLAN\n"
     ++ "       bend-ops dense-identity OUT_DIR [TRAINER]\n"
@@ -114,6 +128,10 @@ def ops.args(xs: List<String>) -> IO(Unit):
   match xs:
     case "lint" <> rest:
       Ln.lnt.main(rest)
+    case "chain" <> rest:
+      Ch.chn.main(rest)
+    case "watch" <> rest:
+      Wt.cwt.main(rest)
     case "probe" <> rest:
       ops.probe(rest)
     case "stage" <> "next" <> Nil{}:
@@ -131,7 +149,17 @@ def ops.args(xs: List<String>) -> IO(Unit):
     case _:
       IO.die(Unit, 2, ops.usage())
 
+# `sim` needs argv[0]: the chain it tests is this same binary
+def ops.main(xs: List<String>) -> IO(Unit):
+  match xs:
+    case +a0 <> "sim" <> rest:
+      Sc.scn.main(a0, rest)
+    case a0 <> rest:
+      ops.args(rest)
+    case Nil{}:
+      IO.die(Unit, 2, ops.usage())
+
 def main() -> IO(Unit):
   do IO<Unit>:
     argv : List<String> <- IO.args()
-    ops.args(List.tail(&1, String, argv))
+    ops.main(argv)

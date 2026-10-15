@@ -495,7 +495,12 @@ def chk.tests() -> List<&2, ChkTest>:
    # s2's share and McNemar's p against awk's, NLR against run 3's lr= at
    # its boundary, the rest of a plan against awk's lines (reads fixtures/box,
    # fixtures/recipes)
-   ChkTest{"recipes.bend", False{}, ROks{41n}}]
+   ChkTest{"recipes.bend", False{}, ROks{41n}},
+   # bend-ops chain and watch (bend/Box/Chain.bend, Watch.bend): their
+   # decisions on run 3's chain.log, s2.log and sha256 listings (the per-poll
+   # line and the eval line byte for byte), follow, verify, HOLD, the watch's
+   # due/silent/safe; bend-sim's ssh reading and the scenarios' event lines
+   ChkTest{"chain.bend", False{}, ROks{45n}}]
 
 def chk.rule(r: ChkRule, +out: List<&2, U32>) -> Bool:
   match r:

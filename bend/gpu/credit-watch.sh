@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-15: replaced by `bend-ops watch HOST PORT DEST [MIN]` (bend/Box/Watch.bend, the plan's Phase 1a; the sandbox scenarios run a copy of this script without these two lines); kept for reference
+exit 2
 # The last line of defence under an unattended chain (fp-chain.sh), for the
 # credit and for the box. Every WATCH_POLL seconds (600):
 # - Under MIN ($1.00) it stops the trainer on the box, once, so the chain sees
