@@ -304,13 +304,14 @@ def out.got(r: Result<&1, &1, U32 & String, U32 & (String & String)>) -> IO(S.Ou
     case Done{p}:
       out.done(p)
     case Fail{(code, msg)}:
-      IO.die(S.Out, 1, "agda-libs: could not run sh: " ++ msg)
+      IO.die(S.Out, 1, "agda-libs: could not run timeout: " ++ msg)
 
+# `timeout 3600 PROG ARGS..` with no shell between (2026-10-15, Phase 7: it
+# went through `sh -c 'cd . && shift && exec ..'`)
 def out.only(prog: String, args: List<String>) -> IO(S.Out):
   do IO<S.Out>:
     r : Result<&1, &1, U32 & String, U32 & (String & String)> <-
-      Process.run("sh", List.append(&1, String, ["-c", "cd \"$1\" && shift && exec \"$@\"", "sh", ".", "timeout", "3600", prog], args),
-        "", S.cap.bytes(), 3630000)
+      Process.run("timeout", List.append(&1, String, ["3600", prog], args), "", S.cap.bytes(), 3630000)
     out.got(r)
 
 def libs.got(+o: S.Out) -> IO(List<&2, List<&2, U32>>):
@@ -542,14 +543,13 @@ def batches(fuel: Nat, ls: List<&2, List<&2, U32>>, +pre: String, +k: Nat) -> IO
         rest : List<&2, String> <- batches(f, List.drop(&2, List<&2, U32>, l <> more, 300n), pre, 1n+k)
         return path <> rest
 
-def session.sh() -> String:
-  "cd \"$1\" && i=$2 && o=$3 && shift 3 && exec \"$@\" < \"$i\" >> \"$o\" 2>&1"
-
+# one interaction session: `cd DIR && timeout 4000000 BIN .. < INP >> OUT
+# 2>&1`, the batch's bytes handed to its standard input (S.run.feed, since
+# 2026-10-15: this was a shell line of its own); INP and OUT are absolute
 def session(+dir: String, +inp: String, +out: String, +bin: String, +libfile: String) -> IO(Unit):
   do IO<Unit>:
-    r : Result<&1, &1, U32 & String, U32 & (String & String)> <-
-      Process.run("sh", ["-c", session.sh(), "sh", dir, inp, out, "timeout", "4000000", bin, "--library-file=" ++ libfile, "--interaction", "+RTS", "-M10G", "-RTS"],
-        "", S.cap.bytes(), 4000030000)
+    xs : List<&2, U32> <- S.read(inp)
+    st : U32 <- S.run.feed(dir, [], 4000000, bin, ["--library-file=" ++ libfile, "--interaction", "+RTS", "-M10G", "-RTS"], out, xs)
     return Unit{}
 
 def sessions(bs: List<&2, String>, +dir: String, +out: String, +bin: String, +libfile: String) -> IO(Unit):

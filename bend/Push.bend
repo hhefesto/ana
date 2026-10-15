@@ -402,12 +402,13 @@ def out.got(r: Result<&1, &1, U32 & String, U32 & (String & String)>) -> IO(S.Ou
     case Fail{(+code, msg)}:
       IO.pure(S.Out, S.Out{Bool.pick(U32, U32.is_eq(code, 110), 124, 125), Nil{}})
 
-# a command's stdout; its stderr passes through to ours
+# a command's stdout; its stderr passes through to ours (`timeout SECS PROG
+# ARGS..` with no shell between, 2026-10-15: it went through `sh -c 'cd . &&
+# shift && exec ..'`)
 def out.only(+secs: U32, prog: String, args: List<String>) -> IO(S.Out):
   do IO<S.Out>:
     r : Result<&1, &1, U32 & String, U32 & (String & String)> <-
-      Process.run("sh", List.append(&1, String, ["-c", "cd \"$1\" && shift && exec \"$@\"", "sh", ".", "timeout", U32.show(secs), prog], args),
-        "", S.cap.bytes(), U32.mul(U32.add(secs, 30), 1000))
+      Process.run("timeout", List.append(&1, String, [U32.show(secs), prog], args), "", S.cap.bytes(), U32.mul(U32.add(secs, 30), 1000))
     out.got(r)
 
 # a command whose output is only shown
@@ -468,15 +469,21 @@ def link.sent.if(ok: Bool, +host: String, +port: String, +mb: String, +want: Nat
         +t1 : Nat <- IO.time()
         link.after(host, port, mb, want, Nat.sub(t1, t0), min, o)
 
+# MB megabytes of zeros through ssh into the box's /tmp/.link-probe, whose
+# size the box answers.  The zeros are a local file first (dd, then ssh with
+# it on its standard input: S.run.from), where they were the shell pipe `dd
+# | ssh` until 2026-10-15 (Phase 7); the clock starts when the file is
+# written, so the time is the transfer's alone.
 def link.check(+host: String, +port: String, +mb: String) -> IO(Lk):
   +want = Nat.mul(nat.of(S.b(mb)), 1048576n)
   do IO<Lk>:
     +min : Nat <- S.env.nat("MIN_KBS", 500n)
     IO.print("check-link: sustained " ++ mb ++ " MB transfer to " ++ host ++ ":" ++ port ++ " ...")
+    +tmp : String <- S.mktemp()
+    z : S.Out <- S.run.quiet(".", [], 300, "dd", ["if=/dev/zero", "of=" ++ tmp ++ "/zeros", "bs=1M", "count=" ++ mb], Nil{})
     +t0 : Nat <- IO.time()
-    +o : S.Out <- S.run.quiet(".", [], 300, "sh", List.append(&1, String,
-      ["-c", "dd if=/dev/zero bs=1M count=\"$1\" 2>/dev/null | { shift; exec \"$@\"; }", "sh", mb, "ssh"],
-      List.append(&1, String, link.opts(port), [host, "cat > /tmp/.link-probe && stat -c %s /tmp/.link-probe"])), Nil{})
+    +o : S.Out <- S.run.from(".", [], 300, "ssh", List.append(&1, String, link.opts(port), [host, "cat > /tmp/.link-probe && stat -c %s /tmp/.link-probe"]), tmp ++ "/zeros")
+    S.rm(tmp)
     link.sent.if(U32.is_eq(S.Out.status(o), 0), host, port, mb, want, t0, min, o)
 
 def say.out(quiet: Bool, +s: String) -> IO(Unit):

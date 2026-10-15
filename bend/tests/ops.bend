@@ -184,17 +184,45 @@ def ops.reps.probs(rs: List<&2, Ln.LnRep>, +name: String) -> List<&2, String>:
     case Ln.LnRep{+n, u, ps} <> t:
       Bool.pick(List<&2, String>, String.eq(n, name), ps, ops.reps.probs(t, name))
 
-def ops.flake() -> String:
-  "{\n  outputs = { self }:\n    let\n      bin =\n        pkgs: name:\n        pkgs.runCommand name { } ''\n          cp -r ${src}/bend src\n          bend src/${name} -o $out/bin/${name}\n        '';\n"
-    ++ "    in {\n      deploy = pkgs.writeShellApplication {\n        name = \"deploy\";\n        runtimeInputs = [ ];\n        text = ''\n"
-    ++ "          exec \"bend-''${1:?usage: deploy TOOL [ARGS...]   (TOOL: ops)}\" \"''${@:2}\"\n        '';\n      };\n"
-    ++ "      ok = pkgs.runCommand \"ok\" { } ''\n          cd ${src}\n          exec ${self.x}/bin/x --report \"$out\"\n        '';\n"
-    ++ "      one = pkgs.writeShellApplication { name = \"one\"; text = ''exec foo \"$@\" | tee x''; };\n"
-    ++ "      bad = pkgs.runCommand \"bad\" { } ''\n          for x in a b; do echo $x; done\n          grep -q y z\n        '';\n    };\n}\n"
+# The lint's flake.nix and Bend inputs are fixtures (fixtures/ops/lint-*.txt,
+# 2026-10-15): shell text in this file's strings would be what --bend reads.
+
+# a flake body's problems: one holds frag; there are none
+def ops.body.has(+fk: List<&2, Ln.LnRep>, +name: String, +frag: String) -> Bool:
+  ops.has(ops.reps.probs(fk, "flake.nix:" ++ name), frag)
+
+def ops.body.ok(+fk: List<&2, Ln.LnRep>, +name: String) -> Bool:
+  Nat.is_eq(ops.len(ops.reps.probs(fk, "flake.nix:" ++ name)), 0n)
+
+def ops.bend.probs(+path: String, +xs: List<&2, U32>) -> List<&2, String>:
+  Ln.lnt.bend.lines(path, Ln.lnt.number(S.split.lines(xs), 1n))
 
 # Checks ------------------------------------------------------------------------------------
 
-def ops.pure(+box: List<&2, U32>, +here: List<&2, U32>, +s2: List<&2, U32>, +chain: List<&2, U32>, +user: List<&2, U32>, +inst: List<&2, U32>, +err: List<&2, U32>) -> List<&2, OpsCk>:
+# the flake-body rule (2026-10-15) and --bend (strict since then), on fixtures
+def ops.lint2(+flake2: List<&2, U32>, +lb: List<&2, U32>, +ls: List<&2, U32>) -> List<&2, OpsCk>:
+  +fk = Ln.lnt.check.flake("flake.nix", flake2)
+  +bp = ops.bend.probs("x.bend", lb)
+  +sp = ops.bend.probs("bend/Sys.bend", ls)
+  +xp = ops.bend.probs("x.bend", ls)
+  [OpsCk{"lint flake body: plain commands pass, no line cap", Bool.and(ops.body.ok(fk, "good"),
+     Nat.is_lt(12n, List.length(&2, Ln.LnSm, Ln.lnt.stmts(Ln.lnt.join(Ln.lnt.number(S.split.lines(flake2), 1n))))))},
+   OpsCk{"lint flake body: && || ; fail", Bool.and(Bool.and(ops.body.has(fk, "and", "&&"), ops.body.has(fk, "or", "||")), ops.body.has(fk, "semi", "; (one"))},
+   OpsCk{"lint flake body: subshell $( backtick heredoc background fail", Bool.and(Bool.and(Bool.and(ops.body.has(fk, "sub", "( (a subshell"), ops.body.has(fk, "cmdsub", "$( )")),
+     Bool.and(ops.body.has(fk, "tick", "backtick"), ops.body.has(fk, "heredoc", "a heredoc"))), ops.body.has(fk, "bg", "a background job"))},
+   OpsCk{"lint flake body: control words, tests and pipes fail", Bool.and(Bool.and(Bool.and(ops.body.has(fk, "if", "a control word: if"), ops.body.has(fk, "while", "a control word: done")),
+     ops.body.has(fk, "test", "a test: [")), ops.body.has(fk, "pipe", "a pipe"))},
+   OpsCk{"lint flake body: text tools fail, after env and exec too", Bool.and(Bool.and(ops.body.has(fk, "tool", "a text tool: sort"),
+     ops.body.has(fk, "envtool", "a text tool after an assignment or wrapper: awk")), ops.body.has(fk, "exectool", "a text tool after exec: grep"))},
+   OpsCk{"lint flake body: one final exec", ops.body.has(fk, "midexec", "flake.nix:67: exec before the last line")},
+   OpsCk{"lint .sh keeps its rule (cp, mkdir, touch fail; 12 lines)", Bool.and(Bool.and(ops.lint.only("cp -r x fixtures\n", "a command other than"),
+     ops.lint.only("mkdir -p $out/bin\n", "a command other than")), Bool.and(ops.lint.only("touch $out\n", "a command other than"), ops.lint.only(String.repeat("cd x\n", 13n), "13 lines of code")))},
+   OpsCk{"lint --bend flags what a line hands sh (joined by ++)", Bool.and(Nat.is_eq(ops.len(bp), 4n),
+     Bool.and(Bool.and(ops.has(bp, "x.bend:6: ; (one"), ops.has(bp, "x.bend:7: ; (one")), Bool.and(ops.has(bp, "x.bend:9: a pipe"), ops.has(bp, "x.bend:13: ; (one"))))},
+   OpsCk{"lint --bend: Sys.bend's fixed exec lines exempt by def", Bool.and(Bool.and(Nat.is_eq(ops.len(sp), 1n), ops.has(sp, "bend/Sys.bend:11: &&")),
+     Nat.is_eq(ops.len(xp), 4n))}]
+
+def ops.pure(+box: List<&2, U32>, +here: List<&2, U32>, +s2: List<&2, U32>, +chain: List<&2, U32>, +user: List<&2, U32>, +inst: List<&2, U32>, +err: List<&2, U32>, +flake: List<&2, U32>) -> List<&2, OpsCk>:
   +bs = Lc.lcl.sha.parse(box)
   +hs = Lc.lcl.sha.parse(here)
   +saved = Rm.rmt.saved.of(s2)
@@ -202,7 +230,7 @@ def ops.pure(+box: List<&2, U32>, +here: List<&2, U32>, +s2: List<&2, U32>, +cha
   +uv = ops.vals(St.st.js.values(user))
   +iv = ops.vals(St.st.js.values(inst))
   +ms = Nat.mul(U32.to_nat(1791956915), U32.to_nat(1000))
-  +fk = Ln.lnt.check.flake("flake.nix", S.b(ops.flake()))
+  +fk = Ln.lnt.check.flake("flake.nix", flake)
   [OpsCk{"sha parse (13 on the box, 15 here)", Bool.and(Nat.is_eq(List.length(&2, Lc.LclSum, bs), 13n), Nat.is_eq(List.length(&2, Lc.LclSum, hs), 15n))},
    OpsCk{"sha text round trip", Bool.and(S.eq(Lc.lcl.sha.text(bs), box), S.eq(Lc.lcl.sha.text(hs), here))},
    OpsCk{"sha verify (run 3: every box checkpoint here)", Nat.is_eq(List.length(&2, List<&2, U32>, Lc.lcl.sha.unmatched(bs, hs)), 0n)},
@@ -272,9 +300,9 @@ def ops.pure(+box: List<&2, U32>, +here: List<&2, U32>, +s2: List<&2, U32>, +cha
    OpsCk{"lint shebang", Bool.and(Bool.and(Bool.and(Ln.lnt.shebang(S.b("#!/usr/bin/env bash")), Ln.lnt.shebang(S.b("#! /bin/sh -e"))), Ln.lnt.shebang(S.b("#!/usr/bin/env -S bash -e"))),
      Bool.and(Bool.not(Ln.lnt.shebang(S.b("#!/usr/bin/env python3"))), Bool.not(Ln.lnt.shebang(S.b("# no")))))},
    OpsCk{"lint flake bodies", ops.names.eq(ops.reps.names(fk), ["flake.nix:bin", "flake.nix:deploy", "flake.nix:ok", "flake.nix:one", "flake.nix:bad"])},
-   OpsCk{"lint flake verdicts", Bool.and(Bool.and(Nat.is_eq(ops.len(ops.reps.probs(fk, "flake.nix:deploy")), 0n), Nat.is_eq(ops.len(ops.reps.probs(fk, "flake.nix:ok")), 0n)),
+   OpsCk{"lint flake verdicts (bin's cp and bend pass: the flake-body rule)", Bool.and(Bool.and(Nat.is_eq(ops.len(ops.reps.probs(fk, "flake.nix:deploy")), 0n), Nat.is_eq(ops.len(ops.reps.probs(fk, "flake.nix:ok")), 0n)),
      Bool.and(Bool.and(ops.has(ops.reps.probs(fk, "flake.nix:one"), "a pipe"), ops.has(ops.reps.probs(fk, "flake.nix:bad"), "a control word: for")),
-       Bool.and(ops.has(ops.reps.probs(fk, "flake.nix:bin"), "flake.nix:7: a command other than set -euo pipefail, export, cd and a final exec: cp"),
+       Bool.and(Nat.is_eq(ops.len(ops.reps.probs(fk, "flake.nix:bin")), 0n),
          ops.has(ops.reps.probs(fk, "flake.nix:bad"), "a text tool: grep"))))},
    OpsCk{"lint allowlist", ops.names.eq(Ln.lnt.allow.of(S.b("# the ratchet\n\nbend/gpu/fp.sh\n  flake.nix:bend-tests  # phase 6\n")), ["bend/gpu/fp.sh", "flake.nix:bend-tests"])}]
 
@@ -354,7 +382,11 @@ def main() -> IO(Unit):
     +user : List<&2, U32> <- S.read("fixtures/ops/vast-user.json")
     +inst : List<&2, U32> <- S.read("fixtures/ops/vast-instances.json")
     +err : List<&2, U32> <- S.read("fixtures/ops/vast-error.json")
+    +flake : List<&2, U32> <- S.read("fixtures/ops/lint-flake.txt")
+    +flake2 : List<&2, U32> <- S.read("fixtures/ops/lint-flake2.txt")
+    +lb : List<&2, U32> <- S.read("fixtures/ops/lint-bend.txt")
+    +ls : List<&2, U32> <- S.read("fixtures/ops/lint-sys.txt")
     +dir : String <- S.mktemp()
     io : List<&2, OpsCk> <- ops.io(dir)
     S.rm(dir)
-    ops.t.say(List.append(&2, OpsCk, ops.pure(box, here, s2, chain, user, inst, err), io), 0n, "")
+    ops.t.say(List.concat(&2, OpsCk, [ops.pure(box, here, s2, chain, user, inst, err, flake), ops.lint2(flake2, lb, ls), io]), 0n, "")

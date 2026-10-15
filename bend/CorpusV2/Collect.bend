@@ -216,17 +216,11 @@ def col.must(+what: String, prog: String, args: List<&2, String>) -> IO(List<&2,
 def col.git(+dir: String, +args: List<&2, String>) -> IO(List<&2, U32>):
   col.must("git -C " ++ dir ++ " " ++ String.join(args, " "), "git", "-C" <> dir <> args)
 
-# Sys's shim with the standard output into a file: `cd DIR && timeout SECS env K=V..
-# PROG ARGS.. > OUT` (OUT relative to DIR), the errors answered
-def col.to.sh() -> String:
-  "cd \"$1\" && o=$2 && shift 2 && exec \"$@\" > \"$o\""
-
-def col.run.in(+dir: String, env: List<&2, String>, +secs: U32, prog: String, args: List<&2, String>, outp: String) -> IO(S.Out):
-  do IO<S.Out>:
-    r : Result<&1, &1, U32 & String, U32 & (String & String)> <-
-      Process.run("sh", List.append(&1, String, ["-c", col.to.sh(), "sh", dir, outp, "timeout", U32.show(secs)], S.argv.env(col.l1(env), prog <> col.l1(args))),
-        "", S.cap.bytes(), U32.mul(U32.add(secs, 30), 1000))
-    S.run.got(r)
+# the standard output into a file: `cd DIR && timeout SECS env K=V.. PROG
+# ARGS.. > OUT` (OUT relative to DIR), the errors answered (S.run.to, which
+# this module's own shell line became on 2026-10-15)
+def col.run.in(+dir: String, env: List<&2, String>, +secs: U32, prog: String, args: List<&2, String>, +outp: String) -> IO(S.Out):
+  S.run.to(dir, col.l1(env), secs, prog, col.l1(args), outp)
 
 # prog's standard output into the file outp (from the cwd)
 def col.run.to(+secs: U32, prog: String, args: List<&2, String>, outp: String) -> IO(S.Out):

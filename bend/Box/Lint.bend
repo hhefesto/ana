@@ -25,14 +25,21 @@ import ./Local.bend as Lc
 # xargs head tail wc diff cmp python).  A file whose first comment line
 # starts with `# UNWIRED ` is skipped (kept for reference, made to exit 2).
 #
+# A flake.nix body is a nix builder's script (2026-10-15, the user's
+# decision): it may hold any number of plain sequential simple commands
+# (`cp -r X fixtures`, `mkdir -p $out/bin`, `bend Checks.bend suite`, `touch
+# $out`), and fails on the same control words, tests, pipes, &&, ||, ;, $(,
+# backticks, subshells, heredocs and text tools (lnt.stmt.flake).
+#
 # The ratchet: tools/lint/shell-allow.txt (or --allow FILE; relative to DIR
 # with --tree) lists the live files, one a line (a path, or flake.nix:NAME),
 # that may still fail until they are ported to Bend.  A failing file it does
 # not list fails the lint (exit 1); a listed one that passes is reported, to
 # be taken off.  --report FILE writes the summary there when the lint passes
-# (the flake check's $out).  Warnings only, until the plan's Phase 7:
-# --bend flags `sh -c` strings with control flow in the Bend sources read;
-# --run-since DATE flags run/**/*.sh newer than DATE (new untracked drivers).
+# (the flake check's $out).  --bend (strict since the plan's Phase 7,
+# 2026-10-15) fails on an `sh -c` string with logic in a Bend source read
+# (Sys.bend's fixed exec lines exempt by name); --run-since DATE warns of
+# run/**/*.sh newer than DATE (new untracked drivers).
 #
 # Every name starts with `lnt.`; the checker is pure (lnt.check.*), tested in
 # bend/tests/ops.bend.
@@ -316,6 +323,25 @@ def lnt.stmt(+ws: List<&2, List<&2, U32>>, +last: Bool) -> List<&2, String>:
         ["a command other than set -euo pipefail, export, cd and a final exec: " ++ S.str(w0)]))))))
   p
 
+# What one statement of a flake.nix body breaks (2026-10-15, the user's
+# decision: a nix builder needs plain sequential commands, `cp -r X
+# fixtures`, `mkdir`, `bend Checks.bend suite`, `touch $out`): any simple
+# command passes but a control word or a test, a text tool as its command
+# (after exec, assignments or wrappers like env too), and an exec before the
+# last line; the scanner's problems (pipes, &&, ||, ;, $(, backticks,
+# subshells, heredocs) are the line's already.  No line cap: that is the
+# .sh files' rule.
+def lnt.stmt.flake(+ws: List<&2, List<&2, U32>>, +last: Bool) -> List<&2, String>:
+  +w0 = lnt.at.w(ws, 0n)
+  +own = lnt.word.problem(w0, "")
+  +isexec = S.eq(w0, S.b("exec"))
+  +cmd = lnt.exec.cmd(List.drop(&2, List<&2, U32>, ws, 1n))
+  Bool.pick(List<&2, String>, isexec,
+    List.append(&2, String, Bool.pick(List<&2, String>, last, Nil{}, ["exec before the last line (one final exec)"]),
+      Bool.pick(List<&2, String>, Nat.is_eq(S.len(cmd), 0n), ["exec without a command"], lnt.word.problem(cmd, " after exec"))),
+    Bool.pick(List<&2, String>, Nat.is_ne(List.length(&2, String, own), 0n), own,
+      lnt.word.problem(lnt.exec.cmd(ws), " after an assignment or wrapper")))
+
 # Lines ---------------------------------------------------------------------------------------
 
 type LnL is Data:
@@ -382,21 +408,30 @@ def lnt.msgs(+label: String, +tag: String, +n: Nat, ps: List<&2, String>) -> Lis
     case p <> t:
       (label ++ ":" ++ Nat.show(n) ++ ": " ++ p ++ tag) <> lnt.msgs(label, tag, n, t)
 
-def lnt.check.stmts(+label: String, +tag: String, ss: List<&2, LnSm>, +k: Nat, +total: Nat) -> List<&2, String>:
+# fk: a flake.nix body's rule (lnt.stmt.flake), else a shell file's (lnt.stmt)
+def lnt.check.stmts(+fk: Bool, +label: String, +tag: String, ss: List<&2, LnSm>, +k: Nat, +total: Nat) -> List<&2, String>:
   match ss:
     case Nil{}:
       Nil{}
     case LnSm{+n, ws, ps} <> t:
-      List.append(&2, String, lnt.msgs(label, tag, n, List.append(&2, String, ps, lnt.stmt(lnt.unq.all(ws), Nat.is_eq(1n+k, total)))),
-        lnt.check.stmts(label, tag, t, 1n+k, total))
+      +us = lnt.unq.all(ws)
+      +last = Nat.is_eq(1n+k, total)
+      List.append(&2, String, lnt.msgs(label, tag, n, List.append(&2, String, ps,
+          Bool.pick(List<&2, String>, fk, lnt.stmt.flake(us, last), lnt.stmt(us, last)))),
+        lnt.check.stmts(fk, label, tag, t, 1n+k, total))
 
-# the problems of a body of shell (numbered lines), each `LABEL:LINE: why TAG`
+# the problems of a shell file (numbered lines), each `LABEL:LINE: why TAG`
 def lnt.check.lines(+label: String, +tag: String, ls: List<&2, LnL>) -> List<&2, String>:
   +ss = lnt.stmts(lnt.join(ls))
   +total = List.length(&2, LnSm, ss)
   +over = Bool.pick(List<&2, String>, Nat.is_lt(12n, total),
     [label ++ ": " ++ Nat.show(total) ++ " lines of code (a shim has at most 12)" ++ tag], Nil{})
-  List.append(&2, String, over, lnt.check.stmts(label, tag, ss, 0n, total))
+  List.append(&2, String, over, lnt.check.stmts(False{}, label, tag, ss, 0n, total))
+
+# the problems of a flake.nix body: plain sequential commands, any number
+def lnt.check.lines.flake(+label: String, +tag: String, ls: List<&2, LnL>) -> List<&2, String>:
+  +ss = lnt.stmts(lnt.join(ls))
+  lnt.check.stmts(True{}, label, tag, ss, 0n, List.length(&2, LnSm, ss))
 
 # Files ---------------------------------------------------------------------------------------
 
@@ -604,7 +639,7 @@ def lnt.check.bodies(+path: String, bs: List<&2, LnBody>) -> List<&2, LnRep>:
     case Nil{}:
       Nil{}
     case LnBody{+name, ls} <> t:
-      LnRep{path ++ ":" ++ S.str(name), False{}, lnt.check.lines(path, " (in " ++ S.str(name) ++ ")", lnt.nix.lines(ls))}
+      LnRep{path ++ ":" ++ S.str(name), False{}, lnt.check.lines.flake(path, " (in " ++ S.str(name) ++ ")", lnt.nix.lines(ls))}
         <> lnt.check.bodies(path, t)
 
 def lnt.check.flake(+path: String, +xs: List<&2, U32>) -> List<&2, LnRep>:
@@ -675,7 +710,16 @@ def lnt.stale(es: List<&2, List<&2, U32>>, +names: List<&2, List<&2, U32>>, +all
       Bool.pick(List<&2, String>, lnt.in.bytes(names, e), rest,
         ("lint: " ++ allowName ++ " lists " ++ S.str(e) ++ ", which is not among the files read: take it off") <> rest)
 
-# The Bend sources' sh -c strings (--bend, a warning until Phase 7) ----------------------------------
+# The Bend sources' sh -c strings (--bend; strict since 2026-10-15) ---------------------------------
+#
+# A Bend line hands sh a string: the expression after `"-c", ` (its string
+# literals joined with what `++` puts between them, a term read as the word
+# X), else, on a line that quotes "$1" or "$@" (S.shim's kind), its first
+# literal and what `++` joins to it.  The string's lines are scanned as a
+# shell file's: a pipe, &&, ||, ;, a background &, a subshell, a heredoc,
+# $( and a backtick each fail the lint.  Exempt, by name: Sys.bend's fixed
+# exec lines (the plan keeps them) -- shim, run.quiet, run.log and bg.line,
+# the defs that hold them.
 
 def lnt.lit.q(+xs: List<&2, U32>) -> Bool:
   U32.is_eq(lnt.at(xs, 0n), 34)
@@ -683,30 +727,100 @@ def lnt.lit.q(+xs: List<&2, U32>) -> Bool:
 def lnt.lit.bs(+xs: List<&2, U32>) -> Bool:
   U32.is_eq(lnt.at(xs, 0n), 92)
 
-# a Bend string literal's bytes (xs: what follows its opening quote)
-def lnt.lit.go(xs: List<&2, U32>, esc: Bool, q: Bool, bs: Bool) -> List<&2, U32>:
+# a Bend string literal's bytes and what follows it (xs: what follows its
+# opening quote; acc: the bytes so far, reversed)
+type LnLt is Data:
+  LnLt{text: List<&2, U32>, rest: List<&2, U32>}
+
+def lnt.lt.go(xs: List<&2, U32>, esc: Bool, q: Bool, bs: Bool, acc: List<&2, U32>) -> LnLt:
   match xs esc q bs:
     case Nil{} _ _ _:
-      Nil{}
+      LnLt{List.reverse(&2, U32, acc), Nil{}}
     case +c <> +t True{} _ _:
-      Bool.pick(U32, U32.is_eq(c, 110), 10, c) <> lnt.lit.go(t, False{}, lnt.lit.q(t), lnt.lit.bs(t))
+      lnt.lt.go(t, False{}, lnt.lit.q(t), lnt.lit.bs(t), Bool.pick(U32, U32.is_eq(c, 110), 10, c) <> acc)
     case c <> t False{} True{} _:
-      Nil{}
+      LnLt{List.reverse(&2, U32, acc), t}
     case c <> +t False{} False{} True{}:
-      lnt.lit.go(t, True{}, lnt.lit.q(t), lnt.lit.bs(t))
+      lnt.lt.go(t, True{}, lnt.lit.q(t), lnt.lit.bs(t), acc)
     case c <> +t False{} False{} False{}:
-      c <> lnt.lit.go(t, False{}, lnt.lit.q(t), lnt.lit.bs(t))
+      lnt.lt.go(t, False{}, lnt.lit.q(t), lnt.lit.bs(t), c <> acc)
 
-def lnt.lit(+xs: List<&2, U32>) -> List<&2, U32>:
-  lnt.lit.go(xs, False{}, lnt.lit.q(xs), lnt.lit.bs(xs))
+def lnt.lt(+xs: List<&2, U32>) -> LnLt:
+  lnt.lt.go(xs, False{}, lnt.lit.q(xs), lnt.lit.bs(xs), Nil{})
 
-# the shell string a Bend line hands sh: the literal after `"-c", `, else
-# the first literal of a line that quotes "$1" or "$@" (S.shim's kind)
+def lnt.lt.text(+l: LnLt) -> List<&2, U32>:
+  match l:
+    case LnLt{x, r}:
+      x
+
+def lnt.lt.rest(+l: LnLt) -> List<&2, U32>:
+  match l:
+    case LnLt{x, r}:
+      r
+
+# A term (a name, a call, a number) ends at a blank, a comma or a closing
+# bracket outside its brackets and string literals.  The scan a byte at a
+# time: depth its open brackets, q inside a literal, esc after a backslash
+# there; stop: the next byte ends it (worked out for it before the call).
+def lnt.term.shut(+c: U32) -> Bool:
+  Bool.or(Bool.or(U32.is_eq(c, 41), U32.is_eq(c, 93)), U32.is_eq(c, 125))
+
+def lnt.term.stop(+xs: List<&2, U32>, +depth: Nat, q: Bool) -> Bool:
+  +c = lnt.at(xs, 0n)
+  Bool.and(Bool.and(Bool.not(q), Nat.is_eq(depth, 0n)), Bool.and(Nat.is_ne(S.len(xs), 0n),
+    Bool.or(Bool.or(lnt.blank(c), U32.is_eq(c, 44)), lnt.term.shut(c))))
+
+def lnt.term.depth(+c: U32, +depth: Nat, q: Bool) -> Nat:
+  +open = Bool.or(Bool.or(U32.is_eq(c, 40), U32.is_eq(c, 91)), U32.is_eq(c, 123))
+  Bool.pick(Nat, q, depth, Bool.pick(Nat, open, 1n+depth, Bool.pick(Nat, lnt.term.shut(c), Nat.sub(depth, 1n), depth)))
+
+# what follows the term starting xs
+def lnt.term.go(xs: List<&2, U32>, +depth: Nat, +q: Bool, +esc: Bool, stop: Bool) -> List<&2, U32>:
+  match xs stop:
+    case Nil{} _:
+      Nil{}
+    case c <> t True{}:
+      c <> t
+    case +c <> +t False{}:
+      +nq = Bool.pick(Bool, q, Bool.or(esc, Bool.not(U32.is_eq(c, 34))), U32.is_eq(c, 34))
+      +nesc = Bool.and(q, Bool.and(Bool.not(esc), U32.is_eq(c, 92)))
+      +nd = lnt.term.depth(c, depth, q)
+      lnt.term.go(t, nd, nq, nesc, lnt.term.stop(t, nd, nq))
+
+def lnt.term(+xs: List<&2, U32>) -> List<&2, U32>:
+  lnt.term.go(xs, 0n, False{}, False{}, False{})
+
+# xs and what `++` joins to it: on: a piece follows (r: it, its leading
+# blanks gone; lit: it is a string literal); acc: the string so far; fuel:
+# the pieces left to read (a line's bytes bound them)
+def lnt.cat.go(fuel: Nat, +r: List<&2, U32>, on: Bool, lit: Bool, acc: List<&2, U32>) -> List<&2, U32>:
+  match fuel on lit:
+    case 0n _ _:
+      acc
+    case _ False{} _:
+      acc
+    case 1n+f True{} True{}:
+      +l = lnt.lt(List.drop(&2, U32, r, 1n))
+      +r1 = lnt.ltrim(lnt.lt.rest(l))
+      +r2 = lnt.ltrim(List.drop(&2, U32, r1, 2n))
+      lnt.cat.go(f, r2, S.prefix(r1, S.b("++")), lnt.lit.q(r2), List.append(&2, U32, acc, lnt.lt.text(l)))
+    case 1n+f True{} False{}:
+      +r1 = lnt.ltrim(lnt.term(r))
+      +r2 = lnt.ltrim(List.drop(&2, U32, r1, 2n))
+      lnt.cat.go(f, r2, S.prefix(r1, S.b("++")), lnt.lit.q(r2), List.append(&2, U32, acc, [88]))
+
+# the string an expression starting at xs makes (a literal or a term, and
+# what `++` joins to it)
+def lnt.cat(+xs: List<&2, U32>) -> List<&2, U32>:
+  +r = lnt.ltrim(xs)
+  lnt.cat.go(S.len(r), r, Nat.is_ne(S.len(r), 0n), lnt.lit.q(r), Nil{})
+
+# the shell string a Bend line hands sh (nothing when it hands none)
 def lnt.bend.lit(+l: List<&2, U32>) -> List<&2, U32>:
-  +a = S.b("\"-c\", \"")
+  +a = S.b("\"-c\", ")
   +shellish = Bool.or(S.infix(l, S.b("\\\"$1\\\"")), S.infix(l, S.b("\\\"$@\\\"")))
-  Bool.pick(List<&2, U32>, S.infix(l, a), lnt.lit(lnt.after(l, a, S.find(l, a, 0n))),
-    Bool.pick(List<&2, U32>, shellish, lnt.lit(lnt.after(l, [34], S.find(l, [34], 0n))), Nil{}))
+  Bool.pick(List<&2, U32>, S.infix(l, a), lnt.cat(lnt.after(l, a, S.find(l, a, 0n))),
+    Bool.pick(List<&2, U32>, shellish, lnt.cat(lnt.after(l, Nil{}, S.find(l, [34], 0n))), Nil{}))
 
 def lnt.line.probs(l: LnLine) -> List<&2, String>:
   match l:
@@ -735,13 +849,38 @@ def lnt.uniq(ps: List<&2, String>, +acc: List<&2, String>) -> List<&2, String>:
     case +p <> t:
       lnt.uniq(t, Bool.pick(List<&2, String>, lnt.has.str(acc, p), acc, p <> acc))
 
-def lnt.bend.lines(+path: String, ls: List<&2, LnL>) -> List<&2, String>:
+# the problems of the shell string a Bend line hands sh
+def lnt.bend.probs(+l: List<&2, U32>) -> List<&2, String>:
+  lnt.uniq(lnt.scan.probs(S.split.lines(lnt.bend.lit(l))), Nil{})
+
+def lnt.bend.exempt.defs() -> List<&2, String>:
+  ["shim", "run.quiet", "run.log", "bg.line"]
+
+def lnt.is.sys(+path: String) -> Bool:
+  +p = S.b(path)
+  Bool.or(S.eq(p, S.b("bend/Sys.bend")), S.suffix(p, S.b("/bend/Sys.bend")))
+
+# a line that starts a def: its name (else the def it is in goes on)
+def lnt.def.of(+x: List<&2, U32>, +cur: List<&2, U32>) -> List<&2, U32>:
+  Bool.pick(List<&2, U32>, S.prefix(x, S.b("def ")), lnt.upto(List.drop(&2, U32, x, 4n), 40, U32.is_eq(lnt.at(x, 4n), 40)), cur)
+
+def lnt.bend.exempt(+sys: Bool, +d: List<&2, U32>) -> Bool:
+  Bool.and(sys, lnt.in(lnt.bend.exempt.defs(), d))
+
+def lnt.bend.go(+path: String, +sys: Bool, ls: List<&2, LnL>, +cur: List<&2, U32>) -> List<&2, String>:
   match ls:
     case Nil{}:
       Nil{}
     case LnL{+n, +x} <> t:
-      List.append(&2, String, lnt.msgs("lint: warning: " ++ path, " (an sh -c string in Bend: Phase 7 makes it sequential process calls)", n,
-        lnt.uniq(lnt.scan.probs(S.split.lines(lnt.bend.lit(x))), Nil{})), lnt.bend.lines(path, t))
+      +d = lnt.def.of(x, cur)
+      List.append(&2, String,
+        Bool.pick(List<&2, String>, lnt.bend.exempt(sys, d), Nil{},
+          lnt.msgs("lint: FAIL " ++ path, " (an sh -c string in Bend: the logic belongs in Bend, the commands in plain process calls, S.run, S.run.to, ...)", n, lnt.bend.probs(x))),
+        lnt.bend.go(path, sys, t, d))
+
+# the problems of a Bend source's sh -c strings, each `lint: FAIL PATH:LINE: why (..)`
+def lnt.bend.lines(+path: String, ls: List<&2, LnL>) -> List<&2, String>:
+  lnt.bend.go(path, lnt.is.sys(path), ls, Nil{})
 
 # Reading -------------------------------------------------------------------------------------------
 
@@ -982,26 +1121,40 @@ def lnt.report(none: Bool, +report: String, +text: String) -> IO(Unit):
     case False{}:
       S.write(report, S.b(text))
 
-def lnt.verdict(ok: Bool, +f: Nat, +allowName: String, +report: String, +text: String) -> IO(Unit):
-  match ok:
-    case True{}:
+# f: the failing shell files and bodies; b: the problems of --bend's sh -c
+# strings (strict since 2026-10-15, the plan's Phase 7: each one fails)
+def lnt.verdict(f0: Bool, b0: Bool, +f: Nat, +b: Nat, +allowName: String, +report: String, +text: String) -> IO(Unit):
+  match f0 b0:
+    case True{} True{}:
       lnt.report(String.is_empty(report), report, text)
-    case False{}:
+    case False{} _:
       IO.die(Unit, 1, "lint: " ++ Nat.show(f) ++ " file(s) hold shell logic and are not on " ++ allowName
         ++ ": move the logic into Bend (a shim may only set -euo pipefail, export, cd and exec), or unwire the file (# UNWIRED DATE: why)")
+    case True{} False{}:
+      IO.die(Unit, 1, "lint: " ++ Nat.show(b) ++ " problem(s) in sh -c strings in Bend: move the logic into Bend and run the commands"
+        ++ " as plain process calls (S.run, S.run.to, S.run.feed, S.run.from)")
 
-def lnt.finish(t: LnTally, +n: Nat, +allowName: String, +report: String, +verbose: Bool, +extra: List<&2, String>) -> IO(Unit):
+def lnt.bend.sum(on: Bool, +b: Nat) -> String:
+  match on:
+    case True{}:
+      "; --bend: " ++ Nat.show(b) ++ " problems in sh -c strings in Bend"
+    case False{}:
+      ""
+
+def lnt.finish(t: LnTally, +n: Nat, +allowName: String, +report: String, +verbose: Bool, +extra: List<&2, String>, +bend: Bool, +bad: List<&2, String>) -> IO(Unit):
   match t:
     case LnTally{+p, +a, +u, +f, o, ns, al}:
-      +sum = lnt.summary(LnTally{p, a, u, f, Nil{}, Nil{}, Nil{}}, n, allowName)
+      +b = List.length(&2, String, bad)
+      +sum = lnt.summary(LnTally{p, a, u, f, Nil{}, Nil{}, Nil{}}, n, allowName) ++ lnt.bend.sum(bend, b)
       +als = List.reverse(&2, String, al)
       do IO<Unit>:
         lnt.say(List.reverse(&2, String, o))
+        lnt.say(bad)
         lnt.say(List.reverse(&2, String, ns))
         lnt.say(extra)
         lnt.say(Bool.pick(List<&2, String>, verbose, List.reverse(&2, String, lnt.indent(als, ["lint: allowed to fail until ported:"])), Nil{}))
         IO.print(sum)
-        lnt.verdict(Nat.is_eq(f, 0n), f, allowName, report, lnt.lines.text(sum <> ("lint: allowed to fail until ported:" <> List.reverse(&2, String, lnt.indent(als, Nil{})))))
+        lnt.verdict(Nat.is_eq(f, 0n), Nat.is_eq(b, 0n), f, b, allowName, report, lnt.lines.text(sum <> ("lint: allowed to fail until ported:" <> List.reverse(&2, String, lnt.indent(als, Nil{})))))
 
 def lnt.run(o: LnOpt) -> IO(Unit):
   match o:
@@ -1017,11 +1170,11 @@ def lnt.run(o: LnOpt) -> IO(Unit):
         +reps : List<&2, LnRep> <- lnt.all(ps, root)
         al : List<&2, U32> <- S.read(allowName)
         +allowed : List<&2, List<&2, U32>> = lnt.allow.of(al)
-        bw : List<&2, String> <- Bool.pick(IO(List<&2, String>), bend, lnt.bend.all(ps, root), IO.pure(List<&2, String>, Nil{}))
+        +bw : List<&2, String> <- Bool.pick(IO(List<&2, String>), bend, lnt.bend.all(ps, root), IO.pure(List<&2, String>, Nil{}))
         sw : List<&2, String> <- lnt.since(Bool.not(String.is_empty(since)), root, since)
         +stale : List<&2, String> = Bool.pick(List<&2, String>, given, Nil{}, lnt.stale(allowed, lnt.names(reps), allowName))
         lnt.finish(lnt.tally(reps, allowed, allowName, LnTally{0n, 0n, 0n, 0n, Nil{}, Nil{}, Nil{}}),
-          List.length(&2, LnRep, reps), allowName, report, verbose, List.concat(&2, String, [stale, bw, sw]))
+          List.length(&2, LnRep, reps), allowName, report, verbose, List.concat(&2, String, [stale, sw]), bend, bw)
 
 def lnt.main.opt(m: Maybe<&2, LnOpt>) -> IO(Unit):
   match m:

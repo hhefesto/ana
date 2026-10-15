@@ -392,11 +392,14 @@ def lic.text.ok(+t: List<&2, U32>) -> Bool:
   Bool.and(Bool.not(copyleft(x)), grant(x))
 
 # Listings: `find ... | LC_ALL=C sort`, one record per line ------------------
+#
+# find a process, its lines sorted bytewise in Bend (2026-10-15, the plan's
+# Phase 7: the shell pipe this was); its errors dropped, as 2>/dev/null did
 
-def listing(+cmd: String, +arg: String) -> IO(List<&2, List<&2, U32>>):
+def listing(args: List<String>) -> IO(List<&2, List<&2, U32>>):
   do IO<List<&2, List<&2, U32>>>:
-    o : S.Out <- S.run.quiet(".", ["LC_ALL=C"], 86400, "sh", ["-c", cmd ++ " | sort", "sh", arg], Nil{})
-    return S.split.lines(S.Out.text(o))
+    o : S.Out <- S.run.quiet(".", ["LC_ALL=C"], 86400, "find", args, Nil{})
+    return S.bytes.sort(S.split.lines(S.Out.text(o)))
 
 # a file: its path, find's type letter, depth and size
 type Fr is Data:
@@ -544,16 +547,33 @@ def tar.got(ok: Bool, +c: Cf, +pkg: String, +pv: List<&2, U32>, +package: List<&
       IO.pure(Xst, es.bump(s, "unreadable"))
     case True{}:
       do IO<Xst>:
-        ls : List<&2, List<&2, U32>> <- listing("find \"$1\" -mindepth 1 -printf '%p\\t%y\\t%d\\t%s\\n'", pkg)
+        ls : List<&2, List<&2, U32>> <- listing([pkg, "-mindepth", "1", "-printf", "%p\\t%y\\t%d\\t%s\\n"])
         tar.listed(c, S.append(S.b(pkg ++ "/"), S.append(pv, [47])), package, recs4(ls), es.bump(s, "processed"))
 
-# one tarball: a fresh directory, the package unpacked into it
+# tar unpacks into a directory mkdir made (`mkdir -p DIR && tar xzf TGZ -C
+# DIR 2>/dev/null`): the status of the step that ended it
+def tar.unpack(made: Bool, +o: S.Out, +pkg: String, +tgz: String) -> IO(U32):
+  match made:
+    case False{}:
+      IO.pure(U32, S.Out.status(o))
+    case True{}:
+      do IO<U32>:
+        +t : S.Out <- S.run.quiet(".", [], 3600, "tar", ["xzf", tgz, "-C", pkg], Nil{})
+        return S.Out.status(t)
+
+# one tarball: a fresh directory, the package unpacked into it (2026-10-15,
+# the plan's Phase 7: the shell line `chmod ..; rm -rf ..; mkdir -p .. &&
+# tar ..` this was, each step now a process; chmod and rm may fail, as
+# their `;` let them)
 def tar.one(+c: Cf, +src: String, +work: String, +name: List<&2, U32>, s: Xst) -> IO(Xst):
   +pv = before.last(before.last(name, 46), 46)
   +pkg = work ++ "/pkg"
   do IO<Xst>:
-    o : S.Out <- S.run(".", [], 3600, "sh", ["-c", "chmod -R u+rwX \"$1\" 2>/dev/null; rm -rf \"$1\"; mkdir -p \"$1\" && tar xzf \"$2\" -C \"$1\" 2>/dev/null", "sh", pkg, src ++ "/tarballs/" ++ S.str(name)], Nil{})
-    tar.got(U32.is_eq(S.Out.status(o), 0), c, pkg, pv, before.last(pv, 45), es.bump(s, "considered"))
+    a : S.Out <- S.run.quiet(".", [], 3600, "chmod", ["-R", "u+rwX", pkg], Nil{})
+    b : S.Out <- S.run(".", [], 3600, "rm", ["-rf", pkg], Nil{})
+    +m : S.Out <- S.run(".", [], 3600, "mkdir", ["-p", pkg], Nil{})
+    +st : U32 <- tar.unpack(U32.is_eq(S.Out.status(m), 0), m, pkg, src ++ "/tarballs/" ++ S.str(name))
+    tar.got(U32.is_eq(st, 0), c, pkg, pv, before.last(pv, 45), es.bump(s, "considered"))
 
 def tar.all(ns: List<&2, List<&2, U32>>, +c: Cf, +src: String, +work: String, s: Xst) -> IO(Xst):
   match ns:
@@ -592,13 +612,13 @@ def tree.files(ok: Bool, +c: Cf, +tree: String, +group: List<&2, U32>, +spare: B
       IO.pure(Xst, es.bump(s, "license"))
     case True{}:
       do IO<Xst>:
-        ls : List<&2, List<&2, U32>> <- listing("find \"$1\" -type f -not -path '*/.git/*' -printf '%p\\t%s\\n'", tree)
+        ls : List<&2, List<&2, U32>> <- listing([tree, "-type", "f", "-not", "-path", "*/.git/*", "-printf", "%p\\t%s\\n"])
         emit.all(sources2(ls), c, group, S.b(tree), hold.source(c, spare, group), s)
 
 # repos/: the license gate first
 def tree.gated(+c: Cf, +tree: String, +group: List<&2, U32>, s: Xst) -> IO(Xst):
   do IO<Xst>:
-    have : List<&2, List<&2, U32>> <- listing("find \"$1\" -mindepth 1 -maxdepth 1 -printf '%Y\\t%f\\n'", tree)
+    have : List<&2, List<&2, U32>> <- listing([tree, "-mindepth", "1", "-maxdepth", "1", "-printf", "%Y\\t%f\\n"])
     t : List<&2, U32> <- lic.read(tree, lic.file(["LICENSE", "LICENCE", "COPYING", "LICENSE.md", "LICENCE.md", "LICENSE.txt", "LICENCE.txt", "COPYING.md"], have))
     tree.files(lic.text.ok(t), c, tree, group, False{}, s)
 
@@ -620,7 +640,7 @@ def tree.all(ns: List<&2, List<&2, U32>>, +c: Cf, +src: String, +cls: String, s:
 # paths of their files do (telomare-history/ before telomare/)
 def trees(+c: Cf, +src: String, +cls: String, s: Xst) -> IO(Xst):
   do IO<Xst>:
-    ns : List<&2, List<&2, U32>> <- listing("find -H \"$1\" -mindepth 1 -maxdepth 1 -xtype d -not -name '.*' -printf '%f/\\n'", src ++ "/" ++ cls)
+    ns : List<&2, List<&2, U32>> <- listing(["-H", src ++ "/" ++ cls, "-mindepth", "1", "-maxdepth", "1", "-xtype", "d", "-not", "-name", ".*", "-printf", "%f/\\n"])
     tree.all(ns, c, src, cls, s)
 
 # The run ----------------------------------------------------------------------------
@@ -700,7 +720,7 @@ def run(+out: String, +src: String) -> IO(Unit):
     o : File <- IO.try(File, File.open(out ++ ".tmp", "w"))
     h : File <- IO.try(File, File.open(Bool.pick(String, on, hp ++ ".tmp", "/dev/null"), "w"))
     say("Hackage tarballs")
-    ns : List<&2, List<&2, U32>> <- listing("find -H \"$1\" -mindepth 1 -maxdepth 1 -name '*.tar.gz' -not -name '.*' -printf '%f\\n'", src ++ "/tarballs")
+    ns : List<&2, List<&2, U32>> <- listing(["-H", src ++ "/tarballs", "-mindepth", "1", "-maxdepth", "1", "-name", "*.tar.gz", "-not", "-name", ".*", "-printf", "%f\\n"])
     s1 : Xst <- tar.all(ns, c, src, work, Xst{o, h, Set.new(), Nil{}})
     say("cloned repositories")
     s2 : Xst <- trees(c, src, "repos", s1)

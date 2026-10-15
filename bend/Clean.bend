@@ -565,11 +565,54 @@ def sh.ok(ok: Bool, +what: String, +o: S.Out) -> IO(Unit):
       IO.die(Unit, 1, "clean: " ++ what ++ " failed: " ++ S.str(S.lines.take(S.Out.text(o), 20n)))
 
 # The driver --------------------------------------------------------------------
+#
+# Each step a process of its own in the work directory, LC_ALL=C (2026-10-15,
+# the plan's Phase 7: these were shell lines with && and pipes; a pipe's
+# middle is now a file of its own, removed after).
 
-def sh(+w: String, +what: String, +script: String, args: List<String>) -> IO(Unit):
+def cl.cmd(+w: String, +what: String, prog: String, args: List<String>) -> IO(Unit):
   do IO<Unit>:
-    +o : S.Out <- S.run(w, ["LC_ALL=C"], 2000000, "sh", List.append(&1, String, ["-c", script, "sh"], args), Nil{})
+    +o : S.Out <- S.run(w, ["LC_ALL=C"], 2000000, prog, args, Nil{})
     sh.ok(U32.is_eq(S.Out.status(o), 0), what, o)
+
+# the same with its standard output into the file out (in w)
+def cl.into(+w: String, +what: String, prog: String, args: List<String>, +out: String) -> IO(Unit):
+  do IO<Unit>:
+    +o : S.Out <- S.run.to(w, ["LC_ALL=C"], 2000000, prog, args, out)
+    sh.ok(U32.is_eq(S.Out.status(o), 0), what, o)
+
+# `sort -S 1G -T . IN > OUT && join -o 2.2 eval.s OUT | sort -u > contam`
+def cl.match(+w: String) -> IO(Unit):
+  do IO<Unit>:
+    cl.cmd(w, "the 10-gram match", "sort", ["-S", "1G", "-T", ".", "-o", "grams.s", "grams"])
+    cl.into(w, "the 10-gram match", "join", ["-o", "2.2", "eval.s", "grams.s"], "contam.j")
+    cl.cmd(w, "the 10-gram match", "sort", ["-u", "-o", "contam", "contam.j"])
+    cl.cmd(w, "the 10-gram match", "rm", ["contam.j"])
+
+# `sort -u -S 1G -T . pairs > pairs.s && join pairs.s sigs | sort -k2,2 -S 1G -T . > p1
+#  && join -1 2 -2 1 -o 1.1,1.2,1.3,2.2 p1 sigs > p2`
+def cl.pairs(+w: String) -> IO(Unit):
+  do IO<Unit>:
+    cl.cmd(w, "the pair join", "sort", ["-u", "-S", "1G", "-T", ".", "-o", "pairs.s", "pairs"])
+    cl.into(w, "the pair join", "join", ["pairs.s", "sigs"], "p1.j")
+    cl.cmd(w, "the pair join", "sort", ["-k2,2", "-S", "1G", "-T", ".", "-o", "p1", "p1.j"])
+    cl.cmd(w, "the pair join", "rm", ["p1.j"])
+    cl.into(w, "the pair join", "join", ["-1", "2", "-2", "1", "-o", "1.1,1.2,1.3,2.2", "p1", "sigs"], "p2")
+
+# `[ -s EVAL.10grams ] && [ EVAL.10grams -nt EVAL ]` (a missing EVAL counts
+# as older, as -nt has it): find prints the cache when it holds
+def cl.cached.find(there: Bool, +w: String, +c: String, +e: String) -> IO(S.Out):
+  match there:
+    case True{}:
+      S.run(w, [], 60, "find", ["-L", c, "-maxdepth", "0", "-size", "+0", "-newer", e], Nil{})
+    case False{}:
+      S.run(w, [], 60, "find", ["-L", c, "-maxdepth", "0", "-size", "+0"], Nil{})
+
+def cl.cached(+w: String, +e: String) -> IO(Bool):
+  do IO<Bool>:
+    there : Bool <- S.exists(e)
+    +o : S.Out <- cl.cached.find(there, w, e ++ ".10grams", e)
+    return Bool.and(U32.is_eq(S.Out.status(o), 0), Nat.is_lt(0n, S.len(S.Out.text(o))))
 
 def nl.sp(xs: List<&2, U32>) -> List<&2, U32>:
   match xs:
@@ -615,14 +658,17 @@ def evals(cached: Bool, +w: String, +e: String) -> IO(Unit):
     case True{}:
       do IO<Unit>:
         Ck.log("clean: the eval 10-grams from " ++ e ++ ".10grams")
-        sh(w, "the cached eval 10-grams", "ln -s \"$1\" eval.s", [e ++ ".10grams"])
+        cl.cmd(w, "the cached eval 10-grams", "ln", ["-s", e ++ ".10grams", "eval.s"])
     case False{}:
       do IO<Unit>:
         er : S.Rd <- S.Rd.lines(e)
         eo : File <- IO.try(File, File.open(w ++ "/eval", "w"))
         +docs : Nat <- pb.go(big(), Pb{er, eo, 0n, True{}})
         Ck.log("clean: " ++ Nat.show(docs) ++ " eval texts hashed")
-        sh(w, "the eval sort", "sort -u -S 1G -T . eval > eval.s && rm eval && cp eval.s \"$1.tmp\" && mv \"$1.tmp\" \"$1\"", [e ++ ".10grams"])
+        cl.cmd(w, "the eval sort", "sort", ["-u", "-S", "1G", "-T", ".", "-o", "eval.s", "eval"])
+        cl.cmd(w, "the eval sort", "rm", ["eval"])
+        cl.cmd(w, "the eval sort", "cp", ["eval.s", e ++ ".10grams.tmp"])
+        cl.cmd(w, "the eval sort", "mv", [e ++ ".10grams.tmp", e ++ ".10grams"])
 
 def clean(+results: String, +train: String, +hold: String, +eval: String) -> IO(Unit):
   do IO<Unit>:
@@ -637,14 +683,14 @@ def clean(+results: String, +train: String, +hold: String, +eval: String) -> IO(
     +ra : Ra <- pa.go(big(), Pa{rd, g, sg, bd, Set.new(), Set.new(), 0n, 0n, True{}})
     Ck.log("clean: " ++ Nat.show(ra.units(ra)) ++ " units hashed")
     +e : String <- S.realpath(eval)
-    +o : S.Out <- S.run(w, [], 60, "sh", ["-c", "[ -s \"$1\" ] && [ \"$1\" -nt \"$2\" ]", "sh", e ++ ".10grams", e], Nil{})
-    evals(U32.is_eq(S.Out.status(o), 0), w, e)
-    sh(w, "the 10-gram match", "sort -S 1G -T . grams > grams.s && join -o 2.2 eval.s grams.s | sort -u > contam", [])
-    sh(w, "the band sort", "sort -S 1G -T . bands > bands.s", [])
+    cached : Bool <- cl.cached(w, e)
+    evals(cached, w, e)
+    cl.match(w)
+    cl.cmd(w, "the band sort", "sort", ["-S", "1G", "-T", ".", "-o", "bands.s", "bands"])
     br : S.Rd <- S.Rd.lines(w ++ "/bands.s")
     po : File <- IO.try(File, File.open(w ++ "/pairs", "w"))
     pc.go(big(), Pc{br, po, Nil{}, Nil{}, True{}})
-    sh(w, "the pair join", "sort -u -S 1G -T . pairs > pairs.s && join pairs.s sigs | sort -k2,2 -S 1G -T . > p1 && join -1 2 -2 1 -o 1.1,1.2,1.3,2.2 p1 sigs > p2", [])
+    cl.pairs(w)
     vr : S.Rd <- S.Rd.lines(w ++ "/p2")
     +near : Set() <- pv.go(big(), Pv{vr, Set.new(), True{}})
     +contam : Set() <- set.of(w ++ "/contam")

@@ -32,9 +32,10 @@
       # Every .bend source, nothing else.
       bendSrc = sourceOf [ (nixpkgs.lib.fileset.fileFilter (f: f.hasExt "bend") ./bend) ];
       # What the shell lint reads (2026-10-14): every *.sh, every file without
-      # an extension (its shebang may name a shell), flake.nix, the allowlist.
+      # an extension (its shebang may name a shell), flake.nix, the allowlist,
+      # and every .bend (2026-10-15: --bend reads the sh -c strings in Bend).
       lintSrc = sourceOf [
-        (nixpkgs.lib.fileset.fileFilter (f: f.hasExt "sh" || !(nixpkgs.lib.hasInfix "." f.name)) ./.)
+        (nixpkgs.lib.fileset.fileFilter (f: f.hasExt "sh" || f.hasExt "bend" || !(nixpkgs.lib.hasInfix "." f.name)) ./.)
         ./flake.nix
         ./tools/lint
       ];
@@ -271,10 +272,11 @@
           '';
           # shell stays a thin shim (2026-10-14): bend-ops lint over lintSrc
           # (every shell file and flake.nix's shell bodies) against the
-          # ratchet in tools/lint/shell-allow.txt; the report is $out
+          # ratchet in tools/lint/shell-allow.txt, and (--bend, strict since
+          # 2026-10-15) every sh -c string in the Bend sources; the report is $out
           shell-lint = pkgs.runCommand "shell-lint" { } ''
             cd ${lintSrc}
-            exec ${self.packages.${system}.bend-ops}/bin/bend-ops lint --tree . --report "$out"
+            exec ${self.packages.${system}.bend-ops}/bin/bend-ops lint --tree . --bend --report "$out"
           '';
           # the behaviour test's tasks and references are what its spec says
           # (2026-10-14: bend-corpus-v2 behaviour tasks --check, the Bend port

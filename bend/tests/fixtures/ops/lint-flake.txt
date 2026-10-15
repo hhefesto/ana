@@ -1,0 +1,28 @@
+{
+  outputs = { self }:
+    let
+      bin =
+        pkgs: name:
+        pkgs.runCommand name { } ''
+          cp -r ${src}/bend src
+          bend src/${name} -o $out/bin/${name}
+        '';
+    in {
+      deploy = pkgs.writeShellApplication {
+        name = "deploy";
+        runtimeInputs = [ ];
+        text = ''
+          exec "bend-''${1:?usage: deploy TOOL [ARGS...]   (TOOL: ops)}" "''${@:2}"
+        '';
+      };
+      ok = pkgs.runCommand "ok" { } ''
+          cd ${src}
+          exec ${self.x}/bin/x --report "$out"
+        '';
+      one = pkgs.writeShellApplication { name = "one"; text = ''exec foo "$@" | tee x''; };
+      bad = pkgs.runCommand "bad" { } ''
+          for x in a b; do echo $x; done
+          grep -q y z
+        '';
+    };
+}

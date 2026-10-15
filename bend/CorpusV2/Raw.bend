@@ -46,10 +46,11 @@ import ./Lib.bend as L
 # order hash, is written out by a `raw --write` with the caps.  Equal order
 # hashes are one id (sha256), so such a run is ordered by its texts.
 #
-# The work is in OUT/.rw-work (spools about the size of the output; removed
-# at the end); JOBS processes at once (default 5), chunks of RAW_CHUNK bytes
-# (default 150 MB; a scanner holds ~0.7 GB, mostly filler.keys).  A slice
-# K >= 2 skips to its start with `tail -c` into `raw --slice-at`.  The
+# The work is in OUT/.rw-work (spools about the size of the output, and a
+# scan's chunk while it is read; removed at the end); JOBS processes at once
+# (default 5), chunks of RAW_CHUNK bytes (default 150 MB; a scanner holds
+# ~0.7 GB, mostly filler.keys).  A slice K >= 2 skips to its start with
+# `tail -c`, read through a FIFO (no shell pipes since 2026-10-15).  The
 # processes are this program again (the head of IO.args) under the
 # subcommand rw.cmd() ("raw"): the program must answer to that name.
 #
@@ -1149,18 +1150,29 @@ def rw.sl.run(+inp: String, +dst: String, +k: Nat, +size: Nat, +off: Nat) -> IO(
 
 # Slice K >= 2 starts at lo - 1 (`tail -c` seeks there; a line starting
 # there or past it is read as Python read it, and the line that byte ends or
-# lies in starts before lo, so it is passed over either way); its output is
-# this process's
-def rw.sl.out(+o: S.Out) -> IO(Unit):
-  Bool.pick(IO(Unit), U32.is_eq(S.Out.status(o), 0), IO.print(S.str(S.chomp(S.Out.text(o)))),
-    IO.die(Unit, 1, "slice: " ++ S.str(S.chomp(S.Out.text(o)))))
+# lies in starts before lo, so it is passed over either way).  The bytes come
+# through a FIFO (2026-10-15, Phase 7: the shell pipe `tail -c +LO SRC |
+# SELF raw --slice-at` this was): `tail` writes it in the background and this
+# process reads it to the slice's end, then closes it, which ends `tail`;
+# as with the pipe, tail's own status is not read.  (Not File.read_at: its
+# offset is a U32, and R/mix.jsonl is past 4 GiB.)
+def rw.sl.skip.if(ok: Bool, +src: String, +dst: String, +k: Nat, +size: Nat, +lo: Nat) -> IO(Unit):
+  match ok:
+    case False{}:
+      IO.die(Unit, 1, "slice: cannot read " ++ src)
+    case True{}:
+      do IO<Unit>:
+        +tmp : String <- S.mktemp()
+        o : List<&2, U32> <- S.must("mkfifo " ++ tmp ++ "/in", "mkfifo", [tmp ++ "/in"])
+        pid : String <- S.background(".", [], tmp ++ "/in", False{}, "tail", ["-c", "+" ++ Nat.show(lo), src])
+        rw.sl.run(tmp ++ "/in", dst, k, size, Nat.sub(lo, 1n))
+        S.rm(tmp)
 
 def rw.sl.skip(+self: String, +src: String, +dst: String, +k: Nat, +size: Nat) -> IO(Unit):
   +lo = Nat.mul(Nat.sub(k, 1n), size)
   do IO<Unit>:
-    +o : S.Out <- S.run(".", [], rw.forever(), "sh", ["-c", "[ -r \"$2\" ] || { echo \"cannot read $2\"; exit 1; }; tail -c +\"$1\" \"$2\" 2>/dev/null | \"$3\" \"$4\" --slice-at \"$5\" /dev/stdin \"$6\" \"$7\" \"$8\"",
-      "sh", Nat.show(lo), src, self, rw.cmd(), Nat.show(Nat.sub(lo, 1n)), dst, Nat.show(k), Nat.show(size)], Nil{})
-    rw.sl.out(o)
+    ok : Bool <- S.exists(src)
+    rw.sl.skip.if(ok, src, dst, k, size, lo)
 
 def rw.sl.at(first: Bool, +self: String, +src: String, +dst: String, +k: Nat, +size: Nat) -> IO(Unit):
   match first:
@@ -1204,27 +1216,105 @@ def rw.sources() -> List<String>:
    "run/raw-new/lean.jsonl", "run/raw-new/lean-2.jsonl", "run/raw-new/bend.jsonl"]
 
 # a job for the pool: a source's chunk K of N scanned, or a language sorted
-# and written
+# and written (pres: the scans' PRE paths, whose spools it sorts)
 type RwJ is Type:
   RwScan{pp: String, src: String, k: Nat, n: Nat, pre: String}
-  RwLang{lang: String}
+  RwLang{lang: String, pres: List<&2, String>}
 
-def rw.scan.sh() -> String:
-  "set -o pipefail; split -n \"l/$1/$2\" \"$3\" | \"$4\" \"$5\" --scan \"$6\" /dev/stdin \"$7\""
+def rw.strs(xs: List<&2, String>) -> List<String>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case x <> more:
+      x <> rw.strs(more)
 
-def rw.lang.sh() -> String:
-  "set -e; sort -S 1G -T \"$1\" -o \"$1/$2.sorted\" \"$1\"/*.\"$2\"; rm -f \"$1\"/*.\"$2\"; \"$3\" \"$4\" --write \"$2\" \"$1\" \"$5\"; rm -f \"$1/$2.sorted\""
+# each PRE with a suffix: the files the scans wrote (each scan writes all of
+# PRE.idx and PRE.LANG, empty or not)
+def rw.of.pres(ps: List<&2, String>, +suf: String) -> List<&2, String>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case p <> more:
+      (p ++ suf) <> rw.of.pres(more, suf)
+
+# the scans' PREs, the jobs given back
+def rw.pres.cons(j: RwJ, a: List<RwJ>, b: List<&2, String>) -> List<RwJ> & List<&2, String>:
+  match j:
+    case RwScan{pp, src, k, n, +pre}:
+      (RwScan{pp, src, k, n, pre} <> a, pre <> b)
+    case RwLang{l, ps}:
+      (RwLang{l, ps} <> a, b)
+
+def rw.pres.add(j: RwJ, r: List<RwJ> & List<&2, String>) -> List<RwJ> & List<&2, String>:
+  (a, b) = r
+  rw.pres.cons(j, a, b)
+
+def rw.pres(js: List<RwJ>) -> List<RwJ> & List<&2, String>:
+  match js:
+    case Nil{}:
+      (Nil{}, Nil{})
+    case j <> more:
+      rw.pres.add(j, rw.pres(more))
+
+# the next command when the last one succeeded (`set -e`), else its status
+def rw.and.go(ok: Bool, +st: U32, next: IO(U32)) -> IO(U32):
+  match ok:
+    case True{}:
+      next
+    case False{}:
+      IO.pure(U32, st)
+
+def rw.and(+st: U32, next: IO(U32)) -> IO(U32):
+  rw.and.go(U32.is_eq(st, 0), st, next)
+
+def rw.status(act: IO(S.Out)) -> IO(U32):
+  IO.bind(S.Out, U32, act, o => IO.pure(U32, S.Out.status(o)))
+
+# A scan (2026-10-15, Phase 7: the pipe `split -n l/K/N SRC | SELF raw
+# --scan POS /dev/stdin PRE` this was): `split` writes the chunk into
+# PRE.in, its errors into PRE.log; the scanner reads PRE.in and adds its
+# output to PRE.log; PRE.in goes.  A chunk on disk a job at a time (about
+# RAW_CHUNK bytes) where the pipe held none.
+def rw.scan.job(+self: String, +pp: String, +src: String, +k: Nat, +n: Nat, +pre: String) -> IO(Bool):
+  +inp = pre ++ ".in"
+  do IO<Bool>:
+    +o : S.Out <- S.run.to(".", ["LC_ALL=C"], rw.forever(), "split", ["-n", "l/" ++ Nat.show(k) ++ "/" ++ Nat.show(n), src], inp)
+    S.write(pre ++ ".log", S.Out.text(o))
+    +st : U32 <- rw.and(S.Out.status(o), S.run.feed(".", ["LC_ALL=C"], rw.forever(), self, [rw.cmd(), "--scan", pp, inp, pre], pre ++ ".log", Nil{}))
+    S.rm(inp)
+    return U32.is_eq(st, 0)
+
+# A language (the shell line `set -e; sort ..; rm -f ..; SELF raw --write
+# ..; rm -f ..` this was, each step now a process of its own into
+# W/LANG.log): its spools sorted into W/LANG.sorted and removed, the
+# language written, W/LANG.sorted removed
+def rw.lang.steps(+self: String, +w: String, +out: String, +lang: String, +sp: List<&2, String>) -> IO(Bool):
+  +log = w ++ "/" ++ lang ++ ".log"
+  +sorted = w ++ "/" ++ lang ++ ".sorted"
+  do IO<Bool>:
+    +s1 : U32 <- S.run.log(".", ["LC_ALL=C"], rw.forever(), "sort", List.append(&1, String, ["-S", "1G", "-T", w, "-o", sorted], rw.strs(sp)), log)
+    +s2 : U32 <- rw.and(s1, S.run.feed(".", ["LC_ALL=C"], rw.forever(), "rm", "-f" <> rw.strs(sp), log, Nil{}))
+    +s3 : U32 <- rw.and(s2, S.run.feed(".", ["LC_ALL=C"], rw.forever(), self, [rw.cmd(), "--write", lang, w, out], log, Nil{}))
+    +s4 : U32 <- rw.and(s3, S.run.feed(".", ["LC_ALL=C"], rw.forever(), "rm", ["-f", sorted], log, Nil{}))
+    return U32.is_eq(s4, 0)
+
+# no scans, no spools: a failure, as the shell's glob of none was
+def rw.lang.job(none: Bool, +self: String, +w: String, +out: String, +lang: String, +sp: List<&2, String>) -> IO(Bool):
+  match none:
+    case True{}:
+      do IO<Bool>:
+        S.write(w ++ "/" ++ lang ++ ".log", S.b("raw: no spools of " ++ lang ++ " to sort\n"))
+        return False{}
+    case False{}:
+      rw.lang.steps(self, w, out, lang, sp)
 
 def rw.job.run(+self: String, +w: String, +out: String, j: RwJ) -> IO(Bool):
   match j:
-    case RwScan{pp, src, k, n, +pre}:
-      do IO<Bool>:
-        +st : U32 <- S.run.log(".", ["LC_ALL=C"], rw.forever(), "sh", ["-c", rw.scan.sh(), "sh", Nat.show(k), Nat.show(n), src, self, rw.cmd(), pp, pre], pre ++ ".log")
-        return U32.is_eq(st, 0)
-    case RwLang{+lang}:
-      do IO<Bool>:
-        +st : U32 <- S.run.log(".", ["LC_ALL=C"], rw.forever(), "sh", ["-c", rw.lang.sh(), "sh", w, lang, self, rw.cmd(), out], w ++ "/" ++ lang ++ ".log")
-        return U32.is_eq(st, 0)
+    case RwScan{+pp, +src, +k, +n, +pre}:
+      rw.scan.job(self, pp, src, k, n, pre)
+    case RwLang{+lang, +pres}:
+      +sp = rw.of.pres(pres, "." ++ lang)
+      rw.lang.job(Nat.is_eq(List.length(&2, String, sp), 0n), self, w, out, lang, sp)
 
 type RwPw is Type:
   RwPw{go: Bool, bad: Nat}
@@ -1316,8 +1406,8 @@ def rw.plan(+w: String, +ch: Nat, srcs: List<String>, +si: Nat) -> IO(List<RwJ>)
 def rw.ok(+bad: Nat, +what: String) -> IO(Unit):
   Bool.pick(IO(Unit), Nat.is_eq(bad, 0n), IO.pure(Unit, Unit{}), IO.die(Unit, 1, "raw: " ++ Nat.show(bad) ++ " " ++ what ++ " failed (their .log files are in the work directory)"))
 
-def rw.langs.all() -> List<RwJ>:
-  [RwLang{"haskell"}, RwLang{"lean"}, RwLang{"agda"}, RwLang{"bend"}, RwLang{"nix"}]
+def rw.langs.all(+pres: List<&2, String>) -> List<RwJ>:
+  [RwLang{"haskell", pres}, RwLang{"lean", pres}, RwLang{"agda", pres}, RwLang{"bend", pres}, RwLang{"nix", pres}]
 
 # the summary lines of the languages that kept a file, in their names' order
 def rw.sum.lines(+w: String, k: Nat, +i: Nat) -> IO(List<&2, List<&2, U32>>):
@@ -1330,10 +1420,22 @@ def rw.sum.lines(+w: String, k: Nat, +i: Nat) -> IO(List<&2, List<&2, U32>>):
         +rest : List<&2, List<&2, U32>> <- rw.sum.lines(w, j, 1n+i)
         return Bool.pick(List<&2, List<&2, U32>>, Nat.is_eq(S.len(x), 0n), rest, x <> rest)
 
-def rw.sorted.idx(+w: String) -> IO(Unit):
+# the scans' PRE.idx sorted into W/idx and removed (two processes: the
+# shell line `set -e; sort ..; rm -f ..` this was); no scans, a failure
+def rw.idx.steps(none: Bool, +w: String, +ix: List<&2, String>) -> IO(U32):
+  match none:
+    case True{}:
+      IO.pure(U32, 2)
+    case False{}:
+      do IO<U32>:
+        +o : S.Out <- S.run(".", ["LC_ALL=C"], rw.forever(), "sort", List.append(&1, String, ["-S", "2G", "-T", w, "-o", w ++ "/idx"], rw.strs(ix)), Nil{})
+        rw.and(S.Out.status(o), rw.status(S.run(".", ["LC_ALL=C"], rw.forever(), "rm", "-f" <> rw.strs(ix), Nil{})))
+
+def rw.sorted.idx(+w: String, +pres: List<&2, String>) -> IO(Unit):
+  +ix = rw.of.pres(pres, ".idx")
   do IO<Unit>:
-    +o : S.Out <- S.run(".", ["LC_ALL=C"], rw.forever(), "sh", ["-c", "set -e; sort -S 2G -T \"$1\" -o \"$1/idx\" \"$1\"/*.idx; rm -f \"$1\"/*.idx", "sh", w], Nil{})
-    rw.ok(U32.to_nat(S.Out.status(o)), "index sorts")
+    +st : U32 <- rw.idx.steps(Nat.is_eq(List.length(&2, String, ix), 0n), w, ix)
+    rw.ok(U32.to_nat(st), "index sorts")
 
 def rw.say(+text: List<&2, U32>) -> IO(Unit):
   match text:
@@ -1341,6 +1443,27 @@ def rw.say(+text: List<&2, U32>) -> IO(Unit):
       IO.pure(Unit, Unit{})
     case t <> more:
       IO.print(S.str(S.chomp(t <> more)))
+
+def rw.main.run(+out: String, +self: String, +w: String, +jobs: Nat, js: List<RwJ>, +pres: List<&2, String>) -> IO(Unit):
+  do IO<Unit>:
+    rw.log("raw: scanning, " ++ Nat.show(jobs) ++ " chunks at once")
+    b1 : Nat <- rw.pool(self, w, out, js, jobs)
+    rw.ok(b1, "scans")
+    rw.log("raw: scanned; sorting the index")
+    rw.sorted.idx(w, pres)
+    rw.decide(w)
+    rw.log("raw: copies decided; writing the languages")
+    b2 : Nat <- rw.pool(self, w, out, rw.langs.all(pres), jobs)
+    rw.ok(b2, "languages")
+    ls : List<&2, List<&2, U32>> <- rw.sum.lines(w, 5n, 0n)
+    +text : List<&2, U32> <- IO.pure(List<&2, U32>, S.append(S.join(ls, 10), [10]))
+    S.write(out ++ "/summary.txt", text)
+    rw.say(text)
+    S.rm(w)
+
+def rw.main.jobs(+out: String, +self: String, +w: String, +jobs: Nat, p: List<RwJ> & List<&2, String>) -> IO(Unit):
+  (js, pres) = p
+  rw.main.run(out, self, w, jobs, js, pres)
 
 # `raw [OUT [SRC...]]`
 def rw.main(+out: String, srcs: List<String>, +self: String) -> IO(Unit):
@@ -1352,20 +1475,7 @@ def rw.main(+out: String, srcs: List<String>, +self: String) -> IO(Unit):
     +jobs : Nat <- S.env.nat("JOBS", 5n)
     +ch : Nat <- S.env.nat("RAW_CHUNK", 150000000n)
     js : List<RwJ> <- rw.plan(w, ch, srcs, 0n)
-    rw.log("raw: scanning, " ++ Nat.show(jobs) ++ " chunks at once")
-    b1 : Nat <- rw.pool(self, w, out, js, jobs)
-    rw.ok(b1, "scans")
-    rw.log("raw: scanned; sorting the index")
-    rw.sorted.idx(w)
-    rw.decide(w)
-    rw.log("raw: copies decided; writing the languages")
-    b2 : Nat <- rw.pool(self, w, out, rw.langs.all(), jobs)
-    rw.ok(b2, "languages")
-    ls : List<&2, List<&2, U32>> <- rw.sum.lines(w, 5n, 0n)
-    +text : List<&2, U32> <- IO.pure(List<&2, U32>, S.append(S.join(ls, 10), [10]))
-    S.write(out ++ "/summary.txt", text)
-    rw.say(text)
-    S.rm(w)
+    rw.main.jobs(out, self, w, jobs, rw.pres(js))
 
 def rw.usage() -> IO(Unit):
   IO.die(Unit, 2, "usage: raw [OUT [SRC...]] | raw --scan POS INPUT PRE | raw --write LANG WORK OUT | raw --slice-at OFF INPUT DST K SIZE")

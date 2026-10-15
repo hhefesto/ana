@@ -448,7 +448,7 @@ def chk.tests() -> List<&2, ChkTest>:
      "a failing echo then a stopped call is not", "one call answered", "one answered, the stopped one not"])}},
    # the corpus tools' libraries: processes and text (Sys), JSON strings as
    # jq decodes and writes them (Json), POSIX cksum
-   ChkTest{"sys.bend", False{}, RExact{chk.oks(["run", "merge", "timeout", "cwd", "env", "stdin", "clean", "parent", "root", "chomp", "split", "replace", "nul", "slurp", "exists"])}},
+   ChkTest{"sys.bend", False{}, RExact{chk.oks(["run", "merge", "timeout", "cwd", "env", "stdin", "clean", "parent", "root", "chomp", "split", "replace", "nul", "slurp", "exists", "to", "feed", "from", "glob", "bytes"])}},
    ChkTest{"json.bend", False{}, RExact{chk.oks(["escapes", "space", "trailing", "bad-escape", "unpaired-high", "lone-low", "raw-tab", "unclosed", "quote", "doc", "doc-order", "doc-extra", "nonul", "line"])}},
    ChkTest{"cksum.bend", False{}, ROks{5n}},
    # the drivers' own rules: the mix's rounding and ids, the extractor's
@@ -481,7 +481,7 @@ def chk.tests() -> List<&2, ChkTest>:
    # (chain.log, the sha256 listings, a trainer's log) and on vastai's --raw
    # JSON, the lint's rules and flake bodies, st.f.floor, and the processes
    # (background, which, find, stat, sha256sum, markers); reads fixtures/ops
-   ChkTest{"ops.bend", False{}, ROks{61n}},
+   ChkTest{"ops.bend", False{}, ROks{70n}},
    # collect's pure parts (bend/CorpusV2/Collect.bend): the config grammar,
    # the repo rules and excludes, the loader-verdict classes, notbase, growth
    # routing and the vault quarter

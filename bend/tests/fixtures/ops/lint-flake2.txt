@@ -1,0 +1,77 @@
+{
+  # the flake-body rule (2026-10-15): plain sequential simple commands pass,
+  # any number of them; logic fails
+  outputs = { self }:
+    {
+      good = pkgs.runCommand "good" { nativeBuildInputs = [ bend ]; } ''
+          export HOME=$TMPDIR
+          cp -r ${bendSrc}/bend src
+          chmod -R u+w src
+          mkdir -p $out/bin src/tests/weights
+          cp ${./weights/code32k.bpe} src/tests/weights/code32k.bpe
+          cd src/tests
+          # a comment
+          cp -r ${./bend/tests/fixtures} fixtures
+          bend Checks.bend suite
+          ./dense --threads 4
+          cat src/*.bend src/Spec/*.bend > corpus.txt
+          bend src/tests/Checks.bend dense-run ${self.x}/bin/x corpus.txt \
+            ${./docs/a.md} ${./bend/tests/b.sha256}
+          A=1 bend x ''${V:-y}
+          set -x
+          touch $out
+        '';
+      and = pkgs.runCommand "and" { } ''
+          cp a b && touch $out
+        '';
+      semi = pkgs.runCommand "semi" { } ''
+          cp a b; touch $out
+        '';
+      or = pkgs.runCommand "or" { } ''
+          cp a b || touch $out
+        '';
+      sub = pkgs.runCommand "sub" { } ''
+          (cd src && bend x)
+        '';
+      cmdsub = pkgs.runCommand "cmdsub" { } ''
+          export V=$(cat x)
+        '';
+      tick = pkgs.runCommand "tick" { } ''
+          export V=`cat x`
+        '';
+      heredoc = pkgs.runCommand "heredoc" { } ''
+          cat <<EOF > x
+        '';
+      if = pkgs.runCommand "if" { } ''
+          if cp a b; then touch $out; fi
+        '';
+      while = pkgs.runCommand "while" { } ''
+          while true
+          do
+            touch $out
+          done
+        '';
+      tool = pkgs.runCommand "tool" { } ''
+          sort a > b
+        '';
+      envtool = pkgs.runCommand "envtool" { } ''
+          env LC_ALL=C awk 1 a > b
+        '';
+      exectool = pkgs.runCommand "exectool" { } ''
+          exec grep -q x y
+        '';
+      test = pkgs.runCommand "test" { } ''
+          [ -f x ]
+        '';
+      midexec = pkgs.runCommand "midexec" { } ''
+          exec bend x
+          touch $out
+        '';
+      pipe = pkgs.runCommand "pipe" { } ''
+          bend x | tee y
+        '';
+      bg = pkgs.runCommand "bg" { } ''
+          bend x &
+        '';
+    };
+}

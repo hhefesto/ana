@@ -185,10 +185,11 @@ def ho.sh(+what: String, env: List<String>, prog: String, args: List<String>) ->
     ho.ok.if(U32.is_eq(S.Out.status(o), 0), o, what)
 
 # files matching sh globs (as Python's glob: no hidden names), sorted
+# (S.glob: the shell loop this was, in Bend, 2026-10-15)
 def ho.glob(+pats: String) -> IO(List<&2, String>):
   do IO<List<&2, String>>:
-    o : List<&2, U32> <- S.must("glob " ++ pats, "sh", ["-c", "for f in " ++ pats ++ "; do if [ -e \"$f\" ] || [ -L \"$f\" ]; then printf '%s\\n' \"$f\"; fi; done"])
-    return List.sort(~String, ~ho.str.le, L.v2.lines.str(ho.lines(o)))
+    ps : List<&2, List<&2, U32>> <- S.glob(pats)
+    return List.sort(~String, ~ho.str.le, L.v2.lines.str(ps))
 
 # `sort` in byte order (Python's order of UTF-8 text) of the files ins into
 # out (u: one of each line); nothing in, an empty out
@@ -200,8 +201,15 @@ def ho.sort(+tmp: String, +u: Bool, +out: String, ins: List<&2, String>) -> IO(U
       ho.sh("sort " ++ out, ["LC_ALL=C"], "sort", List.append(&1, String, Bool.pick(List<String>, u, ["-u"], Nil{}),
         List.append(&1, String, ["-S", "1G", "--parallel=4", "-T", tmp, "-o", out], ho.l1(i <> more))))
 
+# `PROG ARGS.. > OUT`, a command that must succeed (S.run.to: the shell
+# lines `o=$1; shift; exec gzip -dc|cat -- "$@" > "$o"` this was)
+def ho.into(+what: String, +out: String, prog: String, args: List<String>) -> IO(Unit):
+  do IO<Unit>:
+    +o : S.Out <- S.run.to(".", [], 86400, prog, args, out)
+    ho.ok.if(U32.is_eq(S.Out.status(o), 0), o, what)
+
 def ho.gunzip(+out: String, ins: List<&2, String>) -> IO(Unit):
-  ho.sh("gzip -dc into " ++ out, [], "sh", List.append(&1, String, ["-c", "o=$1; shift; exec gzip -dc -- \"$@\" > \"$o\"", "sh", out], ho.l1(ins)))
+  ho.into("gzip -dc into " ++ out, out, "gzip", "-dc" <> "--" <> ho.l1(ins))
 
 def ho.self.of(xs: List<String>) -> String:
   match xs:
@@ -1976,7 +1984,7 @@ def ho.cat(+out: String, ins: List<&2, String>) -> IO(Unit):
     case Nil{}:
       S.write(out, Nil{})
     case i <> more:
-      ho.sh("cat into " ++ out, [], "sh", List.append(&1, String, ["-c", "o=$1; shift; exec cat -- \"$@\" > \"$o\"", "sh", out], ho.l1(i <> more)))
+      ho.into("cat into " ++ out, out, "cat", "--" <> ho.l1(i <> more))
 
 def ho.x.jsonl(+src: String, +dst: String, +dir: String, +z: Nat) -> IO(Unit):
   do IO<Unit>:

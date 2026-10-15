@@ -1,0 +1,16 @@
+import Base
+
+# the --bend rule's lines (2026-10-15, Phase 7): what a Bend line hands sh
+def a() -> IO(Unit):
+  do IO<Unit>:
+    +o : S.Out <- S.run(".", [], 5, "sh", ["-c", "a; b"], Nil{})
+    o <- S.must("glob", "sh", ["-c", "for f in " ++ pats ++ "; do echo $f; done"])
+    r <- Process.run("sh", ["-c", "exec \"$@\" > \"$0\"", out, "timeout", U32.show(secs)], "", 1, 2)
+    o <- S.run(".", [], 1, "sh", ["-c", cmd ++ " | sort", "sh", arg], Nil{})
+    o <- S.run(".", [], 1, "sh", List.append(&1, String, ["-c", script, "sh"], args), Nil{})
+
+def b.sh() -> String:
+  "set -e; sort -o \"$1/x\" \"$1\"/*.y"
+
+def c(+x: String) -> String:
+  Bool.pick(String, f(x, "a | b"), "c", "d")

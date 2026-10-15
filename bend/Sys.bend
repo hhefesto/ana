@@ -326,6 +326,46 @@ def run.log(dir: String, env: List<String>, +secs: U32, prog: String, args: List
     +o : Out <- run.got(r)
     return Out.status(o)
 
+# Redirections (2026-10-15, the plan's Phase 7: the shell strings the tools
+# handed sh became these and plain process calls).  Each line is one exec
+# with one redirection whose file is $0, so no shell logic rides along;
+# `env -C DIR` is the cd, and a relative file is taken from DIR, as after
+# `cd DIR`.
+
+def at.dir(+dir: String, +p: String) -> String:
+  Bool.pick(String, Bool.or(String.eq(dir, "."), prefix(b(p), [47])), p, dir ++ "/" ++ p)
+
+def argv.in(+dir: String, +secs: U32, env: List<String>, prog: String, args: List<String>) -> List<String>:
+  List.append(&1, String, ["timeout", U32.show(secs), "env", "-C", dir], List.append(&1, String, env, prog <> args))
+
+# `cd DIR && timeout SECS env K=V.. PROG ARGS.. > OUT`: the standard output
+# into the file OUT, the standard error back as the text
+def run.to(+dir: String, env: List<String>, +secs: U32, prog: String, args: List<String>, +out: String) -> IO(Out):
+  do IO<Out>:
+    r : Result<&1, &1, U32 & String, U32 & (String & String)> <-
+      Process.run("sh", List.append(&1, String, ["-c", "exec \"$@\" > \"$0\"", at.dir(dir, out)], argv.in(dir, secs, env, prog, args)),
+        "", cap.bytes(), U32.mul(U32.add(secs, 30), 1000))
+    run.got(r)
+
+# `cd DIR && timeout SECS env K=V.. PROG ARGS.. >> LOG 2>&1` with INPUT on its
+# standard input (as `< FILE` gave a file's bytes): the exit status
+def run.feed(+dir: String, env: List<String>, +secs: U32, prog: String, args: List<String>, +log: String, input: List<&2, U32>) -> IO(U32):
+  do IO<U32>:
+    r : Result<&1, &1, U32 & String, U32 & (String & String)> <-
+      Process.run("sh", List.append(&1, String, ["-c", "exec \"$@\" >> \"$0\" 2>&1", at.dir(dir, log)], argv.in(dir, secs, env, prog, args)),
+        str(input), cap.bytes(), U32.mul(U32.add(secs, 30), 1000))
+    +o : Out <- run.got(r)
+    return Out.status(o)
+
+# `cd DIR && timeout SECS env K=V.. PROG ARGS.. < IN 2>/dev/null`: the
+# standard output (the file's bytes go in unread by this process)
+def run.from(+dir: String, env: List<String>, +secs: U32, prog: String, args: List<String>, +inp: String) -> IO(Out):
+  do IO<Out>:
+    r : Result<&1, &1, U32 & String, U32 & (String & String)> <-
+      Process.run("sh", List.append(&1, String, ["-c", "exec \"$@\" < \"$0\" 2>/dev/null", at.dir(dir, inp)], argv.in(dir, secs, env, prog, args)),
+        "", cap.bytes(), U32.mul(U32.add(secs, 30), 1000))
+    run.got(r)
+
 # a command that must succeed: its output, or the tool stops
 def must.if(ok: Bool, +o: Out, +what: String) -> IO(List<&2, U32>):
   match ok:
@@ -730,3 +770,145 @@ def which.go(slash: Bool, +name: String) -> IO(Maybe<&2, String>):
 
 def which(+name: String) -> IO(Maybe<&2, String>):
   which.go(infix(b(name), [47]), name)
+
+# Order and globs (2026-10-15, Phase 7) --------------------------------------
+
+def bytes.hd(+xs: List<&2, U32>) -> U32:
+  match xs:
+    case Nil{}:
+      0
+    case +h <> t:
+      U32.add(h, 1)
+
+def bytes.le.go(a: List<&2, U32>, b: List<&2, U32>, lt: Bool, gt: Bool) -> Bool:
+  match a b lt gt:
+    case Nil{} _ _ _:
+      True{}
+    case _ Nil{} _ _:
+      False{}
+    case _ _ True{} _:
+      True{}
+    case _ _ False{} True{}:
+      False{}
+    case x <> +xt y <> +yt False{} False{}:
+      bytes.le.go(xt, yt, U32.is_lt(bytes.hd(xt), bytes.hd(yt)), U32.is_lt(bytes.hd(yt), bytes.hd(xt)))
+
+# bytewise order (a prefix first), as `LC_ALL=C sort` puts lines
+def bytes.le(a: List<&2, U32>, b: List<&2, U32>) -> Bool:
+  +x = a
+  +y = b
+  bytes.le.go(x, y, U32.is_lt(bytes.hd(x), bytes.hd(y)), U32.is_lt(bytes.hd(y), bytes.hd(x)))
+
+def bytes.sort(xs: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  List.sort(~List<&2, U32>, ~bytes.le, xs)
+
+# `glob(PATS)` is what the shell line
+#
+#   for f in PATS; do if [ -e "$f" ] || [ -L "$f" ]; then printf '%s\n' "$f"; fi; done
+#
+# prints, a pattern after another (PATS: patterns split at spaces): the paths
+# matching a pattern, `*` any run of bytes and `?` one byte within a path's
+# component (brackets are not read: a [ is itself), a name with a leading dot
+# only for a pattern component with one, a component without either named
+# when it is there (a dangling link too).  Each directory is listed by
+# `find -H DIR -mindepth 1 -maxdepth 1 -printf '%f\0'` (a link to a directory
+# is followed, as the shell's glob follows it); a missing directory lists
+# nothing.  Within a pattern the order is find's: callers sort.
+
+def glob.wild(xs: List<&2, U32>) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case +c <> t:
+      Bool.or(Bool.or(U32.is_eq(c, 42), U32.is_eq(c, 63)), glob.wild(t))
+
+# p matches n; st: p starts with a star.  A star tries the rest of p here and
+# itself one byte on; any other byte must match one of n's.
+def glob.m(p: List<&2, U32>, n: List<&2, U32>, st: Bool) -> Bool:
+  match p n st:
+    case Nil{} Nil{} _:
+      True{}
+    case Nil{} _ _:
+      False{}
+    case c <> +pt Nil{} True{}:
+      glob.m(pt, Nil{}, head.is(pt, 42))
+    case c <> pt Nil{} False{}:
+      False{}
+    case +c <> +pt +h <> +nt True{}:
+      Bool.or(glob.m(pt, h <> nt, head.is(pt, 42)), glob.m(c <> pt, nt, True{}))
+    case +c <> +pt +h <> +nt False{}:
+      Bool.and(Bool.or(U32.is_eq(c, 63), U32.is_eq(c, h)), glob.m(pt, nt, head.is(pt, 42)))
+
+def glob.name(+p: List<&2, U32>, +n: List<&2, U32>) -> Bool:
+  Bool.and(Bool.or(Bool.not(head.is(n, 46)), head.is(p, 46)), glob.m(p, n, head.is(p, 42)))
+
+def glob.join(+p: List<&2, U32>, +n: List<&2, U32>) -> List<&2, U32>:
+  Bool.pick(List<&2, U32>, Nat.is_eq(len(p), 0n), n, Bool.pick(List<&2, U32>, suffix(p, [47]), List.append(&2, U32, p, n), List.append(&2, U32, p, 47 <> n)))
+
+def glob.ls.got(r: Result<&1, &1, U32 & String, U32 & (String & String)>) -> List<&2, List<&2, U32>>:
+  match r:
+    case Done{(+code, (out, err))}:
+      Bool.pick(List<&2, List<&2, U32>>, U32.is_eq(code, 0), split(b(out), 0), Nil{})
+    case Fail{e}:
+      Nil{}
+
+# the names in DIR (nothing when it is not a directory)
+def glob.ls(+dir: List<&2, U32>) -> IO(List<&2, List<&2, U32>>):
+  do IO<List<&2, List<&2, U32>>>:
+    r : Result<&1, &1, U32 & String, U32 & (String & String)> <-
+      Process.run("find", ["-H", Bool.pick(String, Nat.is_eq(len(dir), 0n), ".", str(dir)), "-mindepth", "1", "-maxdepth", "1", "-printf", "%f\\0"],
+        "", cap.bytes(), 600000)
+    return glob.ls.got(r)
+
+def glob.keep(ns: List<&2, List<&2, U32>>, +p: List<&2, U32>, +pat: List<&2, U32>) -> List<&2, List<&2, U32>>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case +n <> t:
+      +rest = glob.keep(t, p, pat)
+      Bool.pick(List<&2, List<&2, U32>>, glob.name(pat, n), glob.join(p, n) <> rest, rest)
+
+def glob.one(look: Bool, +p: List<&2, U32>, +pat: List<&2, U32>) -> IO(List<&2, List<&2, U32>>):
+  match look:
+    case False{}:
+      IO.pure(List<&2, List<&2, U32>>, [glob.join(p, pat)])
+    case True{}:
+      do IO<List<&2, List<&2, U32>>>:
+        ns : List<&2, List<&2, U32>> <- glob.ls(p)
+        return glob.keep(ns, p, pat)
+
+# the paths so far, each taken one component on (look: list the directory)
+def glob.dirs(ps: List<&2, List<&2, U32>>, +pat: List<&2, U32>, +look: Bool) -> IO(List<&2, List<&2, U32>>):
+  match ps:
+    case Nil{}:
+      IO.pure(List<&2, List<&2, U32>>, Nil{})
+    case +p <> t:
+      do IO<List<&2, List<&2, U32>>>:
+        a : List<&2, List<&2, U32>> <- glob.one(look, p, pat)
+        rest : List<&2, List<&2, U32>> <- glob.dirs(t, pat, look)
+        return List.append(&2, List<&2, U32>, a, rest)
+
+def glob.go(cs: List<&2, List<&2, U32>>, ps: List<&2, List<&2, U32>>) -> IO(List<&2, List<&2, U32>>):
+  match cs:
+    case Nil{}:
+      IO.pure(List<&2, List<&2, U32>>, ps)
+    case +c <> +t:
+      do IO<List<&2, List<&2, U32>>>:
+        qs : List<&2, List<&2, U32>> <- glob.dirs(ps, c, Bool.or(glob.wild(c), Nat.is_eq(List.length(&2, List<&2, U32>, t), 0n)))
+        glob.go(t, qs)
+
+def glob.pat(+pat: List<&2, U32>) -> IO(List<&2, List<&2, U32>>):
+  glob.go(List.filter(~List<&2, U32>, ~(c => Nat.is_ne(len(c), 0n)), split(pat, 47)), [Bool.pick(List<&2, U32>, head.is(pat, 47), [47], Nil{})])
+
+def glob.all(ps: List<&2, List<&2, U32>>) -> IO(List<&2, List<&2, U32>>):
+  match ps:
+    case Nil{}:
+      IO.pure(List<&2, List<&2, U32>>, Nil{})
+    case +p <> t:
+      do IO<List<&2, List<&2, U32>>>:
+        a : List<&2, List<&2, U32>> <- glob.pat(p)
+        rest : List<&2, List<&2, U32>> <- glob.all(t)
+        return List.append(&2, List<&2, U32>, a, rest)
+
+def glob(+pats: String) -> IO(List<&2, List<&2, U32>>):
+  glob.all(List.filter(~List<&2, U32>, ~(c => Nat.is_ne(len(c), 0n)), split(b(pats), 32)))

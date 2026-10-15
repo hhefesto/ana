@@ -44,7 +44,8 @@ import ./Json.bend as J
 #
 # Everything streams: a source is read a line at a time (a repeated or cycled
 # one is reopened for its next pass), the output and the ids are written as
-# they go, and the duplicate check is `LC_ALL=C sort | uniq -d` over the ids.
+# they go, and the duplicate check is `LC_ALL=C sort` over the ids, then
+# `uniq -d` in Bend.
 
 # Bytes -------------------------------------------------------------------------
 
@@ -568,12 +569,56 @@ def dups.if(some: Bool, +dups: List<&2, U32>, +work: String) -> IO(Unit):
     case False{}:
       IO.pure(Unit, Unit{})
 
+# `uniq -d` over a sorted file, in Bend (2026-10-15, the plan's Phase 7: the
+# shell pipe `sort | uniq -d` this was): each line that repeats the one
+# before, once a run.  prev: the line before (has: there is one), said: its
+# run is out already, out: the lines out (newest first).
+type MxU is Type:
+  MxU{rd: S.Rd, prev: List<&2, U32>, has: Bool, said: Bool, out: List<&2, List<&2, U32>>, go: Bool}
+
+def mx.u.got(+prev: List<&2, U32>, has: Bool, said: Bool, +out: List<&2, List<&2, U32>>, x: S.Rd & Maybe<&2, List<&2, U32>>) -> MxU:
+  (rd, m) = x
+  match m:
+    case None{}:
+      MxU{rd, prev, has, said, out, False{}}
+    case Some{+l}:
+      +same = Bool.and(has, S.eq(l, prev))
+      MxU{rd, l, True{}, same, Bool.pick(List<&2, List<&2, U32>>, Bool.and(same, Bool.not(said)), l <> out, out), True{}}
+
+def mx.u.step(u: MxU) -> IO(MxU):
+  match u:
+    case MxU{rd, +prev, has, said, out, g}:
+      do IO<MxU>:
+        x : S.Rd & Maybe<&2, List<&2, U32>> <- S.Rd.next(rd)
+        return mx.u.got(prev, has, said, out, x)
+
+def mx.u.go(fuel: Nat, u: MxU) -> IO(List<&2, List<&2, U32>>):
+  match fuel u:
+    case 1n+f MxU{rd, prev, has, said, out, True{}}:
+      IO.bind(MxU, List<&2, List<&2, U32>>, mx.u.step(MxU{rd, prev, has, said, out, True{}}), mx.u.go(f))
+    case _ MxU{rd, prev, has, said, out, g}:
+      do IO<List<&2, List<&2, U32>>>:
+        S.Rd.close(rd)
+        return List.reverse(&2, List<&2, U32>, out)
+
+def mx.u.text(ls: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case l <> more:
+      List.append(&2, U32, l, 10 <> mx.u.text(more))
+
+# `sort -T WORK WORK/ids | uniq -d`: the sort a process into WORK/ids.s, the
+# uniq in Bend
 def check.ids(check: Bool, +work: String) -> IO(Unit):
   match check:
     case True{}:
       do IO<Unit>:
-        o : S.Out <- S.run(".", ["LC_ALL=C"], 2000000, "sh", ["-c", "sort -T \"$1\" \"$1/ids\" | uniq -d", "sh", work], Nil{})
-        +t : List<&2, U32> = S.Out.text(o)
+        +so : S.Out <- S.run(".", ["LC_ALL=C"], 2000000, "sort", ["-T", work, "-o", work ++ "/ids.s", work ++ "/ids"], Nil{})
+        o : List<&2, U32> <- S.must.if(U32.is_eq(S.Out.status(so), 0), so, "sort " ++ work ++ "/ids")
+        rd : S.Rd <- S.Rd.lines(work ++ "/ids.s")
+        ls : List<&2, List<&2, U32>> <- mx.u.go(U32.to_nat(4294967295), MxU{rd, Nil{}, False{}, False{}, Nil{}, True{}})
+        +t : List<&2, U32> = mx.u.text(ls)
         dups.if(Nat.is_lt(0n, S.len(t)), t, work)
     case False{}:
       IO.pure(Unit, Unit{})

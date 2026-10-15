@@ -1201,13 +1201,14 @@ def bhv.set(+name: String) -> IO(Bool):
     v : String <- S.env(name, "")
     return Bool.not(String.is_empty(v))
 
-# A process with its stdout and its stderr each into a file, byte for byte
+# A process with its stdout into a file byte for byte (S.run.to) and its
+# stderr, which comes back as the text, written to another (2026-10-15, the
+# plan's Phase 7: the shell line `cd .. && o=.. && e=.. && shift 3 && exec ..
+# > o 2> e` this was).  The files are taken from dir when relative.
 def bhv.run.to(+dir: String, env: List<String>, +prog: String, args: List<String>, +out: String, +err: String) -> IO(U32):
   do IO<U32>:
-    r : Result<&1, &1, U32 & String, U32 & (String & String)> <-
-      Process.run("sh", List.append(&1, String, ["-c", "cd \"$1\" && o=$2 && e=$3 && shift 3 && exec \"$@\" > \"$o\" 2> \"$e\"", "sh", dir, out, err], S.argv.env(env, prog <> args)),
-        "", S.cap.bytes(), 4294967295)
-    +o : S.Out <- S.run.got(r)
+    +o : S.Out <- S.run.to(dir, env, 4000000, prog, args, out)
+    S.write(S.at.dir(dir, err), S.Out.text(o))
     return S.Out.status(o)
 
 # gen: the output of the prompt (prompt ++ answer), in R/NAME.out

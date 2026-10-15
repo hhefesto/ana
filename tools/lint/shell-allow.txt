@@ -25,16 +25,6 @@ tools/corpus-v2/agent-act.sh
 bend/gpu/raw-stage.sh
 bend/gpu/raw-driver.sh
 
-
-# Phase 6: the flake checks decide in Bend (bend/tests/Checks.bend); the
-# derivations keep a two-line boilerplate
-flake.nix:bendBinary
-flake.nix:ana
-flake.nix:bend-spec
-flake.nix:bend-tests
-flake.nix:bend-train
-flake.nix:bend-dense
-flake.nix:bend-decode-dense
-flake.nix:bend-prefill-dense
-flake.nix:bend-bulk-cpu
-flake.nix:behaviour-tasks
+# (2026-10-15, Phase 7: the ten flake.nix bodies are off the list; a
+# flake.nix body may hold plain sequential commands, Lint.bend's
+# lnt.stmt.flake, and every one passes)

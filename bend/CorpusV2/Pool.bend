@@ -95,7 +95,8 @@ def po.next.id(x: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(S.Rd & Maybe<&2, PoPr>)
 def po.next(r: S.Rd) -> IO(S.Rd & Maybe<&2, PoPr>):
   IO.bind(S.Rd & Maybe<&2, List<&2, U32>>, S.Rd & Maybe<&2, PoPr>, S.Rd.next(r), po.next.id)
 
-# a shell line that must succeed (LC_ALL=C: byte order, as Python sorts)
+# a command that must succeed (LC_ALL=C: byte order, as Python sorts); the
+# shell lines these were are plain process calls since 2026-10-15 (Phase 7)
 def po.sh.ok(ok: Bool, +what: String, +o: S.Out) -> IO(Unit):
   match ok:
     case True{}:
@@ -103,9 +104,15 @@ def po.sh.ok(ok: Bool, +what: String, +o: S.Out) -> IO(Unit):
     case False{}:
       IO.die(Unit, 1, what ++ " failed: " ++ S.str(S.lines.take(S.Out.text(o), 20n)))
 
-def po.sh(+what: String, +script: String, args: List<String>) -> IO(Unit):
+def po.cmd(+what: String, prog: String, args: List<String>) -> IO(Unit):
   do IO<Unit>:
-    +o : S.Out <- S.run(".", ["LC_ALL=C"], 86400, "sh", List.append(&1, String, ["-c", script, "sh"], args), Nil{})
+    +o : S.Out <- S.run(".", ["LC_ALL=C"], 86400, prog, args, Nil{})
+    po.sh.ok(U32.is_eq(S.Out.status(o), 0), what, o)
+
+# the same with its standard output into the file out
+def po.into(+what: String, prog: String, args: List<String>, +out: String) -> IO(Unit):
+  do IO<Unit>:
+    +o : S.Out <- S.run.to(".", ["LC_ALL=C"], 86400, prog, args, out)
     po.sh.ok(U32.is_eq(S.Out.status(o), 0), what, o)
 
 def po.strs(xs: List<&2, String>) -> List<String>:
@@ -576,23 +583,11 @@ def po.workers() -> Nat:
   4n
 
 # the results files, as Python's sorted(glob(..train..) + glob(..holdout..))
-def po.results.script() -> String:
-  "for f in run/transcripts*/*/results.train.nul run/transcripts*/*/results.holdout.nul; do if [ -e \"$f\" ] || [ -L \"$f\" ]; then printf '%s\\n' \"$f\"; fi; done | LC_ALL=C sort"
-
-def po.results.if(ok: Bool, +o: S.Out) -> IO(List<&2, String>):
-  match ok:
-    case True{}:
-      IO.pure(List<&2, String>, L.v2.lines.str(S.split.lines(S.Out.text(o))))
-    case False{}:
-      IO.die(List<&2, String>, 1, "pool: listing the results files failed")
-
-def po.results.got(+o: S.Out) -> IO(List<&2, String>):
-  po.results.if(U32.is_eq(S.Out.status(o), 0), o)
-
+# (in byte order, as `LC_ALL=C sort` put the shell loop's lines)
 def po.results() -> IO(List<&2, String>):
   do IO<List<&2, String>>:
-    +o : S.Out <- S.run.quiet(".", [], 600, "sh", ["-c", po.results.script()], Nil{})
-    po.results.got(o)
+    ps : List<&2, List<&2, U32>> <- S.glob("run/transcripts*/*/results.train.nul run/transcripts*/*/results.holdout.nul")
+    return L.v2.lines.str(S.bytes.sort(ps))
 
 def po.sizes(ps: List<&2, String>) -> IO(List<&2, Nat>):
   match ps:
@@ -652,12 +647,13 @@ def po.spools(m: Nat, +work: String, +l: String, +k: Nat) -> List<&2, String>:
     case 1n+p:
       (work ++ "/spool." ++ l ++ "." ++ Nat.show(k)) <> po.spools(p, work, l, 1n+k)
 
-# 3. a language's spools sorted by id (stable: an earlier run's record first)
-def po.sort.script() -> String:
-  "d=$1; o=$2; t=$3; shift 3; sort -z -s -t \"$t\" -k1,1 -S 512M --parallel=2 -T \"$d\" -o \"$o\" \"$@\" && rm -f \"$@\""
-
+# 3. a language's spools sorted by id (stable: an earlier run's record first),
+# then removed
 def po.sort(+work: String, +l: String) -> IO(Unit):
-  po.sh("pool: sorting " ++ l, po.sort.script(), List.append(&1, String, [work, work ++ "/sorted." ++ l, "\u{1}"], po.strs(po.spools(po.workers(), work, l, 0n))))
+  +sp = po.spools(po.workers(), work, l, 0n)
+  do IO<Unit>:
+    po.cmd("pool: sorting " ++ l, "sort", List.append(&1, String, ["-z", "-s", "-t", "\u{1}", "-k1,1", "-S", "512M", "--parallel=2", "-T", work, "-o", work ++ "/sorted." ++ l], po.strs(sp)))
+    po.cmd("pool: sorting " ++ l, "rm", "-f" <> po.strs(sp))
 
 def po.want.chain(ls: List<&2, String>, +self: String, +work: String, +bad: Nat) -> IO(Nat):
   match ls:
@@ -1076,7 +1072,7 @@ def fi.lang.run(+work: String, +l: String, +out: String, +res: String) -> IO(Uni
     t1 : FiT <- fi.tier.run(out, l, "hi", FiT{k, e, Set.new(), Set.new(), wk, FiC{0n, 0n, 0n, 0n}})
     t2 : FiT <- fi.tier.run(out, l, "lo", t1)
     fi.lang.fin(work, l, t2)
-    po.sh("filler: copying " ++ l ++ "'s holdout results", "cp \"$1\" \"$2\"", [res ++ "/" ++ l ++ ".holdout.nul", out ++ "/" ++ l ++ "/results.holdout.nul"])
+    po.cmd("filler: copying " ++ l ++ "'s holdout results", "cp", [res ++ "/" ++ l ++ ".holdout.nul", out ++ "/" ++ l ++ "/results.holdout.nul"])
 
 def fi.lang(xs: List<String>) -> IO(Unit):
   match xs:
@@ -1110,9 +1106,10 @@ def fi.paste(ls: List<&2, String>, +work: String) -> IO(Unit):
     case Nil{}:
       IO.pure(Unit, Unit{})
     case +l <> more:
+      +kp = fi.keyparts(po.workers(), work, l, 0n)
       do IO<Unit>:
-        po.sh("filler: interleaving " ++ l ++ "'s keys", "o=$1; d=$2; shift 2; paste -d \"$d\" \"$@\" > \"$o\" && rm -f \"$@\"",
-          List.append(&1, String, [work ++ "/keys." ++ l, "\n"], po.strs(fi.keyparts(po.workers(), work, l, 0n))))
+        po.into("filler: interleaving " ++ l ++ "'s keys", "paste", "-d" <> "\n" <> po.strs(kp), work ++ "/keys." ++ l)
+        po.cmd("filler: interleaving " ++ l ++ "'s keys", "rm", "-f" <> po.strs(kp))
         fi.paste(more, work)
 
 def fi.lang.chain(ls: List<&2, String>, +self: String, +work: String, +out: String, +res: String, +bad: Nat) -> IO(Nat):
@@ -1154,8 +1151,7 @@ def fi.filler.run(+self: String, +out: String, +res: String) -> IO(Unit):
     cls : List<Chan(Nat)> <- fi.chains.fork(po.chains(), self, work, out, res)
     +b2 : Nat <- po.join(cls, 0n)
     po.check("filler: the languages", b2)
-    po.sh("filler: filler.keys", "o=$1; d=$2; shift 2; sort -u -S 512M -T \"$d\" -o \"$o\" \"$@\"",
-      List.append(&1, String, [out ++ "/filler.keys", work], po.strs(fi.written(po.langs(), work))))
+    po.cmd("filler: filler.keys", "sort", List.append(&1, String, ["-u", "-S", "512M", "-T", work, "-o", out ++ "/filler.keys"], po.strs(fi.written(po.langs(), work))))
     +ls : List<&2, List<&2, U32>> <- po.summary(po.langs(), work)
     IO.print(S.str(S.join(ls, 10)))
     S.rm(work)

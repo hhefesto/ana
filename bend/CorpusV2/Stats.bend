@@ -297,11 +297,19 @@ def cm.load.tsv(+p: String) -> IO(List<&2, CmO>):
     xs : List<&2, U32> <- S.read(p)
     return cm.tsv.of(S.split.lines(xs))
 
+def cm.bases(ps: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case p <> t:
+      S.base.go(p, Nil{}) <> cm.bases(t)
+
+# P's r.*.nul (`cd P && ls r.*.nul`: S.glob since 2026-10-15, in byte order)
 def cm.load.e1(+p: String) -> IO(List<&2, CmO>):
   do IO<List<&2, CmO>>:
     kvs : List<&2, Ev.EvKv> <- Ev.ev.nul(p ++ "/results.nul")
-    o : S.Out <- S.run(".", [], 60, "sh", ["-c", "cd \"$0\" && ls r.*.nul", p], Nil{})
-    vs : List<&2, Ev.EvKv> <- cm.read.all(S.split.lines(S.Out.text(o)), p, Nil{})
+    rs : List<&2, List<&2, U32>> <- S.glob(p ++ "/r.*.nul")
+    vs : List<&2, Ev.EvKv> <- cm.read.all(cm.bases(S.bytes.sort(rs)), p, Nil{})
     return cm.e1.of(kvs, vs)
 
 def cm.load.pick(e1: Bool, beh: Bool, +p: String) -> IO(List<&2, CmO>):

@@ -20,6 +20,7 @@ import ./Act.bend as Ac
 #   bend-ops lint [--tree DIR] [--allow FILE] [--report FILE] [--bend] [--run-since DATE] [-v] [PATH...]
 #                       tracked shell stays a thin shim (bend/Box/Lint.bend); exit 1 on a file
 #                       with shell logic that tools/lint/shell-allow.txt does not list
+#                       (and, with --bend, on an sh -c string with logic in Bend)
 #   bend-ops chain HOST PORT INSTANCE DEST STAGES
 #                       a chain of stages on one box, then the scores, the pulls, the sha256
 #                       check and the DESTROY (bend/Box/Chain.bend; fp-chain.sh's port)
