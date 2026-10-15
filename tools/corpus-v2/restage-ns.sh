@@ -9,6 +9,7 @@ CV2=${CV2:-nix run .#deploy -- corpus-v2}
 echo "mix 2: $($CV2 drop-repos run/v2/holdout/vault.tsv run/rawnew2/mix.jsonl run/rawnew2/mix.jsonl.tmp)"
 mv run/rawnew2/mix.jsonl run/rawnew2/mix.with-vault.jsonl && mv run/rawnew2/mix.jsonl.tmp run/rawnew2/mix.jsonl
 built=0
+# 2026-10-15: raw-stage.sh is unwired too (`bend-ops stage raw build K`, `bend-ops stage raw push K HOST PORT`)
 for k in 1 2 3 4 5; do
   rm -rf run/ns$k
   if R=run/rawnew2 P=ns JOBS=6 bend/gpu/raw-stage.sh build $k > run/ns-rebuild$k.log 2>&1; then built=$k; log "built ns$k ($(head -1 run/ns$k/plan-fp100m-b16-windows.tsv | awk '{print $3}') steps)"; else log "ns$k: nothing left to build"; rm -rf run/ns$k; break; fi

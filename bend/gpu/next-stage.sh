@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-15: build is `bend-ops stage next` (bend/Box/Drive.bend, byte-identical in Phase 4a) and push is `bend-ops stage push NAME RUN HOST PORT` (bend/Box/Stage.bend; `bend-ops sim stage push|push-drop|push-corrupt` compare it with a copy of this script without these two lines); kept for reference
+exit 2
 # Build and stage the next plan: the new transcripts (run/transcripts-next/
 # LANG, one pass) mixed with replay of fp100m's languages (run/transcripts-final/
 # LANG, cycled), as windows, shards and a plan; the held-out new transcripts

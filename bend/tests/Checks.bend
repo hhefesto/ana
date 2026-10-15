@@ -23,7 +23,8 @@ import ../CorpusV2/Steps.bend as St
 #                    validation set smaller than a micro-batch scores above 0;
 #                    six steps of small4-v3 on FROZEN with AdamW and with Muon
 #                    give checkpoints whose `sha256sum` is GOLDENS byte for byte
-#                    (bend/tests/dense-identity.sh writes it)
+#                    (bend/tests/dense-identity.sh wrote it; 2026-10-15: unwired,
+#                    `bend-ops dense-identity` writes it)
 #   bulk-cpu SRC     the CPU bulk ops' outputs byte for byte: SRC/gpu/GemmConf
 #                    and EinsumConf on the JS lane, BEND_FT=loop on 1 thread
 #                    and the default on 8; SRC/tests/bulk-cpu on BEND_FT=loop,

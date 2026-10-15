@@ -6,7 +6,8 @@
 # empty). stdout is line-buffered (stdbuf) so the log shows every step.
 #
 # Expects, in the working directory (the repository's layout, as
-# bend/gpu/fp-stage.sh and bend-push leave it):
+# bend/gpu/fp-stage.sh and bend-push leave it; 2026-10-15: fp-stage.sh is
+# unwired, `bend-ops stage box HOST PORT` leaves the same, with bend-box):
 #   traind.c dense.c                     bend X.bend -o X.c, from this repo's bend/
 #   weights/code32k.bpe                  the tokenizer
 #   run/fp100m/plan-fp100m-b16-windows.tsv, run/fp100m/shard-K-fp100m.corpus

@@ -7,23 +7,20 @@
 # fails at once.  Dead scripts are not listed: they are unwired (`# UNWIRED
 # DATE: why` and `exit 2` after the shebang) and the lint skips them.
 
-# Phase 1b: bend-box, bend-ops stage, bend-ops dense-identity
+# Phase 1b: bend-box, bend-ops stage, bend-ops dense-identity.  2026-10-15 (Phase
+# 1c, `bend-ops sim stage`): fp-stage.sh, fp-restage.sh, next-stage.sh and
+# dense-identity.sh passed the sandbox against their replacements and are
+# unwired.  fp.sh stays live: it is BOX_DRIVER's fallback until bend-box's GPU
+# modes (build, gate, time, run on CUDA) run on a real box, which no sandbox
+# here can show
 bend/gpu/fp.sh
-bend/gpu/fp-stage.sh
-bend/gpu/fp-restage.sh
-bend/gpu/next-stage.sh
-bend/tests/dense-identity.sh
 
-# Phase 3: bend-ops act, corpus-v2 agent-act
-bend/gpu/act-box.sh
-tools/corpus-v2/agent-act.sh
+# Phase 3: bend-ops act, corpus-v2 agent-act (2026-10-15, Phase 1c: act-box.sh
+# and agent-act.sh passed the sandbox and are unwired)
 
 # Phase 4: corpus recipes and run drivers (2026-10-15: s2, actset, steady-mix,
-# render, evals, windows and rawshards are ported and unwired; raw-stage.sh
-# (bend-ops stage raw) and raw-driver.sh (bend-ops feed) stay live until
-# their push, ssh and credit paths pass the Phase 1a sandbox)
-bend/gpu/raw-stage.sh
-bend/gpu/raw-driver.sh
+# render, evals, windows and rawshards are ported and unwired; 2026-10-15,
+# Phase 1c: raw-stage.sh and raw-driver.sh passed the sandbox and are unwired)
 
 # (2026-10-15, Phase 7: the ten flake.nix bodies are off the list; a
 # flake.nix body may hold plain sequential commands, Lint.bend's

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-15: replaced by `bend-ops dense-identity OUT_DIR [TRAINER]` (bend/Box/Stage.bend; `bend-ops sim stage dense-identity` runs a copy of this script without these two lines beside it on the same trainer, CPU only: the same four files byte for byte, the checkpoints dense-identity.sha256's); kept for reference
+exit 2
 # dense-identity.sh — the dense trainer's trajectory as bytes, to hold a
 # layout change (where the store's regions live, how many arrays hold them)
 # to "nothing observable moved".

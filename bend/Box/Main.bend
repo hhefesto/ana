@@ -9,6 +9,7 @@ import ./Lint.bend as Ln
 import ./Chain.bend as Ch
 import ./Watch.bend as Wt
 import ./Scenario.bend as Sc
+import ./ScnStage.bend as Ss
 import ./Stage.bend as Sg
 import ./Drive.bend as Dr
 import ./Evals.bend as Ev
@@ -29,6 +30,9 @@ import ./Act.bend as Ac
 #   bend-ops sim N DIR | sim all DIR | sim soak DIR SECONDS
 #                       the chain and the watch against a box in a sandbox (bend-sim's ssh,
 #                       rsync, vastai, ...), old scripts against new (bend/Box/Scenario.bend)
+#   bend-ops sim stage N|NAME|all DIR
+#                       stage, feed, act and dense-identity in the sandbox, each against the
+#                       script it replaced (bend/Box/ScnStage.bend, 2026-10-15)
 #   bend-ops stage box HOST PORT | push NAME RUN HOST PORT | restage HOST PORT CKPT STAGE... | shards PLAN
 #                       a run onto a box (bend/Box/Stage.bend: fp-stage.sh, next-stage.sh push,
 #                       fp-restage.sh); bend-box, the driver on the box, is built there from box.c
@@ -121,7 +125,7 @@ def ops.usage() -> String:
   "usage: bend-ops lint [--tree DIR] [--allow FILE] [--report FILE] [--bend] [--run-since DATE] [-v] [PATH...]\n"
     ++ "       bend-ops chain HOST PORT INSTANCE DEST STAGES\n"
     ++ "       bend-ops watch HOST PORT DEST [MIN]\n"
-    ++ "       bend-ops sim N DIR | sim all DIR | sim soak DIR SECONDS\n"
+    ++ "       bend-ops sim N DIR | sim all DIR | sim soak DIR SECONDS | sim stage N|NAME|all DIR\n"
     ++ "       bend-ops probe saved LOG | sums DIR NAME... | listed INST | credit MIN | which NAME | alert LOG MSG | ssh HOST PORT CMD\n"
     ++ "       bend-ops stage box HOST PORT | push NAME RUN HOST PORT | restage HOST PORT CKPT STAGE... | shards PLAN\n"
     ++ "       bend-ops dense-identity OUT_DIR [TRAINER]\n"
@@ -159,6 +163,8 @@ def ops.args(xs: List<String>) -> IO(Unit):
 # `sim` needs argv[0]: the chain it tests is this same binary
 def ops.main(xs: List<String>) -> IO(Unit):
   match xs:
+    case +a0 <> "sim" <> "stage" <> rest:
+      Ss.sst.main(a0, rest)
     case +a0 <> "sim" <> rest:
       Sc.scn.main(a0, rest)
     case a0 <> rest:

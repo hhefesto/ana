@@ -13,7 +13,8 @@ import ../Box/Local.bend as Lc
 #   nvidia-smi            --query-gpu, -q -d PERFORMANCE and dmon, as a 5090 answered on run 3's box
 #   clang (clang-19, ..)  writes -o's file (executable) and nothing else; --version
 #   vastai                show user --raw, show instances --raw, destroy instance N -y over a state
-#                         directory SIM_VAST_DIR (~/.sim-vast): credit (a number; user.json
+#                         directory SIM_VAST_DIR (~/.sim-vast): credit (a number; credits: one a
+#                         line, each `show user` takes the first, the last stays; user.json
 #                         replaces the whole answer), instances (a line an instance: ID [STATUS
 #                         [SSH_HOST [SSH_PORT]]]), list.fail (the listing fails), destroy.noop
 #                         (a destroy answers but does not take); every call is appended to calls
@@ -39,6 +40,40 @@ import ../Box/Local.bend as Lc
 #
 #   bend-sim links DIR    those names in DIR, linked to this binary
 #   bend-sim ROLE ARGS..  one part by its name
+#
+# (2026-10-15, Phase 1c: the staging, feed and act paths in the sandbox, bend/Box/ScnStage.bend;
+# these parts are not made by `links`, a scenario links the ones it needs.)  A call a part
+# records is a line `ROLE ARGS` appended to SIM_CALLS (when set), some with ` [K=V ...]`:
+#
+#   scp                   scp's options read and left out, each HOST:PATH mapped as rsync maps
+#                         it, the real cp copies (-r: recursively); 255 while the link is down
+#   nix                   `run ..#bend -- ARGS` runs `bend ARGS`, `run .#deploy -- TOOL ARGS`
+#                         `bend-TOOL ARGS` (both found on $PATH); `path-info -r P` prints P and
+#                         SIM_ELAN (a store path named -elan-4.0.0); --version; anything else
+#                         (copy) is recorded with NIX_SSHOPTS and succeeds
+#   bend                  `bend SRC -o OUT` writes OUT, `bend-sim C of SRC` (the pinned compiler)
+#   bend-push             `link ...` recorded (with TRAIN_ENV_FILE) and answered OK; anything
+#                         else recorded and run by the real bend-push, SIM_PUSH
+#   elan, lake            recorded with the directory they ran in; succeed
+#   systemctl             recorded; `is-active` answers 3 (inactive)
+#   sleep                 sleeps SIM_SLEEP_CAP (1) seconds at most: an old script's waits, short
+#   deploy                (a box's gcroot) `corpus-v2 agent-act ARGS` runs the real
+#                         bend-corpus-v2 (SIM_CV2) agent-act ARGS; `corpus-v2 STEP ARGS` runs
+#                         this binary as bend-corpus-v2 (below), so pgrep sees that name
+#   bend-corpus-v2        (on a box) `agent-eval CKPT DIR ...` recorded with the environment
+#                         agent-act gives it; DIR/report.txt, DIR/episodes.eplog and
+#                         DIR/agent.nul from SIM_REPORT, SIM_EPLOG and SIM_AGENT; SIM_ACT_MS
+#                         (0) of sleep
+#   bend-episode          (on a box) `why` and `langs` run the real one (SIM_EPISODE);
+#                         `accept` and `fixed` are recorded (AGENT_RECORDS) and make DIR
+#
+# The box's path map: SIM_BOX_HOME/.sim-map's lines `FROM TO` (absolute paths).  ssh's
+# command line has every FROM replaced by its TO, and rsync's and scp's remote paths under a
+# FROM are under its TO, so a script naming the workspace, /usr/local/bin or /etc/nix by an
+# absolute path (act-box.sh) acts in the sandbox, never on this machine.  SIM_BOX_HOME/
+# .drop-before (Phase 1c): an ssh command line that holds its text fails with 255 BEFORE it
+# runs, once (the file is removed).  SIM_BOX_HOME/.rsync-fail: the numbers (a line each) of the
+# rsync calls with a remote side (counted in SIM_BOX_HOME/.rsync-calls) that fail with 255.
 #
 # The box's environment (ssh's commands): HOME, SIM_BOX and SIM_BOX_HOME the box
 # directory, PATH its bin/ then SIM_BOX_PATH (else this PATH), and the KEY=VALUE lines of
@@ -508,12 +543,22 @@ def sim.drop.inst(ls: List<&2, List<&2, U32>>, +inst: List<&2, U32>) -> List<&2,
       +rest = sim.drop.inst(t, inst)
       Bool.pick(List<&2, List<&2, U32>>, S.eq(Lc.lcl.nth(Lc.lcl.words(l), 0n), inst), rest, l <> rest)
 
+# (2026-10-15, Phase 1c) the state directory's `credits`: a credit a line, one taken by each
+# `show user` (the last one stays), so a scenario's credit changes at a given call, not at a time
+def sim.vast.pop(+qs: List<&2, List<&2, U32>>, +dir: String) -> IO(Unit):
+  Bool.pick(IO(Unit), Nat.is_lt(1n, List.length(&2, List<&2, U32>, qs)),
+    S.write(dir ++ "/credits", List.append(&2, U32, S.join(List.drop(&2, List<&2, U32>, qs, 1n), 10), [10])), IO.pure(Unit, Unit{}))
+
 def sim.vast.user(+dir: String) -> IO(Unit):
   do IO<Unit>:
     own : Bool <- S.exists(dir ++ "/user.json")
     +u : List<&2, U32> <- S.read(dir ++ "/user.json")
+    +q : List<&2, U32> <- S.read(dir ++ "/credits")
+    +qs : List<&2, List<&2, U32>> = S.split.lines(q)
+    sim.vast.pop(qs, dir)
     +c : List<&2, U32> <- S.read(dir ++ "/credit")
-    IO.print(Bool.pick(String, own, S.str(S.chomp(u)), sim.user.json(Lc.lcl.nth(Lc.lcl.words(c), 0n))))
+    +cr : List<&2, U32> = Bool.pick(List<&2, U32>, List.is_empty(&2, List<&2, U32>, qs), Lc.lcl.nth(Lc.lcl.words(c), 0n), Lc.lcl.nth(qs, 0n))
+    IO.print(Bool.pick(String, own, S.str(S.chomp(u)), sim.user.json(cr)))
 
 def sim.vast.list.at(fail: Bool, +dir: String) -> IO(Unit):
   match fail:
@@ -720,6 +765,55 @@ def sim.ssh.dropped(drop: Bool, +host: String, r: Result<&1, &1, U32 & String, U
     case False{}:
       sim.got("ssh", r)
 
+# The box's path map (2026-10-15, Phase 1c; the header) ------------------------------------
+
+type SimMp is Data:
+  SimMp{from: List<&2, U32>, to: List<&2, U32>}
+
+def sim.map.pairs(ls: List<&2, List<&2, U32>>) -> List<&2, SimMp>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> t:
+      +ws = Lc.lcl.words(l)
+      +rest = sim.map.pairs(t)
+      Bool.pick(List<&2, SimMp>, Nat.is_eq(List.length(&2, List<&2, U32>, ws), 2n), SimMp{Lc.lcl.nth(ws, 0n), Lc.lcl.nth(ws, 1n)} <> rest, rest)
+
+def sim.map.load(+box: String) -> IO(List<&2, SimMp>):
+  do IO<List<&2, SimMp>>:
+    xs : List<&2, U32> <- S.read(box ++ "/.sim-map")
+    return sim.map.pairs(S.split.lines(xs))
+
+# a command line with each FROM replaced by its TO, pair by pair
+def sim.map.text(ms: List<&2, SimMp>, +xs: List<&2, U32>) -> List<&2, U32>:
+  match ms:
+    case Nil{}:
+      xs
+    case SimMp{+f, +t} <> rest:
+      sim.map.text(rest, S.replace(xs, f, t))
+
+def sim.map.under(+p: List<&2, U32>, +f: List<&2, U32>) -> Bool:
+  Bool.or(S.eq(p, f), S.prefix(p, List.append(&2, U32, f, [47])))
+
+# an absolute path under a FROM (the first that holds it) as the same path under its TO (the
+# map is a few lines: Bool.pick's strict recursion is linear in them)
+def sim.map.path(ms: List<&2, SimMp>, +p: List<&2, U32>) -> List<&2, U32>:
+  match ms:
+    case Nil{}:
+      p
+    case SimMp{+f, +t} <> rest:
+      Bool.pick(List<&2, U32>, sim.map.under(p, f), List.append(&2, U32, t, List.drop(&2, U32, p, S.len(f))), sim.map.path(rest, p))
+
+# SIM_BOX_HOME/.drop-before: a command line holding its text fails before it runs, once
+def sim.ssh.before(hit: Bool, +box: String, +host: String, +port: String) -> IO(Unit):
+  match hit:
+    case False{}:
+      IO.pure(Unit, Unit{})
+    case True{}:
+      do IO<Unit>:
+        S.rm(box ++ "/.drop-before")
+        IO.die(Unit, 255, "ssh: connect to host port " ++ port ++ ": Connection timed out (bend-sim: .drop-before; the host left out, so old and new runs log the same line)")
+
 def sim.ssh.at(ok: Bool, +port: String, n: Bool, +host: String, +cmd: List<&2, String>) -> IO(Unit):
   match ok:
     case False{}:
@@ -731,9 +825,12 @@ def sim.ssh.at(ok: Bool, +port: String, n: Bool, +host: String, +cmd: List<&2, S
         down : Bool <- S.exists(box ++ "/.link-down")
         sim.need(down, 255, "ssh: connect to host " ++ host ++ " port " ++ port ++ ": Connection refused (bend-sim: the link is down)")
         sim.need(List.is_empty(&2, String, cmd), 255, "bend-sim ssh: no command (a login shell is not simulated)")
+        ms : List<&2, SimMp> <- sim.map.load(box)
+        +line : String = S.str(sim.map.text(ms, S.b(String.join(cmd, " "))))
+        +db : List<&2, U32> <- S.read(box ++ "/.drop-before")
+        sim.ssh.before(Bool.and(Nat.is_ne(S.len(S.chomp(db)), 0n), S.infix(S.b(line), S.chomp(db))), box, host, port)
         input : String <- sim.input(n)
         envs : List<&2, String> <- sim.box.env(box)
-        +line : String = String.join(cmd, " ")
         r : Result<&1, &1, U32 & String, U32 & (String & String)> <-
           Process.run("env", sim.l1(List.concat(&2, String, [["-i", "-C", box], envs, ["sh", "-c", line]])), input, S.cap.bytes(), 86400000)
         +drop : List<&2, U32> <- S.read(box ++ "/.drop-after")
@@ -760,34 +857,64 @@ def sim.rs.is.remote(+bs: List<&2, U32>, m: Maybe<&2, Nat>) -> Bool:
     case Some{+k}:
       Bool.and(Bool.and(Nat.is_lt(0n, k), Bool.not(S.head.is(bs, 45))), Bool.not(S.infix(List.take(&2, U32, bs, k), [47])))
 
-def sim.rs.path(+box: String, +p: List<&2, U32>) -> String:
-  Bool.pick(String, S.head.is(p, 47), S.str(p), box ++ "/" ++ S.str(p))
+# a remote path in the box: relative to SIM_BOX_HOME, an absolute one as the path map has it
+def sim.rs.path(+box: String, +ms: List<&2, SimMp>, +p: List<&2, U32>) -> String:
+  Bool.pick(String, S.head.is(p, 47), S.str(sim.map.path(ms, p)), box ++ "/" ++ S.str(p))
 
-def sim.rs.word(remote: Bool, +bs: List<&2, U32>, m: Maybe<&2, Nat>, +box: String, +w: String) -> String:
+def sim.rs.word(remote: Bool, +bs: List<&2, U32>, m: Maybe<&2, Nat>, +box: String, +ms: List<&2, SimMp>, +w: String) -> String:
   match remote m:
     case True{} Some{+k}:
-      sim.rs.path(box, List.drop(&2, U32, bs, 1n+k))
+      sim.rs.path(box, ms, List.drop(&2, U32, bs, 1n+k))
     case _ _:
       w
 
-def sim.rs.put(+w: String, r: SimRs, +box: String) -> SimRs:
+def sim.rs.put(+w: String, r: SimRs, +box: String, +ms: List<&2, SimMp>) -> SimRs:
   match r:
     case SimRs{+as, +rem}:
       +bs = S.b(w)
       +m = S.find(bs, [58], 0n)
       +isr = sim.rs.is.remote(bs, m)
-      Bool.pick(SimRs, String.starts_with(w, "--rsh="), SimRs{as, rem}, SimRs{sim.rs.word(isr, bs, m, box, w) <> as, Bool.or(rem, isr)})
+      Bool.pick(SimRs, String.starts_with(w, "--rsh="), SimRs{as, rem}, SimRs{sim.rs.word(isr, bs, m, box, ms, w) <> as, Bool.or(rem, isr)})
 
-def sim.rs.map(ws: List<&2, String>, +box: String) -> SimRs:
+def sim.rs.map(ws: List<&2, String>, +box: String, +ms: List<&2, SimMp>) -> SimRs:
   match ws:
     case Nil{}:
       SimRs{Nil{}, False{}}
     case "-e" <> x <> more:
-      sim.rs.map(more, box)
+      sim.rs.map(more, box, ms)
     case "--rsh" <> x <> more:
-      sim.rs.map(more, box)
+      sim.rs.map(more, box, ms)
     case +w <> more:
-      sim.rs.put(w, sim.rs.map(more, box), box)
+      sim.rs.put(w, sim.rs.map(more, box, ms), box, ms)
+
+def sim.rs.fail(hit: Bool, +n: Nat) -> IO(Unit):
+  match hit:
+    case False{}:
+      IO.pure(Unit, Unit{})
+    case True{}:
+      do IO<Unit>:
+        IO.print_err("rsync: connection unexpectedly closed (bend-sim: .rsync-fail, call " ++ Nat.show(n) ++ ")")
+        IO.die(Unit, 255, "rsync error: unexplained error (code 255) at io.c(232) [sender=3.4.4]")
+
+def sim.rs.listed(ls: List<&2, List<&2, U32>>, +k: List<&2, U32>) -> Bool:
+  match ls:
+    case Nil{}:
+      False{}
+    case +l <> t:
+      Bool.or(S.eq(l, k), sim.rs.listed(t, k))
+
+# a call with a remote side counted in .rsync-calls; the numbers .rsync-fail lists fail
+def sim.rs.count(rem: Bool, +box: String) -> IO(Unit):
+  match rem:
+    case False{}:
+      IO.pure(Unit, Unit{})
+    case True{}:
+      do IO<Unit>:
+        +xs : List<&2, U32> <- S.read(box ++ "/.rsync-calls")
+        +n : Nat = Nat.add(Maybe.default(&2, Nat, Lc.lcl.nat(S.chomp(xs)), 0n), 1n)
+        S.write(box ++ "/.rsync-calls", S.b(Nat.show(n) ++ "\n"))
+        +fs : List<&2, U32> <- S.read(box ++ "/.rsync-fail")
+        sim.rs.fail(sim.rs.listed(S.split.lines(fs), S.b(Nat.show(n))), n)
 
 def sim.rs.down(down: Bool) -> IO(Unit):
   match down:
@@ -799,14 +926,15 @@ def sim.rs.down(down: Bool) -> IO(Unit):
         IO.print_err("rsync: connection unexpectedly closed (0 bytes received so far) [Receiver]")
         IO.die(Unit, 255, "rsync error: unexplained error (code 255) at io.c(232) [Receiver=3.4.4]")
 
-def sim.rsync.with(r: SimRs, +box: String, +real: String) -> IO(Unit):
+def sim.rsync.with(r: SimRs, +box: String, +real: String, +input: String) -> IO(Unit):
   match r:
     case SimRs{as, +rem}:
       do IO<Unit>:
         down : Bool <- S.exists(box ++ "/.link-down")
         rdown : Bool <- S.exists(box ++ "/.rsync-down")
         sim.rs.down(Bool.and(Bool.or(down, rdown), rem))
-        res : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run(real, sim.l1(as), "", S.cap.bytes(), 86400000)
+        sim.rs.count(rem, box)
+        res : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run(real, sim.l1(as), input, S.cap.bytes(), 86400000)
         sim.got("rsync", res)
 
 def sim.rsync(+args: List<&2, String>) -> IO(Unit):
@@ -815,7 +943,52 @@ def sim.rsync(+args: List<&2, String>) -> IO(Unit):
     +real : String <- S.env("SIM_RSYNC", "")
     sim.need(String.is_empty(box), 255, "bend-sim rsync: SIM_BOX_HOME (the box's directory) is not set")
     sim.need(String.is_empty(real), 2, "bend-sim rsync: SIM_RSYNC (the real rsync) is not set")
-    sim.rsync.with(sim.rs.map(args, box), box, real)
+    ms : List<&2, SimMp> <- sim.map.load(box)
+    # `--files-from=-` (act-box.sh setup's `git ls-files -z | rsync ...`): stdin passed on
+    input : String <- sim.input(Bool.not(sim.has(args, "--files-from=-")))
+    sim.rsync.with(sim.rs.map(args, box, ms), box, real, input)
+
+# scp (2026-10-15, Phase 1c: fp-stage.sh's): its options left out (those taking a value with it),
+# each HOST:PATH mapped as rsync maps it, the real cp copies (-r: recursively)
+def sim.scp.flag(+w: String, r: SimRs) -> SimRs:
+  match r:
+    case SimRs{+as, +rem}:
+      SimRs{Bool.pick(List<&2, String>, String.eq(w, "-r"), "-r" <> as, as), rem}
+
+def sim.scp.map(ws: List<&2, String>, +box: String, +ms: List<&2, SimMp>) -> SimRs:
+  match ws:
+    case Nil{}:
+      SimRs{Nil{}, False{}}
+    case "-P" <> x <> more:
+      sim.scp.map(more, box, ms)
+    case "-o" <> x <> more:
+      sim.scp.map(more, box, ms)
+    case "-i" <> x <> more:
+      sim.scp.map(more, box, ms)
+    case "-F" <> x <> more:
+      sim.scp.map(more, box, ms)
+    case "-l" <> x <> more:
+      sim.scp.map(more, box, ms)
+    case +w <> more:
+      +r = sim.scp.map(more, box, ms)
+      Bool.pick(SimRs, String.starts_with(w, "-"), sim.scp.flag(w, r), sim.rs.put(w, r, box, ms))
+
+def sim.scp.with(r: SimRs, +box: String) -> IO(Unit):
+  match r:
+    case SimRs{as, +rem}:
+      do IO<Unit>:
+        down : Bool <- S.exists(box ++ "/.link-down")
+        rdown : Bool <- S.exists(box ++ "/.rsync-down")
+        sim.rs.down(Bool.and(Bool.or(down, rdown), rem))
+        res : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run("cp", sim.l1(as), "", S.cap.bytes(), 86400000)
+        sim.got("scp", res)
+
+def sim.scp(+args: List<&2, String>) -> IO(Unit):
+  do IO<Unit>:
+    +box : String <- S.env("SIM_BOX_HOME", "")
+    sim.need(String.is_empty(box), 255, "bend-sim scp: SIM_BOX_HOME (the box's directory) is not set")
+    ms : List<&2, SimMp> <- sim.map.load(box)
+    sim.scp.with(sim.scp.map(args, box, ms), box)
 
 def sim.rc.got(+rc: String, +out: String, r: Result<&1, &1, U32 & String, U32 & (String & String)>) -> IO(Unit):
   match r:
@@ -951,6 +1124,165 @@ def sim.pg(kill: Bool, +args: List<&2, String>) -> IO(Unit):
     ps : List<&2, List<&2, U32>> <- sim.pg.filter(String.is_empty(box), Lc.lcl.words(Lc.lcl.out(r)), S.b("SIM_BOX=" ++ box))
     sim.pg.fin(kill, o, ps, rp)
 
+# Recorded stubs (2026-10-15, Phase 1c: the staging, feed and act paths; the header) ----------------
+
+# ` K=V` for each of NS that is set (not empty)
+def sim.envs.text(ns: List<&2, String>) -> IO(String):
+  match ns:
+    case Nil{}:
+      IO.pure(String, "")
+    case +n <> t:
+      do IO<String>:
+        +v : String <- S.env(n, "")
+        +rest : String <- sim.envs.text(t)
+        return Bool.pick(String, String.is_empty(v), "", " " ++ n ++ "=" ++ v) ++ rest
+
+def sim.record.add(+f: String, +line: String) -> IO(Unit):
+  Bool.pick(IO(Unit), String.is_empty(f), IO.pure(Unit, Unit{}), S.add(f, S.b(line ++ "\n")))
+
+# `ROLE ARGS [K=V ...]` appended to SIM_CALLS (NS: the variables recorded with it)
+def sim.record(+role: String, +args: List<&2, String>, ns: List<&2, String>) -> IO(Unit):
+  do IO<Unit>:
+    +f : String <- S.env("SIM_CALLS", "")
+    +e : String <- sim.envs.text(ns)
+    sim.record.add(f, role ++ Bool.pick(String, List.is_empty(&2, String, args), "", " " ++ sim.join2(args))
+      ++ Bool.pick(String, String.is_empty(e), "", " [" ++ String.drop(e, 1n) ++ "]"))
+
+# PROG ARGS (found on $PATH), its answer passed on as this part's own
+def sim.pass.run(+prog: String, +args: List<&2, String>) -> IO(Unit):
+  do IO<Unit>:
+    r : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run(prog, sim.l1(args), "", S.cap.bytes(), 86400000)
+    sim.got(prog, r)
+
+def sim.real(+var: String, +role: String) -> IO(String):
+  do IO<String>:
+    +p : String <- S.env(var, "")
+    sim.need(String.is_empty(p), 2, "bend-sim " ++ role ++ ": " ++ var ++ " is not set")
+    return p
+
+# the words after `nix run FLAKE`, without the `--` (Bend's runtime may have taken it already)
+def sim.dashdash(xs: List<&2, String>) -> List<&2, String>:
+  match xs:
+    case "--" <> rest:
+      rest
+    case _:
+      xs
+
+def sim.nix.deploy(xs: List<&2, String>) -> IO(Unit):
+  match xs:
+    case +tool <> +rest:
+      sim.pass.run("bend-" ++ tool, rest)
+    case Nil{}:
+      IO.die(Unit, 2, "bend-sim nix: run .#deploy -- TOOL ARGS")
+
+def sim.nix(xs: List<&2, String>, +all: List<&2, String>) -> IO(Unit):
+  match xs:
+    case "run" <> "..#bend" <> rest:
+      sim.pass.run("bend", sim.dashdash(rest))
+    case "run" <> ".#bend" <> rest:
+      sim.pass.run("bend", sim.dashdash(rest))
+    case "run" <> ".#deploy" <> rest:
+      sim.nix.deploy(sim.dashdash(rest))
+    case "path-info" <> "-r" <> +p <> Nil{}:
+      do IO<Unit>:
+        sim.record("nix", all, Nil{})
+        +elan : String <- S.env("SIM_ELAN", "/nix/store/00000000000000000000000000000000-elan-4.0.0")
+        IO.print(p)
+        IO.print(elan)
+    case "--version" <> Nil{}:
+      IO.print("nix (Nix) 2.24.0 (bend-sim)")
+    case _:
+      sim.record("nix", all, ["NIX_SSHOPTS"])
+
+def sim.bend(xs: List<&2, String>) -> IO(Unit):
+  match xs:
+    case +src <> "-o" <> +out <> Nil{}:
+      S.write(out, S.b("bend-sim C of " ++ src ++ "\n"))
+    case _:
+      IO.die(Unit, 2, "bend-sim bend: SRC -o OUT")
+
+def sim.push(xs: List<&2, String>, +all: List<&2, String>) -> IO(Unit):
+  match xs:
+    case "link" <> rest:
+      do IO<Unit>:
+        sim.record("bend-push", all, ["TRAIN_ENV_FILE"])
+        IO.print("check-link: OK — 20 MB in 0.01 s (bend-sim)")
+    case _:
+      do IO<Unit>:
+        sim.record("bend-push", all, ["TRAIN_ENV_FILE", "SKIP_LINK_CHECK"])
+        +real : String <- sim.real("SIM_PUSH", "bend-push")
+        sim.pass.run(real, all)
+
+def sim.tool(+role: String, +args: List<&2, String>) -> IO(Unit):
+  do IO<Unit>:
+    +cwd : String <- S.realpath(".")
+    sim.record(role, List.append(&2, String, args, ["(in " ++ cwd ++ ")"]), Nil{})
+    IO.print("bend-sim " ++ role ++ ": " ++ sim.join2(args))
+
+def sim.systemctl(+args: List<&2, String>) -> IO(Unit):
+  do IO<Unit>:
+    sim.record("systemctl", args, Nil{})
+    Bool.pick(IO(Unit), sim.has(args, "is-active"), IO.die(Unit, 3, ""), IO.pure(Unit, Unit{}))
+
+def sim.sleep(+args: List<&2, String>) -> IO(Unit):
+  do IO<Unit>:
+    +cap : Nat <- S.env.nat("SIM_SLEEP_CAP", 1n)
+    +n : Nat = Maybe.default(&2, Nat, Lc.lcl.nat(S.b(sim.ssh.word(args))), 1n)
+    IO.sleep(U32.from_nat(Nat.mul(Nat.min(n, Nat.min(cap, 3600n)), 1000n)))
+
+def sim.deploy(xs: List<&2, String>) -> IO(Unit):
+  match xs:
+    case "corpus-v2" <> "agent-act" <> +rest:
+      do IO<Unit>:
+        +real : String <- sim.real("SIM_CV2", "deploy")
+        sim.pass.run(real, "agent-act" <> rest)
+    case "corpus-v2" <> +rest:
+      sim.pass.run("bend-corpus-v2", rest)
+    case _:
+      IO.die(Unit, 2, "bend-sim deploy: corpus-v2 STEP ARGS")
+
+# SRC's bytes (a path in the variable VAR) as DST, unless DST is there or VAR is not set
+def sim.fixture(+var: String, +dst: String) -> IO(Unit):
+  do IO<Unit>:
+    +src : String <- S.env(var, "")
+    there : Bool <- S.exists(dst)
+    +xs : List<&2, U32> <- S.read(src)
+    Bool.pick(IO(Unit), Bool.or(there, String.is_empty(src)), IO.pure(Unit, Unit{}), S.write(dst, xs))
+
+def sim.agent.env() -> List<&2, String>:
+  ["BEND_FT_THREADS", "EVALSET", "AGENT_DEPLOY", "AGENT_RECORDS", "TEMPERATURE", "TOP_P", "AGENT_SEEDS", "AGENT_TAG", "TOKENS",
+   "AGENT_CALLS", "PROCS", "THREADS"]
+
+def sim.cv2(xs: List<&2, String>, +all: List<&2, String>) -> IO(Unit):
+  match xs:
+    case "agent-eval" <> +ck <> +dir <> rest:
+      do IO<Unit>:
+        sim.record("bend-corpus-v2", all, sim.agent.env())
+        S.mkdir(dir)
+        sim.fixture("SIM_REPORT", dir ++ "/report.txt")
+        sim.fixture("SIM_EPLOG", dir ++ "/episodes.eplog")
+        sim.fixture("SIM_AGENT", dir ++ "/agent.nul")
+        +ms : Nat <- S.env.nat("SIM_ACT_MS", 0n)
+        IO.sleep(U32.from_nat(Nat.min(ms, 3600000n)))
+        IO.print("bend-sim agent-eval: " ++ ck ++ " into " ++ dir)
+    case _:
+      sim.record("bend-corpus-v2", all, Nil{})
+
+def sim.episode(xs: List<&2, String>, +all: List<&2, String>) -> IO(Unit):
+  match xs:
+    case "accept" <> +calls <> +cap <> +dir <> rest:
+      do IO<Unit>:
+        sim.record("bend-episode", all, ["AGENT_RECORDS"])
+        S.mkdir(dir)
+    case "fixed" <> +calls <> +cap <> +dir <> rest:
+      do IO<Unit>:
+        sim.record("bend-episode", all, ["AGENT_RECORDS"])
+        S.mkdir(dir)
+    case _:
+      do IO<Unit>:
+        +real : String <- sim.real("SIM_EPISODE", "bend-episode")
+        sim.pass.run(real, all)
+
 # The parts by name ------------------------------------------------------------------------------
 
 def sim.roles() -> List<&2, String>:
@@ -1025,6 +1357,28 @@ def sim.part(+argv0: String, xs: List<&2, String>) -> IO(Unit):
       sim.pg(True{}, args)
     case "sim-rc" <> args:
       sim.rc(args)
+    case "scp" <> +args:
+      sim.scp(args)
+    case "nix" <> +args:
+      sim.nix(args, args)
+    case "bend" <> args:
+      sim.bend(args)
+    case "bend-push" <> +args:
+      sim.push(args, args)
+    case "elan" <> +args:
+      sim.tool("elan", args)
+    case "lake" <> +args:
+      sim.tool("lake", args)
+    case "systemctl" <> +args:
+      sim.systemctl(args)
+    case "sleep" <> +args:
+      sim.sleep(args)
+    case "deploy" <> args:
+      sim.deploy(args)
+    case "bend-corpus-v2" <> +args:
+      sim.cv2(args, args)
+    case "bend-episode" <> +args:
+      sim.episode(args, args)
     case "bend-sim" <> "links" <> +dir <> Nil{}:
       sim.links(argv0, dir)
     case "bend-sim" <> +more:

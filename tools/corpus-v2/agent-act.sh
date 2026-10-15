@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-15: replaced by `bend-corpus-v2 agent-act CKPT DIR [K]` (bend/CorpusV2/AgentAct.bend: the same calls, Phase 3; on the sandbox's box, `bend-ops sim stage act-check|act-start`, the same recorded agent-eval, accept and fixed calls as a copy of this script); unwired with act-box.sh; kept for reference
+exit 2
 # 2026-10-15: ported to Bend as `bend-corpus-v2 agent-act CKPT DIR [K]` (bend/CorpusV2/AgentAct.bend:
 # the same commands, arguments and environment); kept live until the box's deploy is rebuilt with it.
 # agent-act.sh CKPT DIR [K] (2026-10-07): ana's own episodes on train units,

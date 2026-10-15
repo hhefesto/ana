@@ -16,6 +16,7 @@ for f in "${fins[@]}"; do log "finalize $f"; bash "$f" > "run/$name-$(basename "
 # a language whose wave came out empty is left out
 keep=""; for e in $new; do d=${e#*=}; [ -s "$d/transcripts.train.nul" ] && keep="$keep $e" || log "no transcripts in $d"; done
 [ -z "$keep" ] && { log "nothing to train"; exit 0; }
+# 2026-10-15: next-stage.sh is unwired too (`bend-ops stage next`, `bend-ops stage push NAME RUN HOST PORT`)
 NAME=$name NEW="$keep" bend/gpu/next-stage.sh build > "run/$name-build.log" 2>&1 || { log "build failed"; exit 1; }
 NAME=$name bend/gpu/next-stage.sh push "$host" "$port" > "run/$name-push.log" 2>&1 || { log "push failed"; exit 1; }
 line="$name traind-next 1000 run/$name/plan-$name-b16-windows.tsv run/$name $name"

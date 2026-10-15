@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-15: replaced by `bend-ops stage raw mix|mixnew|build|push` (bend/Box/Drive.bend: mix, mixnew and build byte-identical in Phase 4a; push in `bend-ops sim stage raw-push` against a copy of this script without these two lines); kept for reference
+exit 2
 # Raw code for the chain when no new transcripts are ready (the user,
 # 2026-10-02: "Feed it raw code when nothing new is available"). From the
 # repository root:

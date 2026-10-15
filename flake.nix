@@ -278,6 +278,14 @@
             cd ${lintSrc}
             exec ${self.packages.${system}.bend-ops}/bin/bend-ops lint --tree . --bend --report "$out"
           '';
+          # the sandbox box in the build sandbox (2026-10-15, Phase 1c): `bend-ops sim
+          # stage push-drop`, the new side alone (SIM_NEW_ONLY): stage push over bend-sim's
+          # ssh and rsync, a copy the link drops tried again, the shards' sha256, the plan
+          # last, STAGED; the run's directory is $out
+          ops-sim = pkgs.runCommand "ops-sim" { } ''
+            export SIM_NEW_ONLY=1 SIM_REPO=${sourceOf [ ./bend/gpu ]} BEND_SIM=${self.packages.${system}.bend-sim}/bin/bend-sim BEND_BOX=${self.packages.${system}.bend-box}/bin/bend-box
+            exec ${self.packages.${system}.bend-ops}/bin/bend-ops sim stage push-drop "$out"
+          '';
           # the behaviour test's tasks and references are what its spec says
           # (2026-10-14: bend-corpus-v2 behaviour tasks --check, the Bend port
           # of tasks.sh, regenerates them in memory and compares byte for byte)
@@ -316,7 +324,8 @@
           # validation loss, a validation set smaller than a micro-batch
           # scores above 0, and six steps per optimizer on a frozen corpus
           # give the goldens' parameters byte for byte
-          # (bend/tests/dense-identity.sh writes them; Checks.bend dense-run)
+          # (bend/tests/dense-identity.sh wrote them, unwired 2026-10-15:
+          # `bend-ops dense-identity` writes them; Checks.bend dense-run)
           bend-dense = pkgs.runCommand "bend-dense" { nativeBuildInputs = [ (bendFor pkgs) ]; } ''
             export HOME=$TMPDIR
             cp -r ${bendSrc}/bend src

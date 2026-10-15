@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-15: replaced by `bend-ops stage restage HOST PORT CKPT STAGE...` (bend/Box/Stage.bend; `bend-ops sim stage restage` compares it with a copy of this script without these two lines: the same box files but bend-box); kept for reference
+exit 2
 # Stage the chain's remaining stages on a new box (the old one could not come
 # back: vast stopped it when the credit ran out, and another renter took its
 # GPU). From the repository root, once the box answers ssh:

@@ -42,6 +42,10 @@ import ../Push.bend as Pu
 # partial directory and retries (the scripts used scp and `rsync --partial`).  BOX_DIR is the
 # box's working directory (stage box: the env file's REMOTE_DIR; else formalTransformer).
 # Every name starts with `stg.`; the pure parts are tested in bend/tests/box.bend.
+#
+# 2026-10-15 (Phase 1c): fp-stage.sh, next-stage.sh, fp-restage.sh and dense-identity.sh are
+# unwired; `bend-ops sim stage box|push|push-drop|push-corrupt|restage|dense-identity` holds
+# these subcommands to copies of them in the sandbox (bend/Box/ScnStage.bend).
 
 # The plan's shards and their sums (pure) --------------------------------------------------------
 

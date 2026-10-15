@@ -1,0 +1,12 @@
+  haskell direct, solved within 1:2/20 2:2/20 3:2/20 4:2/20
+  haskell repair, solved within 1:5/20 2:5/20 3:5/20 4:5/20
+  agda direct, solved within 1:10/20 2:10/20 3:10/20 4:10/20
+  agda repair, solved within 1:10/20 2:10/20 3:11/20 4:11/20
+  lean direct, solved within 1:1/20 2:1/20 3:1/20 4:1/20
+  lean repair, solved within 1:0/20 2:1/20 3:1/20 4:1/20
+  nix direct, solved within 1:0/0 2:0/0 3:0/0 4:0/0
+  nix repair, solved within 1:6/20 2:6/20 3:6/20 4:6/20
+  bend direct, solved within 1:1/20 2:1/20 3:1/20 4:1/20
+  bend repair, solved within 1:7/20 2:7/20 3:8/20 4:8/20
+all solved 45/180
+render law 180/180

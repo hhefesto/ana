@@ -46,9 +46,14 @@ import ./Vast.bend as Vs
 #       steps (credit-ok STAGES CREDIT CUR STEPS, CUR the box's newest
 #       non-eval log and its last step=I/N); push it, 6 tries a minute apart
 #       (`stage raw push K` >> run/P-pushK.log); append
-#       `PK traind-next 0 run/PK/plan-PK-b16-windows.tsv run/PK PK` to STAGES
+#       `PK traind-next 0 run/PK/plan-PK-b16-windows.tsv run/PK PK` to STAGES.
+#       The waits are FEED_WAIT (600 s), FEED_PUSH_WAIT (60 s) and MIX_POLL (30 s)
 #
 # Every name starts with `drv.`; the pure parts are tested in bend/tests/recipes.bend.
+#
+# 2026-10-15 (Phase 1c): next-stage.sh, raw-stage.sh and raw-driver.sh are unwired; `bend-ops
+# sim stage raw-push|feed` holds `stage raw push` and `feed` to copies of them in the sandbox
+# (bend/Box/ScnStage.bend).
 
 def drv.log(+tool: String, +msg: String) -> IO(Unit):
   K.kor.log(tool, msg)
@@ -374,6 +379,14 @@ def drv.raw(xs: List<&2, String>) -> IO(Unit):
 def drv.flog(+msg: String) -> IO(Unit):
   drv.log("raw-driver", msg)
 
+# the feed's waits, in seconds (2026-10-15, Phase 1c: settable, so the sandbox runs them short):
+# FEED_WAIT (600) between credit checks, FEED_PUSH_WAIT (60) between push tries, MIX_POLL (30)
+# while the mix unit runs
+def drv.sleep(+var: String, +d: Nat) -> IO(Unit):
+  do IO<Unit>:
+    +s : Nat <- S.env.nat(var, d)
+    IO.sleep(U32.mul(U32.from_nat(Nat.min(s, 86400n)), 1000))
+
 # lines of a program's stderr, each logged
 def drv.flog.lines(ls: List<&2, List<&2, U32>>) -> IO(Unit):
   match ls:
@@ -434,7 +447,7 @@ def drv.guard(fuel: Nat, ok: Bool, +b: Rm.RmtBox, +stages: String, +k: String, +
     case 1n+f False{}:
       do IO<Unit>:
         drv.flog("slice " ++ k ++ " (" ++ Nat.show(n) ++ " steps) waits: the credit does not cover it (top up, or it stays out)")
-        IO.sleep(600000)
+        drv.sleep("FEED_WAIT", 600n)
         ok2 : Bool <- drv.credit.ok(b, stages, n)
         drv.guard(f, ok2, b, stages, k, n)
 
@@ -470,12 +483,12 @@ def drv.push.again(t: Nat, ok: Bool, +i: Nat, +self: String, +p: String, +k: Str
     case 0n False{}:
       do IO<Bool>:
         drv.flog("slice " ++ k ++ " push try " ++ Nat.show(i) ++ " failed; again in a minute")
-        IO.sleep(60000)
+        drv.sleep("FEED_PUSH_WAIT", 60n)
         return False{}
     case 1n+(+u) False{}:
       do IO<Bool>:
         drv.flog("slice " ++ k ++ " push try " ++ Nat.show(i) ++ " failed; again in a minute")
-        IO.sleep(60000)
+        drv.sleep("FEED_PUSH_WAIT", 60n)
         +st : U32 <- drv.to("run/" ++ p ++ "-push" ++ k ++ ".log", ["EVALC=run/eval/transcript-next.corpus"], self, ["stage", "push", p ++ k, "run/" ++ p ++ k, host, port])
         drv.push.again(u, U32.is_eq(st, 0), 1n+i, self, p, k, host, port)
 
@@ -494,7 +507,7 @@ def drv.mix.wait(fuel: Nat, active: Bool, +unit: String) -> IO(Unit):
   match fuel active:
     case 1n+f True{}:
       do IO<Unit>:
-        IO.sleep(30000)
+        drv.sleep("MIX_POLL", 30n)
         a : Bool <- drv.mix.active(unit)
         drv.mix.wait(f, a, unit)
     case _ _:

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-15: replaced by `bend-ops feed HOST PORT STAGES [FIRST] [LAST]` (bend/Box/Drive.bend; `bend-ops sim stage feed` compares it with a copy of this script without these two lines: the credit guard and its wait, a push tried again, STAGES, the stop at a slice that does not build); kept for reference
+exit 2
 # Keep the chain fed with raw code: once raw-stage.sh's mix and slice 1 are
 # built, push each slice and append its stage to STAGES, building the next
 # while the box trains on the last. Transcript waves are inserted by hand

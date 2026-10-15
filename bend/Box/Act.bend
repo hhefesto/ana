@@ -75,6 +75,10 @@ import ../CorpusV2/AgentAct.bend as Aa
 # copied, not printf'd there; the toolchain name is read from the local
 # lean-toolchain (the copy just sent).  Every name starts with `acb.`; the
 # pure parts are tested in bend/tests/act.bend.
+#
+# 2026-10-15 (Phase 1c): act-box.sh and agent-act.sh are unwired; `bend-ops sim stage act-*`
+# holds every mode, and `ensure` against run 3's act-restart.sh, to copies of them in the
+# sandbox (bend/Box/ScnStage.bend).
 
 # Text ------------------------------------------------------------------------------------------
 

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# UNWIRED 2026-10-15: replaced by `bend-ops stage box HOST PORT` (bend/Box/Stage.bend; `bend-ops sim stage box` runs a copy of this script without these two lines against it in the sandbox: the same box files, calls and lines but bend-box built there, the plan's Phase 1b); kept for reference
+exit 2
 # Stage the fp100m run on a rented box (bend/gpu/fp.sh runs it there):
 # the trainer and the gate program as C (built on the box with its clang
 # and CUDA), fp.sh, the tokenizer and the held-out transcripts by scp, then
