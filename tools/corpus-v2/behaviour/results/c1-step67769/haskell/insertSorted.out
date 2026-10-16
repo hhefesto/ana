@@ -1,0 +1,25 @@
+=== ana: step 67769 of 81652 (82.997% of its plan) ===
+## User
+
+Insert an element into a sorted list, keeping it sorted.
+
+## Type
+
+type
+```haskell
+insertSorted :: Ord a => a -> [a] -> [a]
+```
+
+## Term
+
+```haskell
+insertSorted x [] = [x]
+insertSorted x (y:ys)
+  | x < y     = x : y : ys
+  | otherwise = y : insertSorted x ys
+```
+
+## ghc
+
+-- |
+-- Module      :  Data.SBV.Examples.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrom

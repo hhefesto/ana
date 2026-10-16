@@ -1,0 +1,23 @@
+=== ana: step 67769 of 81652 (82.997% of its plan) ===
+## User
+
+Sort a list with quicksort.
+
+## Type
+
+type
+```haskell
+quicksort :: Ord a => [a] -> [a]
+```
+
+## Term
+
+```haskell
+quicksort [] = []
+quicksort (x:xs) = quicksort [y | y <- xs, y < x] ++ [x] ++ quicksort [y | y <- xs, y > x]
+```
+
+## ghc
+
+-- |
+-- Module      :  ./Common/Common/CommonLogic/CommonLogic/CommonLogic/CommonLogic/CommonLogic/CommonLogic/CommonLogic/CommonLogic/CommonLogic/CommonLogic/CommonLogic/CommonLogic/CommonLogic/CommonLogic/CommonLogic/CommonLogic/CommonLogic/CommonLogic/CommonLogic/CommonLogic/CommonLogic/CommonLogic/CommonLogic/CommonLogic/CommonLogic/

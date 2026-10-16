@@ -1,0 +1,75 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+Split a string on every occurrence of a separator character.
+
+## Type
+
+type
+```haskell
+splitOn :: Char -> String -> [String]
+```
+
+## Term
+
+```haskell
+splitOn c s = case dropWhile (== c) s of
+  "" -> []
+  s' -> w : splitOn c s''
+    where (w, s'') = break (== c) s'
+```
+
+## ghc
+
+-- Replace
+```
+
+## ghc
+-- Replace
+```
+
+## ghc
+-- Replace
+```
+
+## ghc
+-- Replace
+```
+
+## ghc
+-- Replace
+```
+
+## ghc
+-- Replace
+```
+
+## ghc
+-- Replace
+```
+
+## ghc
+-- Replace
+```
+
+## ghc
+-- Replace
+```
+
+## ghc
+-- Replace
+```
+
+## ghc
+-- Replace
+```
+
+## ghc
+-- Replace
+```
+
+## ghc
+-- Replace
+```
+
+## ghc

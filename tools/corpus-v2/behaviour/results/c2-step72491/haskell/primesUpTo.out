@@ -1,0 +1,78 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+All prime numbers up to and including n, in increasing order.
+
+## Type
+
+type
+```haskell
+primesUpTo :: Int -> [Int]
+```
+
+## Term
+
+```haskell
+primesUpTo n = go n []
+  where
+    go n xs
+      | n <= 1 = xs
+      | otherwise = go (n `div` 2) $ n : xs
+```
+
+## ghc
+
+-- #end
+```
+
+## ghc
+
+-- #end
+```
+
+## ghc
+
+-- #end
+```
+
+## ghc
+
+-- #end
+```
+
+## ghc
+
+-- #end
+```
+
+## ghc
+
+-- #end
+```
+
+## ghc
+
+-- #end
+```
+
+## ghc
+
+-- #end
+```
+
+## ghc
+
+-- #end
+```
+
+## ghc
+
+-- #end
+```
+
+## ghc
+
+-- #end
+```
+
+## ghc

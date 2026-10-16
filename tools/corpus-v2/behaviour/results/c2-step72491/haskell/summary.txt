@@ -1,0 +1,1 @@
+c2-step72491 haskell: 16/30 pass;  5 compile  16 pass  9 wrong 

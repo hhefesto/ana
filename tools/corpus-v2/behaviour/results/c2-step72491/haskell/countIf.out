@@ -1,0 +1,114 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+Count how many elements of a list satisfy a predicate.
+
+## Context
+
+```haskell
+filter :: (a -> Bool) -> [a] -> [a]
+length :: Foldable t => t a -> Int
+```
+
+## Type
+
+type
+```haskell
+countIf :: (a -> Bool) -> [a] -> Int
+```
+
+## Term
+
+```haskell
+countIf p = length . filter p
+```
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+
+
+## ghc
+

@@ -1,0 +1,47 @@
+=== ana: step 67769 of 81652 (82.997% of its plan) ===
+## User
+
+Count how many times each word occurs in a text, as a map from each word to its count.
+
+## Context
+
+```haskell
+words :: String -> [String]
+M.insertWith :: Ord k => (a -> a -> a) -> k -> a -> M.Map k a -> M.Map k a
+M.empty :: M.Map k a
+```
+
+## Type
+
+type
+```haskell
+wordFreq :: String -> M.Map String Int
+```
+
+## Term
+
+```haskell
+wordFreq word = M.fromListWith (+) [(word, 1)]
+```
+
+## ghc
+
+-- |
+-- Module      : AOC.Challenge
+-- License     : BSD3
+--
+-- Stability   : experimental
+-- Portability : non-portable
+--
+-- This module contains the challenge and its implementation
+--
+-- The challenge is based on the challenge described in
+-- <http://www.staff.tuerber.com/blog/2017/10/adventofcode.html>.
+
+module AOC.Challenge
+  ( challenge
+  ) where
+
+import           AOC.Common            ( getInput )
+import           AOC.Solver          ( Constraint, ConstraintKind (..) )
+import           AOC.Util            ( read

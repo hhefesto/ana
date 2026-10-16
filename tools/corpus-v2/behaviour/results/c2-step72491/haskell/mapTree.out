@@ -1,0 +1,43 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+Apply a function to every value in a tree, keeping its shape.
+
+## Context
+
+```haskell
+data Tree a = Leaf | Node (Tree a) a (Tree a)
+```
+
+## Type
+
+type
+```haskell
+mapTree :: (a -> b) -> Tree a -> Tree b
+```
+
+## Term
+
+```haskell
+mapTree f (Leaf) = Leaf
+mapTree f (Node l x r) = Node (mapTree f l) (f x) (mapTree f r)
+```
+
+## ghc
+
+-- | This function is used to implement the `mapTree` function from
+-- `Data.Tree` to `Data.Tree`.
+mapTree f (Leaf) = Leaf
+mapTree f (Node l x r) = Node (mapTree f l) (f x) (mapTree f r)
+```
+
+## ghc
+
+-- | This function is used to implement the `mapTree` function from
+-- `Data.Tree` to `Data.Tree`.
+mapTree f (Node l x r) = Node (mapTree f l) (f x) (mapTree f r)
+```
+
+## ghc
+
+-- | This function is used to

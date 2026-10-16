@@ -1,0 +1,86 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+Remove duplicate elements from a list, keeping the first occurrence of each.
+
+## Type
+
+type
+```haskell
+dedup :: Eq a => [a] -> [a]
+```
+
+## Term
+
+```haskell
+dedup [] = []
+dedup (x:xs) = if x `elem` xs then x : xs else x : dedup xs
+```
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+

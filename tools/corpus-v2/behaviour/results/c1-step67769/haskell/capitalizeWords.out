@@ -1,0 +1,51 @@
+=== ana: step 67769 of 81652 (82.997% of its plan) ===
+## User
+
+Uppercase the first letter of every word in a string of words separated by single spaces.
+
+## Context
+
+```haskell
+toUpper :: Char -> Char
+words :: String -> [String]
+unwords :: [String] -> String
+```
+
+## Type
+
+type
+```haskell
+capitalizeWords :: String -> String
+```
+
+## Term
+
+```haskell
+capitalizeWords = toUpper . unwords
+```
+
+## ghc
+
+-- |
+-- Module      :  Crypto.Hash.SHA256
+-- Copyright   :  (c) 2013-2021 Galois, Inc.
+-- License     :  BSD3
+-- Maintainer  :  crypto@genius.com
+-- Stability   :  provisional
+-- Portability :  portable
+--
+-- A hash function for SHA-256s.
+--
+
+module Crypto.Hash.SHA256 (
+    SHA256(..)
+  , hash
+  , hash'
+  , hash''
+  , hash'''
+  , hash''''
+  , hash'''''
+  , hash'''''''
+  , hash'''''''''
+  , hash'''''''''''
+  ,

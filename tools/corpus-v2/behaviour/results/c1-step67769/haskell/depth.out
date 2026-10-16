@@ -1,0 +1,47 @@
+=== ana: step 67769 of 81652 (82.997% of its plan) ===
+## User
+
+The depth of a tree: 0 for a leaf, and one more than the deeper subtree for a node.
+
+## Context
+
+```haskell
+data Tree a = Leaf | Node (Tree a) a (Tree a)
+```
+
+## Type
+
+type
+```haskell
+depth :: Tree a -> Int
+```
+
+## Term
+
+```haskell
+depth (Leaf) = 0
+depth (Node l _ r) = 1 + max (depth l) (depth r)
+```
+
+## ghc
+
+-- | The depth of a tree
+depth :: Tree a -> Int
+depth (Leaf) = 0
+depth (Node l _ r) = 1 + max (depth l) (depth r)
+```
+
+## ghc
+
+-- | The depth of a tree
+depth :: Tree a -> Int
+depth (Leaf) = 0
+depth (Node l _ r) = 1 + max (depth l) (depth r)
+```
+
+## ghc
+
+-- | The depth of a tree
+depth :: Tree a -> Int
+depth (Leaf) = 0
+depth

@@ -1,0 +1,74 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+Split a list into chunks of the given size; the last chunk may be shorter.
+
+## Type
+
+type
+```haskell
+chunksOf :: Int -> [a] -> [[a]]
+```
+
+## Term
+
+```haskell
+chunksOf n xs = go n xs
+  where
+    go _ [] = []
+    go n (x:xs) = x : go (n - 1) xs
+```
+
+## ghc
+
+ = go n xs
+```
+
+## ghc
+
+ = go n xs
+```
+
+## ghc
+
+ = go n xs
+```
+
+## ghc
+
+ = go n xs
+```
+
+## ghc
+
+ = go n xs
+```
+
+## ghc
+
+ = go n xs
+```
+
+## ghc
+
+ = go n xs
+```
+
+## ghc
+
+ = go n xs
+```
+
+## ghc
+
+ = go n xs
+```
+
+## ghc
+
+ = go n xs
+```
+
+## ghc
+
+ = go

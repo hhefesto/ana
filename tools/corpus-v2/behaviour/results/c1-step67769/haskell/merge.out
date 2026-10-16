@@ -1,0 +1,26 @@
+=== ana: step 67769 of 81652 (82.997% of its plan) ===
+## User
+
+Merge two sorted lists into one sorted list.
+
+## Type
+
+type
+```haskell
+merge :: Ord a => [a] -> [a] -> [a]
+```
+
+## Term
+
+```haskell
+merge [] ys = ys
+merge xs [] = xs
+merge (x:xs) (y:ys)
+  | x <= y = x : merge xs (y:ys)
+  | otherwise = y : merge (x:xs) ys
+```
+
+## ghc
+
+-- |
+-- Module      :  Data.SBV.Examples.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palindrome.Palind

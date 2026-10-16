@@ -1,0 +1,87 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+The greatest common divisor of two non-negative integers, by Euclid's algorithm.
+
+## Type
+
+type
+```haskell
+myGcd :: Int -> Int -> Int
+```
+
+## Term
+
+```haskell
+myGcd a b = if b == 0 then a else myGcd b (a `mod` b)
+```
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+

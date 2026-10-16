@@ -1,0 +1,1 @@
+c1-step67769 haskell: 15/30 pass;  5 compile  15 pass  1 unclosed  9 wrong 

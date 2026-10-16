@@ -1,0 +1,46 @@
+=== ana: step 67769 of 81652 (82.997% of its plan) ===
+## User
+
+Count how many elements of a list satisfy a predicate.
+
+## Context
+
+```haskell
+filter :: (a -> Bool) -> [a] -> [a]
+length :: Foldable t => t a -> Int
+```
+
+## Type
+
+type
+```haskell
+countIf :: (a -> Bool) -> [a] -> Int
+```
+
+## Term
+
+```haskell
+countIf p = length . filter p
+```
+
+## ghc
+
+-- #end
+```
+
+{-# LANGUAGE OverloadedStrings #-}
+
+module Main where
+
+import           Control.Monad
+import           Control.Monad.IO.Class
+import           Control.Monad.Trans.State
+import           Data.Attoparsec.Text
+import           Data.Attoparsec.Text.Dense
+import           Data.Attoparsec.Text.Dense.Dense
+import           Data.Attoparsec.Text.Dense.Util
+import           Data.Attoparsec.Text.Dense.Parse
+import           Data.Attoparsec.Text.Dense.ParseCombinators
+import           Data.Attoparsec.Text.Dense.ParseCombinators
+import           Data.Attoparsec.Text.Dense.ParseCombinators
+import           Data.Attoparsec.Text.D

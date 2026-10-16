@@ -1,0 +1,84 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+The index of the first occurrence of an element in a list, if there is one.
+
+## Type
+
+type
+```haskell
+indexOf :: Eq a => a -> [a] -> Maybe Int
+```
+
+## Term
+
+```haskell
+indexOf _ [] = Nothing
+indexOf x (y:ys)
+  | x == y    = Just 0
+  | otherwise = indexOf x ys
+```
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc

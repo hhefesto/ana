@@ -1,0 +1,46 @@
+=== ana: step 67769 of 81652 (82.997% of its plan) ===
+## User
+
+Reverse a list.
+
+## Type
+
+type
+```haskell
+myReverse :: [a] -> [a]
+```
+
+## Term
+
+```haskell
+myReverse [] = []
+myReverse (x:xs) = myReverse xs ++ [x]
+```
+
+## ghc
+
+-- #hide
+module Main where
+
+import Data.List
+import Data.Ord
+
+-- | The type of a list of integers
+type IntList = [Int]
+
+-- | The type of a list of integers
+type IntList' = [Int]
+
+-- | The type of a list of integers
+type IntList'' = [Int]
+
+-- | The type of a list of integers
+type IntList''' = [Int]
+
+-- | The type of a list of integers
+type IntList'''' = [Int]
+
+-- | The type of a list of integers
+type IntList''''' = [Int]
+
+-- | The type of

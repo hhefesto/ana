@@ -1,0 +1,51 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+The sum of all the values in a tree.
+
+## Context
+
+```haskell
+data Tree a = Leaf | Node (Tree a) a (Tree a)
+```
+
+## Type
+
+type
+```haskell
+treeSum :: Num a => Tree a -> a
+```
+
+## Term
+
+```haskell
+treeSum Leaf = 0
+treeSum (Node l x r) = x + treeSum l + treeSum r
+```
+
+## ghc
+
+-- Define a function that sums all the values in a tree
+sumTree :: Num a => Tree a -> a
+```
+
+## Term
+
+```haskell
+sumTree Leaf = 0
+sumTree (Node l x r) = x + sumTree l + sumTree r
+```
+
+## ghc
+
+-- Define a function that sums all the values in a tree
+sumTree' :: Num a => Tree a -> a
+```
+
+## ghc
+
+-- Define a function that sums all the values in a tree
+sumTree'' :: Num a => Tree a -> a
+```
+
+## ghc

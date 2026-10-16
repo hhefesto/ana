@@ -1,0 +1,44 @@
+=== ana: step 67769 of 81652 (82.997% of its plan) ===
+## User
+
+Split a string on every occurrence of a separator character.
+
+## Type
+
+type
+```haskell
+splitOn :: Char -> String -> [String]
+```
+
+## Term
+
+```haskell
+splitOn c s = case break (== c) s of
+  (as, []) -> as
+  (as, _:bs) -> as : splitOn c bs
+```
+
+## ghc
+
+-- #ifdef
+-- #ifndef
+
+
+module Main where
+
+import           Control.Monad
+import           Data.List
+import           Data.Maybe
+import           System.Exit
+import           System.IO
+import           System.Process
+import           System.Exit
+import           System.Console.GetOpt
+import           System.Exit
+import           System.Random
+import           System.Random.Shuffle
+import           System.Random.Shuffle.Shuffle
+import           System.Random.Shuffle.Shuffle
+import           System.Random.Shuffle.Shuffle
+import           System.Random.Shuffle.Shuffle
+import          

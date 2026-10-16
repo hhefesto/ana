@@ -1,0 +1,75 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+Uppercase the first letter of every word in a string of words separated by single spaces.
+
+## Context
+
+```haskell
+toUpper :: Char -> Char
+words :: String -> [String]
+unwords :: [String] -> String
+```
+
+## Type
+
+type
+```haskell
+capitalizeWords :: String -> String
+```
+
+## Term
+
+```haskell
+capitalizeWords = unwords . words
+```
+
+## ghc
+
+
+
+
+```haskell
+capitalizeWords = unwords . words
+```
+
+## ghc
+
+
+
+```haskell
+capitalizeWords = unwords . words
+```
+
+## ghc
+
+
+```haskell
+capitalizeWords = unwords . words
+```
+
+## ghc
+
+
+```haskell
+capitalizeWords = unwords . words
+```
+
+## ghc
+
+
+```haskell
+capitalizeWords = unwords . words
+```
+
+## ghc
+
+
+```haskell
+capitalizeWords = unwords . words
+```
+
+## ghc
+
+
+
