@@ -130,19 +130,43 @@ bend-ops guard tools/runs/run4.cfg              # starts chain, watch and handov
   - resume rewrites the stage's STAGES line and keeps the old one as STAGES.OLD_INSTANCE.
 - `bend-ops sim drive all run/sim-drive` runs 7 scenarios against run 3's boot-guard.sh, s2-driver.sh and move.sh. Not yet shown: act-ensure, act-pull, `move restage` and `move act`, which need real nix on a box, and `guard install` against real systemd.
 
-## ▶ CONTINUE HERE (2026-10-15): run 3 beat run 2; every box step is a Bend command; run 4 is not yet planned
+## ▶ CONTINUE HERE (2026-10-15, 22:30 UTC-6): run 4 is built and staged here; the box is rented next (section "Run 4" below)
 
-- **No box is rented.** Run 3's box was destroyed on 2026-10-13, and its 15 checkpoints are local in run/v3/run3/out.
-- **The tools:** every step of a run is a Bend command (the section above). The bend2 fork is on upstream 2.0.37+: hhefesto/bend2 ft-kernels 37e80669, with the old head tagged ft-kernels-2.0.35.
-- **New raw Bend for run 4:** run/v4/collect/bend.
+- **No box is rented yet** (2026-10-15 22:30). Run 4's data, configs and tools are built and committed; the rental is next, by the order in "Run 4" below. Run 3's box was destroyed on 2026-10-13, and its 15 checkpoints are local in run/v3/run3/out.
+- **The tools:** every step of a run is a Bend command (the section above). The bend2 fork is on upstream d2aeefc1: hhefesto/bend2 ft-kernels 977a2d98, without IO.time (the wall clock is our own effect, bend/Clock.bend); the old heads are tagged ft-kernels-2.0.37 and ft-kernels-2.0.35. The gcroots the box and the units use (run/gcroot-bend-ops, run/v2/gcroot-deploy-agent, run/agent/gcroot-bend-episode, run/gcroot-bend) are built from master 982e162.
+- **New raw Bend for run 4:** run/v4/collect/bend (in run 4's mix).
   - bend.jsonl holds 801 files (6.9 MB); vault/bend.jsonl holds 33.
   - It covers 19 new repositories, upstream bendlang/bend since 1d895ca0, and the growth of the known repositories.
-  - The run-4 raw build must take it.
+  - Run 4's raw build took it (steady-mix, all 801 files).
 - **Before run 4's rental:**
   - Pick an offer whose `duration` covers the job; check its `end_date` (run 3's first box expired after 3 h).
   - Run the act round's setup afresh: round 1 had no Haskell episodes, because the box lacked the GHC harness and the tarballs. act's check now fails such a language.
   - Validate bend-box on the GPU with `./bend-box gate`, `time` and `run`, and keep fp.sh as the fallback until it has trained.
   - No shadow watch (decided 2026-10-15). The plan wanted the old credit watch beside the new one in alert-only mode, but credit-watch.sh never had such a mode. Its decisions are covered instead by the sandbox runs against the old script: the low-credit stop, the destroy after GRACE when a wanted checkpoint is missing, the destroy that does not take, and the failed listing (`bend-ops sim 5`, `6`, `8` and `9`). On the first rental, watch `journalctl --user -u <watch unit>` and the credit by hand during the first hour.
+
+## Run 4 (from 2026-10-15): continued from run 3, with a real on-policy round and a control
+
+- **The plan** (approved 2026-10-15; the user: "Continue from run 3", "act round on the rented box"; and from now on every run builds on the last):
+  - **C1** hot-starts from run 3's final checkpoint, s2-step56725, with `bend-box again` (TRAIN_NEXT: the optimizer state carries over, the lr re-warms to NLR 1e-4 over NWARM 300 steps and decays on a cosine over the whole run-4 plan, T = 24,927 steps). Its data is run/v4/R4: the raw no earlier run saw, steady-mixed with small replays, and a second pass over run 3's transcript windows at share 0.15 (tools/runs/run4-build.txt has every command). C1 stops at the plan's step B = 11044 (a segment start; lr there 5.99e-5), global step 67769.
+  - **The act round** runs beside C1 on the box's CPUs, with s2-step56725 as the policy, on the 11,298 train prompts, all five languages (the GHC harness and the tarballs are in setup's list now).
+  - **C2**, built on the box at B by `bend-ops handover tools/runs/run4.cfg`: the round's accepted and fixed episodes twice (`s2-acts`), in the plan's remainder capped at REST_STEPS 4000, from C1's lr at B down to 0.
+  - **CTL**, the control: the same capped remainder without episodes, from C1's boundary save (`from=` on its STAGES line), with C2's lr. C2 against CTL is the episodes' effect, which run 3 could not separate from its lr tail.
+  - **Success:** c2 beats ctl and s2-56725 on E5 (paired McNemar p < 0.05), the retry copy rate falls below 85%, no language regresses on E1, transcript-fp bpb ≤ 0.538. A null result is reported as a null.
+- **The data** (run/v4; `bend-corpus-v2 unused`, `steady-mix`, `raw-build`, `combine`):
+  - Unused raw kept: Stack Haskell 100,115 files (449 MB; 60,000 more were run 3's Haskell chains), Lean 651,857 files (1.8 GB: raw 427 MB, staged 932 MB, hf 438 MB).
+  - Replays: run/v2/raw Haskell 270 MB (the Stack pool gave less than the plan reckoned), Agda 150 MB, Nix 60 MB, every Bend file old and new (run/v4/collect/bend: 801 files from 19 new repositories).
+  - The mix: run/v4/R/mix.jsonl, 2.74 GB, 862,677 documents in 801 rounds; by bytes Lean 65.4%, Haskell 26.3%, Agda 5.4%, Nix 2.1%, Bend 0.9%, and every twentieth within 2 points of that (run/v4/R/mix.steady.txt).
+  - The plan: run/v4/R4, 469 shards (434 raw), 24,927 steps; training windows 60,345 transcript (35% of run/v3/T's, its first shards again) and 334,718 raw (84.7%); the code32k tokenizer. The ten raw slices hold 21,005 steps; every one is in the plan.
+  - The raw slicer had broken with the lock on 2.0.37 (every slice past the first timed out: its background `tail` held Process.run's pipes while it waited on the FIFO); dd fills the FIFO now, and bend/tests/slice.bend runs the real slicer (982e162).
+- **Configs:** tools/runs/run4.cfg (the units, the hand-over, C2 and CTL), bend/gpu/v4-box.env (the push), tools/evals/run4.cfg (the evals, its c2 and ctl tags added once their last steps are known).
+- **On the box, in order** (from the repository root here; `root@IP PORT` the box):
+  1. `BOX_ENV=bend/gpu/v4-box.env BEND=$PWD/run/gcroot-bend/bin/bend bend-ops stage box root@IP PORT` (the locked compiler: the `bend` on PATH here is not it), and beside it `bend-ops act ckpt root@IP PORT run/v3/run3/out/s2-step56725.checkpoint` (C1's TRAIN_INIT is that same file, outside out/, so the chain never prunes it).
+  2. On the box: `cd formalTransformer && ./bend-box gate`, then `PLAN=run/v4/R4/plan-fp100m-b16-windows.tsv RUN=run/v4/R4 ./bend-box time`. bend-box's first real GPU run; fp.sh is the fallback.
+  3. C1: `TRAIN_STEPS=11044 NLR=1e-4 NWARM=300 ./bend-box again /home/hhefesto/src/formalTransformer/run/v3/run3/out/s2-step56725.checkpoint run/v4/R4/plan-fp100m-b16-windows.tsv run/v4/R4 fp100m c1` (TRAIN_STEPS, not STEPS: `again` does not set it, and the trainer counts it from the checkpoint's step). Its log c1.log must show lr warming toward 1e-4 from global step 56725.
+  4. Here: `bend-ops act setup`, then `act check` (all five languages answer), then `act start ... run/v4/act/r1` (or let the hand-over's act ensure start it).
+  5. STAGES run/v4/run4.stages is `c1 traind-next 5000`; fill host, port and instance into tools/runs/run4.cfg, then `bend-ops guard tools/runs/run4.cfg install` and `bend-ops guard tools/runs/run4.cfg` (chain with LOG0=c1.log, watch at $1, hand-over). Watch the credit and `journalctl --user -u ft-credit-watch-v4` by hand for the first hour.
+  6. At B the hand-over stops the round, cuts and accepts it, builds C2 and CTL on the box and appends both lines; the chain runs c2, then ctl from out/c1-step67769.checkpoint, scores, pulls, verifies box ⊆ local and destroys.
+  7. Here: add the c2 and ctl tags to tools/evals/run4.cfg and run `bend-ops evals tools/evals/run4.cfg > run/v4/evalruns/compare.txt`.
 
 ## Run 3 (2026-10-07 to 10-13): turn-based compiler episodes; at the end it beats run 2 on E1 and E5
 

@@ -17,3 +17,16 @@ PROCS=8 CV2 unused run/v2/raw-stack/haskell.jsonl=run/v4/pools/haskell-stack.jso
 #    No two sources share an id (checked by hand with jq/comm: the new and old Bend, the
 #    Haskell replay and the kept Haskell).
 CV2 steady-mix run/v4/R/mix.jsonl run/v4/pools/haskell-stack.jsonl:all run/v4/pools/lean-raw.jsonl:all run/v4/pools/lean-staged.jsonl:all run/v4/pools/lean-hf.jsonl:all run/v4/collect/bend/bend.jsonl:all run/v3/Rsrc/bend.jsonl:all run/v3/Rsrc/agda.jsonl:150000000 run/v3/Rsrc/nix.jsonl:60000000 run/v2/raw/haskell.jsonl:270000000
+#    (19:27-21:58; run/v4/R/steady.log: 801 rounds, 862,677 documents, 2.74 GB; by bytes Lean 65.4%,
+#    Haskell 26.3%, Agda 5.4%, Nix 2.1%, Bend 0.9%; every twentieth within 2 points of these,
+#    run/v4/R/mix.steady.txt)
+
+# 3. The raw slices, 300 MB each, three at a time (21:40-22:05; run/v4/R/build-K.log).  CV2 from
+#    here on is master 982e162's (the slicer's FIFO filled by dd: at 54e2cbf every slice past the
+#    first timed out, exit 124).  Planned steps: 2293 2299 2304 2306 2317 2303 2318 2314 2304 247
+#    (the last cut to whole 2,000s of documents), 21,005 in all.
+R=run/v4/R JOBS=4 DEPLOY=run/v2/gcroot-deploy-agent/bin/deploy CV2 raw-build K      # K = 1 .. 10
+
+# 4. The plan: the raw slices with run 3's transcript windows (run/v3/T, a second pass over its
+#    first shards) at raw share 0.85, ending at 24,700 steps (21,005 / 0.85; run/v4/combine.log)
+PROCS=8 DEPLOY=run/v2/gcroot-deploy-agent/bin/deploy CV2 combine 0.85 run/v4/R4 run/v3/T run/v4/R/1 run/v4/R/2 run/v4/R/3 run/v4/R/4 run/v4/R/5 run/v4/R/6 run/v4/R/7 run/v4/R/8 run/v4/R/9 run/v4/R/10 --steps 24700
