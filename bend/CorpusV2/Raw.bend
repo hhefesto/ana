@@ -1153,10 +1153,17 @@ def rw.sl.run(+inp: String, +dst: String, +k: Nat, +size: Nat, +off: Nat) -> IO(
 # there or past it is read as Python read it, and the line that byte ends or
 # lies in starts before lo, so it is passed over either way).  The bytes come
 # through a FIFO (2026-10-15, Phase 7: the shell pipe `tail -c +LO SRC |
-# SELF raw --slice-at` this was): `tail` writes it in the background and this
-# process reads it to the slice's end, then closes it, which ends `tail`;
-# as with the pipe, tail's own status is not read.  (Not File.read_at: its
-# offset is a U32, and R/mix.jsonl is past 4 GiB.)
+# SELF raw --slice-at` this was): `dd` writes it in the background and this
+# process reads it to the slice's end, then closes it, which ends `dd`; as
+# with the pipe, its own status is not read.  (Not File.read_at: its offset
+# is a U32, and R/mix.jsonl is past 4 GiB.)  dd, not `tail -c +LO`
+# (2026-10-15, run 4's build): the background start returns only when the
+# shell's pipes close (Process.run since Bend 2.0.37), and a child that
+# opens the FIFO in its own redirect blocks there, holding them, until the
+# reader opens it, which is only after the start returns (dash keeps a copy
+# of the pipe through any redirect before exec): every slice K >= 2 timed
+# out (exit 124).  dd opens of=FIFO itself, after exec, its stdout
+# /dev/null; skip=LO-1 bytes is where `tail -c +LO` starts.
 def rw.sl.skip.if(ok: Bool, +src: String, +dst: String, +k: Nat, +size: Nat, +lo: Nat) -> IO(Unit):
   match ok:
     case False{}:
@@ -1165,7 +1172,7 @@ def rw.sl.skip.if(ok: Bool, +src: String, +dst: String, +k: Nat, +size: Nat, +lo
       do IO<Unit>:
         +tmp : String <- S.mktemp()
         o : List<&2, U32> <- S.must("mkfifo " ++ tmp ++ "/in", "mkfifo", [tmp ++ "/in"])
-        pid : String <- S.background(".", [], tmp ++ "/in", False{}, "tail", ["-c", "+" ++ Nat.show(lo), src])
+        pid : String <- S.background(".", [], "/dev/null", False{}, "dd", ["if=" ++ src, "of=" ++ tmp ++ "/in", "iflag=skip_bytes", "skip=" ++ Nat.show(Nat.sub(lo, 1n)), "bs=4M", "status=none"])
         rw.sl.run(tmp ++ "/in", dst, k, size, Nat.sub(lo, 1n))
         S.rm(tmp)
 

@@ -517,12 +517,25 @@ def chk.tests() -> List<&2, ChkTest>:
    # stage.env checks on run 3's s2-driver.out, the move's save, push and STAGES rewrite on
    # run 3's files; run 4's plan-base wait and control line; reads fixtures/drive and
    # fixtures/ops/chain.log
-   ChkTest{"drive.bend", False{}, ROks{65n}},
+   ChkTest{"drive.bend", False{}, ROks{66n}},
    # bend-corpus-v2 unused (bend/CorpusV2/Unused.bend, run 4): a line's id as J.first.at reads it,
    # hex and twelve-digit numbers in sort's order, POOL=OUT... SEEN... arguments, and the whole tool
    # (spools, `LC_ALL=C sort`, the merge; two pools in one call) against the set difference on
    # small fixtures, in one process (PROCS 1: no bend-corpus-v2 to spawn here)
-   ChkTest{"unused.bend", False{}, ROks{15n}}]
+   ChkTest{"unused.bend", False{}, ROks{15n}},
+   # the raw slicer run for real (raw-build's first step): slice 2 comes through a FIFO that dd
+   # fills; the tail it replaced held Process.run's pipes and every slice past the first timed out
+   # (the slicer's own lines first: K, the documents kept, the last)
+   ChkTest{"slice.bend", False{}, RExact{["slice 1 20 documents ", "slice 2 20 documents ", "slice 3 0 documents (the last)",
+     "slice 1 21 documents ", "slice 2 19 documents ", "slice 3 0 documents (the last)",
+     "ok a line's start: slice 1 is the lines starting before SIZE",
+     "ok a line's start: slice 2 (through the FIFO) is the lines starting in [SIZE, 2 SIZE)",
+     "ok a line's start: slices 1 and 2 are the file up to the first line starting at 2 SIZE or past it",
+     "ok a line's start: slice 3, the last, keeps whole 2,000s of lines: none of its few",
+     "ok mid-line: slice 1 is the lines starting before SIZE",
+     "ok mid-line: slice 2 (through the FIFO) is the lines starting in [SIZE, 2 SIZE)",
+     "ok mid-line: slices 1 and 2 are the file up to the first line starting at 2 SIZE or past it",
+     "ok mid-line: slice 3, the last, keeps whole 2,000s of lines: none of its few"]}}]
 
 def chk.rule(r: ChkRule, +out: List<&2, U32>) -> Bool:
   match r:
