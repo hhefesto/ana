@@ -1,0 +1,85 @@
+## User
+
+Define `fft`: the radix-2 Cooley–Tukey fast Fourier transform, X(k) = Σ x(n)·e^(−2πi·k·n/N). The input's length N is 2^k.
+
+## Context
+
+```bend
+type Complex is Data: Complex{re: F32, im: F32}
+def Complex.add(a: Complex, b: Complex) -> Complex
+def Complex.sub(a: Complex, b: Complex) -> Complex
+def Complex.mul(a: Complex, b: Complex) -> Complex
+def Complex.cis(t: F32) -> Complex
+def Complex.evens(xs: List<&2, Complex>) -> List<&2, Complex>
+def Complex.odds(xs: List<&2, Complex>) -> List<&2, Complex>
+def Complex.zip_with(~f: Complex -> Complex -> Complex, xs: List<&2, Complex>, ys: List<&2, Complex>) -> List<&2, Complex>
+def Complex.twiddle(n: Nat, zs: List<&2, Complex>) -> List<&2, Complex>
+def Nat.pow(a: Nat, b: Nat) -> Nat
+def List.append(a, -A: Kind(a), xs: List<a, A>, ys: List<a, A>) -> List<a, A>
+```
+
+## Type
+
+type
+```bend
+type Complex is Data:
+  Complex{re: F32, im: F32}
+
+def Complex.add(a: Complex, b: Complex) -> Complex:
+  match a b:
+    case Complex{ar, ai} Complex{br, bi}:
+      Complex{F32.add(ar, br), F32.add(ai, bi)}
+
+def Complex.sub(a: Complex, b: Complex) -> Complex:
+  match a b:
+    case Complex{ar, ai} Complex{br, bi}:
+      Complex{F32.sub(ar, br), F32.sub(ai, bi)}
+
+def Complex.mul(a: Complex, b: Complex) -> Complex:
+  match a b:
+    case Complex{+ar, +ai} Complex{+br, +bi}:
+      Complex{F32.sub(F32.mul(ar, br), F32.mul(ai, bi)), F32.add(F32.mul(ar, bi), F32.mul(ai, br))}
+
+def Complex.cis(+t: F32) -> Complex:
+  Complex{F32.cos(t), F32.sin(t)}
+
+def Complex.evens(xs: List<&2, Complex>) -> List<&2, Complex>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case h <> t:
+      match t:
+        case Nil{}:
+          h <> Nil{}
+        case _ <> r:
+          h <> Complex.evens(r)
+
+def Complex.odds(xs: List<&2, Complex>) -> List<&2, Complex>:
+  Complex.evens(List.tail(&2, Complex, xs))
+
+def Complex.zip_with(~f: Complex -> Complex -> Complex, xs: List<&2, Complex>, ys: List<&2, Complex>) -> List<&2, Complex>:
+  match xs ys:
+    case Nil{} _:
+      Nil{}
+    case h <> t Nil{}:
+      Nil{}
+    case x <> xt y <> yt:
+      f(x, y) <> Complex.zip_with(~f, xt, yt)
+
+def Complex.twiddle.go(zs: List<&2, Complex>, +n: F32, +j: Nat) -> List<&2, Complex>:
+  match zs:
+    case Nil{}:
+      Nil{}
+    case z <> t:
+      Complex.mul(Complex.cis(F32.div(F32.neg(F32.mul(F32.mul(2.0, F32.pi()), F32.from_nat(j))), n)), z) <> Complex.twiddle.go(t, n, 1n+j)
+
+# z(j) times e^(−2πi·j/n), for each z(j) of zs
+def Complex.twiddle(n: Nat, zs: List<&2, Complex>) -> List<&2, Complex>:
+  Complex.twiddle.go(zs, F32.from_nat(n), 0n)
+
+def fft(+k: Nat, +xs: List<&2, Complex>) -> List<&2, Complex>:
+```
+
+## Term
+
+```bend

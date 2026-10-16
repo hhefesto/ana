@@ -1,0 +1,15 @@
+let
+  fft = xs:
+    let n = builtins.length xs; in
+    if n <= 1 then xs else
+    let
+      half = n / 2;
+      at = i: builtins.elemAt xs i;
+      es = fft (builtins.genList (i: at (2 * i)) half);
+      os = fft (builtins.genList (i: at (2 * i + 1)) half);
+      ts = builtins.genList (k: mul (cis (-2.0 * pi * k / n)) (builtins.elemAt os k)) half;
+    in
+      builtins.genList (k: add (builtins.elemAt es k) (builtins.elemAt ts k)) half
+      ++ builtins.genList (k: sub (builtins.elemAt es k) (builtins.elemAt ts k)) half;
+in
+fft

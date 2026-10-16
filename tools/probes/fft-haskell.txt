@@ -1,0 +1,26 @@
+## User
+
+Define `fft`: the radix-2 Cooley–Tukey fast Fourier transform, X(k) = Σ x(n)·e^(−2πi·k·n/N). The input's length N is a power of two.
+
+## Context
+
+```haskell
+data Complex a = !a :+ !a
+cis :: Floating a => a -> Complex a
+fromIntegral :: (Integral a, Num b) => a -> b
+zipWith :: (a -> b -> c) -> [a] -> [b] -> [c]
+length :: [a] -> Int
+```
+
+## Type
+
+type
+```haskell
+import Data.Complex
+
+fft :: [Complex Double] -> [Complex Double]
+```
+
+## Term
+
+```haskell

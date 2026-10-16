@@ -1,0 +1,8 @@
+match k:
+  case 0n:
+    xs
+  case 1n+j:
+    +es = fft(j, Complex.evens(xs))
+    +os = fft(j, Complex.odds(xs))
+    +ts = Complex.twiddle(Nat.pow(2n, 1n+j), os)
+    List.append(&2, Complex, Complex.zip_with(~Complex.add, es, ts), Complex.zip_with(~Complex.sub, es, ts))

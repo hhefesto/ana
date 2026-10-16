@@ -1,0 +1,21 @@
+## User
+
+Define `quicksort`.
+
+## Context
+
+```bend
+def List.filter(xs: List<U32>, f: U32 -> Bool) -> List<U32>
+def List.append(xs: List<U32>, ys: List<U32>) -> List<U32>
+```
+
+## Type
+
+type
+```bend
+def quicksort(xs: List<U32>) -> List<U32>:
+```
+
+## Term
+
+```bend

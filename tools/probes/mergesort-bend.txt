@@ -1,0 +1,22 @@
+## User
+
+Define `mergeSort`.
+
+## Context
+
+```bend
+def List.length(xs: List<U32>) -> Nat
+def List.take(xs: List<U32>, n: Nat) -> List<U32>
+def List.drop(xs: List<U32>, n: Nat) -> List<U32>
+```
+
+## Type
+
+type
+```bend
+def mergeSort(xs: List<U32>) -> List<U32>:
+```
+
+## Term
+
+```bend

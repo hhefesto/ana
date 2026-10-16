@@ -1,0 +1,11 @@
+fun xs =>
+  match xs with
+  | [] => []
+  | [x] => [x]
+  | xs =>
+    let n := xs.length
+    let half := List.range (n / 2)
+    let es := fft (half.map fun i => xs.getD (2 * i) ⟨0, 0⟩)
+    let os := fft (half.map fun i => xs.getD (2 * i + 1) ⟨0, 0⟩)
+    let ts := List.zipWith (fun k z => Complex.cis (-2 * pi * Float.ofNat k / Float.ofNat n) * z) half os
+    List.zipWith (· + ·) es ts ++ List.zipWith (· - ·) es ts

@@ -1,0 +1,17 @@
+fft [] = []
+fft (x ∷ []) = x ∷ []
+fft xs = zipWith _⊕_ es ts ++ zipWith _⊖_ es ts
+  where
+  evens : List Complex → List Complex
+  evens (a ∷ b ∷ r) = a ∷ evens r
+  evens r = r
+  odds : List Complex → List Complex
+  odds (a ∷ r) = evens r
+  odds [] = []
+  n = length xs
+  es = fft (evens xs)
+  os = fft (odds xs)
+  tw : ℕ → List Complex → List Complex
+  tw k [] = []
+  tw k (z ∷ r) = (cis (- (2.0 * pi * fromℕ k ÷ fromℕ n)) ⊗ z) ∷ tw (ℕ.suc k) r
+  ts = tw 0 os

@@ -1,0 +1,22 @@
+## User
+
+Define `mergeSort`.
+
+## Context
+
+```haskell
+splitAt :: Int -> [a] -> ([a], [a])
+length :: [a] -> Int
+div :: Integral a => a -> a -> a
+```
+
+## Type
+
+type
+```haskell
+mergeSort :: Ord a => [a] -> [a]
+```
+
+## Term
+
+```haskell

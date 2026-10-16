@@ -1,0 +1,7 @@
+## User
+
+Define `quicksort`: sort a list of integers with quicksort.
+
+## Term
+
+```nix

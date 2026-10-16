@@ -1,0 +1,20 @@
+## User
+
+Define `quicksort`.
+
+## Context
+
+```lean
+List.filter.{u} {α : Type u} (p : α → Bool) (l : List α) : List α
+```
+
+## Type
+
+type
+```lean
+partial def quicksort : List Nat → List Nat
+```
+
+## Term
+
+```lean

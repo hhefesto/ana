@@ -1,0 +1,25 @@
+## User
+
+Define `quicksort`.
+
+## Context
+
+```agda
+filterᵇ : {A : Set} → (A → Bool) → List A → List A
+_++_ : {A : Set} → List A → List A → List A
+_<ᵇ_ : ℕ → ℕ → Bool
+```
+
+## Type
+
+type
+```agda
+open import Data.List using (List; []; _∷_; filterᵇ; _++_)
+open import Data.Nat using (ℕ; _<ᵇ_)
+{-# TERMINATING #-}
+quicksort : List ℕ → List ℕ
+```
+
+## Term
+
+```agda

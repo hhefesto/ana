@@ -1,0 +1,21 @@
+## User
+
+Define `mergeSort`.
+
+## Context
+
+```lean
+List.splitAt.{u} {α : Type u} (n : Nat) (l : List α) : List α × List α
+List.length.{u_1} {α : Type u_1} : List α → Nat
+```
+
+## Type
+
+type
+```lean
+partial def mergeSort : List Nat → List Nat
+```
+
+## Term
+
+```lean

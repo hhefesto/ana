@@ -1,0 +1,56 @@
+## User
+
+Define `fft`: the radix-2 Cooley–Tukey fast Fourier transform, X(k) = Σ x(n)·e^(−2πi·k·n/N). The input's length N is a power of two.
+
+## Context
+
+```agda
+record Complex : Set
+_+i_ : Float → Float → Complex
+_⊕_ : Complex → Complex → Complex
+_⊖_ : Complex → Complex → Complex
+_⊗_ : Complex → Complex → Complex
+cis : Float → Complex
+pi : Float
+fromℕ : ℕ → Float
+zipWith : {A B C : Set} → (A → B → C) → List A → List B → List C
+length : {A : Set} → List A → ℕ
+```
+
+## Type
+
+type
+```agda
+open import Data.Float using (Float; _+_; _-_; _*_; _÷_; -_; sin; cos; fromℕ)
+open import Data.List using (List; []; _∷_; _++_; zipWith; length)
+open import Data.Nat using (ℕ)
+
+record Complex : Set where
+  constructor _+i_
+  field
+    re : Float
+    im : Float
+open Complex
+
+_⊕_ : Complex → Complex → Complex
+a ⊕ b = (re a + re b) +i (im a + im b)
+
+_⊖_ : Complex → Complex → Complex
+a ⊖ b = (re a - re b) +i (im a - im b)
+
+_⊗_ : Complex → Complex → Complex
+a ⊗ b = (re a * re b - im a * im b) +i (re a * im b + im a * re b)
+
+cis : Float → Complex
+cis t = cos t +i sin t
+
+pi : Float
+pi = 3.141592653589793
+
+{-# TERMINATING #-}
+fft : List Complex → List Complex
+```
+
+## Term
+
+```agda

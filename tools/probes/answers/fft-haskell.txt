@@ -1,0 +1,10 @@
+fft [] = []
+fft [x] = [x]
+fft xs = zipWith (+) es ts ++ zipWith (-) es ts
+  where
+    n = length xs
+    es = fft (evens xs)
+    os = fft (evens (drop 1 xs))
+    ts = zipWith (\k z -> cis (-2 * pi * fromIntegral k / fromIntegral n) * z) [0 :: Int ..] os
+    evens (a : _ : r) = a : evens r
+    evens r = r

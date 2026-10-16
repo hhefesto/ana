@@ -1,0 +1,21 @@
+## User
+
+Define `quicksort`.
+
+## Context
+
+```haskell
+filter :: (a -> Bool) -> [a] -> [a]
+(++) :: [a] -> [a] -> [a]
+```
+
+## Type
+
+type
+```haskell
+quicksort :: Ord a => [a] -> [a]
+```
+
+## Term
+
+```haskell

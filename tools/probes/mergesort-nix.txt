@@ -1,0 +1,7 @@
+## User
+
+Define `mergeSort`: sort a list of integers with merge sort.
+
+## Term
+
+```nix
