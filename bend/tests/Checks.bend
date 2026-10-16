@@ -546,8 +546,8 @@ def chk.tests() -> List<&2, ChkTest>:
    # bend-corpus-v2 port's renames (bend/CorpusV2/PortOps.bend, 2026-10-16): declarations and the
    # header as the loader reads them, import paths through a sibling link, fresh names; the own,
    # alias and binder renames on modules written here (strings and comments untouched, an importer
-   # following its module, Base's own dotted name kept); failures read back; an error's line
-   ChkTest{"portops.bend", False{}, ROks{20n}},
+   # following its module, Base's own dotted name kept); the seg join; failures read back; an error's line
+   ChkTest{"portops.bend", False{}, ROks{22n}},
    # the raw slicer run for real (raw-build's first step): slice 2 comes through a FIFO that dd
    # fills; the tail it replaced held Process.run's pipes and every slice past the first timed out
    # (the slicer's own lines first: K, the documents kept, the last)

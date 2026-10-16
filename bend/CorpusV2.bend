@@ -66,7 +66,7 @@ import ./CorpusV2/Port.bend as Pt
 #                                   one a declaration, at most N a file under PREFIX; OUT.dropped, OUT.stats
 #                                   (CorpusV2/Decl.bend)
 #   port CFG [STEP...]              a collection's loader rejects renamed so the locked compiler loads
-#                                   them (PortOps.bend: own, alias, binder), kept on a pass or the
+#                                   them (PortOps.bend: own, alias, binder, seg), kept on a pass or the
 #                                   author's own failures, repair transcripts, an inbox for the rest:
 #                                   plan check keep out | all   (CorpusV2/Port.bend)
 #

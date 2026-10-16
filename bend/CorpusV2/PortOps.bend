@@ -25,11 +25,17 @@ import ./MutOps.bend as M
 #            Base's and stays).
 #   binder   a bare name used as a binder (never followed by `{`) that the
 #            locked Base declares as a constructor and the older Base
-#            (BASE_OLD: upstream v2.0.37's) does not: `a braced constructor
+#            (the config's base-old: upstream v2.0.37's) does not: `a braced constructor
 #            pattern (E1 is a constructor: write E1{}, or rename the
 #            binder)`.  Every bare token of the name in the module is
 #            renamed (a binder or a use of one: the name is no constructor
 #            the module could mean, it was none when the code was written).
+#   seg      a name whose last word is digits (`Date.leap.100`, a name before
+#            upstream's 2026-09-24 rule that a name is words joined by dots):
+#            `a name (words joined by dots, got 'Date.leap.100')`.  Joined as
+#            one name, the digits after `_` (`Date.leap._100`), in every
+#            file's body alike (its declaration and uses, `A.Date.leap.100` in
+#            an importer), before the rest is read.
 #
 # A new name is the old one with `_` appended until it is fresh: no name
 # token of the module and no name Base declares.  An alias the same, also
@@ -547,42 +553,47 @@ def pto.apply(+text: List<&2, U32>, +bs: List<&2, PtoRn>, +as: List<&2, PtoRn>) 
 # tokens and those of them a `{` follows.
 
 type PtoMod is Data:
-  PtoMod{path: List<&2, U32>, text: List<&2, U32>, hn: Nat, imps: List<&2, PtoImp>, decl: PtoDecl, dset: Set(), ns: List<&2, List<&2, U32>>, braced: List<&2, List<&2, U32>>}
+  PtoMod{path: List<&2, U32>, text: List<&2, U32>, hn: Nat, imps: List<&2, PtoImp>, decl: PtoDecl, dset: Set(), ns: List<&2, List<&2, U32>>, braced: List<&2, List<&2, U32>>, segs: List<&2, PtoRn>}
 
 def pto.mod.path(+m: PtoMod) -> List<&2, U32>:
   match m:
-    case PtoMod{p, t, h, i, d, s, n, b}:
+    case PtoMod{p, t, h, i, d, s, n, b, g}:
       p
 
 def pto.mod.text(+m: PtoMod) -> List<&2, U32>:
   match m:
-    case PtoMod{p, t, h, i, d, s, n, b}:
+    case PtoMod{p, t, h, i, d, s, n, b, g}:
       t
 
 def pto.mod.imps(+m: PtoMod) -> List<&2, PtoImp>:
   match m:
-    case PtoMod{p, t, h, i, d, s, n, b}:
+    case PtoMod{p, t, h, i, d, s, n, b, g}:
       i
 
 def pto.mod.decl(+m: PtoMod) -> PtoDecl:
   match m:
-    case PtoMod{p, t, h, i, d, s, n, b}:
+    case PtoMod{p, t, h, i, d, s, n, b, g}:
       d
 
 def pto.mod.dset(+m: PtoMod) -> Set():
   match m:
-    case PtoMod{p, t, h, i, d, s, n, b}:
+    case PtoMod{p, t, h, i, d, s, n, b, g}:
       s
 
 def pto.mod.ns(+m: PtoMod) -> List<&2, List<&2, U32>>:
   match m:
-    case PtoMod{p, t, h, i, d, s, n, b}:
+    case PtoMod{p, t, h, i, d, s, n, b, g}:
       n
 
 def pto.mod.braced(+m: PtoMod) -> List<&2, List<&2, U32>>:
   match m:
-    case PtoMod{p, t, h, i, d, s, n, b}:
+    case PtoMod{p, t, h, i, d, s, n, b, g}:
       b
+
+def pto.mod.segs(+m: PtoMod) -> List<&2, PtoRn>:
+  match m:
+    case PtoMod{p, t, h, i, d, s, n, b, g}:
+      g
 
 def pto.dedup.go(xs: List<&2, List<&2, U32>>, +seen: Set()) -> List<&2, List<&2, U32>>:
   match xs:
@@ -625,12 +636,64 @@ def pto.imps.res(imps: List<&2, PtoImp>, +ls: List<&2, PtoLink>, +f: List<&2, U3
     case PtoImp{+p, a} <> more:
       PtoImp{pto.resolve(ls, f, p), a} <> pto.imps.res(more, ls, f)
 
-def pto.mod(+ls: List<&2, PtoLink>, +path: List<&2, U32>, +text: List<&2, U32>) -> PtoMod:
+# seg: a name a `.` and digits follow, nothing between them (`Date.leap.100`,
+# a name before Bend 2.0.27's "a name is words joined by dots"), one name
+# whose last word is the digits after `_` (`Date.leap._100`), in a module's
+# body and in its importers' alike (every file's body is read so)
+def pto.seg.at(+x: M.MtoTk, +y: M.MtoTk, +z: M.MtoTk) -> Bool:
+  +zt = M.mto.tk.t(z)
+  Bool.and(Bool.and(Nat.is_eq(M.mto.tk.k(x), 1n), Bool.and(Nat.is_eq(M.mto.tk.k(y), 5n), S.eq(M.mto.tk.t(y), [46]))),
+    Bool.and(Nat.is_eq(M.mto.tk.k(z), 2n), Bool.and(Bool.not(List.is_empty(&2, U32, zt)), M.mto.all.digits(zt))))
+
+def pto.seg.hit(+ts: List<&2, M.MtoTk>) -> Bool:
+  match ts:
+    case +x <> +y <> +z <> more:
+      pto.seg.at(x, y, z)
+    case _:
+      False{}
+
+def pto.seg.new(+x: M.MtoTk, +z: M.MtoTk) -> List<&2, U32>:
+  L.v2.concat([M.mto.tk.t(x), [46, 95], M.mto.tk.t(z)])
+
+def pto.seg.old(+x: M.MtoTk, +z: M.MtoTk) -> List<&2, U32>:
+  L.v2.concat([M.mto.tk.t(x), [46], M.mto.tk.t(z)])
+
+# the tokens rendered with each seg joined
+def pto.seg.text(fuel: Nat, ts: List<&2, M.MtoTk>, hit: Bool) -> List<&2, U32>:
+  match fuel ts hit:
+    case 1n+f +x <> y <> +z <> +more True{}:
+      S.append(pto.seg.new(x, z), pto.seg.text(f, more, pto.seg.hit(more)))
+    case 1n+f +x <> +more False{}:
+      S.append(M.mto.tk.t(x), pto.seg.text(f, more, pto.seg.hit(more)))
+    case _ _ _:
+      Nil{}
+
+# each seg's rename (old text, new name), each once
+def pto.seg.pairs(fuel: Nat, ts: List<&2, M.MtoTk>, hit: Bool, +seen: Set()) -> List<&2, PtoRn>:
+  match fuel ts hit:
+    case 1n+f +x <> y <> +z <> +more True{}:
+      +o = pto.seg.old(x, z)
+      +new = Bool.not(pto.in(seen, o))
+      +rest = pto.seg.pairs(f, more, pto.seg.hit(more), Bool.pick(Set(), new, Set.add(seen, pto.key(o)), seen))
+      Bool.pick(List<&2, PtoRn>, new, PtoRn{o, pto.seg.new(x, z)} <> rest, rest)
+    case 1n+f x <> +more False{}:
+      pto.seg.pairs(f, more, pto.seg.hit(more), seen)
+    case _ _ _:
+      Nil{}
+
+def pto.mod.of(+ls: List<&2, PtoLink>, +path: List<&2, U32>, +text: List<&2, U32>, +segs: List<&2, PtoRn>) -> PtoMod:
   +h = pto.header(text)
   +d = pto.decls(text)
   +body = List.drop(&2, U32, text, pto.hd.n(h))
   PtoMod{path, text, pto.hd.n(h), pto.imps.res(pto.hd.imps(h), ls, path), d, pto.set(List.append(&2, List<&2, U32>, pto.decl.tlds(d), pto.decl.ctrs(d))),
-    pto.dedup(pto.names(body)), pto.dedup(pto.braced.go(pto.sig(body), pto.none()))}
+    pto.dedup(pto.names(body)), pto.dedup(pto.braced.go(pto.sig(body), pto.none())), segs}
+
+# a module as read: its body's segs joined first, then the rest read from that text
+def pto.mod(+ls: List<&2, PtoLink>, +path: List<&2, U32>, +text: List<&2, U32>) -> PtoMod:
+  +n = pto.hd.n(pto.header(text))
+  +ts = M.mto.lex(List.drop(&2, U32, text, n))
+  +fuel = Nat.add(1n, List.length(&2, M.MtoTk, ts))
+  pto.mod.of(ls, path, S.append(List.take(&2, U32, text, n), pto.seg.text(fuel, ts, pto.seg.hit(ts))), pto.seg.pairs(fuel, ts, pto.seg.hit(ts), Set.new()))
 
 # Base --------------------------------------------------------------------------------------------
 #
@@ -832,42 +895,47 @@ def pto.imps.q(imps: List<&2, PtoImp>, +b: PtoBase, +im: Map<&2, PtoInfo>, +m: P
 # aliases, and how many of each kind.
 
 type PtoPlan is Data:
-  PtoPlan{path: List<&2, U32>, text: List<&2, U32>, body: List<&2, PtoRn>, alias: List<&2, PtoRn>, own: Nat, binder: Nat, qual: Nat}
+  PtoPlan{path: List<&2, U32>, text: List<&2, U32>, body: List<&2, PtoRn>, alias: List<&2, PtoRn>, own: Nat, binder: Nat, qual: Nat, seg: Nat}
 
 def pto.plan.path(+p: PtoPlan) -> List<&2, U32>:
   match p:
-    case PtoPlan{a, t, b, l, o, d, q}:
+    case PtoPlan{a, t, b, l, o, d, q, g}:
       a
 
 def pto.plan.text(+p: PtoPlan) -> List<&2, U32>:
   match p:
-    case PtoPlan{a, t, b, l, o, d, q}:
+    case PtoPlan{a, t, b, l, o, d, q, g}:
       t
 
 def pto.plan.body(+p: PtoPlan) -> List<&2, PtoRn>:
   match p:
-    case PtoPlan{a, t, b, l, o, d, q}:
+    case PtoPlan{a, t, b, l, o, d, q, g}:
       b
 
 def pto.plan.alias(+p: PtoPlan) -> List<&2, PtoRn>:
   match p:
-    case PtoPlan{a, t, b, l, o, d, q}:
+    case PtoPlan{a, t, b, l, o, d, q, g}:
       l
 
 def pto.plan.own(+p: PtoPlan) -> Nat:
   match p:
-    case PtoPlan{a, t, b, l, o, d, q}:
+    case PtoPlan{a, t, b, l, o, d, q, g}:
       o
 
 def pto.plan.binder(+p: PtoPlan) -> Nat:
   match p:
-    case PtoPlan{a, t, b, l, o, d, q}:
+    case PtoPlan{a, t, b, l, o, d, q, g}:
       d
 
 def pto.plan.qual(+p: PtoPlan) -> Nat:
   match p:
-    case PtoPlan{a, t, b, l, o, d, q}:
+    case PtoPlan{a, t, b, l, o, d, q, g}:
       q
+
+def pto.plan.seg(+p: PtoPlan) -> Nat:
+  match p:
+    case PtoPlan{a, t, b, l, o, d, q, g}:
+      g
 
 # all its renames, the aliases' too (to read a checker's output back)
 def pto.plan.all(+p: PtoPlan) -> List<&2, PtoRn>:
@@ -882,8 +950,8 @@ def pto.plan(+b: PtoBase, +im: Map<&2, PtoInfo>, +m: PtoMod) -> PtoPlan:
   +used = pto.set.go(pto.aliases(pto.mod.imps(m)), pto.used(b, m))
   +q = pto.imps.q(pto.mod.imps(m), b, im, m, used)
   +body = List.append(&2, PtoRn, own, List.append(&2, PtoRn, bs, pto.q.body(q)))
-  PtoPlan{pto.mod.path(m), pto.apply(pto.mod.text(m), body, pto.q.alias(q)), body, pto.q.alias(q),
-    List.length(&2, PtoRn, own), List.length(&2, PtoRn, bs), List.length(&2, PtoRn, pto.q.body(q))}
+  PtoPlan{pto.mod.path(m), pto.apply(pto.mod.text(m), body, pto.q.alias(q)), List.append(&2, PtoRn, body, pto.mod.segs(m)), pto.q.alias(q),
+    List.length(&2, PtoRn, own), List.length(&2, PtoRn, bs), List.length(&2, PtoRn, pto.q.body(q)), List.length(&2, PtoRn, pto.mod.segs(m))}
 
 def pto.plans.go(ms: List<&2, PtoMod>, +b: PtoBase, +im: Map<&2, PtoInfo>) -> List<&2, PtoPlan>:
   match ms:

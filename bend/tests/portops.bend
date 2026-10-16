@@ -15,7 +15,8 @@ import ../CorpusV2/PortOps.bend as P
 # with the names its module declares and not the Base name it does not; a
 # binder named like a constructor only the locked Base has is renamed, one
 # the older Base had is not; a module with nothing to rename is its text;
-# a checker's failures read back through the renames; whether an error
+# a checker's failures read back through the renames; a name with a
+# digits word joined (seg), in its module and its importer; whether an error
 # points into a text.  Each check prints `ok NAME` or `FAIL NAME`; any FAIL
 # exits 1.  Run from bend/tests.
 
@@ -89,6 +90,18 @@ def po.bind.want() -> String:
 def po.plain() -> String:
   "import Base\nimport ./lib.bend as L\n\ndef h(i: L.Input) -> String:\n  L.show(i)\n"
 
+def po.date() -> String:
+  "import Base\n\ndef Date.leap.100(+y: U32) -> Bool:\n  U32.is_eq(U32.mod(y, 100), 0)\n\ndef half() -> F32:\n  1.5\n\ndef f(y: U32) -> Bool:\n  Date.leap.100(y)\n"
+
+def po.date.want() -> String:
+  "import Base\n\ndef Date.leap._100(+y: U32) -> Bool:\n  U32.is_eq(U32.mod(y, 100), 0)\n\ndef half() -> F32:\n  1.5\n\ndef f(y: U32) -> Bool:\n  Date.leap._100(y)\n"
+
+def po.cal() -> String:
+  "import Base\nimport ./date.bend as D\n\ndef g(y: U32) -> Bool:\n  D.Date.leap.100(y)\n"
+
+def po.cal.want() -> String:
+  "import Base\nimport ./date.bend as D\n\ndef g(y: U32) -> Bool:\n  D.Date.leap._100(y)\n"
+
 def po.links() -> List<&2, P.PtoLink>:
   [P.PtoLink{S.b("Link"), S.b("own__link")}]
 
@@ -97,7 +110,9 @@ def po.mods() -> List<&2, P.PtoMod>:
    P.pto.mod(po.links(), S.b("r__x/net/tcp.bend"), S.b(po.tcp())),
    P.pto.mod(po.links(), S.b("r__x/src/main.bend"), S.b(po.main())),
    P.pto.mod(po.links(), S.b("r__x/src/bind.bend"), S.b(po.bind())),
-   P.pto.mod(po.links(), S.b("r__x/src/plain.bend"), S.b(po.plain()))]
+   P.pto.mod(po.links(), S.b("r__x/src/plain.bend"), S.b(po.plain())),
+   P.pto.mod(po.links(), S.b("r__x/src/date.bend"), S.b(po.date())),
+   P.pto.mod(po.links(), S.b("r__x/src/cal.bend"), S.b(po.cal()))]
 
 def po.b() -> P.PtoBase:
   P.pto.base.of(S.b(po.base()), S.b(po.old()))
@@ -109,7 +124,7 @@ def po.nth(ps: List<&2, P.PtoPlan>, n: Nat) -> P.PtoPlan:
     case p <> t 1n+k:
       po.nth(t, k)
     case Nil{} _:
-      P.PtoPlan{Nil{}, Nil{}, Nil{}, Nil{}, 0n, 0n, 0n}
+      P.PtoPlan{Nil{}, Nil{}, Nil{}, Nil{}, 0n, 0n, 0n, 0n}
 
 def po.rn.is(rs: List<&2, P.PtoRn>, ws: List<&2, String>) -> Bool:
   match rs ws:
@@ -160,6 +175,8 @@ def po.plan.checks() -> List<&2, PoCk>:
   +main = po.nth(ps, 2n)
   +bind = po.nth(ps, 3n)
   +plain = po.nth(ps, 4n)
+  +date = po.nth(ps, 5n)
+  +cal = po.nth(ps, 6n)
   [PoCk{"own: a Base type and a Base constructor renamed in the module, fresh against its own names (Text_ is a def: Text__)", Bool.and(S.eq(P.pto.plan.text(lib), S.b(po.lib.want())),
      Bool.and(po.rn.is(P.pto.plan.body(lib), ["Pair", "Pair_", "Text", "Text__"]), Nat.is_eq(P.pto.plan.own(lib), 2n)))},
    PoCk{"own: a module without a clash is its text", Bool.and(S.eq(P.pto.plan.text(tcp), S.b(po.tcp())), Bool.not(P.pto.plan.changed(tcp)))},
@@ -167,7 +184,9 @@ def po.plan.checks() -> List<&2, PoCk>:
    PoCk{"importer: the renames it made", Bool.and(po.rn.is(P.pto.plan.alias(main), ["TCP", "TCP_"]), Nat.is_eq(P.pto.plan.qual(main), 3n))},
    PoCk{"binder: E1 (a constructor only the locked Base has) renamed; Ready (the older Base had it) and EK (braced) kept", Bool.and(S.eq(P.pto.plan.text(bind), S.b(po.bind.want())), Nat.is_eq(P.pto.plan.binder(bind), 1n))},
    PoCk{"importer: a module whose imports renamed nothing it uses is its text", Bool.and(S.eq(P.pto.plan.text(plain), S.b(po.plain())), Bool.not(P.pto.plan.changed(plain)))},
-   PoCk{"rename: no pairs is the text byte for byte", S.eq(P.pto.rename(S.b(po.main()), Nil{}), S.b(po.main()))}]
+   PoCk{"rename: no pairs is the text byte for byte", S.eq(P.pto.rename(S.b(po.main()), Nil{}), S.b(po.main()))},
+   PoCk{"seg: a name with a digits word (Date.leap.100) declared and used, joined as Date.leap._100; a float kept", Bool.and(S.eq(P.pto.plan.text(date), S.b(po.date.want())), Nat.is_eq(P.pto.plan.seg(date), 1n))},
+   PoCk{"seg: its importer's D.Date.leap.100 joined alike", Bool.and(Bool.and(S.eq(P.pto.plan.text(cal), S.b(po.cal.want())), Nat.is_eq(P.pto.plan.seg(cal), 1n)), P.pto.plan.changed(cal))}]
 
 def po.out() -> String:
   "SOME PROOFS FAIL\nError:\n- expected : U32\n- observed : Text__\nLocation: show\n12 |   match i:\n13>|     case Text__{value}: value\n   |          ^^^^\n"

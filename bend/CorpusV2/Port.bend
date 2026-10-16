@@ -15,7 +15,7 @@ import ./PortOps.bend as P
 # definitions the author's compiler fails), with a repair transcript each
 # (2026-10-16).
 #
-#   bend-corpus-v2 port CFG [STEP...]      STEP: plan check keep out, or all (the default)
+#   bend-corpus-v2 port CFG [STEP...]      STEP: plan check refs keep out; all (the default) is plan check keep out
 #
 # Run from the repository root.  The config (collect's grammar: a directive a
 # line, `#` starts a comment):
@@ -48,14 +48,18 @@ import ./PortOps.bend as P
 #          (sibling links read through; a hub import is the loader's), PortOps'
 #          renames on all of them, each written to OUT/tree at its path (the
 #          links too): OUT/stage/plan.tsv (`path TAB changed TAB own TAB binder
-#          TAB qualified TAB alias`), OUT/stage/inv/REPO.tsv (`new TAB old`, every
+#          TAB qualified TAB alias TAB seg`), OUT/stage/inv/REPO.tsv (`new TAB old`, every
 #          rename of the repository's files).
 #   check  the loader on every candidate in OUT/tree (OUT/stage/check/K.port, the
 #          check `STATUS 0x1F OUTPUT`; OUT/stage/check.tsv `path TAB class TAB
 #          message`); the loader on the original (in src) of every changed one
 #          that passes (K.orig: the error a transcript shows); each ref in turn on
 #          the original of every one it fails a definition of (K.ref, the first
-#          ref that loads it; OUT/stage/ref.tsv `path TAB ref TAB class`).
+#          ref that loads it; OUT/stage/ref.tsv `path TAB i TAB class`, a row each
+#          attempt, i the ref's place in the config).
+#   refs   check's ref checks alone, each ref on the checked ports' originals that
+#          no ref loaded and ref.tsv does not say it tried (refs added to the
+#          config later run on what the earlier ones left).
 #   keep   pass, or checked with the failures (PortOps' pto.fails: its Error and
 #          Location lines, the port's read back through the renames) equal to
 #          the original's under the first ref that loads it: OUT/stage/keep.tsv
@@ -303,7 +307,7 @@ def pt.closure(+src: String, +ls: List<&2, P.PtoLink>, +ps: List<&2, List<&2, U3
 # a plan's line, and its renames as `new TAB old` lines
 def pt.plan.line(+p: P.PtoPlan) -> List<&2, U32>:
   L.v2.concat([P.pto.plan.path(p), S.b("\t" ++ Nat.show(pt.b2n(P.pto.plan.changed(p))) ++ "\t" ++ Nat.show(P.pto.plan.own(p)) ++ "\t" ++ Nat.show(P.pto.plan.binder(p))
-    ++ "\t" ++ Nat.show(P.pto.plan.qual(p)) ++ "\t" ++ Nat.show(List.length(&2, P.PtoRn, P.pto.plan.alias(p))) ++ "\n")])
+    ++ "\t" ++ Nat.show(P.pto.plan.qual(p)) ++ "\t" ++ Nat.show(List.length(&2, P.PtoRn, P.pto.plan.alias(p))) ++ "\t" ++ Nat.show(P.pto.plan.seg(p)) ++ "\n")])
 
 def pt.inv.lines(rs: List<&2, P.PtoRn>) -> List<&2, U32>:
   match rs:
@@ -538,19 +542,54 @@ def pt.keep.loaded(rs: List<&2, C.ColRes>) -> List<&2, C.ColRes>:
       +cls = pt.class(r)
       Bool.pick(List<&2, C.ColRes>, Bool.or(String.eq(cls, "pass"), String.eq(cls, "checked")), r <> rest, rest)
 
-# each ref in turn on the originals no earlier ref loaded
+# ref.tsv holds a row an attempt (`path TAB i TAB class`, i the ref's place in
+# the config): an original is loaded when a row of it says pass or checked
+def pt.row.loaded(+l: List<&2, U32>) -> Bool:
+  +cls = pt.field(S.split(l, 9), 2n)
+  Bool.or(S.eq(cls, S.b("pass")), S.eq(cls, S.b("checked")))
+
+def pt.ref.loaded(ls: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> more:
+      +rest = pt.ref.loaded(more)
+      Bool.pick(List<&2, List<&2, U32>>, pt.row.loaded(l), L.v2.before(l, 9) <> rest, rest)
+
+def pt.ref.tried(ls: List<&2, List<&2, U32>>, +i: Nat) -> List<&2, List<&2, U32>>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> more:
+      +rest = pt.ref.tried(more, i)
+      Bool.pick(List<&2, List<&2, U32>>, S.eq(pt.field(S.split(l, 9), 1n), S.b(Nat.show(i))), L.v2.before(l, 9) <> rest, rest)
+
+# the indices of ks whose original no ref loaded yet and ref i has not tried
+def pt.ks.todo(ks: List<&2, Nat>, +ps: List<&2, List<&2, U32>>, +done: Set(), +tried: Set()) -> List<&2, Nat>:
+  match ks:
+    case Nil{}:
+      Nil{}
+    case +k <> more:
+      +p = M.mto.nth(ps, k)
+      +rest = pt.ks.todo(more, ps, done, tried)
+      Bool.pick(List<&2, Nat>, Bool.or(P.pto.in(done, p), P.pto.in(tried, p)), rest, k <> rest)
+
+# each ref in turn on the checked ports' originals no earlier ref loaded
+# (resumable: what ref.tsv says was tried is not tried again)
 def pt.refs(refs: List<&2, List<&2, U32>>, +c: PtCx, +ps: List<&2, List<&2, U32>>, +ks: List<&2, Nat>, +i: Nat) -> IO(Unit):
   match refs:
     case Nil{}:
       IO.pure(Unit, Unit{})
     case +r <> more:
       do IO<Unit>:
-        +rs : List<&2, C.ColRes> <- C.col.pool("check: ref " ++ Nat.show(i) ++ " on the originals", pt.cx.procs(c), pt.jobs(ps, ks, 0n, S.str(r), pt.secs(c), pt.cx.src(c)))
+        +rl : List<&2, List<&2, U32>> <- C.col.read.lines(pt.st(c, "ref.tsv"))
+        +todo : List<&2, Nat> = pt.ks.todo(ks, ps, P.pto.set(pt.ref.loaded(rl)), P.pto.set(pt.ref.tried(rl, i)))
+        +rs : List<&2, C.ColRes> <- C.col.pool("check: ref " ++ Nat.show(i) ++ " on the originals", pt.cx.procs(c), pt.jobs(ps, todo, 0n, S.str(r), pt.secs(c), pt.cx.src(c)))
         +got : List<&2, C.ColRes> = pt.keep.loaded(rs)
         pt.save(got, pt.st(c, "check"), ".ref")
-        S.add(pt.st(c, "ref.tsv"), pt.ref.rows(got, ps, i))
-        pt.log("check: ref " ++ Nat.show(i) ++ " (" ++ S.str(r) ++ ") loads " ++ Nat.show(List.length(&2, C.ColRes, got)) ++ " of " ++ Nat.show(List.length(&2, Nat, ks)) ++ " originals")
-        pt.refs(more, c, ps, pt.ks.loaded(rs, False{}), 1n+i)
+        S.add(pt.st(c, "ref.tsv"), pt.ref.rows(rs, ps, i))
+        pt.log("check: ref " ++ Nat.show(i) ++ " (" ++ S.str(r) ++ ") loads " ++ Nat.show(List.length(&2, C.ColRes, got)) ++ " of " ++ Nat.show(List.length(&2, Nat, todo)) ++ " originals")
+        pt.refs(more, c, ps, ks, 1n+i)
 
 def pt.count(rs: List<&2, C.ColRes>, +cls: String) -> Nat:
   List.length(&2, Nat, pt.ks.class(rs, cls))
@@ -575,6 +614,22 @@ def pt.check(+c: PtCx) -> IO(Unit):
     pt.save(ro, dir, ".orig")
     pt.log("check: the loader on " ++ Nat.show(List.length(&2, Nat, os)) ++ " originals of changed files that pass")
     pt.refs(C.col.cf.all(pt.cx.cfg(c), "ref"), c, ps, pt.ks.class(rs, "checked"), 0n)
+
+# the indices of check.tsv's rows of class cls
+def pt.ks.rows(ls: List<&2, List<&2, U32>>, +cls: List<&2, U32>, +k: Nat) -> List<&2, Nat>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> more:
+      +rest = pt.ks.rows(more, cls, 1n+k)
+      Bool.pick(List<&2, Nat>, S.eq(pt.field(S.split(l, 9), 1n), cls), k <> rest, rest)
+
+# refs: the ref checks alone (check's last part), the refs ref.tsv has not tried
+def pt.refs.step(+c: PtCx) -> IO(Unit):
+  do IO<Unit>:
+    +ps : List<&2, List<&2, U32>> <- C.col.read.lines(pt.st(c, "cands.tsv"))
+    +cl : List<&2, List<&2, U32>> <- C.col.read.lines(pt.st(c, "check.tsv"))
+    pt.refs(C.col.cf.all(pt.cx.cfg(c), "ref"), c, ps, pt.ks.rows(cl, S.b("checked"), 0n), 0n)
 
 # Keep ------------------------------------------------------------------------------------------------
 
@@ -644,7 +699,7 @@ def pt.keep(+c: PtCx) -> IO(Unit):
   do IO<Unit>:
     +ps : List<&2, List<&2, U32>> <- C.col.read.lines(pt.st(c, "cands.tsv"))
     +rl : List<&2, List<&2, U32>> <- C.col.read.lines(pt.st(c, "ref.tsv"))
-    +out : List<&2, U32> <- pt.keep.go(ps, c, P.pto.set(pt.firsts(rl)), 0n, Nil{})
+    +out : List<&2, U32> <- pt.keep.go(ps, c, P.pto.set(pt.ref.loaded(rl)), 0n, Nil{})
     S.write(pt.st(c, "keep.tsv"), out)
     pt.log("keep: " ++ Nat.show(pt.kept.n(S.split.lines(out))) ++ " of " ++ Nat.show(List.length(&2, List<&2, U32>, ps)) ++ " ported files kept (stage/keep.tsv)")
 
@@ -1023,8 +1078,8 @@ def pt.usage() -> IO(Unit):
   IO.die(Unit, 2, "usage: bend-corpus-v2 port CFG [STEP...]   (STEP: plan check keep out all; see bend/CorpusV2/Port.bend)")
 
 def pt.step(+s: String, +c: PtCx) -> IO(Unit):
-  Bool.pick(IO(Unit), String.eq(s, "plan"), pt.plan(c), Bool.pick(IO(Unit), String.eq(s, "check"), pt.check(c),
-    Bool.pick(IO(Unit), String.eq(s, "keep"), pt.keep(c), Bool.pick(IO(Unit), String.eq(s, "out"), pt.out(c), pt.usage()))))
+  Bool.pick(IO(Unit), String.eq(s, "plan"), pt.plan(c), Bool.pick(IO(Unit), String.eq(s, "check"), pt.check(c), Bool.pick(IO(Unit), String.eq(s, "refs"), pt.refs.step(c),
+    Bool.pick(IO(Unit), String.eq(s, "keep"), pt.keep(c), Bool.pick(IO(Unit), String.eq(s, "out"), pt.out(c), pt.usage())))))
 
 def pt.steps(xs: List<String>, +c: PtCx) -> IO(Unit):
   match xs:
