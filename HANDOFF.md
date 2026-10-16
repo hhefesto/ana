@@ -133,6 +133,11 @@ bend-ops guard tools/runs/run4.cfg              # starts chain, watch and handov
 ## ▶ CONTINUE HERE (2026-10-16, 07:00 UTC-6): run 4's C2 trains on vast 56197173 (from 06:54), then CTL; the units drive it (section "Run 4" below)
 
 - **Run 4 is training** on vast 56197173 (section "Run 4"). C1 ran 22:16 to 06:13. The hand-over built C2 and CTL after a by-hand fix (the duplicate ids), and C2 started 06:54: about 09:45 its end, then CTL about 2.5 h, then the chain scores, pulls and destroys. The chain and the watch are units; the hand-over is done. Run 3's box was destroyed on 2026-10-13, and its 15 checkpoints are local in run/v3/run3/out.
+- **Bend for run 5, by Codex** (from 2026-10-16 08:09): run/v5/bend-gen (ignored, like all of run/).
+  - It began from the user's GPT zip, textbook-gpt/: 54 files, none of which checked under 2.0.37. Codex (gpt-6-astra) repairs them, then writes new Bend 2 code into src/TOPIC/NAME.bend.
+  - AGENTS.md there is its brief. Every file must pass `--check-only` with the locked compiler, and `main`'s output must match NAME.bend.out, an answer worked out independently. PROGRESS.md is its state.
+  - drive.sh runs round after round of `codex exec` (unit codex-bend-gen, MemoryMax 16G, CPUWeight 20, ROUNDS 60). Each round writes round-N.log and round-N.txt, and rounds.log has the totals. `touch STOP` ends it after the current round.
+  - For run 5: take src/ into the raw Bend pool (vault check first).
 - **The tools:** every step of a run is a Bend command (the section above). The bend2 fork is on upstream d2aeefc1: hhefesto/bend2 ft-kernels 977a2d98, without IO.time (the wall clock is our own effect, bend/Clock.bend); the old heads are tagged ft-kernels-2.0.37 and ft-kernels-2.0.35. The gcroots the box and the units use (run/gcroot-bend-ops, run/v2/gcroot-deploy-agent, run/agent/gcroot-bend-episode, run/gcroot-bend) are built from master 982e162.
 - **New raw Bend for run 4:** run/v4/collect/bend (in run 4's mix).
   - bend.jsonl holds 801 files (6.9 MB); vault/bend.jsonl holds 33.
