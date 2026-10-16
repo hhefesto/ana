@@ -285,8 +285,8 @@ def col.self() -> IO(String):
 #
 # A command runs in its directory with its environment and limit; its output is
 # answered (out "", errors merged) or its standard output written to the file out
-# (its errors answered).  A job's result keeps its status and, by mode, nothing (0)
-# or the loader's verdict (1).
+# (its errors answered).  A job's result keeps its status and, by mode, nothing (0),
+# the loader's verdict (1) or the whole output (2: bend-corpus-v2 port's checks).
 
 type ColCmd is Data:
   ColCmd{dir: String, env: List<&2, String>, secs: U32, prog: String, args: List<&2, String>, out: String}
@@ -392,6 +392,8 @@ def col.post(mode: Nat, +st: U32, +text: List<&2, U32>) -> List<&2, U32>:
   match mode:
     case 1n:
       col.verdict(st, text)
+    case 2n:
+      text
     case _:
       Nil{}
 

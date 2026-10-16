@@ -21,6 +21,7 @@ import ./CorpusV2/AgentAct.bend as Aa
 import ./CorpusV2/Unused.bend as Un
 import ./CorpusV2/Mutate.bend as Mu
 import ./CorpusV2/Decl.bend as Dc
+import ./CorpusV2/Port.bend as Pt
 
 # bend-corpus-v2: corpus v2's tools (docs/CORPUS-V2.md), one subcommand each,
 # ported from the Python they replaced, each byte-identical to it on the
@@ -64,6 +65,10 @@ import ./CorpusV2/Decl.bend as Dc
 #                                   source files by id and content key; and run/v2/holdout's ids and keys),
 #                                   one a declaration, at most N a file under PREFIX; OUT.dropped, OUT.stats
 #                                   (CorpusV2/Decl.bend)
+#   port CFG [STEP...]              a collection's loader rejects renamed so the locked compiler loads
+#                                   them (PortOps.bend: own, alias, binder), kept on a pass or the
+#                                   author's own failures, repair transcripts, an inbox for the rest:
+#                                   plan check keep out | all   (CorpusV2/Port.bend)
 #
 # The run recipes (2026-10-15, the plan "all logic in Bend", Phase 4: the
 # tools/corpus-v2 scripts they replace in brackets):
@@ -271,6 +276,8 @@ def c2.args(xs: List<String>) -> IO(Unit):
       Mu.mtt.main(more)
     case "mutate-part" <> more:
       Mu.mtt.part.main(more)
+    case "port" <> more:
+      Pt.pt.main(more)
     case "decl-new" <> more:
       Dc.dcl.main(more)
     case +c <> more:
