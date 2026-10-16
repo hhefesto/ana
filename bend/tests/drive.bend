@@ -262,7 +262,10 @@ def drv.t.run4() -> List<&2, DrvCk>:
      String.eq(Ch.chn.st.plan(back), "run/v4/CTL/plan-fp100m-b16-windows.tsv")), Bool.and(String.eq(Ch.chn.st.rdir(back), "run/v4/CTL"), String.eq(Ch.chn.st.every(back), "1000")))},
    DrvCk{"handover: S2's and the control's lines in one append, a line each", S.eq(Hv.hov.append.text(S.b("c1 traind-next 1000"), "c2 x\nctl y"), S.b("\nc2 x\nctl y\n"))},
    DrvCk{"config: plan-base must be a step number (56,725 is refused, none is 0)", Bool.and(Bool.and(Bool.not(Hv.hov.nat.ok(k, "plan-base")), Hv.hov.nat.ok(k, "boundary")),
-     Hv.hov.nat.ok(k, "no-such-key"))}]
+     Hv.hov.nat.ok(k, "no-such-key"))},
+   DrvCk{"handover: s2 gets act-dir once, or s2-acts' directories in order (run 4: the round twice)",
+     Bool.and(drv.t.strs.eq(Hv.hov.s2.acts.of(Rc.rcf.of(S.b("act-dir run/v4/act/r1\n"))), ["run/v4/act/r1"]),
+       drv.t.strs.eq(Hv.hov.s2.acts.of(Rc.rcf.of(S.b("act-dir run/v4/act/r1\ns2-acts run/v4/act/r1 run/v4/act/r1\n"))), ["run/v4/act/r1", "run/v4/act/r1"]))}]
 
 # The move ------------------------------------------------------------------------------------------
 

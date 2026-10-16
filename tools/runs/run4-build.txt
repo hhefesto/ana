@@ -1,0 +1,19 @@
+# Run 4's data (2026-10-15; the plan: HANDOFF.md "Run 4"), the commands as they ran, in order,
+# from the repository root.  Heavy steps ran in capped scopes:
+#   systemd-run --user --scope --quiet -p MemoryMax=12G -p MemorySwapMax=2G -- CMD
+# CV2 is bend-corpus-v2 at master 54e2cbf (/nix/store/77iir2bk1i9g7gy011k0dh32q34vcpjh-bend-corpus-v2).
+
+# 1. The raw no earlier run saw: each pool's records whose id is in neither run 3's raw mix nor
+#    its transcripts' filler (18:16-19:22; run/v4/pools/unused.log)
+PROCS=8 CV2 unused run/v2/raw-stack/haskell.jsonl=run/v4/pools/haskell-stack.jsonl run/v2/raw/lean.jsonl=run/v4/pools/lean-raw.jsonl run/v2/raw-new3/lean-staged.jsonl=run/v4/pools/lean-staged.jsonl run/v2/raw-hf/lean.jsonl=run/v4/pools/lean-hf.jsonl run/v3/R/mix.jsonl run/v3/T/filler.nul
+#    kept: haskell-stack 100,115 (449 MB; 60,000 more were run 3's Haskell chains, in the filler),
+#    lean-raw 56,727 (427 MB), lean-staged 81,979 (932 MB), lean-hf 513,151 (438 MB).
+#    Checked by hand: the kept Haskell ids meet neither stream (jq ids, sort, comm).
+
+# 2. The steady mix: every unused record, the new Bend (run/v4/collect/bend, 801 files) and
+#    small replays of what earlier runs used up (Agda, Nix, Bend; and 270 MB of run/v2/raw's
+#    Haskell, which run 3 used whole: the Stack pool gave 449 MB, not the 722 MB the plan
+#    reckoned, and the replay keeps C1's Haskell share near the plan's, about a quarter).
+#    No two sources share an id (checked by hand with jq/comm: the new and old Bend, the
+#    Haskell replay and the kept Haskell).
+CV2 steady-mix run/v4/R/mix.jsonl run/v4/pools/haskell-stack.jsonl:all run/v4/pools/lean-raw.jsonl:all run/v4/pools/lean-staged.jsonl:all run/v4/pools/lean-hf.jsonl:all run/v4/collect/bend/bend.jsonl:all run/v3/Rsrc/bend.jsonl:all run/v3/Rsrc/agda.jsonl:150000000 run/v3/Rsrc/nix.jsonl:60000000 run/v2/raw/haskell.jsonl:270000000

@@ -133,6 +133,11 @@ def hov.bnd(+c: HovCx) -> String:
 def hov.act(+c: HovCx) -> String:
   hov.k(c, "act-dir", "")
 
+# s2-acts (2026-10-15, run 4): the act directories s2 is given, in order (s2 concatenates
+# their episodes, so a directory named twice is its episodes twice: two epochs); none: act-dir once
+def hov.s2.acts.of(+kvs: List<&2, Ev.EvKv>) -> List<&2, String>:
+  Rc.rcf.words.or(kvs, "s2-acts", [Rc.rcf.get(kvs, "act-dir", "")])
+
 def hov.ws(+c: HovCx) -> String:
   Ac.acb.ws(hov.ac(c))
 
@@ -596,7 +601,7 @@ def hov.accept(+c: HovCx) -> IO(Unit):
 def hov.s2.cmd(+c: HovCx) -> String:
   +ctl = Bool.pick(List<&2, String>, hov.ctl.on(c), ["CTL_OUT=" ++ hov.ctl(c)], Nil{})
   Ac.acb.rw(hov.ac(c), List.concat(&2, String, [["S1_LOG=" ++ hov.tlog(c), "TRAINER_DIR=" ++ hov.td(c), "EVERY=" ++ hov.every(c)], ctl, Rc.rcf.every(hov.kvs(c), "s2-env")]),
-    Ac.acb.dep(hov.ac(c)), ["corpus-v2", "s2", hov.s1(c), hov.bnd(c), hov.s2(c), hov.act(c)]) ++ " > " ++ hov.q(hov.s2log(c)) ++ " 2>&1"
+    Ac.acb.dep(hov.ac(c)), List.append(&2, String, ["corpus-v2", "s2", hov.s1(c), hov.bnd(c), hov.s2(c)], hov.s2.acts.of(hov.kvs(c)))) ++ " > " ++ hov.q(hov.s2log(c)) ++ " 2>&1"
 
 def hov.env.got(ok: Bool, +c: HovCx, +env: List<&2, U32>) -> IO(Unit):
   match ok:
