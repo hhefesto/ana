@@ -142,6 +142,13 @@ bend-ops guard tools/runs/run4.cfg              # starts chain, watch and handov
   - On Codex's usage limit drive2.sh logs the "try again at" time to rounds.log, sleeps until then, probes until Codex answers, and continues; a cut-off round is re-gated and does not count.
   - Logs: round-N.log, round-N.txt, rounds.log. `touch STOP` ends it after the current round or wait.
   - For run 5: take src/ into the raw Bend pool (vault check first).
+- **Haskell → Bend 2 translation for run 5** (from 2026-10-16 10:33): run/v5/hs2bend.
+  - The inbox holds 1,003 whole Haskell modules that use only `base`, each under 8 KB. They come from run/v2/results/haskell.train.nul's source files; any repository with a held-out file was dropped (42 modules).
+  - AGENTS.md (also linked as CLAUDE.md) is the brief. Engines claim modules with `mv inbox/X work/ENGINE/`.
+  - The gates: `--check-only`; a differential test (Test.hs, the original plus a main, run with runghc, must print exactly what the Bend main prints); and comments.
+  - drive.sh is the persistent unit codex-hs2bend (limit-aware like drive2.sh, ROUNDS 200). It shares Codex's usage with codex-bend-gen2.
+- **More Bend collection for run 5** (2026-10-16): a BendHub source for `bend-corpus-v2 collect` (hub.bend-lang.com: 634 packages, 78 MB, 49 authors, licenses explicit, mostly MIT-0), plus 16 GitHub repositories run 4 lacked and the growth of the known ones, in tools/corpus-v2/collect/bend-run5.cfg (out run/v5/collect/bend).
+- **Mutation-based Bend repair transcripts** (2026-10-16): checked train units are broken realistically and run through the real checker, giving fix transcripts in the trained layout. A new bend-corpus-v2 subcommand; a sample run first, the full run later.
 - **The tools:** every step of a run is a Bend command (the section above). The bend2 fork is on upstream d2aeefc1: hhefesto/bend2 ft-kernels 977a2d98, without IO.time (the wall clock is our own effect, bend/Clock.bend); the old heads are tagged ft-kernels-2.0.37 and ft-kernels-2.0.35. The gcroots the box and the units use (run/gcroot-bend-ops, run/v2/gcroot-deploy-agent, run/agent/gcroot-bend-episode, run/gcroot-bend) are built from master 982e162.
 - **New raw Bend for run 4:** run/v4/collect/bend (in run 4's mix).
   - bend.jsonl holds 801 files (6.9 MB); vault/bend.jsonl holds 33.
