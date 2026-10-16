@@ -178,7 +178,7 @@ bend-ops guard tools/runs/run4.cfg              # starts chain, watch and handov
     - C1 printed `done at step 67769` at 06:13. The hand-over stopped the round with 16,421 episodes (06:13), and accept plus fixed gave 5,090 solved and 7,260 fixed episodes. By language, solved/fixed: Haskell 1559/2103, Lean 1466/3750, Nix 1190/182, Agda 564/720, Bend 311/505.
     - **s2 then failed** (06:28): `s2-acts run/v4/act/r1 run/v4/act/r1` put every episode in twice under the same id, and mix-corpus refuses any id twice ("duplicate ids across sources"; it prints only the first three). The sims stub the mixer, so no test saw it.
     - **Worked around by hand:** run/v4/act/r1e2 on the box holds r1's accepted transcripts with `/e2` appended to every id (a perl one-off; checked: same texts, every id renamed, no duplicates within r1). s2-acts now names r1 and r1e2 (b78cfef), and the guard restarted the hand-over at 06:31. It redid accept and fixed (the same output byte for byte), and s2 passed at 06:54.
-    - The s2 fix itself, so a directory named twice gets `/eK` ids, is code work in bend/CorpusV2/S2.bend.
+    - Fixed in s2 since (7ecce44): a directory named again gives its pairs with `/eK` after every id (the first naming byte for byte), with laws in bend/tests/recipes.bend; a later run can name the act directory twice again. Run 4 keeps r1 and r1e2.
   - **C2 and CTL** (built 06:54):
     - C2: 4,722 steps; its episode windows are 9,730 of 73,015 (share 0.1333).
     - CTL: the same rest capped at 4,071 steps, no episodes.
