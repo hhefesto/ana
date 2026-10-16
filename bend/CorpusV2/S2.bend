@@ -15,7 +15,9 @@ import ./Keyed.bend as K
 #     and a link to each shard's file);
 #   - interleaved with the act rounds' episodes: ana's own solved ones
 #     (ACT_DIR/accepted/LANG-act) and its rejected Terms with the unit's fix
-#     (LANG-fix), as transcript windows of SHARD episodes a shard, each
+#     (LANG-fix), and (2026-10-16) the units broken on purpose with the
+#     checker's errors and their fix (LANG-mut: `bend-corpus-v2 mutate`'s OUT is
+#     an ACT_DIR), as transcript windows of SHARD episodes a shard, each
 #     language PER = max(1, (n + 50) / 100) a round (OUT.ep: OUT.ep/tx/LANG-KIND
 #     and OUT.ep/w, bend-plan-windows' output).  The episode windows' gaps take
 #     filler from FILLER (a slice of format 2's filler, the held-out files left
@@ -597,7 +599,7 @@ def s2s.langs() -> List<&2, String>:
   ["haskell", "agda", "lean", "nix", "bend"]
 
 def s2s.kinds() -> List<&2, String>:
-  List.append(&2, String, s2s.langs.of(s2s.langs(), "act"), s2s.langs.of(s2s.langs(), "fix"))
+  List.concat(&2, String, [s2s.langs.of(s2s.langs(), "act"), s2s.langs.of(s2s.langs(), "fix"), s2s.langs.of(s2s.langs(), "mut")])
 
 # LANG of LANG-KIND
 def s2s.lang.of(+lk: String) -> String:

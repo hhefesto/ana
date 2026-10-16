@@ -19,6 +19,7 @@ import ./CorpusV2/Steady.bend as Sm
 import ./CorpusV2/Recipes.bend as Rc
 import ./CorpusV2/AgentAct.bend as Aa
 import ./CorpusV2/Unused.bend as Un
+import ./CorpusV2/Mutate.bend as Mu
 
 # bend-corpus-v2: corpus v2's tools (docs/CORPUS-V2.md), one subcommand each,
 # ported from the Python they replaced, each byte-identical to it on the
@@ -53,6 +54,10 @@ import ./CorpusV2/Unused.bend as Un
 #   unused POOL OUT SEEN... | unused POOL=OUT... SEEN...   the records of each POOL (JSONL) whose id is in no SEEN stream (.jsonl lines
 #                                   or NUL pairs), in POOL's order, SEEN read once; ids spooled by PROCS workers
 #                                   (unused-spool, unused-finish), sorted by `sort`, merged   (CorpusV2/Unused.bend)
+#   mutate UNITS OUT [N]            Bend repair transcripts: checked train units broken by MutOps.bend's
+#                                   operators, the checker's real errors, format 2's repair layout into
+#                                   OUT/accepted/bend-mut (an act directory for s2); PROCS workers
+#                                   (mutate-part), resumable   (CorpusV2/Mutate.bend)
 #
 # The run recipes (2026-10-15, the plan "all logic in Bend", Phase 4: the
 # tools/corpus-v2 scripts they replace in brackets):
@@ -256,6 +261,10 @@ def c2.args(xs: List<String>) -> IO(Unit):
       Un.unu.main(more)
     case "raw-build" <> more:
       Rc.rcp.raw.build(more)
+    case "mutate" <> more:
+      Mu.mtt.main(more)
+    case "mutate-part" <> more:
+      Mu.mtt.part.main(more)
     case +c <> more:
       c2.run(c2.code(c), c, more)
     case _:

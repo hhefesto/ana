@@ -525,6 +525,18 @@ def chk.tests() -> List<&2, ChkTest>:
    # (spools, `LC_ALL=C sort`, the merge; two pools in one call) against the set difference on
    # small fixtures, in one process (PROCS 1: no bend-corpus-v2 to spawn here)
    ChkTest{"unused.bend", False{}, ROks{15n}},
+   # bend-corpus-v2 mutate's operators (bend/CorpusV2/MutOps.bend, 2026-10-16): the tokens joined
+   # are the text, each of the 13 operators gives exactly its mutants on three bodies and none
+   # where it does not apply, every mutant differs from its body, a unit's tries (cap an
+   # operator, each text once, the operators in turn, the k-th from the key's rotation)
+   ChkTest{"mutops.bend", False{}, ROks{61n}},
+   # bend-corpus-v2 mutate end to end (bend/CorpusV2/Mutate.bend), in one process with `bend`
+   # and weights/code32k.bpe: the error kinds and the keep rule, then a unit set written here (a
+   # unit that checks, a stale one, a Nix one, a held-out one): the selection, stale counted,
+   # every transcript format 2's repair read back by Agent/Spec (User, Context, Type, Attempt,
+   # its failing check, the Term, its pass), no operator twice, a second run the same bytes
+   # (compiled: the tokenizer's parse; the tool prints its summary, so only the ok count is held)
+   ChkTest{"mutate.bend", True{}, RLayout{22n}},
    # the raw slicer run for real (raw-build's first step): slice 2 comes through a FIFO that dd
    # fills; the tail it replaced held Process.run's pipes and every slice past the first timed out
    # (the slicer's own lines first: K, the documents kept, the last)
