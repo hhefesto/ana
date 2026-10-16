@@ -52,6 +52,14 @@ import ./Keyed.bend as K
 #     stops s2 before any work;
 #   - CTL_OUT DIR: also DIR, the control stage's plan: the same (capped) rest
 #     alone, no episodes (`combine 0 DIR OUT.rest`), with OUT's stage.env.
+# An ACT_DIR named more than once (2026-10-16; run 4's s2-acts named
+# run/v4/act/r1 twice, the round's episodes twice) gives its episodes again:
+# its first naming's pairs as they are, its k-th's (k >= 2) with `/eK` after
+# every id (`/e2`, `/e3`, ...), and a log line `s2: LANG-KIND: ACT_DIR again
+# as /eK (N episodes)` (s2s.gather).  Before, the same ids went in twice and
+# bend-plan-windows' mix refused them ("duplicate ids across sources": C2's
+# s2 at 06:28; r1e2 was made by hand).  Directories compare as the strings
+# given (r1 and ./r1 are two); one named once is copied byte for byte.
 # A hot-started S1 (bend-box again, TRAIN_NEXT) logs global steps, but its
 # plan's segment starts and its lr schedule count from the plan's own step 0
 # (the trainer's lr is lr.at(NLR, step - base, NWARM, total - base), base the
@@ -437,20 +445,139 @@ def s2s.links(ks: List<&2, String>, +s1: String, +rest: String) -> IO(Unit):
         K.kor.ln(target, rest ++ name)
         s2s.links(t, s1, rest)
 
-def s2s.accepted(acts: List<&2, String>, +lk: String) -> List<&2, String>:
-  match acts:
+def s2s.accepted(+a: String, +lk: String) -> String:
+  a ++ "/accepted/" ++ lk ++ "/transcripts.train.nul"
+
+# An act directory named more than once (2026-10-16, run 4: `s2-acts r1 r1`,
+# the round's episodes twice).  Its first naming's pairs go in as they are;
+# its k-th (k >= 2) with `/eK` after every id, so no id repeats
+# (bend-plan-windows' mix refuses an id two sources share).  Directories
+# compare as the strings given.
+type S2Act is Data:
+  S2Act{dir: String, k: Nat}
+
+# how many times a is in xs
+def s2s.times(xs: List<&2, String>, +a: String) -> Nat:
+  match xs:
+    case Nil{}:
+      0n
+    case +x <> t:
+      Nat.add(Bool.pick(Nat, String.eq(x, a), 1n, 0n), s2s.times(t, a))
+
+# each directory with its naming's number (before: the ones named so far)
+def s2s.nth.go(xs: List<&2, String>, +before: List<&2, String>) -> List<&2, S2Act>:
+  match xs:
     case Nil{}:
       Nil{}
-    case +a <> t:
-      (a ++ "/accepted/" ++ lk ++ "/transcripts.train.nul") <> s2s.accepted(t, lk)
+    case +x <> t:
+      S2Act{x, 1n+s2s.times(before, x)} <> s2s.nth.go(t, x <> before)
+
+def s2s.nth(+xs: List<&2, String>) -> List<&2, S2Act>:
+  s2s.nth.go(xs, Nil{})
+
+def s2s.suffix(+k: Nat) -> String:
+  "/e" ++ Nat.show(k)
+
+# A NUL file's pairs with suf after each id, streamed a field at a time
+# (S.Rd: memory is a chunk plus the longest field)
+type S2Rn is Type:
+  S2Rn{r: S.Rd, o: File, n: Nat, more: Bool, odd: Bool}
+
+def s2s.rn.pair(+suf: List<&2, U32>, o: File, +n: Nat, +id: List<&2, U32>, x: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(S2Rn):
+  (r, m) = x
+  match m:
+    case None{}:
+      IO.pure(S2Rn, S2Rn{r, o, n, False{}, True{}})
+    case Some{+t}:
+      do IO<S2Rn>:
+        o2 : File <- S.emit(o, List.concat(&2, U32, [id, suf, [0], t, [0]]))
+        return S2Rn{r, o2, 1n+n, True{}, False{}}
+
+def s2s.rn.id(m: Maybe<&2, List<&2, U32>>, +suf: List<&2, U32>, r: S.Rd, o: File, +n: Nat) -> IO(S2Rn):
+  match m:
+    case None{}:
+      IO.pure(S2Rn, S2Rn{r, o, n, False{}, False{}})
+    case Some{+id}:
+      IO.bind(S.Rd & Maybe<&2, List<&2, U32>>, S2Rn, S.Rd.next(r), s2s.rn.pair(suf, o, n, id))
+
+def s2s.rn.got(+suf: List<&2, U32>, o: File, +n: Nat, x: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(S2Rn):
+  (r, m) = x
+  s2s.rn.id(m, suf, r, o, n)
+
+def s2s.rn.step(+suf: List<&2, U32>, s: S2Rn) -> IO(S2Rn):
+  match s:
+    case S2Rn{r, o, n, m, odd}:
+      IO.bind(S.Rd & Maybe<&2, List<&2, U32>>, S2Rn, S.Rd.next(r), s2s.rn.got(suf, o, n))
+
+def s2s.rn.go(fuel: Nat, +suf: List<&2, U32>, s: S2Rn) -> IO(S2Rn):
+  match fuel s:
+    case 1n+f S2Rn{r, o, n, True{}, odd}:
+      IO.bind(S2Rn, S2Rn, s2s.rn.step(suf, S2Rn{r, o, n, True{}, odd}), s2s.rn.go(f, suf))
+    case _ z:
+      IO.pure(S2Rn, z)
+
+# the output handle back, after a log line; an id without its text stops s2
+def s2s.rn.fin(+src: String, +lk: String, +dir: String, +suf: String, s: S2Rn) -> IO(File):
+  match s:
+    case S2Rn{r, o, +n, m, odd}:
+      do IO<File>:
+        S.Rd.close(r)
+        s2s.need(Bool.not(odd), src ++ " ends with an id that has no text (an odd number of NUL fields)")
+        s2s.log(lk ++ ": " ++ dir ++ " again as " ++ suf ++ " (" ++ Nat.show(n) ++ " episodes)")
+        return o
+
+# the k-th naming's pairs (k >= 2), each id followed by /eK
+def s2s.again(+src: String, +lk: String, +dir: String, +k: Nat, o: File) -> IO(File):
+  +suf = s2s.suffix(k)
+  do IO<File>:
+    r : S.Rd <- S.Rd.open(src)
+    s : S2Rn <- s2s.rn.go(K.kor.fuel(), S.b(suf), S2Rn{r, o, 0n, True{}, False{}})
+    s2s.rn.fin(src, lk, dir, suf, s)
+
+def s2s.put.k(first: Bool, +src: String, +lk: String, +dir: String, +k: Nat, o: File) -> IO(File):
+  match first:
+    case True{}:
+      K.kor.cp.one(src, o)
+    case False{}:
+      s2s.again(src, lk, dir, k, o)
+
+def s2s.put.if(there: Bool, +src: String, +lk: String, +dir: String, +k: Nat, o: File) -> IO(File):
+  match there:
+    case True{}:
+      s2s.put.k(Nat.is_eq(k, 1n), src, lk, dir, k, o)
+    case False{}:
+      IO.pure(File, o)
+
+# one naming's ACT_DIR/accepted/LANG-KIND/transcripts.train.nul into o (none
+# when the directory has no such file)
+def s2s.put(a: S2Act, +lk: String, o: File) -> IO(File):
+  match a:
+    case S2Act{+dir, +k}:
+      +src = s2s.accepted(dir, lk)
+      do IO<File>:
+        there : Bool <- S.exists(src)
+        s2s.put.if(there, src, lk, dir, k, o)
+
+def s2s.put.all(xs: List<&2, S2Act>, +lk: String, o: File) -> IO(File):
+  match xs:
+    case Nil{}:
+      IO.pure(File, o)
+    case a <> t:
+      IO.bind(File, File, s2s.put(a, lk, o), s2s.put.all(t, lk))
+
+# every ACT_DIR's LANG-KIND pairs into dst, in the order named
+def s2s.gather(+acts: List<&2, String>, +lk: String, +dst: String) -> IO(Unit):
+  do IO<Unit>:
+    o : File <- IO.try(File, File.open(dst, "w"))
+    o2 : File <- s2s.put.all(s2s.nth(acts), lk, o)
+    File.close(o2)
 
 # one language and kind of episodes: OUT.ep/tx/LANG-KIND, its spec
-def s2s.lang(+c: S2Cfg, +ep: String, acts: List<&2, String>, +lk: String, +l: String) -> IO(List<&2, String>):
+def s2s.lang(+c: S2Cfg, +ep: String, +acts: List<&2, String>, +lk: String, +l: String) -> IO(List<&2, String>):
   +d = ep ++ "/tx/" ++ lk
   do IO<List<&2, String>>:
     S.mkdir(d)
-    fs : List<&2, String> <- K.kor.existing(s2s.accepted(acts, lk))
-    K.kor.cat(fs, d ++ "/transcripts.train.nul")
+    s2s.gather(acts, lk, d ++ "/transcripts.train.nul")
     S.write(d ++ "/files-hi.nul", Nil{})
     S.write(d ++ "/files-lo.nul", Nil{})
     K.kor.ln(s2s.abs(s2s.c.pwd(c), s2s.c.tx(c)) ++ "/" ++ l ++ "/results.holdout.nul", d ++ "/results.holdout.nul")

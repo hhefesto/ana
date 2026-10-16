@@ -170,6 +170,113 @@ def rt.s2(+plan: List<&2, U32>, +s1log: List<&2, U32>) -> List<&2, RcpCk>:
    # a hot-started S1 (bend-box again: the trainer's base is the checkpoint's step, its total base + the plan's)
    RcpCk{"s2 NLR of a hot-started S1 is the trainer's lr at global step base + BOUNDARY", rt.hot.nlr([56725n, 0n, 1n], [300n, 4000n, 11280n, 26000n])}]
 
+# s2's act directories (2026-10-16, run 4: s2-acts named run/v4/act/r1 twice, every id went in
+# twice and bend-plan-windows' mix refused them): s2s.gather and s2s.eps run for real on small
+# act directories written here
+
+def rt.acts.ks(xs: List<&2, T2.S2Act>) -> String:
+  match xs:
+    case Nil{}:
+      ""
+    case T2.S2Act{+d, +k} <> t:
+      d ++ ":" ++ Nat.show(k) ++ " " ++ rt.acts.ks(t)
+
+# a NUL file's ids (its fields, S.split's: the first of each pair)
+def rt.acts.ids(xs: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match xs:
+    case +i <> t <> more:
+      i <> rt.acts.ids(more)
+    case _:
+      Nil{}
+
+def rt.acts.has(xs: List<&2, List<&2, U32>>, +x: List<&2, U32>) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case +y <> t:
+      Bool.or(S.eq(x, y), rt.acts.has(t, x))
+
+# no id twice in a NUL file's bytes
+def rt.acts.distinct.go(xs: List<&2, List<&2, U32>>) -> Bool:
+  match xs:
+    case Nil{}:
+      True{}
+    case +x <> +t:
+      Bool.and(Bool.not(rt.acts.has(t, x)), rt.acts.distinct.go(t))
+
+def rt.acts.distinct(+bs: List<&2, U32>) -> Bool:
+  rt.acts.distinct.go(rt.acts.ids(S.split(bs, 0)))
+
+# the meaning of a k-th naming: a NUL file's pairs, suf after each id
+def rt.acts.again.go(xs: List<&2, List<&2, U32>>, +suf: List<&2, U32>) -> List<&2, U32>:
+  match xs:
+    case +i <> +t <> more:
+      List.concat(&2, U32, [i, suf, [0], t, [0], rt.acts.again.go(more, suf)])
+    case _:
+      Nil{}
+
+def rt.acts.again(+bs: List<&2, U32>, +suf: String) -> List<&2, U32>:
+  rt.acts.again.go(S.split(bs, 0), S.b(suf))
+
+# r1's haskell-act: run 4's id shapes, a text with a newline and a tab, an empty text
+def rt.acts.h1() -> List<&2, U32>:
+  S.b("curated:o__r/a.bend#f@47/episode-687\u{0}text a\nline2\tx\u{0}repo:x/A.hs#g@445/fixed-6311\u{0}tb\u{0}c\u{0}\u{0}")
+
+def rt.acts.h2() -> List<&2, U32>:
+  S.b("repo:y/B.hs#h@1/episode-2\u{0}t2\u{0}")
+
+def rt.acts.l1() -> List<&2, U32>:
+  S.b("repo:z/C.lean#k@9/fixed-3\u{0}lt\u{0}")
+
+def rt.acts.cfg(+dir: String) -> T2.S2Cfg:
+  T2.S2Cfg{["true"], dir ++ "/filler", dir ++ "/tx-src", "3e-4", 300n, "5000", "250", "8", dir, "", dir}
+
+def rt.acts() -> List<&2, RcpCk>:
+  [RcpCk{"s2 acts: each naming's number (1 the first time a directory is named, k its k-th; compared as written)",
+     rt.is(rt.acts.ks(T2.s2s.nth(["a", "b", "a", "a", "b", "./a"])), "a:1 b:1 a:2 a:3 b:2 ./a:1 ")},
+   RcpCk{"s2 acts: the suffixes", Bool.and(rt.is(T2.s2s.suffix(2n), "/e2"), rt.is(T2.s2s.suffix(13n), "/e13"))}]
+
+def rt.acts.io(+dir: String) -> IO(List<&2, RcpCk>):
+  +r1 = dir ++ "/r1"
+  +r2 = dir ++ "/r2"
+  +h1 = rt.acts.h1()
+  +h2 = rt.acts.h2()
+  +l1 = rt.acts.l1()
+  do IO<List<&2, RcpCk>>:
+    S.mkdir(r1 ++ "/accepted/haskell-act")
+    S.mkdir(r1 ++ "/accepted/lean-fix")
+    S.mkdir(r2 ++ "/accepted/haskell-act")
+    S.write(T2.s2s.accepted(r1, "haskell-act"), h1)
+    S.write(T2.s2s.accepted(r1, "lean-fix"), l1)
+    S.write(T2.s2s.accepted(r2, "haskell-act"), h2)
+    T2.s2s.gather([r1, r1], "haskell-act", dir ++ "/twice.nul")
+    +twice : List<&2, U32> <- S.read(dir ++ "/twice.nul")
+    +n1 : Nat <- K.kor.pairs(T2.s2s.accepted(r1, "haskell-act"))
+    +n2 : Nat <- K.kor.pairs(dir ++ "/twice.nul")
+    T2.s2s.gather([r1, r2, r1, r1], "haskell-act", dir ++ "/four.nul")
+    +four : List<&2, U32> <- S.read(dir ++ "/four.nul")
+    T2.s2s.gather([r1, r2], "haskell-act", dir ++ "/once.nul")
+    +once : List<&2, U32> <- S.read(dir ++ "/once.nul")
+    K.kor.cat([T2.s2s.accepted(r1, "haskell-act"), T2.s2s.accepted(r2, "haskell-act")], dir ++ "/cat.nul")
+    +cat : List<&2, U32> <- S.read(dir ++ "/cat.nul")
+    T2.s2s.gather([r2, r1, r2, r1], "lean-fix", dir ++ "/lean.nul")
+    +lean : List<&2, U32> <- S.read(dir ++ "/lean.nul")
+    T2.s2s.gather([r2, r2], "lean-fix", dir ++ "/none.nul")
+    +none : List<&2, U32> <- S.read(dir ++ "/none.nul")
+    +specs : List<&2, String> <- T2.s2s.eps(T2.s2s.kinds(), rt.acts.cfg(dir), dir ++ "/S2.ep", [r1, r1])
+    +ep : List<&2, U32> <- S.read(dir ++ "/S2.ep/tx/haskell-act/transcripts.train.nul")
+    return [RcpCk{"s2 acts: a directory named twice gives its pairs, then the same texts with /e2 after each id",
+        rt.bs(twice, S.str(h1) ++ "curated:o__r/a.bend#f@47/episode-687/e2\u{0}text a\nline2\tx\u{0}repo:x/A.hs#g@445/fixed-6311/e2\u{0}tb\u{0}c/e2\u{0}\u{0}")},
+      RcpCk{"s2 acts: named twice is the first copy then the meaning's renamed copy", S.eq(twice, List.append(&2, U32, h1, rt.acts.again(h1, "/e2")))},
+      RcpCk{"s2 acts: named twice, twice the pairs (3, 6) and no id twice", Bool.and(Bool.and(Nat.is_eq(n1, 3n), Nat.is_eq(n2, Nat.mul(2n, n1))), rt.acts.distinct(twice))},
+      RcpCk{"s2 acts: r1 r2 r1 r1 is r1, r2, r1 with /e2, r1 with /e3; no id twice",
+        Bool.and(S.eq(four, List.concat(&2, U32, [h1, h2, rt.acts.again(h1, "/e2"), rt.acts.again(h1, "/e3")])), rt.acts.distinct(four))},
+      RcpCk{"s2 acts: directories named once are cat's bytes (run 3's s2)", Bool.and(S.eq(once, cat), S.eq(once, List.append(&2, U32, h1, h2)))},
+      RcpCk{"s2 acts: a directory without the kind's file adds nothing (r2 r1 r2 r1: r1, r1 with /e2; r2 r2: empty)",
+        Bool.and(S.eq(lean, List.append(&2, U32, l1, rt.acts.again(l1, "/e2"))), List.is_empty(&2, U32, none))},
+      RcpCk{"s2 acts: s2's episodes (s2s.eps) with r1 named twice: haskell-act:1 lean-fix:1, haskell-act's the twice file",
+        Bool.and(rt.is(String.join(specs, " "), "haskell-act:1 lean-fix:1"), S.eq(ep, List.append(&2, U32, h1, rt.acts.again(h1, "/e2"))))}]
+
 # actset, steady-mix, recipes ------------------------------------------------------------------
 
 def rt.unit(+id: String, +want: String) -> Bool:
@@ -237,5 +344,6 @@ def main() -> IO(Unit):
     +verdicts : List<&2, U32> <- S.read("fixtures/recipes/verdicts-s2-56725.tsv")
     +dir : String <- S.mktemp()
     io : List<&2, RcpCk> <- rt.keyed.io(dir)
+    acts : List<&2, RcpCk> <- rt.acts.io(dir)
     S.rm(dir)
-    rt.say(List.concat(&2, RcpCk, [rt.keyed(), io, rt.s2(plan, s1log), rt.misc(), rt.drive(), rt.evals(report, verdicts)]), 0n, "")
+    rt.say(List.concat(&2, RcpCk, [rt.keyed(), io, rt.s2(plan, s1log), rt.acts(), acts, rt.misc(), rt.drive(), rt.evals(report, verdicts)]), 0n, "")
