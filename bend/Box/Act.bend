@@ -1059,6 +1059,12 @@ def acb.lake.get(ok: Bool, +c: AcbCx, +b: Rm.RmtBox, +elan: String, +o1: Lc.LclO
         +o2 : Lc.LclOut <- acb.ssh(b, 7200, acb.rw.path(c, acb.at(c, "run/harness/mathlib4"), elan ++ "/bin:", Nil{}, "lake", ["exe", "cache", "get"]))
         acb.lake.fin(Lc.lcl.ok(o2), List.append(&2, U32, acb.text(o1), acb.text(o2)))
 
+# elan's install went: it exited 0, or the toolchain was there already (elan exits 1 with
+# "error: 'TOOLCHAIN' is already installed": every setup after the first stopped there,
+# before `lake exe cache get`; run 4's box, 2026-10-15)
+def acb.elan.ok(+o: Lc.LclOut) -> Bool:
+  Bool.or(Lc.lcl.ok(o), S.infix(acb.text(o), S.b("is already installed")))
+
 # elan's toolchain (lean-toolchain's) and Mathlib's build from its cache, on the box
 def acb.lake(+c: AcbCx, +b: Rm.RmtBox) -> IO(Unit):
   do IO<Unit>:
@@ -1068,7 +1074,7 @@ def acb.lake(+c: AcbCx, +b: Rm.RmtBox) -> IO(Unit):
     +tc : List<&2, U32> <- S.read(acb.at(c, "run/harness/mathlib4/lean-toolchain"))
     +o1 : Lc.LclOut <- acb.ssh(b, 7200, acb.rw.path(c, acb.at(c, "run/harness/mathlib4"), elan ++ "/bin:", Nil{}, "elan",
       List.append(&2, String, ["toolchain", "install"], acb.strs(Lc.lcl.words(tc)))))
-    acb.lake.get(Lc.lcl.ok(o1), c, b, elan, o1)
+    acb.lake.get(acb.elan.ok(o1), c, b, elan, o1)
 
 def acb.setup(+host: String, +port: String) -> IO(Unit):
   do IO<Unit>:

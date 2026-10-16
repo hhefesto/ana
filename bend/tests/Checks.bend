@@ -510,7 +510,7 @@ def chk.tests() -> List<&2, ChkTest>:
    # round 1's eplog head, setup's unit and tree rules, the frame and pair cuts, agent-act's
    # command lines; reads fixtures/act (compiled: the interpreter's stack is too small for the
    # eplog's parse)
-   ChkTest{"act.bend", True{}, ROks{45n}},
+   ChkTest{"act.bend", True{}, ROks{46n}},
    # the run drivers' pure parts (bend/Box/RunCfg, Unit, Guard, Handover, Move: Phase 4b)
    # against run 3's boot-guard.sh, s2-driver.sh and move.sh: the config, the systemd-run
    # line and its record, what the guard starts, the hand-over's counts, stage line and

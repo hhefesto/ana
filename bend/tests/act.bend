@@ -150,7 +150,10 @@ def act.cuts() -> List<&2, ActCk>:
    ActCk{"cut-pairs: the last whole pair", Bool.and(Nat.is_eq(Ab.abx.p.good(p), 4n), Nat.is_eq(Ab.abx.p.pairs(p), 1n))},
    ActCk{"cut-pairs: empty fields count", Bool.and(Nat.is_eq(Ab.abx.p.good(q), 3n), Nat.is_eq(Ab.abx.p.pairs(q), 1n))},
    ActCk{"act-stop: a session from /proc/PID/stat", Bool.and(Nat.is_eq(Maybe.default(&2, Nat, Ab.abx.sid.of(act.b("4242 (bend-corpus-v2) S 1 4242 4242 0 -1 4194560\n")), 0n), 4242n),
-     Nat.is_eq(Maybe.default(&2, Nat, Ab.abx.sid.of(act.b("7 (a) b) R 1 2 3 4\n")), 0n), 3n))}]
+     Nat.is_eq(Maybe.default(&2, Nat, Ab.abx.sid.of(act.b("7 (a) b) R 1 2 3 4\n")), 0n), 3n))},
+   ActCk{"setup: elan's install went (exit 0, or the toolchain already there: elan exits 1), not another failure",
+     Bool.and(Bool.and(Ac.acb.elan.ok(Lc.LclOut{0, act.b("info: installing\n"), Nil{}}), Ac.acb.elan.ok(Lc.LclOut{1, Nil{}, act.b("error: 'leanprover/lean4:v4.34.0-rc2' is already installed\n")})),
+       Bool.not(Ac.acb.elan.ok(Lc.LclOut{1, Nil{}, act.b("error: could not download\n")})))}]
 
 # agent-act --------------------------------------------------------------------------------------
 
