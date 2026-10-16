@@ -48,11 +48,18 @@ def dt.pair(+id: String, +rec: List<&2, U32>) -> List<&2, U32>:
 
 # The pure parts -----------------------------------------------------------------
 
+def dt.caps.is(cs: List<&2, D.DclCap>) -> Bool:
+  match cs:
+    case D.DclCap{+p, +n} <> D.DclCap{+q, +m} <> Nil{}:
+      Bool.and(Bool.and(S.eq(p, S.b("repo:hub__bend-collections-")), Nat.is_eq(n, 16n)), Bool.and(S.eq(q, Nil{}), Nat.is_eq(m, 64n)))
+    case _:
+      False{}
+
 def dt.args.is(a: D.DclArgs) -> Bool:
   match a:
-    case D.DclArgs{+h, +s, +b}:
-      Bool.and(Bool.and(S.eq(S.b(String.concat(h)), S.b("a.nulb.jsonl")), S.eq(S.b(String.concat(s)), S.b("s.nul"))),
-        S.eq(S.b(String.concat(b)), S.b("x=1")))
+    case D.DclArgs{+h, +s, c, +b}:
+      Bool.and(Bool.and(Bool.and(S.eq(S.b(String.concat(h)), S.b("a.nulb.jsonl")), S.eq(S.b(String.concat(s)), S.b("s.nul"))),
+        S.eq(S.b(String.concat(b)), S.b("x=1cap=16cap=a:b"))), dt.caps.is(c))
 
 def dt.pure() -> List<&2, DcCk>:
   +r = dt.rec("def f() -> U32:", "import Base\n\n", "def f() -> U32:\n", "  1\n", "\ndef g() -> U32:\n  2\n")
@@ -63,9 +70,18 @@ def dt.pure() -> List<&2, DcCk>:
    DcCk{"decl: the head and tail do not count", String.eq(D.dcl.decl(r), D.dcl.decl(dt.rec("def f() -> U32:", "", "def f() -> U32:\n", "  1\n", "")))},
    DcCk{"tkey: the last key for the same file, else the text's", Bool.and(String.eq(D.dcl.tkey(True{}, "k", r), "k"),
      String.eq(D.dcl.tkey(False{}, "k", r), L.v2.key(D.dcl.text(r))))},
-   DcCk{"reasons: the codes' names", String.eq(String.concat([D.dcl.reason(0n), D.dcl.reason(1n), D.dcl.reason(2n), D.dcl.reason(3n), D.dcl.reason(4n), D.dcl.reason(5n), D.dcl.reason(6n)]),
-     "keptv2-heldheld-fileheld-textheld-declseendup")},
-   DcCk{"args: held= and seen= in the order given, anything else refused", dt.args.is(D.dcl.args(["held=a.nul", "seen=s.nul", "held=b.jsonl", "x=1"]))}]
+   DcCk{"reasons: the codes' names", String.eq(String.concat([D.dcl.reason(0n), D.dcl.reason(1n), D.dcl.reason(2n), D.dcl.reason(3n), D.dcl.reason(4n), D.dcl.reason(5n), D.dcl.reason(6n), D.dcl.reason(7n)]),
+     "keptv2-heldheld-fileheld-textheld-declseendupcap")},
+   DcCk{"args: held=, seen= and cap=PREFIX:N in the order given (N after the last `:`), anything else refused",
+     dt.args.is(D.dcl.args(["held=a.nul", "cap=repo:hub__bend-collections-:16", "seen=s.nul", "held=b.jsonl", "x=1", "cap=16", "cap=:64", "cap=a:b"]))},
+   DcCk{"cap: the first cap whose prefix the file starts with, else none", Bool.and(Bool.and(
+     Nat.is_eq(D.dcl.cap.of([D.DclCap{S.b("repo:a"), 2n}, D.DclCap{S.b("repo:"), 9n}], S.b("repo:ab/x.bend")), 2n),
+     Nat.is_eq(D.dcl.cap.of([D.DclCap{S.b("repo:a"), 2n}, D.DclCap{S.b("repo:"), 9n}], S.b("repo:b/x.bend")), 9n)),
+     Nat.is_eq(D.dcl.cap.of([D.DclCap{S.b("repo:a"), 2n}], S.b("own:a/x.bend")), 0n))},
+   DcCk{"sel: no cap or few units keeps all; else every stride-th from the first, cap of them", Bool.and(Bool.and(
+     Bool.and(D.dcl.sel(7n, 10n, 0n), D.dcl.sel(4n, 5n, 5n)),
+     Bool.and(Bool.and(D.dcl.sel(0n, 10n, 3n), D.dcl.sel(3n, 10n, 3n)), Bool.and(D.dcl.sel(6n, 10n, 3n), Bool.not(D.dcl.sel(9n, 10n, 3n))))),
+     Bool.and(Bool.not(Bool.or(D.dcl.sel(1n, 10n, 3n), D.dcl.sel(5n, 10n, 3n))), Bool.and(D.dcl.sel(2n, 5n, 2n), Bool.not(D.dcl.sel(4n, 5n, 2n)))))}]
 
 # The tool on files ----------------------------------------------------------------------
 
@@ -110,11 +126,19 @@ def dt.units() -> List<&2, U32>:
     dt.pair("repo:p__other/d.bend#k1@3", dt.rec("def k1() -> U32:", "import Base\n# another file\n\n", "def k1() -> U32:\n", "  1\n", "")),
     dt.k2()])
 
+# a capped file of five units and a free file of two
+def dt.cu(+f: String, +k: String) -> List<&2, U32>:
+  dt.pair("repo:" ++ f ++ "#u" ++ k ++ "@3", dt.u("def u" ++ k ++ "() -> U32:", "  " ++ k ++ "\n"))
+
+def dt.capped() -> List<&2, U32>:
+  L.v2.concat([dt.cu("c__capped/m.bend", "0"), dt.cu("c__capped/m.bend", "1"), dt.cu("c__capped/m.bend", "2"), dt.cu("c__capped/m.bend", "3"),
+    dt.cu("c__capped/m.bend", "4"), dt.cu("c__free/n.bend", "5"), dt.cu("c__free/n.bend", "6")])
+
 def dt.dropped() -> String:
   "v2-held\trepo:x__heldrepo/a.bend#a@3\nv2-held\trepo:x__pathrepo/sub/P.bend#b@3\nheld-file\trepo:o__vaultrepo/v.bend#v@3\nheld-text\trepo:y__copy/c.bend#v@3\nheld-text\trepo:z__z/e.bend#e@3\nheld-decl\trepo:q__q/h2.bend#hd@3\nseen\trepo:q__q/s2.bend#sd@3\ndup\trepo:p__other/d.bend#k1@3\n"
 
 def dt.stats() -> String:
-  "dup 1\nheld-decl 1\nheld-file 1\nheld-text 2\nkept 2\nseen 1\nunits 10\nv2-held 2\n"
+  "cap 0\ndup 1\nheld-decl 1\nheld-file 1\nheld-text 2\nkept 2\nseen 1\nunits 10\nv2-held 2\n"
 
 def dt.v2(+dir: String) -> IO(Unit):
   do IO<Unit>:
@@ -124,7 +148,7 @@ def dt.v2(+dir: String) -> IO(Unit):
     S.write(dir ++ "/v2/exclude.sha256", S.b(L.v2.key(S.b(dt.listed.text())) ++ "\n"))
 
 def dt.run(+dir: String, +out: String) -> IO(List<&2, Cl.Stat>):
-  D.dcl.run(dir ++ "/units.nul", out, [dir ++ "/held.jsonl", dir ++ "/held.nul"], [dir ++ "/seen.nul"], dir ++ "/v2")
+  D.dcl.run(dir ++ "/units.nul", out, [dir ++ "/held.jsonl", dir ++ "/held.nul"], [dir ++ "/seen.nul"], Nil{}, dir ++ "/v2")
 
 def dt.io(+dir: String) -> IO(List<&2, DcCk>):
   do IO<List<&2, DcCk>>:
@@ -141,10 +165,16 @@ def dt.io(+dir: String) -> IO(List<&2, DcCk>):
     st2 : List<&2, Cl.Stat> <- dt.run(dir, dir ++ "/again.nul")
     +o2 : List<&2, U32> <- S.read(dir ++ "/again.nul")
     +d2 : List<&2, U32> <- S.read(dir ++ "/again.nul.dropped")
-    st3 : List<&2, Cl.Stat> <- D.dcl.run(dir ++ "/units.nul", dir ++ "/none.nul", Nil{}, Nil{}, dir ++ "/v2")
+    st3 : List<&2, Cl.Stat> <- D.dcl.run(dir ++ "/units.nul", dir ++ "/none.nul", Nil{}, Nil{}, Nil{}, dir ++ "/v2")
     +o3 : List<&2, U32> <- S.read(dir ++ "/none.nul")
-    st4 : List<&2, Cl.Stat> <- D.dcl.run(dir ++ "/out.nul", dir ++ "/self.nul", Nil{}, [dir ++ "/out.nul"], dir ++ "/v2")
+    st4 : List<&2, Cl.Stat> <- D.dcl.run(dir ++ "/out.nul", dir ++ "/self.nul", Nil{}, [dir ++ "/out.nul"], Nil{}, dir ++ "/v2")
     +o4 : List<&2, U32> <- S.read(dir ++ "/self.nul")
+    S.write(dir ++ "/units5.nul", dt.capped())
+    st5 : List<&2, Cl.Stat> <- D.dcl.run(dir ++ "/units5.nul", dir ++ "/cap.nul", Nil{}, Nil{}, [D.DclCap{S.b("repo:c__capped/"), 2n}], dir ++ "/v2")
+    +o5 : List<&2, U32> <- S.read(dir ++ "/cap.nul")
+    +d5 : List<&2, U32> <- S.read(dir ++ "/cap.nul.dropped")
+    st6 : List<&2, Cl.Stat> <- D.dcl.run(dir ++ "/units5.nul", dir ++ "/cap5.nul", Nil{}, Nil{}, [D.DclCap{S.b("repo:c__capped/"), 5n}], dir ++ "/v2")
+    +o6 : List<&2, U32> <- S.read(dir ++ "/cap5.nul")
     return [DcCk{"tool: OUT is the kept pairs as they stand, in UNITS' order", S.eq(o, L.v2.concat([dt.k1(), dt.k2()]))},
       DcCk{"tool: OUT.dropped names each dropped unit with the first rule that holds", S.eq(dr, S.b(dt.dropped()))},
       DcCk{"tool: OUT.stats counts every rule, kept and units, in byte order", S.eq(sf, S.b(dt.stats()))},
@@ -156,7 +186,12 @@ def dt.io(+dir: String) -> IO(List<&2, DcCk>):
           dt.pair("repo:q__q/h2.bend#hd@3", dt.rec("def hd() -> U32:", "import Base\n\n", "def hd() -> U32:\n", "  42\n", "\ndef w() -> U32:\n  0\n")),
           dt.pair("repo:q__q/s2.bend#sd@3", dt.rec("def sd() -> U32:", "import Base\n\n", "def sd() -> U32:\n", "  9\n", "\ndef w2() -> U32:\n  0\n")),
           dt.k1(), dt.k2()]))},
-      DcCk{"tool: OUT seen against itself keeps nothing", Bool.and(Nat.is_eq(S.len(o4), 0n), String.eq(Cl.stat.show(st4), "dup 0\nheld-decl 0\nheld-file 0\nheld-text 0\nkept 0\nseen 2\nunits 2\nv2-held 0\n"))},
+      DcCk{"tool: OUT seen against itself keeps nothing", Bool.and(Nat.is_eq(S.len(o4), 0n), String.eq(Cl.stat.show(st4), "cap 0\ndup 0\nheld-decl 0\nheld-file 0\nheld-text 0\nkept 0\nseen 2\nunits 2\nv2-held 0\n"))},
+      DcCk{"tool: cap=PREFIX:2 keeps the capped file's units 0 and 2 of 5 (stride 2) and the free file whole", Bool.and(Bool.and(
+        S.eq(o5, L.v2.concat([dt.cu("c__capped/m.bend", "0"), dt.cu("c__capped/m.bend", "2"), dt.cu("c__free/n.bend", "5"), dt.cu("c__free/n.bend", "6")])),
+        S.eq(d5, S.b("cap\trepo:c__capped/m.bend#u1@3\ncap\trepo:c__capped/m.bend#u3@3\ncap\trepo:c__capped/m.bend#u4@3\n"))),
+        String.eq(Cl.stat.show(st5), "cap 3\ndup 0\nheld-decl 0\nheld-file 0\nheld-text 0\nkept 4\nseen 0\nunits 7\nv2-held 0\n"))},
+      DcCk{"tool: a cap as large as the file keeps it whole", Bool.and(S.eq(o6, dt.capped()), String.eq(Cl.stat.show(st6), "cap 0\ndup 0\nheld-decl 0\nheld-file 0\nheld-text 0\nkept 7\nseen 0\nunits 7\nv2-held 0\n"))},
       DcCk{"tool: a second run answers the same stats (a held .jsonl line that is no record is passed over)", String.eq(Cl.stat.show(st2), dt.stats())}]
 
 def main() -> IO(Unit):

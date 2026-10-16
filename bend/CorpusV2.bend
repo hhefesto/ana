@@ -59,10 +59,11 @@ import ./CorpusV2/Decl.bend as Dc
 #                                   operators, the checker's real errors, format 2's repair layout into
 #                                   OUT/accepted/bend-mut (an act directory for s2); PROCS workers
 #                                   (mutate-part), resumable   (CorpusV2/Mutate.bend)
-#   decl-new UNITS OUT [held=FILE]... [seen=FILE]...   a new wave's units less the declarations the corpus
-#                                   trains on (seen) or holds out (held: units, or source files by id and
-#                                   content key; and run/v2/holdout's ids and keys), one a declaration;
-#                                   OUT.dropped, OUT.stats   (CorpusV2/Decl.bend)
+#   decl-new UNITS OUT [held=FILE]... [seen=FILE]... [cap=PREFIX:N]...   a new wave's units less the
+#                                   declarations the corpus trains on (seen) or holds out (held: units, or
+#                                   source files by id and content key; and run/v2/holdout's ids and keys),
+#                                   one a declaration, at most N a file under PREFIX; OUT.dropped, OUT.stats
+#                                   (CorpusV2/Decl.bend)
 #
 # The run recipes (2026-10-15, the plan "all logic in Bend", Phase 4: the
 # tools/corpus-v2 scripts they replace in brackets):

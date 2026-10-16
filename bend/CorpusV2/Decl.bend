@@ -11,7 +11,7 @@ import ./Keyed.bend as K
 # one-unit-a-declaration rule and corpus v2's holdout carried to a wave that
 # comes after the pool).
 #
-#   bend-corpus-v2 decl-new UNITS OUT [held=FILE]... [seen=FILE]...
+#   bend-corpus-v2 decl-new UNITS OUT [held=FILE]... [seen=FILE]... [cap=PREFIX:N]...
 #
 # UNITS, a seen FILE and a held FILE ending in .nul are NUL pairs: an id
 # (`FILE#NAME@LINE`), then a record whose fields are joined by 0x1E, as
@@ -33,7 +33,16 @@ import ./Keyed.bend as K
 #   held-text   its file's content key is a held file's, or V2_HOLDOUT's exclude.sha256 has it
 #   held-decl   its declaration is a held unit's
 #   seen        its declaration is a seen unit's
+#   cap         its file's id starts with a cap's PREFIX (the first such cap) and
+#               the file has more than N units in UNITS, and it is not one of
+#               the N kept: every stride-th unit of the file from its first,
+#               stride the file's count div N (bend-units' MAX_PER_FILE spread
+#               with offset 0; a first pass counts the capped files' units)
 #   dup         its declaration is an earlier kept unit's of UNITS
+#
+# A cap brings a rule of an earlier wave to this one: community round 3 cut
+# Giulio2002/bend-collections at 16 units a file (the user's round 1 rule:
+# its one-line forwarding proofs cost about 40 CPU-s a unit to check).
 #
 # OUT: the kept pairs as they stand, in UNITS' order (written as OUT.tmp,
 # moved at the end); OUT.dropped: `REASON TAB ID` a dropped unit; OUT.stats:
@@ -62,13 +71,15 @@ def dcl.reason(n: Nat) -> String:
       "seen"
     case 6n:
       "dup"
+    case 7n:
+      "cap"
     case _:
       "kept"
 
 # every key at 0, so the stats always list them
 def dcl.st0() -> List<&2, Cl.Stat>:
   [Cl.Stat{"units", 0n}, Cl.Stat{"kept", 0n}, Cl.Stat{"v2-held", 0n}, Cl.Stat{"held-file", 0n}, Cl.Stat{"held-text", 0n},
-    Cl.Stat{"held-decl", 0n}, Cl.Stat{"seen", 0n}, Cl.Stat{"dup", 0n}]
+    Cl.Stat{"held-decl", 0n}, Cl.Stat{"seen", 0n}, Cl.Stat{"cap", 0n}, Cl.Stat{"dup", 0n}]
 
 # A unit (pure) -------------------------------------------------------------------
 
@@ -198,25 +209,119 @@ def dcl.loads(+held: Bool, ps: List<String>, a: DclAdd) -> IO(DclAdd):
         a2 : DclAdd <- dcl.load(held, p, a)
         dcl.loads(held, more, a2)
 
-# What a unit is judged against: V2_HOLDOUT's exclusion, the held files,
-# their texts' keys, the held declarations, the seen declarations.
-type DclH is Data:
-  DclH{e: L.Excl, fs: Set(), ts: Set(), ds: Set(), ss: Set()}
+# Caps -------------------------------------------------------------------------------
 
-def dcl.h.of(+e: L.Excl, held: DclAdd, seen: DclAdd) -> DclH:
+# a cap: the files whose id starts with pre keep at most n units
+type DclCap is Data:
+  DclCap{pre: List<&2, U32>, n: Nat}
+
+# N of the first cap whose PREFIX the file's id starts with (0: none)
+def dcl.cap.of(+caps: List<&2, DclCap>, +file: List<&2, U32>) -> Nat:
+  match caps:
+    case Nil{}:
+      0n
+    case DclCap{+pre, +n} <> more:
+      Bool.pick(Nat, S.prefix(file, pre), n, dcl.cap.of(more, file))
+
+# the unit at i of a file of n units is kept under cap: every stride-th from
+# the first, the first cap of them (all when cap is 0 or n is at most cap)
+def dcl.sel(+i: Nat, +n: Nat, +cap: Nat) -> Bool:
+  +stride = Nat.max(Nat.div(n, Nat.max(cap, 1n)), 1n)
+  Bool.or(Bool.or(Nat.is_eq(cap, 0n), Nat.is_le(n, cap)),
+    Bool.and(Nat.is_eq(Nat.mod(i, stride), 0n), Nat.is_lt(Nat.div(i, stride), cap)))
+
+def dcl.n.fin(r: Map<&2, Nat> & Nat) -> Nat:
+  (m, n) = r
+  n
+
+# the units a capped file has in UNITS (the first pass's count)
+def dcl.n.of(+m: Map<&2, Nat>, +file: List<&2, U32>) -> Nat:
+  dcl.n.fin(Map.get(Nat, 0n, m, S.str(file)))
+
+# The first pass: the capped files' units counted
+type DclCn is Type:
+  DclCn{r: S.Rd, m: Map<&2, Nat>, more: Bool}
+
+def dcl.cn.set(+k: String, r: Map<&2, Nat> & Nat) -> Map<&2, Nat>:
+  (m, n) = r
+  Map.set(&2, Nat, m, k, 1n+n)
+
+def dcl.cn.bump(go: Bool, m: Map<&2, Nat>, +k: String) -> Map<&2, Nat>:
+  match go:
+    case True{}:
+      dcl.cn.set(k, Map.get(Nat, 0n, m, k))
+    case False{}:
+      m
+
+def dcl.cn.add(+caps: List<&2, DclCap>, m: Map<&2, Nat>, +id: List<&2, U32>) -> Map<&2, Nat>:
+  +file = dcl.file(id)
+  dcl.cn.bump(Nat.is_lt(0n, dcl.cap.of(caps, file)), m, S.str(file))
+
+def dcl.cn.text(+caps: List<&2, DclCap>, m: Map<&2, Nat>, +id: List<&2, U32>, x: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(DclCn):
+  (r, t) = x
+  match t:
+    case None{}:
+      IO.pure(DclCn, DclCn{r, m, False{}})
+    case Some{rec}:
+      IO.pure(DclCn, DclCn{r, dcl.cn.add(caps, m, id), True{}})
+
+def dcl.cn.id(+caps: List<&2, DclCap>, r: S.Rd, m: Map<&2, Nat>, x: Maybe<&2, List<&2, U32>>) -> IO(DclCn):
+  match x:
+    case None{}:
+      IO.pure(DclCn, DclCn{r, m, False{}})
+    case Some{+id}:
+      IO.bind(S.Rd & Maybe<&2, List<&2, U32>>, DclCn, S.Rd.next(r), dcl.cn.text(caps, m, id))
+
+def dcl.cn.got(+caps: List<&2, DclCap>, m: Map<&2, Nat>, x: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(DclCn):
+  (r, i) = x
+  dcl.cn.id(caps, r, m, i)
+
+def dcl.cn.go(fuel: Nat, +caps: List<&2, DclCap>, s: DclCn) -> IO(DclCn):
+  match fuel s:
+    case 1n+f DclCn{r, m, True{}}:
+      IO.bind(DclCn, DclCn, IO.bind(S.Rd & Maybe<&2, List<&2, U32>>, DclCn, S.Rd.next(r), dcl.cn.got(caps, m)), dcl.cn.go(f, caps))
+    case _ DclCn{r, m, g}:
+      IO.pure(DclCn, DclCn{r, m, g})
+
+def dcl.cn.fin(s: DclCn) -> IO(Map<&2, Nat>):
+  match s:
+    case DclCn{r, m, g}:
+      do IO<Map<&2, Nat>>:
+        S.Rd.close(r)
+        return m
+
+# no caps: no first pass
+def dcl.count(+units: String, caps: List<&2, DclCap>) -> IO(Map<&2, Nat>):
+  match caps:
+    case Nil{}:
+      IO.pure(Map<&2, Nat>, Map.new(&2, Nat))
+    case +c <> +more:
+      do IO<Map<&2, Nat>>:
+        r : S.Rd <- S.Rd.open(units)
+        s : DclCn <- dcl.cn.go(dcl.big(), c <> more, DclCn{r, Map.new(&2, Nat), True{}})
+        dcl.cn.fin(s)
+
+# What a unit is judged against: V2_HOLDOUT's exclusion, the held files,
+# their texts' keys, the held declarations, the seen declarations, the caps
+# and the capped files' counts.
+type DclH is Data:
+  DclH{e: L.Excl, fs: Set(), ts: Set(), ds: Set(), ss: Set(), caps: List<&2, DclCap>, cn: Map<&2, Nat>}
+
+def dcl.h.of(+e: L.Excl, held: DclAdd, seen: DclAdd, +caps: List<&2, DclCap>, cn: Map<&2, Nat>) -> DclH:
   match held seen:
     case DclAdd{fs, ts, ds, pf, pk} DclAdd{gs, us, ss, qf, qk}:
-      DclH{e, fs, ts, ds, ss}
+      DclH{e, fs, ts, ds, ss, caps, cn}
 
-# the first reason that holds (0: none)
-def dcl.why(+h: DclH, +file: List<&2, U32>, +id: List<&2, U32>, +tk: String, +dk: String) -> Nat:
+# the first reason that holds (0: none); i is the unit's place in its file
+def dcl.why(+h: DclH, +file: List<&2, U32>, +id: List<&2, U32>, +tk: String, +dk: String, +i: Nat) -> Nat:
   match h:
-    case DclH{+e, fs, ts, ds, ss}:
+    case DclH{+e, fs, ts, ds, ss, +caps, +cn}:
       Bool.pick(Nat, L.v2.held.id(e, id), 1n,
         Bool.pick(Nat, L.v2.in(fs, S.str(file)), 2n,
           Bool.pick(Nat, Bool.or(L.v2.in(ts, tk), L.v2.held.key(e, tk)), 3n,
             Bool.pick(Nat, L.v2.in(ds, dk), 4n,
-              Bool.pick(Nat, L.v2.in(ss, dk), 5n, 0n)))))
+              Bool.pick(Nat, L.v2.in(ss, dk), 5n,
+                Bool.pick(Nat, dcl.sel(i, dcl.n.of(cn, file), dcl.cap.of(caps, file)), 0n, 7n))))))
 
 # a unit no other rule dropped is a duplicate when an earlier kept unit has
 # its declaration; else its declaration is kept
@@ -240,8 +345,9 @@ def dcl.dup(why: Nat, kept: Set(), +dk: String) -> Set() & Nat:
 
 # The pass over UNITS ---------------------------------------------------------------
 
+# pf, pk, pi: the last unit's file, its content key and the last unit's place in it
 type DclSt is Type:
-  DclSt{r: S.Rd, o: File, d: File, kept: Set(), pf: List<&2, U32>, pk: String, st: List<&2, Cl.Stat>, more: Bool}
+  DclSt{r: S.Rd, o: File, d: File, kept: Set(), pf: List<&2, U32>, pk: String, pi: Nat, st: List<&2, Cl.Stat>, more: Bool}
 
 # a kept pair to OUT, a dropped one's reason and id to OUT.dropped
 def dcl.put(why: Nat, o: File, d: File, +id: List<&2, U32>, +rec: List<&2, U32>) -> IO(File & File):
@@ -255,56 +361,58 @@ def dcl.put(why: Nat, o: File, d: File, +id: List<&2, U32>, +rec: List<&2, U32>)
         d2 : File <- S.emit(d, L.v2.concat([S.b(dcl.reason(1n+p)), [9], id, [10]]))
         return (o, d2)
 
-def dcl.u.out(r: S.Rd, kept: Set(), +file: List<&2, U32>, +tk: String, st: List<&2, Cl.Stat>, x: File & File) -> IO(DclSt):
+def dcl.u.out(r: S.Rd, kept: Set(), +file: List<&2, U32>, +tk: String, +i: Nat, st: List<&2, Cl.Stat>, x: File & File) -> IO(DclSt):
   (o, d) = x
-  IO.pure(DclSt, DclSt{r, o, d, kept, file, tk, st, True{}})
+  IO.pure(DclSt, DclSt{r, o, d, kept, file, tk, i, st, True{}})
 
-def dcl.u.fin(r: S.Rd, o: File, d: File, +file: List<&2, U32>, +tk: String, st: List<&2, Cl.Stat>, +id: List<&2, U32>, +rec: List<&2, U32>, x: Set() & Nat) -> IO(DclSt):
+def dcl.u.fin(r: S.Rd, o: File, d: File, +file: List<&2, U32>, +tk: String, +i: Nat, st: List<&2, Cl.Stat>, +id: List<&2, U32>, +rec: List<&2, U32>, x: Set() & Nat) -> IO(DclSt):
   (kept, +why) = x
   do IO<DclSt>:
     od : File & File <- dcl.put(why, o, d, id, rec)
-    dcl.u.out(r, kept, file, tk, Cl.stat.bump(dcl.reason(why), 1n, Cl.stat.bump("units", 1n, st)), od)
+    dcl.u.out(r, kept, file, tk, i, Cl.stat.bump(dcl.reason(why), 1n, Cl.stat.bump("units", 1n, st)), od)
 
-def dcl.u.rec(+h: DclH, r: S.Rd, o: File, d: File, kept: Set(), +pf: List<&2, U32>, +pk: String, st: List<&2, Cl.Stat>, +id: List<&2, U32>, +rec: List<&2, U32>) -> IO(DclSt):
+def dcl.u.rec(+h: DclH, r: S.Rd, o: File, d: File, kept: Set(), +pf: List<&2, U32>, +pk: String, +pi: Nat, st: List<&2, Cl.Stat>, +id: List<&2, U32>, +rec: List<&2, U32>) -> IO(DclSt):
   +file = dcl.file(id)
-  +tk = dcl.tkey(S.eq(file, pf), pk, rec)
+  +same = S.eq(file, pf)
+  +i = Bool.pick(Nat, same, 1n+pi, 0n)
+  +tk = dcl.tkey(same, pk, rec)
   +dk = dcl.decl(rec)
-  dcl.u.fin(r, o, d, file, tk, st, id, rec, dcl.dup(dcl.why(h, file, id, tk, dk), kept, dk))
+  dcl.u.fin(r, o, d, file, tk, i, st, id, rec, dcl.dup(dcl.why(h, file, id, tk, dk, i), kept, dk))
 
-def dcl.u.text(+h: DclH, o: File, d: File, kept: Set(), +pf: List<&2, U32>, +pk: String, st: List<&2, Cl.Stat>, +id: List<&2, U32>, x: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(DclSt):
+def dcl.u.text(+h: DclH, o: File, d: File, kept: Set(), +pf: List<&2, U32>, +pk: String, +pi: Nat, st: List<&2, Cl.Stat>, +id: List<&2, U32>, x: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(DclSt):
   (r, m) = x
   match m:
     case None{}:
-      IO.pure(DclSt, DclSt{r, o, d, kept, pf, pk, st, False{}})
+      IO.pure(DclSt, DclSt{r, o, d, kept, pf, pk, pi, st, False{}})
     case Some{+rec}:
-      dcl.u.rec(h, r, o, d, kept, pf, pk, st, id, rec)
+      dcl.u.rec(h, r, o, d, kept, pf, pk, pi, st, id, rec)
 
-def dcl.u.id(+h: DclH, r: S.Rd, o: File, d: File, kept: Set(), +pf: List<&2, U32>, +pk: String, st: List<&2, Cl.Stat>, m: Maybe<&2, List<&2, U32>>) -> IO(DclSt):
+def dcl.u.id(+h: DclH, r: S.Rd, o: File, d: File, kept: Set(), +pf: List<&2, U32>, +pk: String, +pi: Nat, st: List<&2, Cl.Stat>, m: Maybe<&2, List<&2, U32>>) -> IO(DclSt):
   match m:
     case None{}:
-      IO.pure(DclSt, DclSt{r, o, d, kept, pf, pk, st, False{}})
+      IO.pure(DclSt, DclSt{r, o, d, kept, pf, pk, pi, st, False{}})
     case Some{+id}:
-      IO.bind(S.Rd & Maybe<&2, List<&2, U32>>, DclSt, S.Rd.next(r), dcl.u.text(h, o, d, kept, pf, pk, st, id))
+      IO.bind(S.Rd & Maybe<&2, List<&2, U32>>, DclSt, S.Rd.next(r), dcl.u.text(h, o, d, kept, pf, pk, pi, st, id))
 
-def dcl.u.got(+h: DclH, o: File, d: File, kept: Set(), +pf: List<&2, U32>, +pk: String, st: List<&2, Cl.Stat>, x: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(DclSt):
+def dcl.u.got(+h: DclH, o: File, d: File, kept: Set(), +pf: List<&2, U32>, +pk: String, +pi: Nat, st: List<&2, Cl.Stat>, x: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(DclSt):
   (r, m) = x
-  dcl.u.id(h, r, o, d, kept, pf, pk, st, m)
+  dcl.u.id(h, r, o, d, kept, pf, pk, pi, st, m)
 
 def dcl.u.step(+h: DclH, s: DclSt) -> IO(DclSt):
   match s:
-    case DclSt{r, o, d, kept, pf, pk, st, g}:
-      IO.bind(S.Rd & Maybe<&2, List<&2, U32>>, DclSt, S.Rd.next(r), dcl.u.got(h, o, d, kept, pf, pk, st))
+    case DclSt{r, o, d, kept, pf, pk, pi, st, g}:
+      IO.bind(S.Rd & Maybe<&2, List<&2, U32>>, DclSt, S.Rd.next(r), dcl.u.got(h, o, d, kept, pf, pk, pi, st))
 
 def dcl.u.go(fuel: Nat, +h: DclH, s: DclSt) -> IO(DclSt):
   match fuel s:
-    case 1n+f DclSt{r, o, d, kept, pf, pk, st, True{}}:
-      IO.bind(DclSt, DclSt, dcl.u.step(h, DclSt{r, o, d, kept, pf, pk, st, True{}}), dcl.u.go(f, h))
-    case _ DclSt{r, o, d, kept, pf, pk, st, g}:
-      IO.pure(DclSt, DclSt{r, o, d, kept, pf, pk, st, g})
+    case 1n+f DclSt{r, o, d, kept, pf, pk, pi, st, True{}}:
+      IO.bind(DclSt, DclSt, dcl.u.step(h, DclSt{r, o, d, kept, pf, pk, pi, st, True{}}), dcl.u.go(f, h))
+    case _ DclSt{r, o, d, kept, pf, pk, pi, st, g}:
+      IO.pure(DclSt, DclSt{r, o, d, kept, pf, pk, pi, st, g})
 
 def dcl.u.fin.all(+out: String, s: DclSt) -> IO(List<&2, Cl.Stat>):
   match s:
-    case DclSt{r, o, d, kept, pf, pk, +st, g}:
+    case DclSt{r, o, d, kept, pf, pk, pi, +st, g}:
       do IO<List<&2, Cl.Stat>>:
         S.Rd.close(r)
         File.close(o)
@@ -313,36 +421,57 @@ def dcl.u.fin.all(+out: String, s: DclSt) -> IO(List<&2, Cl.Stat>):
         S.mv(out ++ ".tmp", out)
         return st
 
-# the whole tool: the sets, then the pass (its stats answered)
-def dcl.run(+units: String, +out: String, held: List<String>, seen: List<String>, +v2: String) -> IO(List<&2, Cl.Stat>):
+# the whole tool: the sets, the capped files' counts, then the pass (its stats answered)
+def dcl.run(+units: String, +out: String, held: List<String>, seen: List<String>, +caps: List<&2, DclCap>, +v2: String) -> IO(List<&2, Cl.Stat>):
   do IO<List<&2, Cl.Stat>>:
     e : L.Excl <- L.v2.ex.load(v2)
     ha : DclAdd <- dcl.loads(True{}, held, dcl.add0())
     sa : DclAdd <- dcl.loads(False{}, seen, dcl.add0())
-    +h : DclH = dcl.h.of(e, ha, sa)
+    cn : Map<&2, Nat> <- dcl.count(units, caps)
+    +h : DclH = dcl.h.of(e, ha, sa, caps, cn)
     r : S.Rd <- S.Rd.open(units)
     o : File <- IO.try(File, File.open(out ++ ".tmp", "w"))
     d : File <- IO.try(File, File.open(out ++ ".dropped", "w"))
-    s : DclSt <- dcl.u.go(dcl.big(), h, DclSt{r, o, d, Set.new(), [0], "", dcl.st0(), True{}})
+    s : DclSt <- dcl.u.go(dcl.big(), h, DclSt{r, o, d, Set.new(), [0], "", 0n, dcl.st0(), True{}})
     dcl.u.fin.all(out, s)
 
 # The command ----------------------------------------------------------------------
 
 type DclArgs is Data:
-  DclArgs{held: List<&2, String>, seen: List<&2, String>, bad: List<&2, String>}
+  DclArgs{held: List<&2, String>, seen: List<&2, String>, caps: List<&2, DclCap>, bad: List<&2, String>}
+
+def dcl.cap.mk(has: Bool, +pre: List<&2, U32>, m: Maybe<&2, Nat>) -> Maybe<&2, DclCap>:
+  match has m:
+    case True{} Some{n}:
+      Some{DclCap{pre, n}}
+    case _ _:
+      None{}
+
+# PREFIX:N (N after the last `:`, so a PREFIX may hold `:`, as `repo:` does)
+def dcl.cap.word(+x: List<&2, U32>) -> Maybe<&2, DclCap>:
+  +num = List.reverse(&2, U32, L.v2.before(List.reverse(&2, U32, x), 58))
+  dcl.cap.mk(L.v2.has(x, 58), L.v2.parent(x, 58), Nat.read(S.str(num)))
+
+def dcl.args.cap(m: Maybe<&2, DclCap>, +w: String, h: List<&2, String>, s: List<&2, String>, c: List<&2, DclCap>, b: List<&2, String>) -> DclArgs:
+  match m:
+    case Some{x}:
+      DclArgs{h, s, x <> c, b}
+    case None{}:
+      DclArgs{h, s, c, w <> b}
 
 def dcl.args.one(+w: String, a: DclArgs) -> DclArgs:
   match a:
-    case DclArgs{+h, +s, +b}:
+    case DclArgs{+h, +s, +c, +b}:
       +x = S.b(w)
-      Bool.pick(DclArgs, S.prefix(x, S.b("held=")), DclArgs{S.str(List.drop(&2, U32, x, 5n)) <> h, s, b},
-        Bool.pick(DclArgs, S.prefix(x, S.b("seen=")), DclArgs{h, S.str(List.drop(&2, U32, x, 5n)) <> s, b}, DclArgs{h, s, w <> b}))
+      Bool.pick(DclArgs, S.prefix(x, S.b("held=")), DclArgs{S.str(List.drop(&2, U32, x, 5n)) <> h, s, c, b},
+        Bool.pick(DclArgs, S.prefix(x, S.b("seen=")), DclArgs{h, S.str(List.drop(&2, U32, x, 5n)) <> s, c, b},
+          Bool.pick(DclArgs, S.prefix(x, S.b("cap=")), dcl.args.cap(dcl.cap.word(List.drop(&2, U32, x, 4n)), w, h, s, c, b), DclArgs{h, s, c, w <> b})))
 
-# the held= and seen= words, each list in the order given
+# the held=, seen= and cap= words, each list in the order given
 def dcl.args(ws: List<String>) -> DclArgs:
   match ws:
     case Nil{}:
-      DclArgs{Nil{}, Nil{}, Nil{}}
+      DclArgs{Nil{}, Nil{}, Nil{}, Nil{}}
     case +w <> more:
       dcl.args.one(w, dcl.args(more))
 
@@ -360,18 +489,25 @@ def dcl.any.jsonl(xs: List<&2, String>) -> Bool:
     case +x <> more:
       Bool.or(dcl.is.jsonl(x), dcl.any.jsonl(more))
 
+def dcl.caps.show(cs: List<&2, DclCap>) -> String:
+  match cs:
+    case Nil{}:
+      ""
+    case DclCap{p, n} <> more:
+      " " ++ S.str(p) ++ "*:" ++ Nat.show(n) ++ dcl.caps.show(more)
+
 def dcl.usage() -> IO(Unit):
-  IO.die(Unit, 2, "usage: bend-corpus-v2 decl-new UNITS OUT [held=FILE]... [seen=FILE]...   (env: V2_HOLDOUT, default run/v2/holdout)")
+  IO.die(Unit, 2, "usage: bend-corpus-v2 decl-new UNITS OUT [held=FILE]... [seen=FILE]... [cap=PREFIX:N]...   (env: V2_HOLDOUT, default run/v2/holdout)")
 
 def dcl.go(+units: String, +out: String, a: DclArgs) -> IO(Unit):
   match a:
-    case DclArgs{+h, +s, b}:
+    case DclArgs{+h, +s, +c, b}:
       do IO<Unit>:
         Bool.pick(IO(Unit), Nat.is_eq(List.length(&2, String, b), 0n), IO.pure(Unit, Unit{}), dcl.usage())
         Bool.pick(IO(Unit), dcl.any.jsonl(s), K.kor.die("decl-new", "a seen file is units (.nul): source files hold no declarations"), IO.pure(Unit, Unit{}))
         +v2 : String <- S.env("V2_HOLDOUT", "run/v2/holdout")
-        dcl.log(units ++ " to " ++ out ++ ": " ++ Nat.show(List.length(&2, String, h)) ++ " held, " ++ Nat.show(List.length(&2, String, s)) ++ " seen, " ++ v2 ++ "'s holdout")
-        st : List<&2, Cl.Stat> <- dcl.run(units, out, dcl.strs(h), dcl.strs(s), v2)
+        dcl.log(units ++ " to " ++ out ++ ": " ++ Nat.show(List.length(&2, String, h)) ++ " held, " ++ Nat.show(List.length(&2, String, s)) ++ " seen, " ++ v2 ++ "'s holdout, caps:" ++ dcl.caps.show(c))
+        st : List<&2, Cl.Stat> <- dcl.run(units, out, dcl.strs(h), dcl.strs(s), c, v2)
         IO.print(S.str(S.chomp(S.b(Cl.stat.show(st)))))
         dcl.log("done: " ++ out ++ " (" ++ out ++ ".stats, " ++ out ++ ".dropped)")
 

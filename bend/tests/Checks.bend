@@ -540,8 +540,9 @@ def chk.tests() -> List<&2, ChkTest>:
    # bend-corpus-v2 decl-new (bend/CorpusV2/Decl.bend, 2026-10-16): a unit's file, its file's text and its
    # declaration key (the pool's), the held=/seen= words; the tool on units written here, one a rule
    # (a v2 held-out repository and path, a held file's id, its text in another file, a listed key, a
-   # held declaration, a seen one, a duplicate): OUT exactly the kept pairs, OUT.dropped, the stats
-   ChkTest{"decl.bend", False{}, ROks{16n}},
+   # held declaration, a seen one, a duplicate): OUT exactly the kept pairs, OUT.dropped, the stats; a
+   # cap=PREFIX:N (every stride-th unit of a capped file, the first N), cap words, sel's spread
+   ChkTest{"decl.bend", False{}, ROks{20n}},
    # the raw slicer run for real (raw-build's first step): slice 2 comes through a FIFO that dd
    # fills; the tail it replaced held Process.run's pipes and every slice past the first timed out
    # (the slicer's own lines first: K, the documents kept, the last)
