@@ -136,7 +136,11 @@ bend-ops guard tools/runs/run4.cfg              # starts chain, watch and handov
 - **Bend for run 5, by Codex** (from 2026-10-16 08:09): run/v5/bend-gen (ignored, like all of run/).
   - It began from the user's GPT zip, textbook-gpt/: 54 files, none of which checked under 2.0.37. Codex (gpt-6-astra) repairs them, then writes new Bend 2 code into src/TOPIC/NAME.bend.
   - AGENTS.md there is its brief. Every file must pass `--check-only` with the locked compiler, and `main`'s output must match NAME.bend.out, an answer worked out independently. PROGRESS.md is its state.
-  - drive.sh runs round after round of `codex exec` (unit codex-bend-gen, MemoryMax 16G, CPUWeight 20, ROUNDS 60). Each round writes round-N.log and round-N.txt, and rounds.log has the totals. `touch STOP` ends it after the current round.
+  - The user: "extend the bend corpus as much as possible with good bend code", "all variants of algorithms you can think of", "add comments describing each program".
+  - CATALOG.md lists 19 sections of algorithms with their variants and the styles to vary. Gate 5 in AGENTS.md requires a header comment (what the program computes, the variant's idea, its complexity, what main runs) and a comment on every def.
+  - drive.sh ran round 1 only (unit codex-bend-gen, told to stop with STOP). drive2.sh took over as the persistent user unit codex-bend-gen2 (~/.config/systemd/user, enabled, Restart=on-failure, MemoryMax 16G, CPUWeight 20, ROUNDS=200 good rounds).
+  - On Codex's usage limit drive2.sh logs the "try again at" time to rounds.log, sleeps until then, probes until Codex answers, and continues; a cut-off round is re-gated and does not count.
+  - Logs: round-N.log, round-N.txt, rounds.log. `touch STOP` ends it after the current round or wait.
   - For run 5: take src/ into the raw Bend pool (vault check first).
 - **The tools:** every step of a run is a Bend command (the section above). The bend2 fork is on upstream d2aeefc1: hhefesto/bend2 ft-kernels 977a2d98, without IO.time (the wall clock is our own effect, bend/Clock.bend); the old heads are tagged ft-kernels-2.0.37 and ft-kernels-2.0.35. The gcroots the box and the units use (run/gcroot-bend-ops, run/v2/gcroot-deploy-agent, run/agent/gcroot-bend-episode, run/gcroot-bend) are built from master 982e162.
 - **New raw Bend for run 4:** run/v4/collect/bend (in run 4's mix).
