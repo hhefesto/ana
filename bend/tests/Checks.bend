@@ -485,8 +485,9 @@ def chk.tests() -> List<&2, ChkTest>:
    ChkTest{"ops.bend", False{}, ROks{70n}},
    # collect's pure parts (bend/CorpusV2/Collect.bend): the config grammar,
    # the repo rules and excludes, the loader-verdict classes, notbase, growth
-   # routing and the vault quarter
-   ChkTest{"collect.bend", False{}, ROks{35n}},
+   # routing and the vault quarter; the hub (2026-10-16): its listing, the newest of a
+   # name, PINS over the choice, plain paths, the manifest and its hash
+   ChkTest{"collect.bend", False{}, ROks{69n}},
    # bend-box's and `bend-ops stage`'s readers (bend/Box/OnBox.bend,
    # Stage.bend) against fp.sh's awk, grep, sort, tail and sed on real logs
    # (gate.log, time.log, dmon.txt, a plan; reads fixtures/box)

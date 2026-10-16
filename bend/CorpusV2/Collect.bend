@@ -42,6 +42,14 @@ import ./Raw.bend as R
 #                             never had (pre's path rule), routed by its earlier assignment
 #                             (vault-known: the vault; else the C3 rule on its units with its
 #                             directory split frozen by big-known), never a vault candidate
+#   hub URL RULE [exclude PREFIX...]
+#                             BendHub's packages (2026-10-16; URL https://hub.bend-lang.com):
+#                             the newest version of every name and every unnamed package, each
+#                             a new repository SRC/hub__NAME (SRC/hub__0xHASH), RULE and the
+#                             excluded prefixes as a repository's; PINS gets a row a package
+#                             (`hub/NAME TAB 0xHASH TAB publish date TAB licence TAB
+#                             NAME@VERSION`, the licence recorded, never a filter) and a pinned
+#                             one is taken at its pin; the section "The hub" says how
 #   sibling OWNER/NAME LINK   SRC/LINK -> OWNER__NAME, for the loader's `../Link/x.bend` imports
 #   loader PATH               the Bend 2 loader the gate runs (`bend` on PATH)
 #   loader-secs N             its limit a file (60)
@@ -69,11 +77,13 @@ import ./Raw.bend as R
 # The steps (`all`: in this order; each reads what the one before wrote):
 #
 #   fetch      clones (shallow, blobless, sparse `*.bend`) at their pins, PINS rows for the
-#              new ones, the sibling links, the upstream's files
+#              new ones, the sibling links, the upstream's files, the hub's packages
+#              (SRC/HUB.tsv)
 #   list       each repository's .bend files (`find`, .git pruned), less vendored directories,
 #              `*_generated*`, files over `big` (lt100k: 100 KB or more) and excluded
 #              prefixes: stage/list.tsv (`file TAB id`, id repo:OWNER__NAME/PATH, the
-#              repositories in the config's order, the upstream last) and stage/list.counts
+#              repositories in the config's order, the upstream, then the hub's packages in
+#              HUB.tsv's order) and stage/list.counts
 #   gate-bend  copies of Base (a base.bend whose first 4 lines are the upstream's
 #              bend2/base.bend's, the upstream's own excepted) out; then the loader,
 #              `cd DIR && timeout SECS LOADER FILE --check-only`, procs at once: exit 0 pass,
@@ -939,6 +949,685 @@ def col.sibs(xss: ColCfg(), +src: String) -> IO(Unit):
         col.sib.one(ws, src)
         col.sibs(more, src)
 
+# The hub (2026-10-16) -------------------------------------------------------------------
+#
+# `hub URL RULE [exclude PREFIX...]`: BendHub's packages (`bend FILE --publish`), each
+# taken as a repository SRC/hub__NAME (an unnamed package: SRC/hub__0xHASH) that every
+# later step treats like a clone; RULE and the excluded prefixes as a repository's.
+#
+#   the listing   URL/packages.json?sort=new&limit=100&after=K, page by page until the
+#                 listing's total (SRC/.hub/packages-K.json): each package's hash, name,
+#                 version, publish time and licence
+#   the choice    the newest version of every name (versions compared as numbers, a part
+#                 at a time, then the publish time) and every unnamed package; PINS keeps a
+#                 package's hash under hub/NAME (hub/0xHASH), so a fetch again takes the
+#                 pinned one; a new row gives the hash, the publish date (UTC), the licence
+#                 (the listing's id; LICENSE for a licence file without one; MIT-0 (default)
+#                 for none, the hub's terms) and NAME@VERSION, recorded, never a filter
+#   the files     URL/0xHASH/manifest (`SHA256 PATH` a line), which must hash to the
+#                 package's hash (the hash is its sha256's first 32 hex digits) and name
+#                 only plain relative paths (parts of [A-Za-z0-9._-], none . or ..), then
+#                 every file it names (curl) and `sha256sum -c` on them; a package that
+#                 fails is logged and left out; a complete one gets SRC/hub__X/.hub (its
+#                 hash), and a fetch again keeps a directory whose .hub is the chosen hash
+#   SRC/HUB.tsv   `DIR TAB hub/NAME TAB HASH TAB VERSION TAB LICENCE` a complete package,
+#                 sorted by DIR: the repositories `list` adds after the config's
+#
+# The packages are new repositories to the later steps (the vault's quarter, C3's units).
+
+type ColHub is Data:
+  ColHub{hash: List<&2, U32>, name: List<&2, U32>, version: List<&2, U32>, ts: Nat, lic: List<&2, U32>}
+
+type ColHubCf is Data:
+  ColHubCf{url: List<&2, U32>, rule: Nat, excl: List<&2, List<&2, U32>>}
+
+def col.hub.lic.none() -> List<&2, U32>:
+  S.b("MIT-0 (default)")
+
+def col.hub.empty() -> ColHub:
+  ColHub{Nil{}, Nil{}, Nil{}, 0n, col.hub.lic.none()}
+
+def col.hub.hash(+h: ColHub) -> List<&2, U32>:
+  match h:
+    case ColHub{a, n, v, t, l}:
+      a
+
+def col.hub.name(+h: ColHub) -> List<&2, U32>:
+  match h:
+    case ColHub{a, n, v, t, l}:
+      n
+
+def col.hub.version(+h: ColHub) -> List<&2, U32>:
+  match h:
+    case ColHub{a, n, v, t, l}:
+      v
+
+def col.hub.ts(+h: ColHub) -> Nat:
+  match h:
+    case ColHub{a, n, v, t, l}:
+      t
+
+def col.hub.lic(+h: ColHub) -> List<&2, U32>:
+  match h:
+    case ColHub{a, n, v, t, l}:
+      l
+
+def col.hub.named(+h: ColHub) -> Bool:
+  Nat.is_lt(0n, S.len(col.hub.name(h)))
+
+# the package as a repository: hub/NAME (hub/0xHASH), its directory hub__NAME
+def col.hub.repo(+h: ColHub) -> List<&2, U32>:
+  S.append(S.b("hub/"), Bool.pick(List<&2, U32>, col.hub.named(h), col.hub.name(h), col.hub.hash(h)))
+
+def col.hub.dir(+h: ColHub) -> List<&2, U32>:
+  col.dir.of(col.hub.repo(h))
+
+# NAME@VERSION, or the hash
+def col.hub.label(+h: ColHub) -> List<&2, U32>:
+  Bool.pick(List<&2, U32>, col.hub.named(h), L.v2.concat([col.hub.name(h), [64], col.hub.version(h)]), col.hub.hash(h))
+
+# The config line
+
+def col.hub.cf.of(ws: List<&2, List<&2, U32>>) -> List<&2, ColHubCf>:
+  match ws:
+    case +u <> rl <> rest:
+      [ColHubCf{u, col.rule(rl), col.excl(rest)}]
+    case u <> Nil{}:
+      [ColHubCf{u, 9n, Nil{}}]
+    case Nil{}:
+      Nil{}
+
+def col.hub.cf.first(xss: ColCfg()) -> List<&2, ColHubCf>:
+  match xss:
+    case Nil{}:
+      Nil{}
+    case ws <> more:
+      col.hub.cf.of(ws)
+
+# the hub line (its first; none: an empty list)
+def col.hub.cf(+cs: ColCfg()) -> List<&2, ColHubCf>:
+  col.hub.cf.first(col.cf.args(cs, S.b("hub")))
+
+def col.hub.cf.rules(hs: List<&2, ColHubCf>) -> List<&2, List<&2, U32>>:
+  match hs:
+    case Nil{}:
+      Nil{}
+    case ColHubCf{+u, +r, e} <> more:
+      Bool.pick(List<&2, List<&2, U32>>, Nat.is_eq(r, 9n), [S.append(S.b("hub "), u)], Nil{})
+
+# URL without a trailing /
+def col.hub.base(+u: List<&2, U32>) -> String:
+  S.str(Bool.pick(List<&2, U32>, S.suffix(u, [47]), List.take(&2, U32, u, Nat.sub(S.len(u), 1n)), u))
+
+def col.hub.page.url(+base: String, +after: Nat) -> String:
+  base ++ "/packages.json?sort=new&limit=100&after=" ++ Nat.show(after)
+
+# The listing: st.js.values' leaves at [packages, K, FIELD, ...], a package a K
+
+# a field's code: 1 hash, 2 name, 3 version, 4 ts, 5 license.file, 6 license.id, 0 other
+def col.hub.sub(+rest: List<&2, St.StJk>) -> List<&2, U32>:
+  match rest:
+    case St.StJkK{k} <> Nil{}:
+      k
+    case _:
+      [0]
+
+def col.hub.code(+f: List<&2, U32>, +rest: List<&2, St.StJk>) -> Nat:
+  +top = Nat.is_eq(List.length(&2, St.StJk, rest), 0n)
+  +lic = S.eq(f, S.b("license"))
+  Bool.pick(Nat, Bool.and(top, S.eq(f, S.b("hash"))), 1n,
+    Bool.pick(Nat, Bool.and(top, S.eq(f, S.b("name"))), 2n,
+      Bool.pick(Nat, Bool.and(top, S.eq(f, S.b("version"))), 3n,
+        Bool.pick(Nat, Bool.and(top, S.eq(f, S.b("ts"))), 4n,
+          Bool.pick(Nat, Bool.and(lic, S.eq(col.hub.sub(rest), S.b("file"))), 5n,
+            Bool.pick(Nat, Bool.and(lic, S.eq(col.hub.sub(rest), S.b("id"))), 6n, 0n))))))
+
+# a string value as json.loads gives it; anything else (null) empty
+def col.hub.str(v: St.StTk) -> List<&2, U32>:
+  match v:
+    case St.StTkS{r}:
+      St.st.js.key(r)
+    case _:
+      Nil{}
+
+def col.hub.set(code: Nat, v: St.StTk, h: ColHub) -> ColHub:
+  match code h:
+    case 1n ColHub{a, n, ver, t, l}:
+      ColHub{col.hub.str(v), n, ver, t, l}
+    case 2n ColHub{a, n, ver, t, l}:
+      ColHub{a, col.hub.str(v), ver, t, l}
+    case 3n ColHub{a, n, ver, t, l}:
+      ColHub{a, n, col.hub.str(v), t, l}
+    case 4n ColHub{a, n, ver, t, l}:
+      ColHub{a, n, ver, col.nat(St.st.js.text(v)), l}
+    case 5n ColHub{a, n, ver, t, +l}:
+      ColHub{a, n, ver, t, Bool.pick(List<&2, U32>, S.eq(l, col.hub.lic.none()), S.b("LICENSE"), l)}
+    case 6n ColHub{a, n, ver, t, +l}:
+      +s = col.hub.str(v)
+      ColHub{a, n, ver, t, Bool.pick(List<&2, U32>, Nat.is_eq(S.len(s), 0n), l, s)}
+    case _ h2:
+      h2
+
+type ColHi is Data:
+  ColHi{i: Nat, code: Nat, v: St.StTk}
+
+def col.hub.item(+p: List<&2, St.StJk>, v: St.StTk) -> List<&2, ColHi>:
+  match p:
+    case St.StJkK{+top} <> St.StJkI{+i} <> St.StJkK{+f} <> +rest:
+      Bool.pick(List<&2, ColHi>, S.eq(top, S.b("packages")), [ColHi{i, col.hub.code(f, rest), v}], Nil{})
+    case _:
+      Nil{}
+
+def col.hub.items(vs: List<&2, St.StJv>) -> List<&2, ColHi>:
+  match vs:
+    case Nil{}:
+      Nil{}
+    case St.StJv{p, v} <> more:
+      List.append(&2, ColHi, col.hub.item(p, v), col.hub.items(more))
+
+def col.hub.same(+xs: List<&2, ColHi>, +k: Nat) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case ColHi{+i, c, v} <> more:
+      Nat.is_eq(i, k)
+
+def col.hub.close(open: Bool, h: ColHub, rest: List<&2, ColHub>) -> List<&2, ColHub>:
+  match open:
+    case True{}:
+      h <> rest
+    case False{}:
+      rest
+
+# the items grouped by K, each group folded into a package
+def col.hub.grp(xs: List<&2, ColHi>, same: Bool, +k: Nat, cur: ColHub, open: Bool) -> List<&2, ColHub>:
+  match xs same:
+    case Nil{} _:
+      col.hub.close(open, cur, Nil{})
+    case ColHi{i, c, v} <> +more True{}:
+      col.hub.grp(more, col.hub.same(more, k), k, col.hub.set(c, v, cur), True{})
+    case ColHi{+i, c, v} <> +more False{}:
+      col.hub.close(open, cur, col.hub.grp(more, col.hub.same(more, i), i, col.hub.set(c, v, col.hub.empty()), True{}))
+
+def col.hub.of.values(m: Maybe<&2, List<&2, St.StJv>>) -> Maybe<&2, List<&2, ColHub>>:
+  match m:
+    case None{}:
+      None{}
+    case Some{vs}:
+      Some{col.hub.grp(col.hub.items(vs), False{}, 0n, col.hub.empty(), False{})}
+
+# a listing page's packages (None: the page is not JSON)
+def col.hub.listing(+json: List<&2, U32>) -> Maybe<&2, List<&2, ColHub>>:
+  col.hub.of.values(St.st.js.values(json))
+
+def col.hub.total.of(m: Maybe<&2, List<&2, St.StJv>>) -> Nat:
+  match m:
+    case None{}:
+      0n
+    case Some{vs}:
+      col.nat(St.st.js.text(Maybe.default(&2, St.StTk, St.st.js.at(vs, [St.StJkK{S.b("total")}]), St.StTkV{S.b("0")})))
+
+# the listing's total
+def col.hub.total(+json: List<&2, U32>) -> Nat:
+  col.hub.total.of(St.st.js.values(json))
+
+# The choice
+
+def col.hub.nats(xss: List<&2, List<&2, U32>>) -> List<&2, Nat>:
+  match xss:
+    case Nil{}:
+      Nil{}
+    case +x <> more:
+      col.nat(x) <> col.hub.nats(more)
+
+# a version's numbers: 0.1.11.0 is [0, 1, 11, 0]
+def col.hub.ver(+v: List<&2, U32>) -> List<&2, Nat>:
+  col.hub.nats(S.split(v, 46))
+
+# compare number lists a part at a time: 0 less, 1 equal, 2 greater (a prefix is less)
+def col.hub.vcmp(a: List<&2, Nat>, b: List<&2, Nat>) -> Nat:
+  match a b:
+    case Nil{} Nil{}:
+      1n
+    case Nil{} y <> yt:
+      0n
+    case x <> xt Nil{}:
+      2n
+    case +x <> xt +y <> yt:
+      +r = col.hub.vcmp(xt, yt)
+      Bool.pick(Nat, Nat.is_lt(x, y), 0n, Bool.pick(Nat, Nat.is_lt(y, x), 2n, r))
+
+# version v at time t is at least as new as version w at time u: greater, or the same
+# and published no earlier
+def col.hub.newer(+v: List<&2, U32>, +t: Nat, +w: List<&2, U32>, +u: Nat) -> Bool:
+  +c = col.hub.vcmp(col.hub.ver(v), col.hub.ver(w))
+  Bool.or(Nat.is_eq(c, 2n), Bool.and(Nat.is_eq(c, 1n), Nat.is_le(u, t)))
+
+# by name, the newest of a name first
+def col.hub.le(a: ColHub, b: ColHub) -> Bool:
+  match a b:
+    case ColHub{h1, +x, v, t, l1} ColHub{h2, +y, w, u, l2}:
+      Bool.pick(Bool, S.eq(x, y), col.hub.newer(v, t, w, u), col.le(x, y))
+
+def col.hub.dir.le(a: ColHub, b: ColHub) -> Bool:
+  col.le(col.hub.dir(a), col.hub.dir(b))
+
+def col.hub.first.go(xs: List<&2, ColHub>, +prev: List<&2, U32>, first: Bool) -> List<&2, ColHub>:
+  match xs first:
+    case Nil{} _:
+      Nil{}
+    case +x <> more True{}:
+      x <> col.hub.first.go(more, col.hub.name(x), False{})
+    case +x <> more False{}:
+      List.append(&2, ColHub, Bool.pick(List<&2, ColHub>, S.eq(col.hub.name(x), prev), Nil{}, [x]), col.hub.first.go(more, col.hub.name(x), False{}))
+
+def col.hub.hashes.go(xs: List<&2, ColHub>, +seen: Set()) -> List<&2, ColHub>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +x <> more:
+      +k = col.k(col.hub.hash(x))
+      List.append(&2, ColHub, Bool.pick(List<&2, ColHub>, L.v2.in(seen, k), Nil{}, [x]), col.hub.hashes.go(more, Set.add(seen, k)))
+
+# a listing without a hash twice (paging while the hub publishes can show one twice)
+def col.hub.uniq(xs: List<&2, ColHub>) -> List<&2, ColHub>:
+  col.hub.hashes.go(xs, Set.new())
+
+# the packages to take: the newest of every name and every unnamed one, by directory
+def col.hub.choose(+xs: List<&2, ColHub>) -> List<&2, ColHub>:
+  +named = List.filter(~ColHub, ~(h => col.hub.named(h)), xs)
+  +unnamed = List.filter(~ColHub, ~(h => Bool.not(col.hub.named(h))), xs)
+  List.sort(~ColHub, ~col.hub.dir.le, List.append(&2, ColHub, col.hub.first.go(List.sort(~ColHub, ~col.hub.le, named), Nil{}, True{}), unnamed))
+
+def col.hub.find(xs: List<&2, ColHub>, +hash: List<&2, U32>) -> Maybe<&2, ColHub>:
+  match xs:
+    case Nil{}:
+      None{}
+    case +x <> more:
+      +rest = col.hub.find(more, hash)
+      Bool.pick(Maybe<&2, ColHub>, S.eq(col.hub.hash(x), hash), Some{x}, rest)
+
+def col.hub.pin.got(+h: ColHub, +p: List<&2, U32>, m: Maybe<&2, ColHub>) -> ColHub:
+  match m:
+    case Some{x}:
+      x
+    case None{}:
+      ColHub{p, col.hub.name(h), S.b("?"), 0n, S.b("?")}
+
+# the choice under PINS: a pinned package's hash is the pinned one (its listing row when
+# the listing has it)
+def col.hub.pinned(+all: List<&2, ColHub>, +pins: List<&2, List<&2, U32>>, +h: ColHub) -> ColHub:
+  +p = col.pin(pins, col.hub.repo(h))
+  Bool.pick(ColHub, Bool.or(Nat.is_eq(S.len(p), 0n), S.eq(p, col.hub.hash(h))), h, col.hub.pin.got(h, p, col.hub.find(all, p)))
+
+def col.hub.pins(hs: List<&2, ColHub>, +all: List<&2, ColHub>, +pins: List<&2, List<&2, U32>>) -> List<&2, ColHub>:
+  match hs:
+    case Nil{}:
+      Nil{}
+    case h <> more:
+      col.hub.pinned(all, pins, h) <> col.hub.pins(more, all, pins)
+
+# ms since the epoch as an ISO date in UTC
+def col.hub.date(+ms: Nat) -> String:
+  +s = U32.from_nat(Nat.mod(Nat.div(ms, 1000n), 86400n))
+  Ck.civil(U32.from_nat(Nat.div(ms, 86400000n))) ++ "T" ++ Ck.pad2(U32.div(s, 3600)) ++ ":" ++ Ck.pad2(U32.div(U32.mod(s, 3600), 60)) ++ ":" ++ Ck.pad2(U32.mod(s, 60)) ++ "Z"
+
+# a PINS row: hub/NAME TAB HASH TAB DATE TAB LICENCE TAB NAME@VERSION
+def col.hub.pin.row(+h: ColHub) -> List<&2, U32>:
+  L.v2.concat([col.hub.repo(h), [9], col.hub.hash(h), [9], S.b(col.hub.date(col.hub.ts(h))), [9], col.hub.lic(h), [9], col.hub.label(h), [10]])
+
+# a HUB.tsv row: DIR TAB hub/NAME TAB HASH TAB VERSION TAB LICENCE
+def col.hub.row(+h: ColHub) -> List<&2, U32>:
+  L.v2.concat([col.hub.dir(h), [9], col.hub.repo(h), [9], col.hub.hash(h), [9], col.hub.version(h), [9], col.hub.lic(h), [10]])
+
+# The manifest
+
+type ColHf is Data:
+  ColHf{sha: List<&2, U32>, path: List<&2, U32>}
+
+def col.hub.hf.path(+f: ColHf) -> List<&2, U32>:
+  match f:
+    case ColHf{s, p}:
+      p
+
+def col.hub.in(+c: U32, +lo: U32, +hi: U32) -> Bool:
+  Bool.and(U32.is_le(lo, c), U32.is_le(c, hi))
+
+def col.hub.byte.ok(+c: U32) -> Bool:
+  Bool.or(Bool.or(col.hub.in(c, 97, 122), col.hub.in(c, 65, 90)), Bool.or(col.hub.in(c, 48, 57), Bool.or(Bool.or(U32.is_eq(c, 46), U32.is_eq(c, 95)), U32.is_eq(c, 45))))
+
+def col.hub.hex.byte(+c: U32) -> Bool:
+  Bool.or(col.hub.in(c, 48, 57), col.hub.in(c, 97, 102))
+
+def col.hub.bytes.ok(xs: List<&2, U32>) -> Bool:
+  match xs:
+    case Nil{}:
+      True{}
+    case +c <> more:
+      Bool.and(col.hub.byte.ok(c), col.hub.bytes.ok(more))
+
+def col.hub.hex.ok(xs: List<&2, U32>) -> Bool:
+  match xs:
+    case Nil{}:
+      True{}
+    case +c <> more:
+      Bool.and(col.hub.hex.byte(c), col.hub.hex.ok(more))
+
+def col.hub.part.ok(+p: List<&2, U32>) -> Bool:
+  Bool.and(Bool.and(Nat.is_lt(0n, S.len(p)), col.hub.bytes.ok(p)), Bool.not(Bool.or(S.eq(p, [46]), S.eq(p, [46, 46]))))
+
+def col.hub.parts.ok(ps: List<&2, List<&2, U32>>) -> Bool:
+  match ps:
+    case Nil{}:
+      True{}
+    case +p <> more:
+      Bool.and(col.hub.part.ok(p), col.hub.parts.ok(more))
+
+# a plain relative path: parts of [A-Za-z0-9._-] joined by single slashes, none . or ..
+def col.hub.path.ok(+p: List<&2, U32>) -> Bool:
+  Bool.and(Bool.and(Nat.is_lt(0n, S.len(p)), Bool.not(S.suffix(p, [47]))), col.hub.parts.ok(S.split(p, 47)))
+
+# a manifest line, `SHA256 PATH` (Nil: not one)
+def col.hub.man.line(+l: List<&2, U32>) -> List<&2, ColHf>:
+  +sha = L.v2.before(l, 32)
+  +p = L.v2.after(l, 32)
+  Bool.pick(List<&2, ColHf>, Bool.and(Bool.and(L.v2.has(l, 32), Nat.is_eq(S.len(sha), 64n)), Bool.and(col.hub.hex.ok(sha), col.hub.path.ok(p))), [ColHf{sha, p}], Nil{})
+
+def col.hub.man.go(ls: List<&2, List<&2, U32>>) -> List<&2, ColHf>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> more:
+      List.append(&2, ColHf, col.hub.man.line(l), col.hub.man.go(more))
+
+# a manifest's files (None: a line that is not one, or no file)
+def col.hub.man(+xs: List<&2, U32>) -> Maybe<&2, List<&2, ColHf>>:
+  +ls = col.nonempty(S.split.lines(xs))
+  +fs = col.hub.man.go(ls)
+  +n = List.length(&2, ColHf, fs)
+  Bool.pick(Maybe<&2, List<&2, ColHf>>, Bool.and(Nat.is_lt(0n, n), Nat.is_eq(n, List.length(&2, List<&2, U32>, ls))), Some{fs}, None{})
+
+# the manifest is the package's: its sha256 starts with the hash's 32 hex digits
+def col.hub.man.ok(+hash: List<&2, U32>, +xs: List<&2, U32>) -> Bool:
+  +h = List.drop(&2, U32, hash, 2n)
+  Bool.and(Bool.and(S.prefix(hash, S.b("0x")), Nat.is_eq(S.len(h), 32n)), S.prefix(S.b(H.sha256(xs)), h))
+
+# sha256sum's check file: `SHA256  PATH` a line
+def col.hub.sums(fs: List<&2, ColHf>) -> List<&2, U32>:
+  match fs:
+    case Nil{}:
+      Nil{}
+    case ColHf{s, p} <> more:
+      L.v2.concat([s, [32, 32], p, [10], col.hub.sums(more)])
+
+def col.hub.curl.flags() -> List<&2, String>:
+  ["-fsS", "--retry", "3", "--retry-delay", "2", "--connect-timeout", "30"]
+
+# curl's arguments for every file: -o PATH URL/0xHASH/PATH
+def col.hub.gets(fs: List<&2, ColHf>, +base: String, +hash: String) -> List<&2, String>:
+  match fs:
+    case Nil{}:
+      Nil{}
+    case +f <> more:
+      +p = S.str(col.hub.hf.path(f))
+      "-o" <> p <> (base ++ "/" ++ hash ++ "/" ++ p) <> col.hub.gets(more, base, hash)
+
+# HUB.tsv's rows as repositories (kind 3: a hub package), with the hub line's rule
+def col.hub.repos.of(ls: List<&2, List<&2, U32>>, +rule: Nat, +excl: List<&2, List<&2, U32>>) -> List<&2, ColRepo>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> more:
+      +fs = S.split(l, 9)
+      List.append(&2, ColRepo, Bool.pick(List<&2, ColRepo>, Nat.is_lt(1n, List.length(&2, List<&2, U32>, fs)), [ColRepo{L.v2.nth(fs, 1n), L.v2.nth(fs, 0n), rule, excl, 3n}], Nil{}), col.hub.repos.of(more, rule, excl))
+
+# The fetch
+
+def col.hub.src(+c: ColCx) -> String:
+  col.cx.src(c) ++ "/HUB.tsv"
+
+def col.hub.pages.got(m: Maybe<&2, List<&2, ColHub>>, +page: String) -> IO(List<&2, ColHub>):
+  match m:
+    case Some{ps}:
+      IO.pure(List<&2, ColHub>, ps)
+    case None{}:
+      IO.die(List<&2, ColHub>, 1, "collect: hub: " ++ page ++ " is not a package listing")
+
+# the listing, a page at a time from AFTER, until a page is empty or the total is reached
+def col.hub.pages(fuel: Nat, go: Bool, +base: String, +dir: String, +after: Nat, acc: List<&2, ColHub>) -> IO(List<&2, ColHub>):
+  match fuel go:
+    case 1n+f True{}:
+      +page = dir ++ "/packages-" ++ Nat.show(after) ++ ".json"
+      do IO<List<&2, ColHub>>:
+        col.to("curl " ++ col.hub.page.url(base, after), "curl", List.append(&2, String, col.hub.curl.flags(), ["--max-time", "120", col.hub.page.url(base, after)]), page)
+        +xs : List<&2, U32> <- S.read(page)
+        +ps : List<&2, ColHub> <- col.hub.pages.got(col.hub.listing(xs), page)
+        +n : Nat = List.length(&2, ColHub, ps)
+        +total : Nat = col.hub.total(xs)
+        col.log("fetch: hub listing after " ++ Nat.show(after) ++ ": " ++ Nat.show(n) ++ " packages (total " ++ Nat.show(total) ++ ")")
+        col.hub.pages(f, Bool.and(Nat.is_lt(0n, n), Nat.is_lt(Nat.add(after, n), total)), base, dir, Nat.add(after, n), List.append(&2, ColHub, acc, ps))
+    case _ _:
+      IO.pure(List<&2, ColHub>, acc)
+
+def col.hub.pin.new(fresh: Bool, +pins: String, +h: ColHub) -> IO(Unit):
+  match fresh:
+    case True{}:
+      S.add(pins, col.hub.pin.row(h))
+    case False{}:
+      IO.pure(Unit, Unit{})
+
+def col.hub.pin.all(hs: List<&2, ColHub>, +pins: String, +old: List<&2, List<&2, U32>>) -> IO(Unit):
+  match hs:
+    case Nil{}:
+      IO.pure(Unit, Unit{})
+    case +h <> more:
+      do IO<Unit>:
+        col.hub.pin.new(Nat.is_eq(S.len(col.pin(old, col.hub.repo(h))), 0n), pins, h)
+        col.hub.pin.all(more, pins, old)
+
+# a directory whose .hub is the hash is complete
+def col.hub.done(+dir: String, +hash: List<&2, U32>) -> IO(Bool):
+  do IO<Bool>:
+    there : Bool <- S.exists(dir ++ "/.hub")
+    +xs : List<&2, U32> <- S.read(dir ++ "/.hub")
+    return Bool.and(there, S.eq(S.chomp(xs), hash))
+
+def col.hub.todo.keep(done: Bool, h: ColHub, rest: List<&2, ColHub>) -> List<&2, ColHub>:
+  match done:
+    case True{}:
+      rest
+    case False{}:
+      h <> rest
+
+# the chosen packages not complete yet (each emptied and made again)
+def col.hub.todo(hs: List<&2, ColHub>, +src: String) -> IO(List<&2, ColHub>):
+  match hs:
+    case Nil{}:
+      IO.pure(List<&2, ColHub>, Nil{})
+    case +h <> more:
+      +dir = src ++ "/" ++ S.str(col.hub.dir(h))
+      do IO<List<&2, ColHub>>:
+        done : Bool <- col.hub.done(dir, col.hub.hash(h))
+        +rest : List<&2, ColHub> <- col.hub.todo(more, src)
+        return col.hub.todo.keep(done, h, rest)
+
+def col.hub.fresh(hs: List<&2, ColHub>, +src: String) -> IO(Unit):
+  match hs:
+    case Nil{}:
+      IO.pure(Unit, Unit{})
+    case +h <> more:
+      +dir = src ++ "/" ++ S.str(col.hub.dir(h))
+      do IO<Unit>:
+        S.rm(dir)
+        S.mkdir(dir)
+        col.hub.fresh(more, src)
+
+def col.hub.man.jobs(hs: List<&2, ColHub>, +base: String, +src: String, +k: Nat) -> List<&2, ColJob>:
+  match hs:
+    case Nil{}:
+      Nil{}
+    case +h <> more:
+      +hash = S.str(col.hub.hash(h))
+      +out = src ++ "/" ++ S.str(col.hub.dir(h)) ++ "/.hub.manifest"
+      ColJob{k, 0n, [ColCmd{".", Nil{}, 300, "curl", List.append(&2, String, col.hub.curl.flags(), ["--max-time", "120", base ++ "/" ++ hash ++ "/manifest"]), out}]} <> col.hub.man.jobs(more, base, src, 1n+k)
+
+# A package on its way: its row, its directory, its files (None: refused)
+type ColHp is Data:
+  ColHp{h: ColHub, dir: String, fs: Maybe<&2, List<&2, ColHf>>}
+
+def col.hub.hp.ok(+p: ColHp) -> Bool:
+  match p:
+    case ColHp{h, d, Some{fs}}:
+      True{}
+    case ColHp{h, d, None{}}:
+      False{}
+
+def col.hub.man.note(ok: Bool, +good: Bool, +h: ColHub) -> IO(Unit):
+  match ok:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      col.log("fetch: hub: " ++ S.str(col.hub.label(h)) ++ ": " ++ Bool.pick(String, good, "a manifest line is not `SHA256 PATH` with a plain relative path", "the manifest does not hash to the package's hash") ++ "; left out")
+
+def col.hub.man.read(ok: Bool, +h: ColHub, +dir: String) -> IO(ColHp):
+  match ok:
+    case True{}:
+      do IO<ColHp>:
+        +xs : List<&2, U32> <- S.read(dir ++ "/.hub.manifest")
+        +good : Bool = col.hub.man.ok(col.hub.hash(h), xs)
+        +m : Maybe<&2, List<&2, ColHf>> = Bool.pick(Maybe<&2, List<&2, ColHf>>, good, col.hub.man(xs), None{})
+        col.hub.man.note(col.hub.hp.ok(ColHp{h, dir, m}), good, h)
+        return ColHp{h, dir, m}
+    case False{}:
+      do IO<ColHp>:
+        col.log("fetch: hub: " ++ S.str(col.hub.label(h)) ++ ": no manifest")
+        return ColHp{h, dir, None{}}
+
+# the manifests read (the pool's results in the packages' order)
+def col.hub.hps(hs: List<&2, ColHub>, rs: List<&2, ColRes>, +src: String) -> IO(List<&2, ColHp>):
+  match hs rs:
+    case +h <> more +r <> rt:
+      do IO<List<&2, ColHp>>:
+        +p : ColHp <- col.hub.man.read(U32.is_eq(col.res.status(r), 0), h, src ++ "/" ++ S.str(col.hub.dir(h)))
+        +rest : List<&2, ColHp> <- col.hub.hps(more, rt, src)
+        return p <> rest
+    case _ _:
+      IO.pure(List<&2, ColHp>, Nil{})
+
+def col.hub.file.jobs(ps: List<&2, ColHp>, +base: String, +k: Nat) -> List<&2, ColJob>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case ColHp{+h, +dir, Some{+fs}} <> more:
+      +hash = S.str(col.hub.hash(h))
+      ColJob{k, 0n, [ColCmd{dir, Nil{}, 3600, "curl", List.append(&2, String, col.hub.curl.flags(), List.append(&2, String, ["--max-time", "3000", "--create-dirs"], col.hub.gets(fs, base, hash))), ""},
+        ColCmd{dir, Nil{}, 600, "sha256sum", ["--quiet", "--strict", "-c", ".hub.sha256"], ""}]} <> col.hub.file.jobs(more, base, 1n+k)
+    case ColHp{h, dir, None{}} <> more:
+      col.hub.file.jobs(more, base, k)
+
+def col.hub.sums.write(ps: List<&2, ColHp>) -> IO(Unit):
+  match ps:
+    case Nil{}:
+      IO.pure(Unit, Unit{})
+    case ColHp{h, +dir, Some{fs}} <> more:
+      do IO<Unit>:
+        S.write(dir ++ "/.hub.sha256", col.hub.sums(fs))
+        col.hub.sums.write(more)
+    case ColHp{h, dir, None{}} <> more:
+      col.hub.sums.write(more)
+
+def col.hub.oks(ps: List<&2, ColHp>) -> List<&2, ColHp>:
+  List.filter(~ColHp, ~(p => col.hub.hp.ok(p)), ps)
+
+def col.hub.end(ok: Bool, +h: ColHub, +dir: String, +r: ColRes) -> IO(Unit):
+  match ok:
+    case True{}:
+      S.write(dir ++ "/.hub", S.append(col.hub.hash(h), [10]))
+    case False{}:
+      do IO<Unit>:
+        col.log("fetch: hub: " ++ S.str(col.hub.label(h)) ++ " failed (exit " ++ U32.show(col.res.status(r)) ++ "): " ++ S.str(S.lines.take(col.res.text(r), 3n)))
+        S.rm(dir)
+
+def col.hub.ends(ps: List<&2, ColHp>, rs: List<&2, ColRes>) -> IO(Unit):
+  match ps rs:
+    case ColHp{+h, +dir, m} <> more +r <> rt:
+      do IO<Unit>:
+        col.hub.end(U32.is_eq(col.res.status(r), 0), h, dir, r)
+        col.hub.ends(more, rt)
+    case _ _:
+      IO.pure(Unit, Unit{})
+
+def col.hub.rows(hs: List<&2, ColHub>, +src: String) -> IO(List<&2, U32>):
+  match hs:
+    case Nil{}:
+      IO.pure(List<&2, U32>, Nil{})
+    case +h <> more:
+      do IO<List<&2, U32>>:
+        done : Bool <- col.hub.done(src ++ "/" ++ S.str(col.hub.dir(h)), col.hub.hash(h))
+        +rest : List<&2, U32> <- col.hub.rows(more, src)
+        return S.append(Bool.pick(List<&2, U32>, done, col.hub.row(h), Nil{}), rest)
+
+def col.hub.fetch.go(+c: ColCx, +hc: ColHubCf) -> IO(Unit):
+  match hc:
+    case ColHubCf{+u, r, e}:
+      +base = col.hub.base(u)
+      +src = col.cx.src(c)
+      +pins = col.cx.pins(c)
+      do IO<Unit>:
+        S.mkdir(src ++ "/.hub")
+        +all0 : List<&2, ColHub> <- col.hub.pages(col.fuel(), True{}, base, src ++ "/.hub", 0n, Nil{})
+        +all : List<&2, ColHub> = col.hub.uniq(all0)
+        +old : List<&2, List<&2, U32>> <- col.read.lines(pins)
+        +chosen : List<&2, ColHub> = col.hub.pins(col.hub.choose(all), all, old)
+        +nn : Nat = List.length(&2, ColHub, List.filter(~ColHub, ~(h => col.hub.named(h)), chosen))
+        col.log("fetch: hub " ++ base ++ ": " ++ Nat.show(List.length(&2, ColHub, all)) ++ " packages listed; " ++ Nat.show(nn) ++ " names (the newest of each), " ++ Nat.show(Nat.sub(List.length(&2, ColHub, chosen), nn)) ++ " unnamed")
+        col.hub.pin.all(chosen, pins, old)
+        +todo : List<&2, ColHub> <- col.hub.todo(chosen, src)
+        col.log("fetch: hub: " ++ Nat.show(List.length(&2, ColHub, todo)) ++ " packages to fetch (the rest complete in " ++ src ++ ")")
+        col.hub.fresh(todo, src)
+        +mr : List<&2, ColRes> <- col.pool("fetch: hub manifests", col.cx.procs(c), col.hub.man.jobs(todo, base, src, 0n))
+        +hps : List<&2, ColHp> <- col.hub.hps(todo, mr, src)
+        +oks : List<&2, ColHp> = col.hub.oks(hps)
+        col.hub.sums.write(oks)
+        +fr : List<&2, ColRes> <- col.pool("fetch: hub files", col.cx.procs(c), col.hub.file.jobs(oks, base, 0n))
+        col.hub.ends(oks, fr)
+        +rows : List<&2, U32> <- col.hub.rows(chosen, src)
+        S.write(col.hub.src(c), rows)
+        +n : Nat = List.length(&2, List<&2, U32>, col.nonempty(S.split.lines(rows)))
+        col.log("fetch: hub: " ++ Nat.show(n) ++ " of " ++ Nat.show(List.length(&2, ColHub, chosen)) ++ " packages complete (" ++ col.hub.src(c) ++ ")")
+
+def col.hub.fetch.all(+c: ColCx, hs: List<&2, ColHubCf>) -> IO(Unit):
+  match hs:
+    case Nil{}:
+      IO.pure(Unit, Unit{})
+    case +h <> more:
+      col.hub.fetch.go(c, h)
+
+def col.hub.fetch(+c: ColCx) -> IO(Unit):
+  col.hub.fetch.all(c, col.hub.cf(col.cx.cfg(c)))
+
+def col.hub.repos.got(there: Bool, +c: ColCx, +hc: ColHubCf) -> IO(List<&2, ColRepo>):
+  match there hc:
+    case True{} ColHubCf{u, +r, +e}:
+      do IO<List<&2, ColRepo>>:
+        +ls : List<&2, List<&2, U32>> <- col.read.lines(col.hub.src(c))
+        return col.hub.repos.of(ls, r, e)
+    case False{} h:
+      IO.die(List<&2, ColRepo>, 1, "collect: " ++ col.hub.src(c) ++ " is missing (the hub's packages: run fetch first)")
+
+def col.hub.repos.all(+c: ColCx, hs: List<&2, ColHubCf>) -> IO(List<&2, ColRepo>):
+  match hs:
+    case Nil{}:
+      IO.pure(List<&2, ColRepo>, Nil{})
+    case +h <> more:
+      do IO<List<&2, ColRepo>>:
+        there : Bool <- S.exists(col.hub.src(c))
+        col.hub.repos.got(there, c, h)
+
+# the hub's packages as repositories (none without a hub line)
+def col.hub.repos(+c: ColCx) -> IO(List<&2, ColRepo>):
+  col.hub.repos.all(c, col.hub.cf(col.cx.cfg(c)))
+
 def col.fetch(+c: ColCx) -> IO(Unit):
   +rs = col.repos(col.cx.cfg(c))
   do IO<Unit>:
@@ -949,6 +1638,7 @@ def col.fetch(+c: ColCx) -> IO(Unit):
     col.clones(col.cx.pins(c), col.cx.src(c), rs)
     col.sibs(col.cf.args(col.cx.cfg(c), S.b("sibling")), col.cx.src(c))
     col.up.fetch.go(col.up(col.cx.cfg(c)), c)
+    col.hub.fetch(c)
     +pl : List<&2, List<&2, U32>> <- col.read.lines(col.cx.pins(c))
     col.log("fetch: done (" ++ Nat.show(List.length(&2, List<&2, U32>, col.nonempty(pl))) ++ " pinned)")
 
@@ -1112,8 +1802,9 @@ def col.list.go(rs: List<&2, ColRepo>, +c: ColCx, +pins: List<&2, List<&2, U32>>
         col.list.go(more, c, pins, known)
 
 def col.list(+c: ColCx) -> IO(Unit):
-  +rs = col.repos(col.cx.cfg(c))
   do IO<Unit>:
+    +hub : List<&2, ColRepo> <- col.hub.repos(c)
+    +rs : List<&2, ColRepo> = List.append(&2, ColRepo, col.repos(col.cx.cfg(c)), hub)
     S.mkdir(col.cx.out(c) ++ "/stage")
     S.write(col.st(c, "list.tsv"), Nil{})
     S.write(col.st(c, "list.counts"), Nil{})
@@ -2291,7 +2982,7 @@ def col.load(+path: String) -> IO(ColCfg()):
 
 def col.validate(+c: ColCx) -> IO(Unit):
   +cs = col.cx.cfg(c)
-  +bad = col.bad.rules(col.repos(cs))
+  +bad = List.append(&2, List<&2, U32>, col.bad.rules(col.repos(cs)), col.hub.cf.rules(col.hub.cf(cs)))
   +ok = Bool.and(Bool.and(Bool.not(String.is_empty(col.cx.out(c))), Bool.not(String.is_empty(col.cx.src(c)))),
     Bool.and(String.eq(col.cf.str(cs, "lang", "bend"), "bend"), Nat.is_eq(List.length(&2, List<&2, U32>, bad), 0n)))
   Bool.pick(IO(Unit), ok, IO.pure(Unit, Unit{}),
