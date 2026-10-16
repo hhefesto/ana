@@ -26,7 +26,10 @@ import ../Box/Local.bend as Lc
 #                   SIM_S2_STEPS`, 30) and OUT/stage.env (NLR, NWARM=10), the episodes counted
 #                   on stderr, the stage line on stdout (`s2 traind-next EVERY REL/plan... REL
 #                   fp100m`, REL OUT under TRAINER_DIR, else $HOME/formalTransformer); with
-#                   SIM_S2_FAIL set, run 3's bend-windows refusal and exit 1.  corpus-v2
+#                   SIM_S2_FAIL set, run 3's bend-windows refusal and exit 1; a BOUNDARY past
+#                   S1's plan (`plan sim N`) refused as s2 refuses a step that starts no
+#                   segment; REST_STEPS logged, and CTL_OUT (2026-10-15, run 4) built as
+#                   OUT is (`plan sim SIM_CTL_STEPS`, 20, and stage.env).  corpus-v2
 #                   agent-act CKPT DIR: the act round above
 #   bend-episode    accept|fixed CALLS CAP OUT EPLOG: EPLOG's whole frames, those of kind act
 #                   (accept) or fix (fixed) as `ID NUL TEXT NUL` records in OUT/LANG-KIND/
@@ -314,27 +317,47 @@ def sdf.s2.acts(as: List<&2, String>) -> IO(Unit):
         sdf.s2.count(Maybe.default(&2, List<&2, List<&2, U32>>, m, Nil{}), a ++ "/accepted")
         sdf.s2.acts(t)
 
+# REST_STEPS said; CTL_OUT's plan (`plan sim SIM_CTL_STEPS`, 20) and stage.env when it is set
+def sdf.s2.ctl(+ctl: String, +rest: String) -> IO(Unit):
+  do IO<Unit>:
+    Bool.pick(IO(Unit), String.is_empty(rest), IO.pure(Unit, Unit{}), Ck.log("s2: REST_STEPS " ++ rest ++ " (bend-sim)"))
+    +steps : Nat <- S.env.nat("SIM_CTL_STEPS", 20n)
+    Bool.pick(IO(Unit), String.is_empty(ctl), IO.pure(Unit, Unit{}), S.rm(ctl))
+    Bool.pick(IO(Unit), String.is_empty(ctl), IO.pure(Unit, Unit{}), S.mkdir(ctl))
+    Bool.pick(IO(Unit), String.is_empty(ctl), IO.pure(Unit, Unit{}), S.write(ctl ++ "/plan-fp100m-b16-windows.tsv", S.b("plan sim " ++ Nat.show(steps) ++ "\n")))
+    Bool.pick(IO(Unit), String.is_empty(ctl), IO.pure(Unit, Unit{}), S.write(ctl ++ "/stage.env", S.b("NLR=1e-4\nNWARM=10\n")))
+    Bool.pick(IO(Unit), String.is_empty(ctl), IO.pure(Unit, Unit{}), Ck.log("s2: control: " ++ Nat.show(steps) ++ " steps in " ++ ctl ++ " (bend-sim)"))
+
 def sdf.s2.build(+s1: String, +b: String, +out: String, +acts: List<&2, String>) -> IO(Unit):
   do IO<Unit>:
     +steps : Nat <- S.env.nat("SIM_S2_STEPS", 30n)
     +every : String <- S.env("EVERY", "5000")
     +home : String <- S.env("HOME", "")
     +tdir : String <- S.env("TRAINER_DIR", home ++ "/formalTransformer")
+    +rest : String <- S.env("REST_STEPS", "")
+    +ctl : String <- S.env("CTL_OUT", "")
     S.rm(out)
     S.mkdir(out)
     sdf.s2.acts(acts)
     S.write(out ++ "/plan-fp100m-b16-windows.tsv", S.b("plan sim " ++ Nat.show(steps) ++ "\n"))
     S.write(out ++ "/stage.env", S.b("NLR=1e-4\nNWARM=10\n"))
+    sdf.s2.ctl(ctl, rest)
     Ck.log("s2: S2 from " ++ s1 ++ " at step " ++ b ++ ": " ++ Nat.show(steps) ++ " steps in " ++ out ++ "; append to STAGES: (bend-sim)")
     IO.print("s2 traind-next " ++ every ++ " " ++ sdf.rel(out, tdir) ++ "/plan-fp100m-b16-windows.tsv " ++ sdf.rel(out, tdir) ++ " fp100m")
 
+# BOUNDARY must be a step of S1's plan (`plan sim N`: at most N), as s2's must start one of its
+# segments: a hot-started S1's global step (plan-base + BOUNDARY) is refused, as s2 refuses it
 def sdf.s2(+s1: String, +b: String, +out: String, +acts: List<&2, String>) -> IO(Unit):
   do IO<Unit>:
     +n : Nat <- S.size(s1 ++ "/plan-fp100m-b16-windows.tsv")
+    +pl : List<&2, U32> <- S.read(s1 ++ "/plan-fp100m-b16-windows.tsv")
+    +total : Nat = Maybe.default(&2, Nat, Lc.lcl.nat(Lc.lcl.nth(Lc.lcl.words(S.lines.first(pl)), 2n)), 0n)
+    +bn : Nat = Maybe.default(&2, Nat, Lc.lcl.nat(S.b(b)), U32.to_nat(4000000000))
     fail : String <- S.env("SIM_S2_FAIL", "")
     Bool.pick(IO(Unit), Nat.is_eq(n, 0n), IO.die(Unit, 1, "s2: no plan " ++ s1 ++ "/plan-fp100m-b16-windows.tsv"),
-      Bool.pick(IO(Unit), String.is_empty(fail), sdf.s2.build(s1, b, out, acts),
-        IO.die(Unit, 1, "s2: plan-windows: \n  shard 0: bend-windows failed (exit 1): windows: a transcript of 2158 tokens does not fit a window of 2046\n")))
+      Bool.pick(IO(Unit), Nat.is_lt(total, bn), IO.die(Unit, 1, "s2: step " ++ b ++ " starts no segment of " ++ s1 ++ "/plan-fp100m-b16-windows.tsv (bend-sim: its plan has " ++ Nat.show(total) ++ " steps)"),
+        Bool.pick(IO(Unit), String.is_empty(fail), sdf.s2.build(s1, b, out, acts),
+          IO.die(Unit, 1, "s2: plan-windows: \n  shard 0: bend-windows failed (exit 1): windows: a transcript of 2158 tokens does not fit a window of 2046\n"))))
 
 # The parts ----------------------------------------------------------------------------------------
 

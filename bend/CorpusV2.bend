@@ -18,6 +18,7 @@ import ./CorpusV2/ActSet.bend as As2
 import ./CorpusV2/Steady.bend as Sm
 import ./CorpusV2/Recipes.bend as Rc
 import ./CorpusV2/AgentAct.bend as Aa
+import ./CorpusV2/Unused.bend as Un
 
 # bend-corpus-v2: corpus v2's tools (docs/CORPUS-V2.md), one subcommand each,
 # ported from the Python they replaced, each byte-identical to it on the
@@ -49,6 +50,9 @@ import ./CorpusV2/AgentAct.bend as Aa
 #   behaviour tasks [--check] [LANG...] | run CKPT|REF TAG [LANG...] | selftest [LANG...]
 #                                   the behaviour test   (CorpusV2/Behaviour.bend)
 #   collect CFG STEP...             new Bend code from a config: fetch list gate-bend nul keys pre gate split check | all   (CorpusV2/Collect.bend)
+#   unused POOL OUT SEEN... | unused POOL=OUT... SEEN...   the records of each POOL (JSONL) whose id is in no SEEN stream (.jsonl lines
+#                                   or NUL pairs), in POOL's order, SEEN read once; ids spooled by PROCS workers
+#                                   (unused-spool, unused-finish), sorted by `sort`, merged   (CorpusV2/Unused.bend)
 #
 # The run recipes (2026-10-15, the plan "all logic in Bend", Phase 4: the
 # tools/corpus-v2 scripts they replace in brackets):
@@ -244,6 +248,12 @@ def c2.args(xs: List<String>) -> IO(Unit):
       Rc.rcp.evals(more)
     case "windows" <> more:
       Rc.rcp.windows(more)
+    case "unused-spool" <> more:
+      Un.unu.spool.main(more)
+    case "unused-finish" <> more:
+      Un.unu.finish.main(more)
+    case "unused" <> more:
+      Un.unu.main(more)
     case "raw-build" <> more:
       Rc.rcp.raw.build(more)
     case +c <> more:

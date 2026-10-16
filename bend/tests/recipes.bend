@@ -4,6 +4,7 @@ import ../Sha256.bend as H
 import ../CorpusV2/Steps.bend as St
 import ../CorpusV2/Keyed.bend as K
 import ../CorpusV2/S2.bend as T2
+import ../Train/Opt.bend as O
 import ../CorpusV2/ActSet.bend as A
 import ../CorpusV2/Steady.bend as M
 import ../CorpusV2/Recipes.bend as R
@@ -81,6 +82,63 @@ def rt.keyed.io(+dir: String) -> IO(List<&2, RcpCk>):
 
 # s2 -----------------------------------------------------------------------------------------------
 
+def rt.lines.eq(xs: List<&2, List<&2, U32>>, ys: List<&2, List<&2, U32>>) -> Bool:
+  match xs ys:
+    case Nil{} Nil{}:
+      True{}
+    case +x <> xt +y <> yt:
+      Bool.and(S.eq(x, y), rt.lines.eq(xt, yt))
+    case _ _:
+      False{}
+
+def rt.cap.none(c: T2.S2Cap) -> Bool:
+  match c:
+    case T2.S2NoCap{}:
+      True{}
+    case _:
+      False{}
+
+# the plan's own steps by awk's arithmetic: END - START ($10 - $9) of each line
+def rt.rest.steps(ls: List<&2, List<&2, U32>>) -> Nat:
+  match ls:
+    case Nil{}:
+      0n
+    case +l <> t:
+      +ws = K.kor.words(l)
+      Nat.add(Nat.sub(K.kor.nat(K.kor.field(ws, 9n)), K.kor.nat(K.kor.field(ws, 8n))), rt.rest.steps(t))
+
+# for each N: the cap is a prefix of the rest, its steps at most N, and the next segment would pass N
+def rt.cap.law(+rest: List<&2, List<&2, U32>>, ns: List<&2, Nat>) -> Bool:
+  match ns:
+    case Nil{}:
+      True{}
+    case +n <> t:
+      +c = T2.s2s.cap(rest, n)
+      +k = List.length(&2, List<&2, U32>, c)
+      +next = List.take(&2, List<&2, U32>, rest, 1n+k)
+      +over = Bool.or(Nat.is_eq(k, List.length(&2, List<&2, U32>, rest)), Nat.is_lt(n, T2.s2s.steps.of(next)))
+      Bool.and(Bool.and(rt.lines.eq(c, List.take(&2, List<&2, U32>, rest, k)), Bool.and(Nat.is_le(T2.s2s.steps.of(c), n), over)), rt.cap.law(rest, t))
+
+# Train/Opt's lr.at as TrainDense's hot loop calls it (TRAIN_NEXT: base the
+# checkpoint's step, the schedule's total base + the plan's steps, TRAIN_LR read
+# by F32.read): lr.at(NLR, (base + b) - base, warm, (base + total) - base), shown
+# as the log shows it
+def rt.hot.one(+base: Nat, bs: List<&2, Nat>) -> Bool:
+  match bs:
+    case Nil{}:
+      True{}
+    case +b <> t:
+      +lr = Maybe.default(&2, F32, F32.read("1e-4"), 0.0)
+      +trainer = F32.show(O.lr.at(lr, Nat.sub(Nat.add(base, b), base), 300n, Nat.sub(Nat.add(base, 26000n), base)))
+      Bool.and(rt.is(T2.s2s.nlr("1e-4", b, 300n, 26000n), trainer), rt.hot.one(base, t))
+
+def rt.hot.nlr(bases: List<&2, Nat>, +bs: List<&2, Nat>) -> Bool:
+  match bases:
+    case Nil{}:
+      True{}
+    case +p <> t:
+      Bool.and(rt.hot.one(p, bs), rt.hot.nlr(t, bs))
+
 def rt.s2(+plan: List<&2, U32>, +s1log: List<&2, U32>) -> List<&2, RcpCk>:
   +pl = T2.s2s.lines(plan)
   +rest = T2.s2s.rest(pl, 170n)
@@ -97,7 +155,20 @@ def rt.s2(+plan: List<&2, U32>, +s1log: List<&2, U32>) -> List<&2, RcpCk>:
    RcpCk{"s2 per", Bool.and(Bool.and(Nat.is_eq(T2.s2s.per(0n), 1n), Nat.is_eq(T2.s2s.per(149n), 1n)), Bool.and(Nat.is_eq(T2.s2s.per(150n), 2n), Nat.is_eq(T2.s2s.per(4754n), 48n)))},
    RcpCk{"s2 stage line relative to the trainer's directory",
      Bool.and(rt.is(T2.s2s.stage("5000", T2.s2s.rel("/root/formalTransformer/run/v3/S2", "/root/formalTransformer")), "s2 traind-next 5000 run/v3/S2/plan-fp100m-b16-windows.tsv run/v3/S2 fp100m"),
-       rt.is(T2.s2s.rel("run/v3/S2", "/root/formalTransformer"), "run/v3/S2"))}]
+       rt.is(T2.s2s.rel("run/v3/S2", "/root/formalTransformer"), "run/v3/S2"))},
+   # REST_STEPS (run 4): the rest from 170 is segments of 66, 69, 66, 76, ... steps ($8)
+   RcpCk{"s2 REST_STEPS: unset or empty keeps the whole rest", Bool.and(rt.lines.eq(T2.s2s.capped(T2.s2s.cap.of(""), rest), rest), rt.cap.none(T2.s2s.cap.of("")))},
+   RcpCk{"s2 REST_STEPS: the leading segments whose steps sum to at most N", Bool.and(Bool.and(Nat.is_eq(List.length(&2, List<&2, U32>, T2.s2s.cap(rest, 200n)), 2n),
+     Nat.is_eq(List.length(&2, List<&2, U32>, T2.s2s.cap(rest, 201n)), 3n)), Bool.and(Nat.is_eq(T2.s2s.steps.of(T2.s2s.cap(rest, 201n)), 201n),
+       rt.lines.eq(T2.s2s.capped(T2.s2s.cap.of("201"), rest), List.take(&2, List<&2, U32>, rest, 3n))))},
+   RcpCk{"s2 REST_STEPS: never past N, never a segment out of order", rt.cap.law(rest, [0n, 1n, 65n, 66n, 134n, 135n, 136n, 1000n, 1949n, 1950n, 100000n])},
+   RcpCk{"s2 REST_STEPS: past the rest's steps keeps it all; under its first segment keeps none", Bool.and(Bool.and(Nat.is_eq(T2.s2s.steps.of(rest), rt.rest.steps(rest)),
+     rt.lines.eq(T2.s2s.cap(rest, T2.s2s.steps.of(rest)), rest)), Bool.and(List.is_empty(&2, List<&2, U32>, T2.s2s.cap(rest, 65n)), List.is_empty(&2, List<&2, U32>, T2.s2s.cap(Nil{}, 9n))))},
+   RcpCk{"s2 REST_STEPS: a word that is not a step count is refused", Bool.and(Bool.not(T2.s2s.cap.ok(T2.s2s.cap.of("4k"))), Bool.and(T2.s2s.cap.ok(T2.s2s.cap.of("4000")), T2.s2s.cap.ok(T2.s2s.cap.of(""))))},
+   RcpCk{"s2 REST_STEPS: the share is the capped rest's (3187 windows; awk's 0.0760)", Bool.and(Nat.is_eq(T2.s2s.tw(T2.s2s.cap(rest, 201n), False{}), 3187n),
+     rt.is(T2.s2s.share(262n, T2.s2s.tw(T2.s2s.cap(rest, 201n), False{})), "0.0760"))},
+   # a hot-started S1 (bend-box again: the trainer's base is the checkpoint's step, its total base + the plan's)
+   RcpCk{"s2 NLR of a hot-started S1 is the trainer's lr at global step base + BOUNDARY", rt.hot.nlr([56725n, 0n, 1n], [300n, 4000n, 11280n, 26000n])}]
 
 # actset, steady-mix, recipes ------------------------------------------------------------------
 

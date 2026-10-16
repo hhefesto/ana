@@ -8,6 +8,7 @@ import ../Box/Unit.bend as Un
 import ../Box/Guard.bend as Gd
 import ../Box/Handover.bend as Hv
 import ../Box/Move.bend as Mv
+import ../Box/Chain.bend as Ch
 
 # The run drivers' pure parts (2026-10-15, the plan's Phase 4b: bend/Box/
 # RunCfg, Unit, Guard, Handover and Move, from run 3's boot-guard.sh,
@@ -226,6 +227,43 @@ def drv.t.hand(+out: List<&2, U32>) -> List<&2, DrvCk>:
    DrvCk{"handover: the appended line starts a line of its own", Bool.and(S.eq(Hv.hov.append.text(S.b("s1 traind 5000"), "s2 x"), S.b("\ns2 x\n")),
      Bool.and(S.eq(Hv.hov.append.text(S.b("s1 traind 5000\n"), "s2 x"), S.b("s2 x\n")), S.eq(Hv.hov.append.text(Nil{}, "s2 x"), S.b("s2 x\n"))))}]
 
+# Run 4's hand-over (2026-10-15): plan-base and the control stage -----------------------------------
+
+# 0 wait, 1 done, 2 off (with its text)
+def drv.t.w.is(+w: Hv.HovW, +code: Nat, +text: String) -> Bool:
+  match w:
+    case Hv.HovWait{}:
+      Nat.is_eq(code, 0n)
+    case Hv.HovDone{}:
+      Nat.is_eq(code, 1n)
+    case Hv.HovOff{+t}:
+      Bool.and(Nat.is_eq(code, 2n), String.eq(t, text))
+    case _:
+      False{}
+
+def drv.t.out(+st: U32, +text: String) -> Lc.LclOut:
+  Lc.LclOut{st, S.b(text), Nil{}}
+
+def drv.t.run4() -> List<&2, DrvCk>:
+  +stages = S.b("# run 4\nc1 traind-next 1000\n")
+  +ctl = Hv.hov.ctl.line("ctl", "1000", "run/v4/CTL", Hv.hov.ctl.from.of(Hv.hov.first.stage(stages), Hv.hov.done.step(56725n, "11280")))
+  +back = Ch.chn.stage.of(S.b(ctl))
+  +k = Rc.rcf.of(S.b("plan-base 56,725\nboundary 11280\nctl-stage ctl\n"))
+  [DrvCk{"handover: plan-base 0 waits for the boundary's own text", String.eq(Hv.hov.done.step(0n, "36696"), "36696")},
+   DrvCk{"handover: a hot-started stage is done at plan-base + boundary (global)", String.eq(Hv.hov.done.step(56725n, "11280"), "68005")},
+   DrvCk{"handover: grep -o's lines: the boundary's is done, no line or no answer waits", Bool.and(Bool.and(drv.t.w.is(Hv.hov.done.of(drv.t.out(0, "done at step 68005\n"), "68005"), 1n, ""),
+     drv.t.w.is(Hv.hov.done.of(drv.t.out(1, ""), "68005"), 0n, "")), drv.t.w.is(Hv.hov.done.of(drv.t.out(255, "done at step 68005\n"), "68005"), 0n, ""))},
+   DrvCk{"handover: a log done at another step stops the wait (plan-base or TRAIN_STEPS wrong), a longer number too",
+     Bool.and(drv.t.w.is(Hv.hov.done.of(drv.t.out(0, "done at step 11280\n"), "68005"), 2n, "done at step 11280"),
+       drv.t.w.is(Hv.hov.done.of(drv.t.out(0, "done at step 680050\n"), "68005"), 2n, "done at step 680050"))},
+   DrvCk{"handover: the control stage's line, from the first stage's save at plan-base + boundary",
+     String.eq(ctl, "ctl traind-next 1000 run/v4/CTL/plan-fp100m-b16-windows.tsv run/v4/CTL fp100m from=out/c1-step68005.checkpoint")},
+   DrvCk{"handover: the chain reads the control line back (from= and the plan's fields)", Bool.and(Bool.and(String.eq(Ch.chn.st.from(back), "out/c1-step68005.checkpoint"),
+     String.eq(Ch.chn.st.plan(back), "run/v4/CTL/plan-fp100m-b16-windows.tsv")), Bool.and(String.eq(Ch.chn.st.rdir(back), "run/v4/CTL"), String.eq(Ch.chn.st.every(back), "1000")))},
+   DrvCk{"handover: S2's and the control's lines in one append, a line each", S.eq(Hv.hov.append.text(S.b("c1 traind-next 1000"), "c2 x\nctl y"), S.b("\nc2 x\nctl y\n"))},
+   DrvCk{"config: plan-base must be a step number (56,725 is refused, none is 0)", Bool.and(Bool.and(Bool.not(Hv.hov.nat.ok(k, "plan-base")), Hv.hov.nat.ok(k, "boundary")),
+     Hv.hov.nat.ok(k, "no-such-key"))}]
+
 # The move ------------------------------------------------------------------------------------------
 
 def drv.t.move(+old: List<&2, U32>, +push: List<&2, U32>, +before: List<&2, U32>, +after: List<&2, U32>) -> List<&2, DrvCk>:
@@ -260,4 +298,4 @@ def main() -> IO(Unit):
     +old : List<&2, U32> <- S.read("fixtures/drive/train-old.tail")
     +push : List<&2, U32> <- S.read("fixtures/drive/stage2.head")
     up : List<&2, DrvCk> <- drv.t.upto(old)
-    drv.t.say(List.concat(&2, DrvCk, [drv.t.cfg(), drv.t.units(), drv.t.guard(log, before, after), drv.t.hand(out), drv.t.move(old, push, before, after), up]), 0n, "")
+    drv.t.say(List.concat(&2, DrvCk, [drv.t.cfg(), drv.t.units(), drv.t.guard(log, before, after), drv.t.hand(out), drv.t.run4(), drv.t.move(old, push, before, after), up]), 0n, "")

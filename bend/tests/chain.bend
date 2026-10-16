@@ -233,10 +233,65 @@ def t.pure(+chain: List<&2, U32>, +s2: List<&2, U32>, +box: List<&2, U32>, +here
      t.strs.eq(Sc.scn.events(S.b("[2026-10-13 05:09:12 UTC-6] credit-watch: finished\nx\n"), True{}), ["credit-watch: finished"]))},
    TCk{"sim: multiset difference", t.strs.eq(Sc.scn.minus(["a", "b", "a", "c"], ["a", "c"]), ["b", "a"])}]
 
+# from= (2026-10-15, run 4's control stage) ------------------------------------------------------
+
+# run 4's chain: c1 hot-started (EVERY 1000), c2 appended by the hand-over, ctl from c1's boundary save
+def t.run4() -> String:
+  "c1 traind-next 1000\nc2 traind-next 1000 run/v4/C2/plan-fp100m-b16-windows.tsv run/v4/C2 fp100m\n"
+    ++ "ctl traind-next 1000 run/v4/CTL/plan-fp100m-b16-windows.tsv run/v4/CTL fp100m from=out/c1-step68005.checkpoint\n"
+    ++ "# a comment\nabs traind-next 0 from=/root/elsewhere/x-step5.checkpoint p r z\n"
+
+# the same with raw stages (EVERY 0) and a save from= names twice
+def t.raw4() -> String:
+  "c1 traind-next 0\nc2 traind-next 0 p2 r2 z\nctl traind-next 0 p3 r3 z from=out/c1-step130.checkpoint\nagain traind-next 0 p4 r4 z from=out/c1-step130.checkpoint\n"
+
+def t.after.is(+a: Ch.ChnAfter, +del: String, +why: String, +last: String) -> Bool:
+  Bool.and(Bool.and(t.maybe.is(Ch.chn.after.del(a), del), String.eq(Ch.chn.after.why(a), why)), t.maybe.is(Ch.chn.after.last(a), last))
+
+def t.from() -> List<&2, TCk>:
+  +r4 = S.b(t.run4())
+  +ls = Ch.chn.stage.lines(S.split.lines(r4))
+  +ctl = Ch.chn.stage.of(Maybe.default(&2, List<&2, U32>, Ch.chn.stage.at(r4, 3n), Nil{}))
+  +mid = Ch.chn.stage.of(S.b("ctl traind-next 1000 from=out/a-step5.checkpoint p r z"))
+  +raw = S.b(t.raw4())
+  +rls = Ch.chn.stage.lines(S.split.lines(raw))
+  +run3 = S.b(t.stages())
+  [TCk{"from=: a stage line's fields keep their places, from= last", Bool.and(Bool.and(String.eq(Ch.chn.st.name(ctl), "ctl"), String.eq(Ch.chn.st.every(ctl), "1000")),
+     Bool.and(Bool.and(String.eq(Ch.chn.st.plan(ctl), "run/v4/CTL/plan-fp100m-b16-windows.tsv"), String.eq(Ch.chn.st.ssz(ctl), "fp100m")),
+       String.eq(Ch.chn.st.from(ctl), "out/c1-step68005.checkpoint")))},
+   TCk{"from=: anywhere after the name, the other words keep their order", Bool.and(Bool.and(String.eq(Ch.chn.st.plan(mid), "p"), String.eq(Ch.chn.st.ssz(mid), "z")),
+     String.eq(Ch.chn.st.from(mid), "out/a-step5.checkpoint"))},
+   TCk{"from=: a line without one reads as before and starts from out/PREV", Bool.and(String.is_empty(Ch.chn.st.from(Ch.chn.stage.of(Maybe.default(&2, List<&2, U32>, Ch.chn.stage.at(run3, 2n), Nil{})))),
+     String.eq(Ch.chn.st.src(Ch.chn.stage.of(Maybe.default(&2, List<&2, U32>, Ch.chn.stage.at(run3, 2n), Nil{})), "s1-step36696.checkpoint"), "out/s1-step36696.checkpoint"))},
+   TCk{"from=: a stage starts from its from=, not the stage before's last", String.eq(Ch.chn.st.src(ctl, "c2-step74005.checkpoint"), "out/c1-step68005.checkpoint")},
+   TCk{"from=: the saves STAGES keeps (under out/ only), from the k-th line on", Bool.and(Bool.and(t.strs.eq(Ch.chn.keep.of(r4, 1n), ["c1-step68005.checkpoint"]),
+     t.strs.eq(Ch.chn.keep.of(r4, 3n), ["c1-step68005.checkpoint"])), Bool.and(List.is_empty(&2, String, Ch.chn.keep.of(r4, 4n)), List.is_empty(&2, String, Ch.chn.keep.of(run3, 1n))))},
+   TCk{"from=: the prune never takes a save a line starts from (60500 stays, 68005 goes)", t.strs.eq(Ch.chn.minus(Ch.chn.prunable([t.ck("c1", 60500n), t.ck("c1", 68005n), t.ck("c1", t.n(68500))], t.n(1000), Nil{}),
+     Ch.chn.keep.of(S.b("c1 traind-next 1000\nx traind-next 0 p r z from=out/c1-step60500.checkpoint\n"), 1n)), ["c1-step68005.checkpoint"])},
+   TCk{"from=: a save's stage and step", Bool.and(Bool.and(String.eq(Ch.chn.save.stage("c1-step68005.checkpoint"), "c1"), String.eq(Ch.chn.save.stage("a-step2-step10.checkpoint"), "a-step2")),
+     Bool.and(Nat.is_eq(Rm.rmt.ck.step(Maybe.default(&2, Rm.RmtCk, Ch.chn.save.ck("a-step2-step10.checkpoint"), Rm.RmtCk{0n, Nil{}})), 10n),
+       Bool.and(Bool.not(Maybe.is_some(&2, Rm.RmtCk, Ch.chn.save.ck("notes.txt"))), Bool.not(Maybe.is_some(&2, String, Ch.chn.save.of("/root/x-step5.checkpoint"))))))},
+   TCk{"after: no from=, a raw stage's last goes once loaded (fp-chain.sh's rule)", Bool.and(t.after.is(Ch.chn.after("", "c1-step130.checkpoint", "c1", 0n, rls, Nil{}, Nil{}), "c1-step130.checkpoint", "a raw stage's", ""),
+     t.after.is(Ch.chn.after("", "c1-step130.checkpoint", "c1", t.n(1000), rls, Nil{}, Nil{}), "", "a raw stage's", ""))},
+   TCk{"after: no from=, a raw stage's last a later line names stays", t.after.is(Ch.chn.after("", "c1-step130.checkpoint", "c1", 0n, rls, Ch.chn.keep.of(raw, 2n), Nil{}), "", "a raw stage's", "")},
+   TCk{"after: the from= save of a raw stage goes once its last user loaded it, not before", Bool.and(t.after.is(Ch.chn.after("out/c1-step130.checkpoint", "c2-step160.checkpoint", "c2", 0n, rls,
+     Ch.chn.keep.of(raw, 4n), Nil{}), "", "a raw stage's", "c2-step160.checkpoint"), t.after.is(Ch.chn.after("out/c1-step130.checkpoint", "ctl-step160.checkpoint", "ctl", 0n, rls, Ch.chn.keep.of(raw, 5n), Nil{}),
+       "c1-step130.checkpoint", "a raw stage's", "ctl-step160.checkpoint"))},
+   TCk{"after: a from= save the chain pulls stays (a multiple of its EVERY, or a last)", Bool.and(t.after.is(Ch.chn.after("out/c1-step68000.checkpoint", "c2-step74005.checkpoint", "c2", t.n(1000), ls,
+     Nil{}, Nil{}), "", "between its stage's pulls", ""), t.after.is(Ch.chn.after("out/c1-step68005.checkpoint", "c2-step74005.checkpoint", "c2", t.n(1000), ls, Nil{}, ["c1-step68005.checkpoint"]),
+       "", "between its stage's pulls", ""))},
+   TCk{"after: a from= save between its stage's pulls, no last, goes once loaded", t.after.is(Ch.chn.after("out/c1-step60500.checkpoint", "c2-step74005.checkpoint", "c2", t.n(1000), ls, Nil{}, Nil{}),
+     "c1-step60500.checkpoint", "between its stage's pulls", "")},
+   TCk{"after: a path outside out/, or a stage STAGES does not name, stays", Bool.and(t.after.is(Ch.chn.after("/root/elsewhere/x-step5.checkpoint", "", "", 0n, ls, Nil{}, Nil{}), "", "", ""),
+     t.after.is(Ch.chn.after("out/zz-step5.checkpoint", "c2-step9.checkpoint", "c2", t.n(1000), ls, Nil{}, Nil{}), "", "between its stage's pulls", ""))},
+   TCk{"after: the stage before's raw last that no stage loads is a last (a branch's end), once", Bool.and(t.after.is(Ch.chn.after("out/c1-step130.checkpoint", "c2-step160.checkpoint", "c2", 0n, rls,
+     Nil{}, Nil{}), "c1-step130.checkpoint", "a raw stage's", "c2-step160.checkpoint"), t.after.is(Ch.chn.after("out/c1-step130.checkpoint", "c2-step160.checkpoint", "c2", 0n, rls, Nil{},
+       ["c2-step160.checkpoint"]), "c1-step130.checkpoint", "a raw stage's", ""))}]
+
 def main() -> IO(Unit):
   do IO<Unit>:
     +chain : List<&2, U32> <- S.read("fixtures/ops/chain.log")
     +s2 : List<&2, U32> <- S.read("fixtures/ops/s2.log")
     +box : List<&2, U32> <- S.read("fixtures/ops/sha256.box.txt")
     +here : List<&2, U32> <- S.read("fixtures/ops/sha256.txt")
-    t.say(t.pure(chain, s2, box, here), 0n, "")
+    t.say(List.append(&2, TCk, t.pure(chain, s2, box, here), t.from()), 0n, "")

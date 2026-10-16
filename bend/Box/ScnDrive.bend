@@ -8,7 +8,7 @@ import ./Scenario.bend as Sc
 # (2026-10-15, the plan's Phase 4b verification: bend-ops guard, handover,
 # move and unit, and run 3's boot-guard.sh, s2-driver.sh and move.sh).
 #
-#   bend-ops sim drive N DIR      scenario dN (1..7) in DIR/dN-new and, where the old driver runs
+#   bend-ops sim drive N DIR      scenario dN (1..9) in DIR/dN-new and, where the old driver runs
 #                                 too, DIR/dN-old (each wiped first); `ok`/`FAIL` lines, exit 1 on a FAIL
 #   bend-ops sim drive all DIR    every scenario, one after the other
 #
@@ -34,6 +34,11 @@ import ./Scenario.bend as Sc
 #   d6  move: old-stop, old-pull (an 81 KB eplog cut to whole frames), resume on a second box,
 #       watch, old-check
 #   d7  unit: start, start again, list, a reboot, restart, stop, a refused start (new only)
+#   d8  run 4 (new only): c1 hot-started by `bend-box again` (plan-base 100); the hand-over waits
+#       for global step 130, gives s2 the plan's step 30, REST_STEPS and CTL_OUT, appends c2 and
+#       ctl from=out/c1-step130.checkpoint; the chain runs c2, then ctl from the same save
+#   d9  run 4 with raw c1 and c2 (EVERY 0, new only): c1's boundary save stays on the box past c2's
+#       start until ctl has loaded it, then goes; c2's last, which nothing loads, is pulled
 #
 # Old against new (d1-d6): the driver's chain.log lines and its output (stamps
 # stripped; s2-driver: read as handover:, s2.sh as s2; act-stop's own line left
@@ -729,6 +734,117 @@ def sdr.d6(+t: Sc.ScnTools, +base: String, +olds: String) -> IO(List<&2, Sc.ScnR
       Sc.scn.tagged("d6 old = new", cs),
       Sc.scn.tagged("d6 old = new", fs)])
 
+# Run 4 (d8, d9): a hot-started first stage, the hand-over with plan-base, REST_STEPS and a control ---
+#
+# c1 is started as run 4's C1 is: `bend-box again` (TRAIN_NEXT) from run/base/base-step100.checkpoint
+# (outside out/, so the chain's verify does not ask for it) with TRAIN_STEPS=30, so its log
+# counts global steps 101..130 and ends `done at step 130`; LOG0 is c1.log.  The hand-over
+# (plan-base 100, boundary 30) waits for step 130, gives s2 the plan's step 30 (bend-sim's s2
+# refuses a step past its S1 plan's 30), REST_STEPS and CTL_OUT, and appends c2 and then
+# ctl, which starts from=out/c1-step130.checkpoint.  The chain runs c2 from c1's last save,
+# then ctl from the same save.
+
+def sdr.cfg.run4(+d: String, +tag: String, +every2: String) -> String:
+  sdr.lines(["# run 4's hand-over in a sandbox (bend/Box/ScnDrive.bend)", "host root@sim-" ++ tag, "port 2222", "instance 4242", "dest dest", "stages stages",
+    "trainer-dir " ++ d ++ "/box/formalTransformer", "trainer-log c1.log", "box-driver ./bend-box", "boundary 30", "plan-base 100", "handover-poll 1",
+    "act-ws " ++ d ++ "/box/ws", "act-box-bin " ++ d ++ "/box/bin", "act-dir run/v3/act/r1", "act-stop-wait 1",
+    "s2-from run/v3/S1", "s2-out run/v3/S2", "s2-log run/v3/s2.log", "s2-every " ++ every2, "s2-stage c2", "s2-env REST_STEPS=20 LR=1e-4", "s2-env WARM=300",
+    "ctl-stage ctl", "ctl-out run/v3/CTL", "ctl-every 10"])
+
+# c1, as run 4's C1 starts: bend-box again from a save outside out/, TRAIN_STEPS the boundary
+def sdr.c1(+c: Sc.ScnCx) -> IO(Unit):
+  +ft = Sc.scn.ft(c)
+  do IO<Unit>:
+    S.mkdir(ft ++ "/run/base")
+    S.write(ft ++ "/run/base/base-step100.checkpoint", S.b("BTC1\nsim base checkpoint, step 100\n"))
+    +o : S.Out <- S.run(ft, Sc.scn.l1(List.append(&2, String, ["SIM_BOX=" ++ Sc.scn.box(c), "TRAIN_STEPS=30", "NWARM=300"], Sc.scn.simenv(c, ["SIM_DRIVE=1"]))), 120,
+      "./bend-box", ["again", "run/base/base-step100.checkpoint", "run/v3/S1/plan-fp100m-b16-windows.tsv", "run/v3/S1", "fp100m", "c1"], Nil{})
+    S.write(Sc.scn.d(c) ++ "/c1-start.out", S.Out.text(o))
+    Sc.scn.say(c, "c1 started by bend-box again (exit " ++ U32.show(S.Out.status(o)) ++ ")")
+
+def sdr.cx4(+t: Sc.ScnTools, +base: String, +tag: String) -> Sc.ScnCx:
+  +d = base ++ "/" ++ tag
+  Sc.scn.cx(t, d, tag, False{}, "./bend-box", ["SIM_DRIVE=1", "SIM_UNITS=" ++ d ++ "/units", "UNIT_STATE=" ++ d ++ "/unitstate",
+    "SYSTEMD_USER_DIR=" ++ d ++ "/home/.config/systemd/user", "WAIT=30", "H=root@sim-" ++ tag, "P=2222", "B=30", "LOG0=c1.log"])
+
+def sdr.run4(+t: Sc.ScnTools, +base: String, +id: String, +about: String, +stages: String, +every2: String, +ex: List<&2, Sc.ScnExp>, +dx: List<&2, SdrExp>) -> IO(List<&2, Sc.ScnRes>):
+  +c = sdr.cx4(t, base, "d" ++ id ++ "-new")
+  +d = Sc.scn.d(c)
+  do IO<List<&2, Sc.ScnRes>>:
+    Sc.scn.say(c, "scenario d" ++ id ++ ": " ++ about)
+    Sc.scn.setup(c, Sc.Scn{"d" ++ id, about, stages, ["", "", ""], ["SIM_DRIVE=1"], Nil{}, Nil{}, False{}, Nil{}, Nil{}})
+    sdr.extra(c, "30", sdr.cfg.run4(d, Sc.scn.tag(c), every2))
+    sdr.c1(c)
+    sdr.act.start(c, ["SIM_ACT_FINISH=1", "SIM_ACT_EPISODES=20"])
+    Sc.scn.launch(c, "watch", Sc.scn.watch.argv(c))
+    Sc.scn.launch(c, "chain", Sc.scn.chain.argv(c))
+    Sc.scn.launch(c, "driver", sdr.driver.argv(c, False{}))
+    +ended : Bool <- Sc.scn.wait(d ++ "/chain.rc", 600n)
+    +dend : Bool <- Sc.scn.wait(d ++ "/driver.rc", 120n)
+    gone : Bool <- S.exists(Sc.scn.dest(c) ++ "/DESTROYED")
+    w : Bool <- Bool.pick(IO(Bool), gone, Sc.scn.wait(d ++ "/watch.rc", 20n), IO.pure(Bool, True{}))
+    sdr.cleanup(c, False{})
+    rs : List<&2, Sc.ScnRes> <- Sc.scn.exps(ex, c)
+    ds : List<&2, Sc.ScnRes> <- sdr.exps(dx, c)
+    Sc.scn.say(c, "done")
+    return Sc.scn.tagged(Sc.scn.tag(c), List.concat(&2, Sc.ScnRes, [[Sc.ScnRes{"the chain ended by itself", ended, ""}, Sc.ScnRes{"the driver ended by itself", dend, ""}], rs, ds]))
+
+def sdr.c2.line(+every: String) -> String:
+  "c2 traind-next " ++ every ++ " run/v3/S2/plan-fp100m-b16-windows.tsv run/v3/S2 fp100m"
+
+def sdr.ctl.line() -> String:
+  "ctl traind-next 10 run/v3/CTL/plan-fp100m-b16-windows.tsv run/v3/CTL fp100m from=out/c1-step130.checkpoint"
+
+# the lines both run-4 scenarios share: the wait and the boundary at global step 130, s2 at the
+# plan's step 30 with REST_STEPS and the control's plan, both lines appended, both stages started
+def sdr.r4.exps(+every2: String) -> List<&2, Sc.ScnExp>:
+  [Sc.ExRc{"0"}, Sc.ExMark{"DESTROYED", True{}}, Sc.ExMark{"DIED", False{}}, Sc.ExMark{"REFUSED", False{}}, Sc.ExStarts{3n},
+   Sc.ExLog{"/box/formalTransformer/c1.log (plan-base 100 + boundary 30)\n", True{}},
+   Sc.ExLog{"] handover: waiting for S1's 'done at step 130' in ", True{}},
+   Sc.ExLog{"] handover: S1 is done at step 130 (plan-base 100 + boundary 30)\n", True{}},
+   Sc.ExLog{"] handover: s2: ", True{}}, Sc.ExLog{"/box/formalTransformer/run/v3/S1 30 -> ", True{}},
+   Sc.ExLog{"] s2: REST_STEPS 20 (bend-sim)\n", True{}}, Sc.ExLog{"/box/formalTransformer/run/v3/S1 at step 30: 30 steps in ", True{}},
+   Sc.ExLog{"/box/formalTransformer/run/v3/CTL (bend-sim)\n", True{}},
+   Sc.ExLog{"] handover: control stage.env: NLR=1e-4 NWARM=10 ; ctl starts from out/c1-step130.checkpoint\n", True{}},
+   Sc.ExLog{"] handover: appended to stages: " ++ sdr.c2.line(every2) ++ "\n", True{}},
+   Sc.ExLog{"] handover: appended to stages: " ++ sdr.ctl.line() ++ "\n", True{}},
+   Sc.ExLog{"] stage c2: from out/c1-step130.checkpoint on run/v3/S2/plan-fp100m-b16-windows.tsv\n", True{}},
+   Sc.ExLog{"] stage ctl: from out/c1-step130.checkpoint on run/v3/CTL/plan-fp100m-b16-windows.tsv\n", True{}},
+   Sc.ExBoxFile{"run/v3/CTL/stage.env"}]
+
+def sdr.r4.dexps(+every2: String) -> List<&2, SdrExp>:
+  [DxRc{"driver", "0"}, DxIn{"stages", "c1 traind-next", True{}}, DxIn{"stages", "\n" ++ sdr.c2.line(every2) ++ "\n" ++ sdr.ctl.line() ++ "\n", True{}},
+   DxIn{"c1-start.out", "trainer pid ", True{}}, DxIn{"box/formalTransformer/c1.log", "] loaded run/base/base-step100.checkpoint (1 ms)\n", True{}},
+   DxIn{"box/formalTransformer/c1.log", "] done at step 130\n", True{}},
+   DxIn{"box/formalTransformer/c2.log", "] loaded out/c1-step130.checkpoint (1 ms)\n", True{}},
+   DxIn{"box/formalTransformer/ctl.log", "] loaded out/c1-step130.checkpoint (1 ms)\n", True{}},
+   DxIn{"box/formalTransformer/ctl.log", "] done at step 150\n", True{}},
+   DxIn{"box/.sim-starts", "start out/c1 from 100\n", True{}}, DxIn{"box/.sim-starts", "start out/ctl from 130\n", True{}}]
+
+# d8: run 4's own EVERYs (c1 and c2 pulled every 10): the boundary save is a pull and a last
+def sdr.d8(+t: Sc.ScnTools, +base: String) -> IO(List<&2, Sc.ScnRes>):
+  sdr.run4(t, base, "8", "run 4: c1 hot-started by bend-box again (plan-base 100); the hand-over waits for global step 130, builds c2 with REST_STEPS and the control, appends c2 and ctl from=; the chain runs both",
+    "c1 traind-next 10\n", "10",
+    List.concat(&2, Sc.ScnExp, [sdr.r4.exps("10"),
+      [Sc.ExLog{"deleted out/c1-step130", False{}},
+       Sc.ExOut{List.concat(&2, String, [Sc.scn.cks("c1", [110n, 120n, 130n]), Sc.scn.cks("c2", [140n, 150n, 160n]), Sc.scn.cks("ctl", [140n, 150n])])},
+       Sc.ExLog{"] eval: out/c1-step110.checkpoint out/c1-step120.checkpoint out/c1-step130.checkpoint  out/c2-step140.checkpoint out/c2-step150.checkpoint out/c2-step160.checkpoint  out/ctl-step140.checkpoint out/ctl-step150.checkpoint \n", True{}}]]),
+    sdr.r4.dexps("10"))
+
+# d9: raw c1 and c2 (EVERY 0): c1's boundary save stays on the box past c2's start, until ctl
+# has loaded it, then goes; c2's last, which nothing loads, is scored and pulled (a branch's end)
+def sdr.d9(+t: Sc.ScnTools, +base: String) -> IO(List<&2, Sc.ScnRes>):
+  sdr.run4(t, base, "9", "run 4 with raw c1 and c2 (EVERY 0): the boundary save c1-step130 is kept past c2's start until ctl loaded it, then deleted; c2's unloaded last is pulled",
+    "c1 traind-next 0\n", "0",
+    List.concat(&2, Sc.ScnExp, [sdr.r4.exps("0"),
+      [Sc.ExLog{"] deleted out/c1-step130.checkpoint on the box (a raw stage's, loaded by ctl)\n", True{}},
+       Sc.ExLog{"(a raw stage's, loaded by c2)", False{}},
+       Sc.ExLog{"] out/c2-step160.checkpoint: no stage starts from it (ctl starts from out/c1-step130.checkpoint); it is scored and pulled at the end\n", True{}},
+       Sc.ExOut{List.append(&2, String, Sc.scn.cks("c2", [160n]), Sc.scn.cks("ctl", [140n, 150n]))},
+       Sc.ExBox{List.append(&2, String, Sc.scn.cks("c2", [160n]), Sc.scn.cks("ctl", [140n, 150n]))},
+       Sc.ExLog{"] eval: out/ctl-step140.checkpoint out/ctl-step150.checkpoint  out/c2-step160.checkpoint\n", True{}}]]),
+    sdr.r4.dexps("0"))
+
 # unit (d7) ------------------------------------------------------------------------------------------
 
 def sdr.d7(+t: Sc.ScnTools, +base: String) -> IO(List<&2, Sc.ScnRes>):
@@ -769,7 +885,7 @@ def sdr.d7(+t: Sc.ScnTools, +base: String) -> IO(List<&2, Sc.ScnRes>):
 # The command ----------------------------------------------------------------------------------------
 
 def sdr.usage() -> String:
-  "usage: bend-ops sim drive N DIR | sim drive all DIR   (N: 1..7; BEND_SIM, BEND_BOX, SIM_REPO, SIM_CV2, SIM_OLD_DRIVERS)"
+  "usage: bend-ops sim drive N DIR | sim drive all DIR   (N: 1..9; BEND_SIM, BEND_BOX, SIM_REPO, SIM_CV2, SIM_OLD_DRIVERS)"
 
 def sdr.one(+id: String, +t: Sc.ScnTools, +base: String, +olds: String) -> IO(List<&2, Sc.ScnRes>):
   Bool.pick(IO(List<&2, Sc.ScnRes>), String.eq(id, "1"), sdr.hand(t, base, olds, sdr.d1()),
@@ -779,7 +895,9 @@ def sdr.one(+id: String, +t: Sc.ScnTools, +base: String, +olds: String) -> IO(Li
   Bool.pick(IO(List<&2, Sc.ScnRes>), String.eq(id, "5"), sdr.d5(t, base, olds),
   Bool.pick(IO(List<&2, Sc.ScnRes>), String.eq(id, "6"), sdr.d6(t, base, olds),
   Bool.pick(IO(List<&2, Sc.ScnRes>), String.eq(id, "7"), sdr.d7(t, base),
-    IO.die(List<&2, Sc.ScnRes>, 2, sdr.usage()))))))))
+  Bool.pick(IO(List<&2, Sc.ScnRes>), String.eq(id, "8"), sdr.d8(t, base),
+  Bool.pick(IO(List<&2, Sc.ScnRes>), String.eq(id, "9"), sdr.d9(t, base),
+    IO.die(List<&2, Sc.ScnRes>, 2, sdr.usage()))))))))))
 
 def sdr.many(ids: List<&2, String>, +t: Sc.ScnTools, +base: String, +olds: String) -> IO(List<&2, Sc.ScnRes>):
   match ids:
@@ -792,7 +910,7 @@ def sdr.many(ids: List<&2, String>, +t: Sc.ScnTools, +base: String, +olds: Strin
         return List.append(&2, Sc.ScnRes, a, b)
 
 def sdr.ids(+id: String) -> List<&2, String>:
-  Bool.pick(List<&2, String>, String.eq(id, "all"), ["1", "2", "3", "4", "5", "6", "7"], [id])
+  Bool.pick(List<&2, String>, String.eq(id, "all"), ["1", "2", "3", "4", "5", "6", "7", "8", "9"], [id])
 
 def sdr.main(+argv0: String, xs: List<String>) -> IO(Unit):
   match xs:

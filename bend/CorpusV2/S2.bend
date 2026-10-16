@@ -44,6 +44,21 @@ import ./Keyed.bend as K
 # EVERY (5000), SHARD (250), JOBS (8), TRAINER_DIR ($HOME/formalTransformer),
 # S1_LOG.  Run from the act workspace (the repository).  Logs go to stderr,
 # stamped UTC-6.  Every def is prefixed `s2s.`.
+#
+# Run 4's (2026-10-15), both unset by default (then all is as above):
+#   - REST_STEPS N: the rest is only its leading segments whose steps ($8 of
+#     each segment line) sum to at most N (s2s.cap); the share, the log
+#     lines and OUT.rest are the capped rest's; a cap that holds no segment
+#     stops s2 before any work;
+#   - CTL_OUT DIR: also DIR, the control stage's plan: the same (capped) rest
+#     alone, no episodes (`combine 0 DIR OUT.rest`), with OUT's stage.env.
+# A hot-started S1 (bend-box again, TRAIN_NEXT) logs global steps, but its
+# plan's segment starts and its lr schedule count from the plan's own step 0
+# (the trainer's lr is lr.at(NLR, step - base, NWARM, total - base), base the
+# checkpoint's step and total base plus the plan's steps): BOUNDARY is
+# plan-relative, and NLR = lr.at(LR, BOUNDARY, WARM, the plan's steps) is the
+# lr= its log shows at global step base + BOUNDARY when LR and WARM are the
+# NLR and NWARM it was started with.
 
 # The plans (pure) ----------------------------------------------------------------------------
 
@@ -121,6 +136,67 @@ def s2s.unlines(ls: List<&2, List<&2, U32>>) -> List<&2, U32>:
       Nil{}
     case +l <> t:
       List.append(&2, U32, l, 10 <> s2s.unlines(t))
+
+# REST_STEPS (2026-10-15, run 4): the rest capped.  A segment line's steps are
+# its own STEPS field ($8: its training windows / 16, rounded up, as combine
+# and bend-plan-segment count them); the cap keeps the rest's leading
+# segments while their steps sum to at most N, so the rest never runs past
+# N steps, and drops the others (they stay unused for a later run).
+
+def s2s.seg.steps(+l: List<&2, U32>) -> Nat:
+  K.kor.nat(K.kor.field(K.kor.words(l), 7n))
+
+# the sum of $8 over the lines
+def s2s.steps.of(ls: List<&2, List<&2, U32>>) -> Nat:
+  match ls:
+    case Nil{}:
+      0n
+    case +l <> t:
+      Nat.add(s2s.seg.steps(l), s2s.steps.of(t))
+
+# does the first line's steps fit in n
+def s2s.cap.fits(+ls: List<&2, List<&2, U32>>, +n: Nat) -> Bool:
+  match ls:
+    case Nil{}:
+      False{}
+    case +l <> t:
+      Nat.is_le(s2s.seg.steps(l), n)
+
+def s2s.cap.go(ls: List<&2, List<&2, U32>>, +n: Nat, fits: Bool) -> List<&2, List<&2, U32>>:
+  match ls fits:
+    case +l <> +t True{}:
+      +left = Nat.sub(n, s2s.seg.steps(l))
+      l <> s2s.cap.go(t, left, s2s.cap.fits(t, left))
+    case _ _:
+      Nil{}
+
+# the leading lines whose steps sum to at most n
+def s2s.cap(+ls: List<&2, List<&2, U32>>, +n: Nat) -> List<&2, List<&2, U32>>:
+  s2s.cap.go(ls, n, s2s.cap.fits(ls, n))
+
+# REST_STEPS's text: unset or empty is no cap (None)
+type S2Cap is Data:
+  S2NoCap{}
+  S2CapAt{n: Nat}
+  S2CapBad{text: String}
+
+def s2s.cap.read(m: Maybe<&2, Nat>, +v: String) -> S2Cap:
+  match m:
+    case Some{n}:
+      S2CapAt{n}
+    case None{}:
+      S2CapBad{v}
+
+def s2s.cap.of(+v: String) -> S2Cap:
+  Bool.pick(S2Cap, String.is_empty(v), S2NoCap{}, s2s.cap.read(Nat.read(v), v))
+
+# the rest as S2 takes it: all of it, or capped
+def s2s.capped(+cap: S2Cap, +ls: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match cap:
+    case S2CapAt{+n}:
+      s2s.cap(ls, n)
+    case _:
+      ls
 
 # Numbers (pure) -------------------------------------------------------------------------------
 
@@ -442,6 +518,41 @@ def s2s.pw(+st: U32, +log: String) -> IO(Unit):
     K.kor.show.file(log)
     s2s.need(U32.is_eq(st, 0), "bend-plan-windows failed (exit " ++ U32.show(st) ++ "; " ++ log ++ ")")
 
+def s2s.cap.ok(+cap: S2Cap) -> Bool:
+  match cap:
+    case S2CapBad{t}:
+      False{}
+    case _:
+      True{}
+
+# REST_STEPS said: what the cap kept of the rest (nothing to say without one)
+def s2s.cap.say(+cap: S2Cap, +b: Nat, +rl0: List<&2, List<&2, U32>>, +rl: List<&2, List<&2, U32>>) -> IO(Unit):
+  match cap:
+    case S2CapAt{+n}:
+      +k = List.length(&2, List<&2, U32>, rl)
+      +m = List.length(&2, List<&2, U32>, rl0)
+      do IO<Unit>:
+        s2s.need(Nat.is_lt(0n, k), "REST_STEPS " ++ Nat.show(n) ++ " holds no segment of the rest from step " ++ Nat.show(b) ++ " (its first has "
+          ++ Nat.show(s2s.steps.of(List.take(&2, List<&2, U32>, rl0, 1n))) ++ " steps)")
+        s2s.log("REST_STEPS " ++ Nat.show(n) ++ ": the first " ++ Nat.show(k) ++ " of the rest's " ++ Nat.show(m) ++ " segments, " ++ Nat.show(s2s.steps.of(rl))
+          ++ " of its " ++ Nat.show(s2s.steps.of(rl0)) ++ " steps; the other " ++ Nat.show(Nat.sub(m, k)) ++ " segments stay unused")
+    case _:
+      IO.pure(Unit, Unit{})
+
+# CTL_OUT (2026-10-15, run 4's control stage): the same capped rest alone, no
+# episodes (`combine 0 CTL_OUT OUT.rest`: the rest's shards in the rest's order,
+# planned from step 0), and the stage.env S2 gets; nothing when CTL_OUT is unset
+def s2s.control.go(+ctl: String, +rest: String, +env: List<&2, U32>) -> IO(Unit):
+  do IO<Unit>:
+    S.rm(ctl)
+    Cb.cb.combine(["0", ctl, rest])
+    S.write(ctl ++ "/stage.env", env)
+    +ct : List<&2, U32> <- S.read(ctl ++ "/plan-fp100m-b16-windows.tsv")
+    s2s.log("control: " ++ Nat.show(s2s.steps(s2s.lines(ct))) ++ " steps in " ++ ctl ++ " (the rest alone, no episodes), its stage.env S2's")
+
+def s2s.control(+ctl: String, +rest: String, +env: List<&2, U32>) -> IO(Unit):
+  Bool.pick(IO(Unit), String.is_empty(ctl), IO.pure(Unit, Unit{}), s2s.control.go(ctl, rest, env))
+
 # Main ---------------------------------------------------------------------------------------------
 
 def s2s.run(+s1: String, +b: Nat, +out: String, +acts: List<&2, String>) -> IO(Unit):
@@ -455,16 +566,23 @@ def s2s.run(+s1: String, +b: Nat, +out: String, +acts: List<&2, String>) -> IO(U
     +pt : List<&2, U32> <- S.read(p)
     +pl : List<&2, List<&2, U32>> = s2s.lines(pt)
     s2s.need(s2s.starts(pl, b), "step " ++ Nat.show(b) ++ " starts no segment of " ++ p)
+    +capv : String <- S.env("REST_STEPS", "")
+    +cap : S2Cap = s2s.cap.of(capv)
+    s2s.need(s2s.cap.ok(cap), "REST_STEPS " ++ capv ++ " is not a step count")
+    +ctl : String <- S.env("CTL_OUT", "")
     # the lr S1's schedule reaches at the boundary, checked against S1's log first
     +nlr : String = s2s.nlr(s2s.c.lr(c), b, s2s.c.warm(c), s2s.steps(pl))
     +seen : String <- s2s.check(c, nlr)
+    # the rest of the steady plan (REST_STEPS: its leading segments only)
+    +rl0 : List<&2, List<&2, U32>> = s2s.rest(pl, b)
+    +rl : List<&2, List<&2, U32>> = s2s.capped(cap, rl0)
+    s2s.cap.say(cap, b, rl0, rl)
     S.rm(rest)
     S.rm(ep)
     S.rm(out)
     S.mkdir(rest)
     S.mkdir(ep ++ "/tx")
-    # the rest of the steady plan: combine reads a plan's segment lines and the shards beside it
-    +rl : List<&2, List<&2, U32>> = s2s.rest(pl, b)
+    # combine reads a plan's segment lines and the shards beside it
     S.write(rest ++ "/plan-fp100m-b16-windows.tsv", s2s.unlines(rl))
     s2s.links(s2s.ks(rl), s1, rest)
     +rw : Nat = s2s.tw(rl, False{})
@@ -486,6 +604,7 @@ def s2s.run(+s1: String, +b: Nat, +out: String, +acts: List<&2, String>) -> IO(U
     Cb.cb.combine([share, out, rest, ep ++ "/w"])
     S.write(out ++ "/stage.env", S.b("NLR=" ++ nlr ++ "\nNWARM=10\n"))
     s2s.log("stage.env: NLR " ++ nlr ++ " (S1's log last shows lr " ++ seen ++ "), NWARM 10")
+    s2s.control(ctl, rest, S.b("NLR=" ++ nlr ++ "\nNWARM=10\n"))
     +ot : List<&2, U32> <- S.read(out ++ "/plan-fp100m-b16-windows.tsv")
     +ol : List<&2, List<&2, U32>> = s2s.lines(ot)
     s2s.log("S2: " ++ Nat.show(s2s.steps(ol)) ++ " steps in " ++ out ++ "; append to STAGES:")

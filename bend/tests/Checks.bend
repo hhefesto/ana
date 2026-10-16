@@ -494,14 +494,16 @@ def chk.tests() -> List<&2, ChkTest>:
    # the run recipes (bend/CorpusV2/{Keyed,S2,ActSet,Steady,Recipes}.bend,
    # bend/Box/{Drive,Evals}.bend): keyed-order against sha256sum's order,
    # s2's share and McNemar's p against awk's, NLR against run 3's lr= at
-   # its boundary, the rest of a plan against awk's lines (reads fixtures/box,
+   # its boundary, the rest of a plan against awk's lines, REST_STEPS's cap and a
+   # hot-started S1's NLR (run 4) (reads fixtures/box,
    # fixtures/recipes)
-   ChkTest{"recipes.bend", False{}, ROks{41n}},
+   ChkTest{"recipes.bend", False{}, ROks{48n}},
    # bend-ops chain and watch (bend/Box/Chain.bend, Watch.bend): their
    # decisions on run 3's chain.log, s2.log and sha256 listings (the per-poll
    # line and the eval line byte for byte), follow, verify, HOLD, the watch's
-   # due/silent/safe; bend-sim's ssh reading and the scenarios' event lines
-   ChkTest{"chain.bend", False{}, ROks{45n}},
+   # due/silent/safe; bend-sim's ssh reading and the scenarios' event lines; from= (run 4:
+   # its parse, the saves the prune keeps, what a start leaves to delete or to pull)
+   ChkTest{"chain.bend", False{}, ROks{59n}},
    # the act round's pure parts (bend/Box/Act.bend, ActBox.bend, CorpusV2/AgentAct.bend,
    # bend-episode langs) against act-box.sh, agent-act.sh, s2-driver.sh and move.sh: PROCS
    # under a cgroup quota, the check's verdict on run 3's check.txt, the per-language table on
@@ -513,8 +515,14 @@ def chk.tests() -> List<&2, ChkTest>:
    # against run 3's boot-guard.sh, s2-driver.sh and move.sh: the config, the systemd-run
    # line and its record, what the guard starts, the hand-over's counts, stage line and
    # stage.env checks on run 3's s2-driver.out, the move's save, push and STAGES rewrite on
-   # run 3's files; reads fixtures/drive and fixtures/ops/chain.log
-   ChkTest{"drive.bend", False{}, ROks{57n}}]
+   # run 3's files; run 4's plan-base wait and control line; reads fixtures/drive and
+   # fixtures/ops/chain.log
+   ChkTest{"drive.bend", False{}, ROks{65n}},
+   # bend-corpus-v2 unused (bend/CorpusV2/Unused.bend, run 4): a line's id as J.first.at reads it,
+   # hex and twelve-digit numbers in sort's order, POOL=OUT... SEEN... arguments, and the whole tool
+   # (spools, `LC_ALL=C sort`, the merge; two pools in one call) against the set difference on
+   # small fixtures, in one process (PROCS 1: no bend-corpus-v2 to spawn here)
+   ChkTest{"unused.bend", False{}, ROks{15n}}]
 
 def chk.rule(r: ChkRule, +out: List<&2, U32>) -> Bool:
   match r:

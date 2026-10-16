@@ -8,6 +8,7 @@ import ./Act.bend as Ac
 import ./Evals.bend as Ev
 import ./RunCfg.bend as Rc
 import ./Guard.bend as Gd
+import ./Chain.bend as Ch
 import ../CorpusV2/AgentAct.bend as Aa
 
 # Handover: from the first stage to the second at the boundary, unattended
@@ -48,6 +49,23 @@ import ../CorpusV2/AgentAct.bend as Aa
 # run 3's act-restart.sh; a failure is logged and the wait goes on); act-pull
 # yes runs `bend-ops act pull HOST PORT DIR` after the append, so the round's
 # episodes are kept here before the box goes.
+#
+# New for run 4 (2026-10-15), each off by default (then all is as above):
+# plan-base P, for a boundary stage hot-started with `bend-box again` (TRAIN_NEXT:
+# its log counts global steps, the checkpoint's step P on): the wait is for `done
+# at step P+BOUNDARY`, while s2 gets the plan's own BOUNDARY (its segments and
+# its lr schedule count from the plan's step 0; s2-env's LR and WARM are then the
+# NLR and NWARM the stage was started with, and s2's NLR check against the log's
+# last lr= holds).  A log that says `done at step` at another step stops the
+# hand-over (plan-base or TRAIN_STEPS wrong) instead of waiting forever.
+# ctl-stage NAME and ctl-out DIR: a control stage beside S2 (run 4's CTL): s2
+# also builds DIR (CTL_OUT: the same capped rest, no episodes), and NAME's line
+# is appended right after S2's, in the same write: `NAME traind-next CTL_EVERY
+# DIR/plan-fp100m-b16-windows.tsv DIR fp100m from=FROM` (ctl-every, default
+# s2-every; ctl-from, default out/FIRST-step<P+BOUNDARY>.checkpoint, FIRST the
+# first stage of STAGES: the boundary stage's last save), so the chain starts it
+# from the boundary's save, not S2's (bend/Box/Chain.bend's from=); its plan,
+# stage.env and FROM must be on the box before anything is appended.
 #
 # Every command sent is a fixed line without control flow (Remote.bend's ssh,
 # retried on a dropped link); every answer is parsed here.  Log lines are
@@ -140,6 +158,30 @@ def hov.s2(+c: HovCx) -> String:
 def hov.s2log(+c: HovCx) -> String:
   hov.w(c, hov.k(c, "s2-log", "run/v3/s2.log"))
 
+# plan-base (2026-10-15, run 4): the step the boundary stage's plan starts at,
+# 0 for a stage started on its plan from scratch; a stage hot-started with
+# `bend-box again` (TRAIN_NEXT) logs global steps, the checkpoint's step plus
+# its plan's, so its log says `done at step PLAN-BASE+BOUNDARY`
+def hov.base(+c: HovCx) -> Nat:
+  Rc.rcf.nat(hov.kvs(c), "plan-base", 0n)
+
+# the control stage (run 4): ctl-stage NAME (none: no control), built by s2 in
+# ctl-out (CTL_OUT) beside S2 and appended after it, starting from ctl-from
+def hov.ctl.stage(+c: HovCx) -> String:
+  hov.k(c, "ctl-stage", "")
+
+def hov.ctl.on(+c: HovCx) -> Bool:
+  Bool.not(String.is_empty(hov.ctl.stage(c)))
+
+def hov.ctl.rel(+c: HovCx) -> String:
+  hov.k(c, "ctl-out", "")
+
+def hov.ctl(+c: HovCx) -> String:
+  Rc.rcf.at(hov.td(c), hov.ctl.rel(c))
+
+def hov.ctl.every(+c: HovCx) -> String:
+  hov.k(c, "ctl-every", hov.every(c))
+
 # the act workspace on the box and here, as bend/Box/Act.bend's environment names it
 def hov.ac.of(+kvs: List<&2, Ev.EvKv>, +home: String) -> Ac.AcbCx:
   Ac.AcbCx{Rc.rcf.get(kvs, "act-ws", "/home/hhefesto/src/formalTransformer"), Rc.rcf.get(kvs, "act-home", home),
@@ -162,10 +204,18 @@ def hov.cx.of(+kvs: List<&2, Ev.EvKv>, +cfg: String) -> IO(HovCx):
 def hov.keys() -> List<&2, String>:
   ["host", "port", "dest", "stages", "trainer-dir", "boundary", "act-dir", "s2-from", "s2-out"]
 
+# a key that must be a step number when it is there (plan-base 56,725 must not read as 0)
+def hov.nat.ok(+kvs: List<&2, Ev.EvKv>, +key: String) -> Bool:
+  +v = Rc.rcf.get(kvs, key, "")
+  Bool.or(String.is_empty(v), Maybe.is_some(&2, Nat, Rc.rcf.nat.of(v)))
+
 def hov.cx(+cfg: String) -> IO(HovCx):
   do IO<HovCx>:
     +kvs : List<&2, Ev.EvKv> <- Rc.rcf.read(cfg)
     Rc.rcf.need(kvs, hov.keys(), cfg)
+    Rc.rcf.need(kvs, Bool.pick(List<&2, String>, String.is_empty(Rc.rcf.get(kvs, "ctl-stage", "")), Nil{}, ["ctl-out"]), cfg)
+    Bool.pick(IO(Unit), Bool.and(hov.nat.ok(kvs, "plan-base"), hov.nat.ok(kvs, "boundary")), IO.pure(Unit, Unit{}),
+      IO.die(Unit, 2, cfg ++ ": plan-base and boundary are step numbers"))
     hov.cx.of(kvs, cfg)
 
 # Decisions (pure) ---------------------------------------------------------------------------------
@@ -180,6 +230,23 @@ def hov.want(+every: String, +out: String) -> String:
 # the line appended to STAGES (relative: the chain looks for a plan under its BOX_DIR)
 def hov.stage.line(+stage: String, +every: String, +rel: String) -> String:
   stage ++ " traind-next " ++ every ++ " " ++ rel ++ "/plan-fp100m-b16-windows.tsv " ++ rel ++ " fp100m"
+
+# the step the boundary stage's log says it is done at: plan-base + boundary,
+# the boundary's own text when plan-base is 0
+def hov.done.step(+base: Nat, +bnd: String) -> String:
+  Bool.pick(String, Nat.is_eq(base, 0n), bnd, Nat.show(Nat.add(base, Maybe.default(&2, Nat, Rc.rcf.nat.of(bnd), 0n))))
+
+# the control stage's line: S2's form, then where it starts (the chain's from=)
+def hov.ctl.line(+stage: String, +every: String, +rel: String, +from: String) -> String:
+  hov.stage.line(stage, every, rel) ++ " from=" ++ from
+
+# the boundary stage's last save, as bend-box again names it (out/NAME-step<N>):
+# NAME the first stage's in STAGES, N the step its log says it is done at
+def hov.ctl.from.of(+first: String, +g: String) -> String:
+  "out/" ++ first ++ "-step" ++ g ++ ".checkpoint"
+
+def hov.first.stage(+stages: List<&2, U32>) -> String:
+  Ch.chn.st.name(Ch.chn.stage.of(Maybe.default(&2, List<&2, U32>, Ch.chn.stage.at(stages, 1n), Nil{})))
 
 def hov.line.ok(+line: String, +every: String, +rel: String, +abs: String) -> Bool:
   Bool.or(String.eq(line, hov.want(every, rel)), String.eq(line, hov.want(every, abs)))
@@ -342,6 +409,7 @@ type HovW is Data:
   HovDone{}
   HovGone{}
   HovDied{text: String}
+  HovOff{text: String}
 
 def hov.waiting(+w: HovW) -> Bool:
   match w:
@@ -350,10 +418,29 @@ def hov.waiting(+w: HovW) -> Bool:
     case _:
       False{}
 
-def hov.probe(+c: HovCx) -> IO(Bool):
-  do IO<Bool>:
-    +o : Lc.LclOut <- hov.ssh(c, 300, "grep -q -F -e " ++ hov.q("done at step " ++ hov.bnd(c)) ++ " -- " ++ hov.q(hov.tlog(c)))
-    return Lc.lcl.ok(o)
+def hov.has.line(ls: List<&2, List<&2, U32>>, +x: List<&2, U32>) -> Bool:
+  match ls:
+    case Nil{}:
+      False{}
+    case +l <> t:
+      Bool.or(S.eq(l, x), hov.has.line(t, x))
+
+# `grep -o 'done at step [0-9]*' LOG`'s answer: the boundary's line (done), another
+# (the stage ended at a step that is not plan-base + boundary: its last such line),
+# none, or no answer (wait)
+def hov.done.of(+o: Lc.LclOut, +g: String) -> HovW:
+  +ls = S.split.lines(Lc.lcl.out(o))
+  Bool.pick(HovW, Bool.not(Lc.lcl.ok(o)), HovWait{}, Bool.pick(HovW, hov.has.line(ls, S.b("done at step " ++ g)), HovDone{},
+    Bool.pick(HovW, List.is_empty(&2, List<&2, U32>, ls), HovWait{}, HovOff{S.str(hov.last(ls))})))
+
+# where the boundary stage's log says it is done: plan-base + boundary
+def hov.g(+c: HovCx) -> String:
+  hov.done.step(hov.base(c), hov.bnd(c))
+
+def hov.probe(+c: HovCx) -> IO(HovW):
+  do IO<HovW>:
+    +o : Lc.LclOut <- hov.ssh(c, 300, "grep -o -e " ++ hov.q("done at step [0-9]*") ++ " -- " ++ hov.q(hov.tlog(c)))
+    return hov.done.of(o, hov.g(c))
 
 # DESTROYED, then DIED (the chain's markers), then the boundary's line on the box
 def hov.check(gone: Bool, died: Bool, +dt: List<&2, U32>, +c: HovCx) -> IO(HovW):
@@ -363,9 +450,7 @@ def hov.check(gone: Bool, died: Bool, +dt: List<&2, U32>, +c: HovCx) -> IO(HovW)
     case False{} True{}:
       IO.pure(HovW, HovDied{S.str(S.chomp(dt))})
     case False{} False{}:
-      do IO<HovW>:
-        d : Bool <- hov.probe(c)
-        return Bool.pick(HovW, d, HovDone{}, HovWait{})
+      hov.probe(c)
 
 def hov.look(+c: HovCx) -> IO(HovW):
   do IO<HovW>:
@@ -391,6 +476,8 @@ def hov.wait.go(fuel: Nat, +c: HovCx, w: HovW) -> IO(HovW):
       IO.pure(HovW, HovGone{})
     case _ HovDied{t}:
       IO.pure(HovW, HovDied{t})
+    case _ HovOff{t}:
+      IO.pure(HovW, HovOff{t})
 
 # The act round ----------------------------------------------------------------------------------------
 
@@ -505,8 +592,10 @@ def hov.accept(+c: HovCx) -> IO(Unit):
 
 # S2 ---------------------------------------------------------------------------------------------------
 
+# with a control stage, s2 builds its plan too (CTL_OUT)
 def hov.s2.cmd(+c: HovCx) -> String:
-  Ac.acb.rw(hov.ac(c), List.append(&2, String, ["S1_LOG=" ++ hov.tlog(c), "TRAINER_DIR=" ++ hov.td(c), "EVERY=" ++ hov.every(c)], Rc.rcf.every(hov.kvs(c), "s2-env")),
+  +ctl = Bool.pick(List<&2, String>, hov.ctl.on(c), ["CTL_OUT=" ++ hov.ctl(c)], Nil{})
+  Ac.acb.rw(hov.ac(c), List.concat(&2, String, [["S1_LOG=" ++ hov.tlog(c), "TRAINER_DIR=" ++ hov.td(c), "EVERY=" ++ hov.every(c)], ctl, Rc.rcf.every(hov.kvs(c), "s2-env")]),
     Ac.acb.dep(hov.ac(c)), ["corpus-v2", "s2", hov.s1(c), hov.bnd(c), hov.s2(c), hov.act(c)]) ++ " > " ++ hov.q(hov.s2log(c)) ++ " 2>&1"
 
 def hov.env.got(ok: Bool, +c: HovCx, +env: List<&2, U32>) -> IO(Unit):
@@ -516,20 +605,51 @@ def hov.env.got(ok: Bool, +c: HovCx, +env: List<&2, U32>) -> IO(Unit):
     case True{}:
       hov.log(c, "S2 stage.env: " ++ hov.spaced(env))
 
-def hov.append.go(has: Bool, +c: HovCx, +st: List<&2, U32>, +line: String) -> IO(Unit):
+def hov.say.if(yes: Bool, +c: HovCx, +msg: String) -> IO(Unit):
+  match yes:
+    case True{}:
+      hov.log(c, msg)
+    case False{}:
+      IO.pure(Unit, Unit{})
+
+# STAGES gets S2's line, then (with a control stage) the control's, in one write
+def hov.append.go(has: Bool, +c: HovCx, +st: List<&2, U32>, +line: String, +ctl: String, +which: String) -> IO(Unit):
   match has:
     case True{}:
-      hov.fail(c, "a stage " ++ hov.stage(c) ++ " is already in " ++ hov.stages(c) ++ "; not appending")
+      hov.fail(c, "a stage " ++ which ++ " is already in " ++ hov.stages(c) ++ "; not appending")
     case False{}:
       do IO<Unit>:
-        S.add(hov.stages(c), hov.append.text(st, line))
+        S.add(hov.stages(c), hov.append.text(st, Bool.pick(String, String.is_empty(ctl), line, line ++ "\n" ++ ctl)))
         hov.log(c, "appended to " ++ hov.stages(c) ++ ": " ++ line)
+        hov.say.if(Bool.not(String.is_empty(ctl)), c, "appended to " ++ hov.stages(c) ++ ": " ++ ctl)
 
-def hov.append(+c: HovCx) -> IO(Unit):
+def hov.append(+c: HovCx, +from: String) -> IO(Unit):
   +line = hov.stage.line(hov.stage(c), hov.every(c), hov.s2rel(c))
+  +ctl = Bool.pick(String, hov.ctl.on(c), hov.ctl.line(hov.ctl.stage(c), hov.ctl.every(c), hov.ctl.rel(c), from), "")
   do IO<Unit>:
     +st : List<&2, U32> <- S.read(hov.stages(c))
-    hov.append.go(Gd.grd.has.stage(st, hov.stage(c)), c, st, line)
+    +s2has : Bool = Gd.grd.has.stage(st, hov.stage(c))
+    +ctlhas : Bool = Bool.and(hov.ctl.on(c), Gd.grd.has.stage(st, hov.ctl.stage(c)))
+    hov.append.go(Bool.or(s2has, ctlhas), c, st, line, ctl, Bool.pick(String, s2has, hov.stage(c), hov.ctl.stage(c)))
+
+def hov.ctl.got(ok: Bool, +c: HovCx, +env: List<&2, U32>, +from: String) -> IO(Unit):
+  match ok:
+    case False{}:
+      hov.fail(c, "the control stage's plan or stage.env (" ++ hov.ctl(c) ++ "), or " ++ from ++ ", is missing on the box")
+    case True{}:
+      hov.log(c, "control stage.env: " ++ hov.spaced(env) ++ "; " ++ hov.ctl.stage(c) ++ " starts from " ++ from)
+
+# a control stage: its plan and stage.env, and the save it starts from, on the box
+def hov.ctl.check(on: Bool, +c: HovCx, +from: String) -> IO(Unit):
+  match on:
+    case False{}:
+      IO.pure(Unit, Unit{})
+    case True{}:
+      do IO<Unit>:
+        +ps : Rm.RmtStat <- Rm.rmt.stat(hov.box(c), hov.ctl(c) ++ "/plan-fp100m-b16-windows.tsv")
+        +e : Lc.LclOut <- hov.ssh(c, 120, "cat -- " ++ hov.q(hov.ctl(c) ++ "/stage.env"))
+        +fs : Rm.RmtStat <- Rm.rmt.stat(hov.box(c), Rc.rcf.at(hov.td(c), from))
+        hov.ctl.got(Bool.and(Bool.and(hov.nonempty(ps), hov.nonempty(fs)), Bool.and(Lc.lcl.ok(e), hov.env.ok(Lc.lcl.out(e)))), c, Lc.lcl.out(e), from)
 
 def hov.s2.ok(+c: HovCx, +ls: List<&2, List<&2, U32>>) -> IO(Unit):
   +line = S.str(hov.last(ls))
@@ -539,7 +659,10 @@ def hov.s2.ok(+c: HovCx, +ls: List<&2, List<&2, U32>>) -> IO(Unit):
     +ps : Rm.RmtStat <- Rm.rmt.stat(hov.box(c), hov.s2(c) ++ "/plan-fp100m-b16-windows.tsv")
     +e : Lc.LclOut <- hov.ssh(c, 120, "cat -- " ++ hov.q(hov.s2(c) ++ "/stage.env"))
     hov.env.got(Bool.and(Bool.and(hov.nonempty(ps), Lc.lcl.ok(e)), hov.env.ok(Lc.lcl.out(e))), c, Lc.lcl.out(e))
-    hov.append(c)
+    +st : List<&2, U32> <- S.read(hov.stages(c))
+    +from : String = hov.k(c, "ctl-from", hov.ctl.from.of(hov.first.stage(st), hov.g(c)))
+    hov.ctl.check(hov.ctl.on(c), c, from)
+    hov.append(c, from)
 
 def hov.s2.got(ok: Bool, +c: HovCx, +t: List<&2, U32>) -> IO(Unit):
   match ok:
@@ -573,9 +696,13 @@ def hov.pull.if(yes: Bool, +c: HovCx) -> IO(Unit):
 
 # Main -------------------------------------------------------------------------------------------------
 
+# a hot-started boundary stage: the plan's step its global step stands for (nothing when plan-base is 0)
+def hov.base.say(+c: HovCx) -> String:
+  Bool.pick(String, Nat.is_eq(hov.base(c), 0n), "", " (plan-base " ++ Nat.show(hov.base(c)) ++ " + boundary " ++ hov.bnd(c) ++ ")")
+
 def hov.boundary(+c: HovCx) -> IO(Unit):
   do IO<Unit>:
-    hov.log(c, "S1 is done at step " ++ hov.bnd(c))
+    hov.log(c, "S1 is done at step " ++ hov.g(c) ++ hov.base.say(c))
     d : Bool <- hov.act.done(c)
     hov.stop.if(d, c)
     hov.accept(c)
@@ -590,12 +717,14 @@ def hov.after(w: HovW, +c: HovCx) -> IO(Unit):
       hov.fail(c, "a stage died (" ++ t ++ "); no S2")
     case HovWait{}:
       hov.fail(c, "gave up waiting for the boundary")
+    case HovOff{+t}:
+      hov.fail(c, "S1's log says '" ++ t ++ "', not 'done at step " ++ hov.g(c) ++ "'" ++ hov.base.say(c) ++ ": no S2 (is plan-base or TRAIN_STEPS wrong?)")
     case HovDone{}:
       hov.boundary(c)
 
 def hov.wait(+c: HovCx) -> IO(Unit):
   do IO<Unit>:
-    hov.log(c, "waiting for S1's 'done at step " ++ hov.bnd(c) ++ "' in " ++ hov.tlog(c))
+    hov.log(c, "waiting for S1's 'done at step " ++ hov.g(c) ++ "' in " ++ hov.tlog(c) ++ hov.base.say(c))
     +w0 : HovW <- hov.look(c)
     hov.ensure.if(Bool.and(hov.waiting(w0), Rc.rcf.yes(hov.kvs(c), "act-ensure", False{})), c)
     w : HovW <- hov.wait.go(U32.to_nat(100000000), c, w0)

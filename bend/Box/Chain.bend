@@ -27,6 +27,16 @@ import ../Clock.bend as Ck
 # started": a dropped connection never starts a second trainer.  The first
 # stage must already be running.
 #
+# A stage line may also carry from=CKPT (2026-10-15, run 4's control stage; any
+# word after the name, the others keep their places): the stage starts with
+# `BOX_DRIVER again CKPT ...` (CKPT relative to BOX_DIR, as out/c1-step68005.
+# checkpoint) instead of from the stage before's last save.  A save that a line
+# names with from= is never pruned, and the EVERY 0 rule leaves it on the box
+# until the last stage naming it has loaded it; then it goes when the chain
+# would not pull it (a raw stage's, or a step between its stage's pulls, not a
+# last).  The stage before's raw last that such a stage does not load is scored
+# and pulled at the end, as the chain's very last is (a branch's end).
+#
 # Stages may be appended while the chain runs: at the end of the list it waits
 # WAIT seconds (7200) for another line, and a stage whose PLAN is not on the box
 # yet waits WAIT for it (both polled every WAIT_POLL, 60 s).  Every POLL seconds
@@ -245,7 +255,7 @@ def chn.lstrip(xs: List<&2, U32>, sp: Bool) -> List<&2, U32>:
 # The stages file ------------------------------------------------------------------------------
 
 type ChnStage is Data:
-  ChnStage{name: String, bin: String, every: String, plan: String, rdir: String, ssz: String}
+  ChnStage{name: String, bin: String, every: String, plan: String, rdir: String, ssz: String, from: String}
 
 # a line fp-chain.sh's `grep -v '^[[:space:]]*\(#\|$\)'` keeps
 def chn.stage.line(+l: List<&2, U32>) -> Bool:
@@ -264,40 +274,171 @@ def chn.stage.lines(ls: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
 def chn.stage.at(+text: List<&2, U32>, +k: Nat) -> Maybe<&2, List<&2, U32>>:
   List.get(&2, List<&2, U32>, chn.stage.lines(S.split.lines(text)), Nat.sub(k, 1n))
 
+# from=CKPT (2026-10-15, run 4's control stage): a word of a stage line that
+# names the save the stage starts from (relative to BOX_DIR, as out/NAME-stepN.
+# checkpoint), in place of the stage before's last; the other words keep their
+# places, so a line without one reads as it always did.  The last from= counts.
+def chn.from.word(ws: List<&2, List<&2, U32>>, +acc: String) -> String:
+  match ws:
+    case Nil{}:
+      acc
+    case +w <> t:
+      chn.from.word(t, Bool.pick(String, S.prefix(w, S.b("from=")), S.str(List.drop(&2, U32, w, 5n)), acc))
+
+def chn.plain.words(ws: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match ws:
+    case Nil{}:
+      Nil{}
+    case +w <> t:
+      +rest = chn.plain.words(t)
+      Bool.pick(List<&2, List<&2, U32>>, S.prefix(w, S.b("from=")), rest, w <> rest)
+
 def chn.stage.of(+l: List<&2, U32>) -> ChnStage:
-  +ws = Lc.lcl.words(l)
+  +all = Lc.lcl.words(l)
+  +ws = chn.plain.words(all)
   ChnStage{S.str(Lc.lcl.nth(ws, 0n)), S.str(Lc.lcl.nth(ws, 1n)), S.str(Lc.lcl.nth(ws, 2n)), S.str(Lc.lcl.nth(ws, 3n)), S.str(Lc.lcl.nth(ws, 4n)),
-    S.str(Lc.lcl.nth(ws, 5n))}
+    S.str(Lc.lcl.nth(ws, 5n)), chn.from.word(all, "")}
 
 def chn.st.name(+s: ChnStage) -> String:
   match s:
-    case ChnStage{n, b, e, p, r, z}:
+    case ChnStage{n, b, e, p, r, z, f}:
       n
 
 def chn.st.bin(+s: ChnStage) -> String:
   match s:
-    case ChnStage{n, b, e, p, r, z}:
+    case ChnStage{n, b, e, p, r, z, f}:
       b
 
 def chn.st.every(+s: ChnStage) -> String:
   match s:
-    case ChnStage{n, b, e, p, r, z}:
+    case ChnStage{n, b, e, p, r, z, f}:
       e
 
 def chn.st.plan(+s: ChnStage) -> String:
   match s:
-    case ChnStage{n, b, e, p, r, z}:
+    case ChnStage{n, b, e, p, r, z, f}:
       p
 
 def chn.st.rdir(+s: ChnStage) -> String:
   match s:
-    case ChnStage{n, b, e, p, r, z}:
+    case ChnStage{n, b, e, p, r, z, f}:
       r
 
 def chn.st.ssz(+s: ChnStage) -> String:
   match s:
-    case ChnStage{n, b, e, p, r, z}:
+    case ChnStage{n, b, e, p, r, z, f}:
       z
+
+def chn.st.from(+s: ChnStage) -> String:
+  match s:
+    case ChnStage{n, b, e, p, r, z, f}:
+      f
+
+# where a stage starts: its from=, else the stage before's last save
+def chn.st.src(+s: ChnStage, +prev: String) -> String:
+  Bool.pick(String, String.is_empty(chn.st.from(s)), "out/" ++ prev, chn.st.from(s))
+
+# a from= path that is one of the chain's own saves: its name under out/ (None: any other path)
+def chn.save.of(+p: String) -> Maybe<&2, String>:
+  +xs = S.b(p)
+  +r = List.drop(&2, U32, xs, 4n)
+  Bool.pick(Maybe<&2, String>, Bool.and(S.prefix(xs, S.b("out/")), Bool.not(S.infix(r, [47]))), Some{S.str(r)}, None{})
+
+def chn.saves.of(ps: List<&2, String>) -> List<&2, String>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case +p <> t:
+      +rest = chn.saves.of(t)
+      Bool.pick(List<&2, String>, Maybe.is_some(&2, String, chn.save.of(p)), Maybe.default(&2, String, chn.save.of(p), "") <> rest, rest)
+
+def chn.froms.of(ls: List<&2, List<&2, U32>>) -> List<&2, String>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> t:
+      +f = chn.st.from(chn.stage.of(l))
+      +rest = chn.froms.of(t)
+      Bool.pick(List<&2, String>, String.is_empty(f), rest, f <> rest)
+
+# the saves the stage lines from the k-th on (k from 1) start from: what a stage
+# not started yet still needs on the box (k 1: every line's)
+def chn.keep.of(+text: List<&2, U32>, +k: Nat) -> List<&2, String>:
+  chn.saves.of(chn.froms.of(List.drop(&2, List<&2, U32>, chn.stage.lines(S.split.lines(text)), Nat.sub(k, 1n))))
+
+# a save's stage and step (NAME and N of NAME-stepN.checkpoint), None for another name
+def chn.save.ck(+f: String) -> Maybe<&2, Rm.RmtCk>:
+  Rm.rmt.ck.from(Rm.rmt.upto.ck(S.b(f)))
+
+def chn.save.stage(+f: String) -> String:
+  +b = Maybe.default(&2, List<&2, U32>, Rm.rmt.upto.ck(S.b(f)), Nil{})
+  S.str(List.take(&2, U32, b, Nat.sub(S.len(b), Nat.add(S.len(Rm.rmt.digits.end(b, Nil{})), 5n))))
+
+# the EVERY of stage NAME's first line, None when no line names it (or it is no number)
+def chn.every.of(ls: List<&2, List<&2, U32>>, +name: String) -> Maybe<&2, Nat>:
+  match ls:
+    case Nil{}:
+      None{}
+    case +l <> t:
+      +s = chn.stage.of(l)
+      Bool.pick(Maybe<&2, Nat>, String.eq(chn.st.name(s), name), Lc.lcl.nat(S.b(chn.st.every(s))), chn.every.of(t, name))
+
+# What a stage that started leaves to do (2026-10-15, from=): the save it
+# loaded that no stage needs any more, to delete on the box (and why), and a
+# last save of the stage before it that no stage loads, to score and pull at
+# the end (a branch's end: the control stage starts from the boundary's save,
+# not from S2's last).
+type ChnAfter is Data:
+  ChnAfter{del: Maybe<&2, String>, why: String, last: Maybe<&2, String>}
+
+def chn.after.del(+a: ChnAfter) -> Maybe<&2, String>:
+  match a:
+    case ChnAfter{d, w, l}:
+      d
+
+def chn.after.why(+a: ChnAfter) -> String:
+  match a:
+    case ChnAfter{d, w, l}:
+      w
+
+def chn.after.last(+a: ChnAfter) -> Maybe<&2, String>:
+  match a:
+    case ChnAfter{d, w, l}:
+      l
+
+# a from= save, loaded: it goes unless a stage not started yet (later) names it
+# or the chain pulls it (a last, or a step that is a multiple of its stage's
+# EVERY: the prune's rule); a save of no stage in STAGES stays
+def chn.after.x(m: Maybe<&2, String>, +ls: List<&2, List<&2, U32>>, +later: List<&2, String>, +lasts: List<&2, String>) -> ChnAfter:
+  match m:
+    case None{}:
+      ChnAfter{None{}, "", None{}}
+    case Some{+x}:
+      +ck = chn.save.ck(x)
+      +e = chn.every.of(ls, chn.save.stage(x))
+      +ev = Maybe.default(&2, Nat, e, 1n)
+      +known = Bool.and(Maybe.is_some(&2, Nat, e), Maybe.is_some(&2, Rm.RmtCk, ck))
+      +st = Rm.rmt.ck.step(Maybe.default(&2, Rm.RmtCk, ck, Rm.RmtCk{0n, Nil{}}))
+      +pulled = Bool.and(Nat.is_ne(ev, 0n), Nat.is_eq(Nat.mod(st, Nat.max(ev, 1n)), 0n))
+      +gone = Bool.and(Bool.and(known, Bool.not(pulled)), Bool.and(Bool.not(chn.has(lasts, x)), Bool.not(chn.has(later, x))))
+      ChnAfter{Bool.pick(Maybe<&2, String>, gone, Some{x}, None{}), Bool.pick(String, Nat.is_eq(ev, 0n), "a raw stage's", "between its stage's pulls"), None{}}
+
+def chn.after.branch(a: ChnAfter, +yes: Bool, +prev: String) -> ChnAfter:
+  match a:
+    case ChnAfter{d, w, l}:
+      ChnAfter{d, w, Bool.pick(Maybe<&2, String>, yes, Some{prev}, None{})}
+
+# after a stage started from `from` (its from=, "" for none: the stage before's
+# last, prev, of stage pname with EVERY pevery); ls the stage lines, later the
+# saves the stages not started yet name, lasts those to score and pull.  No
+# from=: prev goes when it is a raw stage's (EVERY 0) own save no later stage
+# names (fp-chain.sh's rule, and from='s).  A from=: the save it names goes by
+# chn.after.x, and a raw stage's prev that nothing loads is a last.
+def chn.after(+from: String, +prev: String, +pname: String, +pevery: Nat, +ls: List<&2, List<&2, U32>>, +later: List<&2, String>, +lasts: List<&2, String>) -> ChnAfter:
+  +free = Bool.and(Bool.and(Nat.is_eq(pevery, 0n), String.starts_with(prev, pname ++ "-step")), Bool.not(chn.has(later, prev)))
+  +x = Maybe.default(&2, String, chn.save.of(from), "")
+  Bool.pick(ChnAfter, String.is_empty(from), ChnAfter{Bool.pick(Maybe<&2, String>, free, Some{prev}, None{}), "a raw stage's", None{}},
+    chn.after.branch(chn.after.x(chn.save.of(from), ls, later, lasts), Bool.and(Bool.and(free, Bool.not(String.eq(prev, x))), Bool.not(chn.has(lasts, prev))), prev))
 
 # a stage's log on the box: NAME.log, the first stage's LOG0
 def chn.log.of(+k: Nat, +name: String, +log0: String) -> String:
@@ -658,9 +799,13 @@ def chn.prune.do(none: Bool, +c: ChnCfg, +fs: List<&2, String>, +done: List<&2, 
         +o : Lc.LclOut <- chn.ssh(c, 300, "rm -f --" ++ chn.qs(chn.rm.paths(c, fs)))
         return chn.prune.done(Lc.lcl.ok(o), done, fs)
 
+# (from=, 2026-10-15) never a save a STAGES line starts from: it stays on the
+# box until the stage that names it has loaded it (chn.after)
 def chn.prune(+c: ChnCfg, +cs: List<&2, Rm.RmtCk>, +every: Nat, +done: List<&2, String>) -> IO(List<&2, String>):
-  +fs = chn.prunable(cs, every, done)
-  chn.prune.do(List.is_empty(&2, String, fs), c, fs, done)
+  do IO<List<&2, String>>:
+    +txt : List<&2, U32> <- S.read(chn.stages(c))
+    +fs : List<&2, String> = chn.minus(chn.prunable(cs, every, done), chn.keep.of(txt, 1n))
+    chn.prune.do(List.is_empty(&2, String, fs), c, fs, done)
 
 # a stage's saves pulled (the multiples of EVERY) and pruned on the box, from
 # one listing of its log (None: the box did not answer, nothing is done)
@@ -868,7 +1013,7 @@ def chn.tail1(+t: List<&2, U32>) -> List<&2, U32>:
 
 def chn.start.cmd(+c: ChnCfg, +prev: String, +s: ChnStage) -> String:
   "env -C " ++ Rm.rmt.q(chn.dir(c)) ++ " " ++ Rm.rmt.q(chn.drv(c)) ++ " again"
-    ++ chn.qs(["out/" ++ prev, chn.st.plan(s), chn.st.rdir(s), chn.st.ssz(s), chn.st.name(s)])
+    ++ chn.qs([chn.st.src(s, prev), chn.st.plan(s), chn.st.rdir(s), chn.st.ssz(s), chn.st.name(s)])
 
 def chn.start.after(yes: Bool, +c: ChnCfg, +name: String, +i: Nat) -> IO(ChnS):
   match yes:
@@ -986,23 +1131,41 @@ def chn.stage.follow(+c: ChnCfg, +r: ChnRun, +s: ChnStage, +e: Nat, +lg: String)
     m : Maybe<&2, List<&2, Rm.RmtCk>> <- chn.saved(c, lg)
     chn.stage.after(chn.last(chn.cks(m)), c, r, chn.st.name(s), e, lg, logs, ok)
 
-def chn.rawdel.said(ok: Bool, +c: ChnCfg, +prev: String, +name: String) -> IO(Unit):
+def chn.rawdel.said(ok: Bool, +c: ChnCfg, +prev: String, +why: String, +name: String) -> IO(Unit):
   match ok:
     case True{}:
-      chn.log(c, "deleted out/" ++ prev ++ " on the box (a raw stage's, loaded by " ++ name ++ ")")
+      chn.log(c, "deleted out/" ++ prev ++ " on the box (" ++ why ++ ", loaded by " ++ name ++ ")")
     case False{}:
       IO.pure(Unit, Unit{})
 
-# a raw stage's (EVERY 0) last save has been loaded by now: it can go (only
-# ever the stage before's own save)
-def chn.rawdel(yes: Bool, +c: ChnCfg, +prev: String, +name: String) -> IO(Unit):
-  match yes:
-    case False{}:
+# the save the stage loaded, when no stage needs it any more (chn.after): a raw
+# stage's (EVERY 0) last save (only ever the stage before's own save), or a
+# from= save no stage not started yet names and the chain does not pull
+def chn.rawdel(m: Maybe<&2, String>, +c: ChnCfg, +why: String, +name: String) -> IO(Unit):
+  match m:
+    case None{}:
       IO.pure(Unit, Unit{})
-    case True{}:
+    case Some{+prev}:
       do IO<Unit>:
         +o : Lc.LclOut <- chn.ssh(c, 120, "rm -f -- " ++ Rm.rmt.q(chn.at(c, "out/" ++ prev)))
-        chn.rawdel.said(Lc.lcl.ok(o), c, prev, name)
+        chn.rawdel.said(Lc.lcl.ok(o), c, prev, why, name)
+
+# a branch's end: a raw stage's last save that no stage loads is scored and pulled
+def chn.branch(m: Maybe<&2, String>, +c: ChnCfg, r: ChnRun, +name: String, +src: String) -> IO(ChnRun):
+  match m r:
+    case None{} r2:
+      IO.pure(ChnRun, r2)
+    case Some{+l} ChnRun{k, p, pn, pe, lg, +ls, le, mo}:
+      do IO<ChnRun>:
+        chn.log(c, "out/" ++ l ++ ": no stage starts from it (" ++ name ++ " starts from " ++ src ++ "); it is scored and pulled at the end")
+        return ChnRun{k, p, pn, pe, lg, List.append(&2, String, ls, [l]), le, mo}
+
+# what the stage's start leaves to do, from STAGES as it is now (the stages from
+# the k-th on, chn.r.k: not started yet)
+def chn.after.of(+c: ChnCfg, +r: ChnRun, +s: ChnStage) -> IO(ChnAfter):
+  do IO<ChnAfter>:
+    +txt : List<&2, U32> <- S.read(chn.stages(c))
+    return chn.after(chn.st.from(s), chn.r.prev(r), chn.r.pname(r), chn.r.pevery(r), chn.stage.lines(S.split.lines(txt)), chn.keep.of(txt, chn.r.k(r)), chn.r.lasts(r))
 
 def chn.stage.launched(ok: Bool, +c: ChnCfg, +r: ChnRun, +s: ChnStage, +e: Nat, +lg: String) -> IO(ChnRun):
   match ok:
@@ -1011,12 +1174,14 @@ def chn.stage.launched(ok: Bool, +c: ChnCfg, +r: ChnRun, +s: ChnStage, +e: Nat, 
     case True{}:
       do IO<ChnRun>:
         chn.sleep(chn.settle(c))
-        chn.rawdel(Bool.and(Nat.is_eq(chn.r.pevery(r), 0n), String.starts_with(chn.r.prev(r), chn.r.pname(r) ++ "-step")), c, chn.r.prev(r), chn.st.name(s))
-        chn.stage.follow(c, r, s, e, lg)
+        +a : ChnAfter <- chn.after.of(c, r, s)
+        chn.rawdel(chn.after.del(a), c, chn.after.why(a), chn.st.name(s))
+        r2 : ChnRun <- chn.branch(chn.after.last(a), c, r, chn.st.name(s), chn.st.src(s, chn.r.prev(r)))
+        chn.stage.follow(c, r2, s, e, lg)
 
 def chn.stage.launch(+c: ChnCfg, +r: ChnRun, +s: ChnStage, +e: Nat, +lg: String) -> IO(ChnRun):
   do IO<ChnRun>:
-    chn.log(c, "stage " ++ chn.st.name(s) ++ ": from out/" ++ chn.r.prev(r) ++ " on " ++ chn.st.plan(s))
+    chn.log(c, "stage " ++ chn.st.name(s) ++ ": from " ++ chn.st.src(s, chn.r.prev(r)) ++ " on " ++ chn.st.plan(s))
     ok : Bool <- chn.start(c, chn.r.prev(r), s)
     chn.stage.launched(ok, c, r, s, e, lg)
 
@@ -1046,13 +1211,21 @@ def chn.stage.start(can: Bool, +c: ChnCfg, +r: ChnRun, +s: ChnStage, +e: Nat, +l
         p : Bool <- chn.known(c, chn.st.plan(s))
         chn.stage.plan(p, c, r, s, e, lg)
 
-# its log on the box: follow it; else start the stage
+# a stage started before a restart, from a from=: its branch's end is a last again
+def chn.stage.resumed(+c: ChnCfg, +r: ChnRun, +s: ChnStage, +e: Nat, +lg: String) -> IO(ChnRun):
+  do IO<ChnRun>:
+    +a : ChnAfter <- chn.after.of(c, r, s)
+    r2 : ChnRun <- chn.branch(Bool.pick(Maybe<&2, String>, String.is_empty(chn.st.from(s)), None{}, chn.after.last(a)), c, r, chn.st.name(s), chn.st.src(s, chn.r.prev(r)))
+    chn.stage.follow(c, r2, s, e, lg)
+
+# its log on the box: follow it; else start the stage (from its from=, else
+# from the stage before's last)
 def chn.stage.there(yes: Bool, +c: ChnCfg, +r: ChnRun, +s: ChnStage, +e: Nat, +lg: String) -> IO(ChnRun):
   match yes:
     case True{}:
-      chn.stage.follow(c, r, s, e, lg)
+      chn.stage.resumed(c, r, s, e, lg)
     case False{}:
-      chn.stage.start(Bool.and(Bool.not(String.is_empty(chn.r.prev(r))), Bool.not(String.is_empty(chn.st.plan(s)))), c, r, s, e, lg)
+      chn.stage.start(Bool.and(Bool.or(Bool.not(String.is_empty(chn.r.prev(r))), Bool.not(String.is_empty(chn.st.from(s)))), Bool.not(String.is_empty(chn.st.plan(s)))), c, r, s, e, lg)
 
 def chn.stage.every(m: Maybe<&2, Nat>, +c: ChnCfg, +r: ChnRun, +s: ChnStage) -> IO(ChnRun):
   match m:
@@ -1477,7 +1650,7 @@ def chn.begin(gone: Bool, +c: ChnCfg) -> IO(Unit):
         chn.finish(c, r)
 
 def chn.usage() -> String:
-  "usage: bend-ops chain HOST PORT INSTANCE DEST STAGES   (STAGES: NAME BINARY EVERY [PLAN RUN_DIR SHARD_SIZE] a line)"
+  "usage: bend-ops chain HOST PORT INSTANCE DEST STAGES   (STAGES: NAME BINARY EVERY [PLAN RUN_DIR SHARD_SIZE] [from=CKPT] a line)"
 
 def chn.run(+host: String, +port: String, +inst: String, +dest: String, +stages: String) -> IO(Unit):
   do IO<Unit>:
