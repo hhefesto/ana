@@ -1,6 +1,8 @@
 import Base
 import ../Sys.bend as S
 import ../CorpusV2/PortOps.bend as P
+import ../CorpusV2/Port.bend as Pt
+import ../Agent/Spec.bend as A
 
 # The renames of bend-corpus-v2 port (bend/CorpusV2/PortOps.bend,
 # 2026-10-16) against their meaning, on a small Base and modules written
@@ -17,7 +19,8 @@ import ../CorpusV2/PortOps.bend as P
 # the older Base had is not; a module with nothing to rename is its text;
 # a checker's failures read back through the renames; a name with a
 # digits word joined (seg), in its module and its importer; whether an error
-# points into a text.  Each check prints `ok NAME` or `FAIL NAME`; any FAIL
+# points into a text; a repair transcript (Port.bend's render) read back by
+# Agent/Spec.  Each check prints `ok NAME` or `FAIL NAME`; any FAIL
 # exits 1.  Run from bend/tests.
 
 type PoCk is Data:
@@ -198,5 +201,37 @@ def po.out.checks() -> List<&2, PoCk>:
    PoCk{"at: the error's line is the text's line 13", Bool.and(P.pto.at.self(S.b(po.out()), S.b(po.lib.want())), Bool.not(P.pto.at.self(S.b(po.out()), S.b(po.lib()))))},
    PoCk{"at: no line shown, none", Bool.not(P.pto.at.self(S.b("Error:\n- expected : x\n"), S.b(po.lib())))}]
 
+# A repair transcript (Port.bend's pt.render, Transcript's format-2 turns):
+# read back by Agent/Spec, User, the Attempt, the call and its failing
+# echo, the Term, the call and its passing echo; the Term is the port
+def po.ck(+st: String, +out: String) -> List<&2, U32>:
+  S.append(S.b(st), 31 <> S.b(out))
+
+def po.tr() -> List<&2, U32>:
+  Pt.pt.render(Pt.pt.fs(S.b("src/lib.bend"), S.b(po.lib.want()), po.ck("0", "ALL PROOFS CHECK\n"), S.b(po.lib()),
+    po.ck("1", "SOME PROOFS FAIL\nError:\n- expected : a fresh constructor name (duplicate declaration: Text)\n- observed : 'Text'\n")))
+
+def po.roles(e: List<&2, A.Turn>) -> List<&2, Nat>:
+  match e:
+    case Nil{}:
+      Nil{}
+    case A.Turn{+r, x} <> t:
+      A.ag.role.code(r) <> po.roles(t)
+
+def po.nats.eq(xs: List<&2, Nat>, ys: List<&2, Nat>) -> Bool:
+  match xs ys:
+    case Nil{} Nil{}:
+      True{}
+    case +x <> xt +y <> yt:
+      Bool.and(Nat.is_eq(x, y), po.nats.eq(xt, yt))
+    case _ _:
+      False{}
+
+def po.tr.checks() -> List<&2, PoCk>:
+  +e = A.ag.read.bytes(po.tr())
+  [PoCk{"transcript: User, Attempt, call, failing echo, Term, call, passing echo; solved; the Term is the port", Bool.and(Bool.and(po.nats.eq(po.roles(e), [0n, 2n, 4n, 5n, 3n, 4n, 5n]), A.ag.solved(e)),
+     S.eq(S.chomp(A.ag.answer.code(e)), S.chomp(S.b(po.lib.want()))))},
+   PoCk{"transcript: the ask names the file", S.prefix(po.tr(), S.b("## User\n\nWrite the Bend file `src/lib.bend`.\n\nThis attempt fails. Fix it.\n\n## Attempt\n\n```bend\n# Inputs"))}]
+
 def main() -> IO(Unit):
-  po.say(List.concat(&2, PoCk, [po.decl.checks(), po.hd.checks(), po.plan.checks(), po.out.checks()]), 0n, "")
+  po.say(List.concat(&2, PoCk, [po.decl.checks(), po.hd.checks(), po.plan.checks(), po.out.checks(), po.tr.checks()]), 0n, "")
