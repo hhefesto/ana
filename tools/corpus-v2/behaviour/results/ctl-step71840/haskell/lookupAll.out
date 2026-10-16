@@ -1,0 +1,80 @@
+=== ana: step 71840 of 71840 (100.000% of its plan) ===
+## User
+
+Look up every key of a list in an association list, keeping only the values that are found.
+
+## Context
+
+```haskell
+lookup :: Eq a => a -> [(a, b)] -> Maybe b
+```
+
+## Type
+
+type
+```haskell
+lookupAll :: Eq k => [k] -> [(k, v)] -> [v]
+```
+
+## Term
+
+```haskell
+lookupAll [] _ = []
+lookupAll ((k, v) : xs) kvs =
+  case lookup k kvs of
+    Just v -> v : lookupAll xs kvs
+    Nothing -> lookupAll xs kvs
+```
+
+## ghc
+
+-- #end
+```
+
+## ghc
+
+-- #end
+```
+
+## ghc
+
+-- #end
+```
+
+## ghc
+
+-- #end
+```
+
+## ghc
+
+-- #end
+```
+
+## ghc
+
+-- #end
+```
+
+## ghc
+
+-- #end
+```
+
+## ghc
+
+-- #end
+```
+
+## ghc
+
+-- #end
+```
+
+## ghc
+
+-- #end
+```
+
+## ghc
+

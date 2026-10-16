@@ -1,0 +1,59 @@
+=== ana: step 71840 of 71840 (100.000% of its plan) ===
+## User
+
+Uppercase the first letter of every word in a string of words separated by single spaces.
+
+## Context
+
+```haskell
+toUpper :: Char -> Char
+words :: String -> [String]
+unwords :: [String] -> String
+```
+
+## Type
+
+type
+```haskell
+capitalizeWords :: String -> String
+```
+
+## Term
+
+```haskell
+capitalizeWords = unwords . words
+```
+
+## ghc
+
+-- | This is the main entry point for the 'Char' type class.
+module Data.Char.Tuple.Internal where
+
+import Data.Char
+import Data.Char
+```
+
+## ghc
+
+-- | This is the main entry point for the 'Char' type class.
+module Data.Char.Tuple.Internal where
+
+import Data.Char
+```
+
+## ghc
+
+-- | This is the main entry point for the 'Char' type class.
+module Data.Char.Tuple.Internal where
+
+import Data.Char
+```
+
+## ghc
+
+-- | This is the main entry point for the 'Char' type class.
+module Data.Char.Tuple.Internal where
+
+import Data.Char
+```
+

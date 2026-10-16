@@ -1,0 +1,1 @@
+ctl-step71840 haskell: 15/30 pass;  7 compile  15 pass  8 wrong 

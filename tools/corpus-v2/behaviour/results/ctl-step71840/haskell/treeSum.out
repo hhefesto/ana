@@ -1,0 +1,48 @@
+=== ana: step 71840 of 71840 (100.000% of its plan) ===
+## User
+
+The sum of all the values in a tree.
+
+## Context
+
+```haskell
+data Tree a = Leaf | Node (Tree a) a (Tree a)
+```
+
+## Type
+
+type
+```haskell
+treeSum :: Num a => Tree a -> a
+```
+
+## Term
+
+```haskell
+treeSum (Leaf) = 0
+treeSum (Node l x r) = x + treeSum l + treeSum r
+```
+
+## ghc
+
+-- |
+-- Module      :  Data.SBV.Examples.Internal
+-- Copyright   :  (c) Levent Erkok
+-- License     :  BSD3
+-- Maintainer  :  erkokl@gmail.com
+-- Stability   :  experimental
+--
+-- Internal functions for working with symbolic values
+
+module Data.SBV.Examples.Internal where
+
+import Data.SBV
+
+-- | The value of a symbolic value
+sval :: Symbolic a => a -> Symbolic a
+sval = sint
+```
+
+## Symbolic values
+
+The following functions are used to

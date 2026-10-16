@@ -1,0 +1,43 @@
+=== ana: step 71840 of 71840 (100.000% of its plan) ===
+## User
+
+Remove duplicate elements from a list, keeping the first occurrence of each.
+
+## Type
+
+type
+```haskell
+dedup :: Eq a => [a] -> [a]
+```
+
+## Term
+
+```haskell
+dedup [] = []
+dedup (x:xs) = if x `elem` xs then x : xs else x : dedup xs
+```
+
+## ghc
+
+#define DUPLICATE
+
+## ghc
+
+{-# LANGUAGE OverloadedStrings #-}
+
+module Main where
+
+import           Control.Monad
+import           Data.List
+import           Data.Maybe
+import           Data.Ord
+import           Data.Semigroup
+import           Data.Text (Text)
+import qualified Data.Text as T
+import           Data.Text.IO as T
+import           Data.Void
+import           Text.Megaparsec
+import           Text.Megaparsec.Char
+import           Text.Megaparsec.Char.Lexer
+import           Text.Megaparsec.Char.Lexer qualified as L
+import           Text.Megaparsec.Char.Lex

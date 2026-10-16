@@ -1,0 +1,48 @@
+=== ana: step 71840 of 71840 (100.000% of its plan) ===
+## User
+
+Shift every lowercase letter forward by n places in the alphabet, wrapping from z to a; leave every other character unchanged.
+
+## Context
+
+```haskell
+ord :: Char -> Int
+chr :: Int -> Char
+isLower :: Char -> Bool
+```
+
+## Type
+
+type
+```haskell
+caesar :: Int -> String -> String
+```
+
+## Term
+
+```haskell
+caesar n = map (ord . chr . isLower)
+```
+
+## ghc
+
+-- |
+-- Module      :  Crypto.Hash.SHA256
+-- Copyright   :  (c) 2013-2015 Galois, Inc.
+-- License     :  BSD3
+-- Maintainer  :  crypto@galois.com
+-- Stability   :  provisional
+-- Portability :  portable
+--
+-- Cryptographic SHA256 hashing algorithm.
+--
+-- This module is intended to be imported qualified, to avoid name clashes with "Prelude"
+-- in other modules.
+--
+-- @since 4.8.0.0
+module Crypto.Hash.SHA256 (
+    -- * Hashing
+    SHA256,
+    SHA256Algorithm,
+    SHA256AlgorithmAlgorithm,
+    SHA256Algorithm

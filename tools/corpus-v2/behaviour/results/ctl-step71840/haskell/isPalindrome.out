@@ -1,0 +1,91 @@
+=== ana: step 71840 of 71840 (100.000% of its plan) ===
+## User
+
+Check whether a list reads the same forwards and backwards.
+
+## Type
+
+type
+```haskell
+isPalindrome :: Eq a => [a] -> Bool
+```
+
+## Term
+
+```haskell
+isPalindrome xs = xs == reverse xs
+```
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+##

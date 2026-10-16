@@ -1,0 +1,46 @@
+=== ana: step 71840 of 71840 (100.000% of its plan) ===
+## User
+
+Apply a function to every value in a tree, keeping its shape.
+
+## Context
+
+```haskell
+data Tree a = Leaf | Node (Tree a) a (Tree a)
+```
+
+## Type
+
+type
+```haskell
+mapTree :: (a -> b) -> Tree a -> Tree b
+```
+
+## Term
+
+```haskell
+mapTree f (Leaf) = Leaf
+mapTree f (Node l x r) = Node (mapTree f l) (f x) (mapTree f r)
+```
+
+## ghc
+
+-- |
+-- Module      :  Data.SBV.Examples.Combinators
+-- Copyright   :  (c) Levent Erkok
+-- License     :  BSD3
+-- Maintainer  :  erkokl@gmail.com
+-- Stability   :  experimental
+--
+-- Combinators for working with symbolic values
+
+module Data.SBV.Examples.Combinators where
+
+import Data.SBV
+import Data.SBV.Examples.Common
+```
+
+## Symbolic values
+
+The following functions are used to define the symbolic value of a
+symbolic value in a given

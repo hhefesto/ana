@@ -1,0 +1,91 @@
+=== ana: step 71840 of 71840 (100.000% of its plan) ===
+## User
+
+All prime numbers up to and including n, in increasing order.
+
+## Type
+
+type
+```haskell
+primesUpTo :: Int -> [Int]
+```
+
+## Term
+
+```haskell
+primesUpTo n = takeWhile (<= n) primes
+```
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+##

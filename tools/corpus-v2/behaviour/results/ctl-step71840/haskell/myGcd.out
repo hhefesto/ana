@@ -1,0 +1,37 @@
+=== ana: step 71840 of 71840 (100.000% of its plan) ===
+## User
+
+The greatest common divisor of two non-negative integers, by Euclid's algorithm.
+
+## Type
+
+type
+```haskell
+myGcd :: Int -> Int -> Int
+```
+
+## Term
+
+```haskell
+myGcd a b = if a > b then a else b
+```
+
+## ghc
+
+You may find it out of this problem by using the Euclid algorithm.
+
+## ghc
+
+Euclid's algorithm is a simple algorithm that calculates the greatest common divisor of two non-negative integers.
+
+## ghc
+
+Euclid's algorithm is a simple algorithm that calculates the greatest common divisor of two non-negative integers.
+
+## ghc
+
+Euclid's algorithm is a simple algorithm that calculates the greatest common divisor of two non-negative integers.
+
+## ghc
+
+Euclid's algorithm is a simple algorithm that calculates the greatest common divisor of two non-negative

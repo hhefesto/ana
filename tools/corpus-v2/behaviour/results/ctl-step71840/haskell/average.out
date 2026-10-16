@@ -1,0 +1,91 @@
+=== ana: step 71840 of 71840 (100.000% of its plan) ===
+## User
+
+The arithmetic mean of a non-empty list of numbers.
+
+## Type
+
+type
+```haskell
+average :: [Double] -> Double
+```
+
+## Term
+
+```haskell
+average xs = sum xs / fromIntegral (length xs)
+```
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc
+
+## ghc

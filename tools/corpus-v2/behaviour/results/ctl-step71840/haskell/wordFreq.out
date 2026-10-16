@@ -1,0 +1,42 @@
+=== ana: step 71840 of 71840 (100.000% of its plan) ===
+## User
+
+Count how many times each word occurs in a text, as a map from each word to its count.
+
+## Context
+
+```haskell
+words :: String -> [String]
+M.insertWith :: Ord k => (a -> a -> a) -> k -> a -> M.Map k a -> M.Map k a
+M.empty :: M.Map k a
+```
+
+## Type
+
+type
+```haskell
+wordFreq :: String -> M.Map String Int
+```
+
+## Term
+
+```haskell
+wordFreq = M.fromList . words
+```
+
+## ghc
+
+-- |
+-- Module      :  Data.Singletons.TH
+-- Copyright   :  (C) 2018 Csongor Kiss
+-- License     :  BSD-style (see LICENSE)
+-- Maintainer  :  Csongor Kiss <kiss.csongor.kiss@gmail.com>
+-- Stability   :  experimental
+-- Portability :  non-portable
+--
+-- This module contains the 'Singletons' type and the 'Singletons' type
+-- for the 'Singletons' type and the 'Singletons' type for the 'Singletons'
+-- type for the 'Singletons' type.
+--
+-- The 'Singletons' type is a type that can be used to represent the
+

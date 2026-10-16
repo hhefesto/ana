@@ -1,0 +1,68 @@
+=== ana: step 71840 of 71840 (100.000% of its plan) ===
+## User
+
+The longest word of a string of words separated by spaces; on a tie, the first such word.
+
+## Type
+
+type
+```haskell
+longestWord :: String -> String
+```
+
+## Term
+
+```haskell
+longestWord = longestWord . words
+```
+
+## ghc
+
+*** Exception: No such word
+
+## ghc
+
+*** Not a valid word
+
+## ghc
+
+*** Not a valid word
+
+## ghc
+
+*** Not a valid word
+
+## ghc
+
+*** Not a valid word
+
+## ghc
+
+*** Not a valid word
+
+## ghc
+
+*** Not a valid word
+
+## ghc
+
+*** Not a valid word
+
+## ghc
+
+*** Not a valid word
+
+## ghc
+
+*** Not a valid word
+
+## ghc
+
+*** Not a valid word
+
+## ghc
+
+*** Not a valid word
+
+## ghc
+
