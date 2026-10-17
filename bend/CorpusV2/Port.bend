@@ -86,7 +86,8 @@ import ./PortOps.bend as P
 #          changed file that passes, whose original's error points into itself
 #          and that fits the window, id `port:REPO/PATH/repair`; INBOX/REPO/ for
 #          every candidate not kept: the repository's files from OUT/tree (none of
-#          a held-out unit) and FAILING.tsv (`path TAB class TAB message`), each
+#          a held-out unit) and FAILING.tsv (`path TAB class TAB message TAB why`:
+#          the loader's verdict and keep's reason), each
 #          failing file's loader output beside it as PATH.err; OUT/summary.txt.
 #
 # Every def is prefixed `pt.`.
@@ -1181,7 +1182,7 @@ def pt.nats.count(xs: List<&2, Nat>, +k: Nat) -> Nat:
 
 # The inbox: a repository a directory, its files from the tree (none of a
 # vault repository or a held-out unit), the failing ones listed in
-# FAILING.tsv (`path TAB class TAB message`, the path in the repository) with
+# FAILING.tsv (`path TAB class TAB message TAB why`, the path in the repository) with
 # their loader output beside them (PATH.err)
 
 # check.tsv's rows of the paths in s
@@ -1192,6 +1193,21 @@ def pt.rows.in(ls: List<&2, List<&2, U32>>, +s: Set()) -> List<&2, List<&2, U32>
     case +l <> more:
       +rest = pt.rows.in(more, s)
       Bool.pick(List<&2, List<&2, U32>>, P.pto.in(s, L.v2.before(l, 9)), l <> rest, rest)
+
+# keep.tsv's reasons by path, and a check.tsv row with its file's reason after it
+def pt.why.of(ls: List<&2, List<&2, U32>>, m: Map<&2, List<&2, U32>>) -> Map<&2, List<&2, U32>>:
+  match ls:
+    case Nil{}:
+      m
+    case +l <> more:
+      pt.why.of(more, Map.set(&2, List<&2, U32>, m, P.pto.key(L.v2.before(l, 9)), pt.field(S.split(l, 9), 2n)))
+
+def pt.rows.why(ls: List<&2, List<&2, U32>>, +wm: Map<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> more:
+      L.v2.concat([l, [9], pt.hm.val(Map.get(List<&2, U32>, Nil{}, wm, P.pto.key(L.v2.before(l, 9))))]) <> pt.rows.why(more, wm)
 
 # the rows of the repository dir
 def pt.rows.dir(ls: List<&2, List<&2, U32>>, +dir: List<&2, U32>) -> List<&2, List<&2, U32>>:
@@ -1302,7 +1318,7 @@ def pt.out(+c: PtCx) -> IO(Unit):
     pt.log("out: transcripts: " ++ Nat.show(pt.nats.count(whys, 0n)) ++ " written (" ++ C.col.mb(tz) ++ " MB); none for " ++ Nat.show(pt.nats.count(whys, 1n)) ++ " (unchanged, not a pass, or no error of the original), "
       ++ Nat.show(pt.nats.count(whys, 2n)) ++ " (the original's error is in an import), " ++ Nat.show(pt.nats.count(whys, 3n)) ++ " (over the window)")
     +cl : List<&2, List<&2, U32>> <- C.col.read.lines(pt.st(c, "check.tsv"))
-    +rows : List<&2, List<&2, U32>> = pt.rows.in(cl, P.pto.set(failed))
+    +rows : List<&2, List<&2, U32>> = pt.rows.why(pt.rows.in(cl, P.pto.set(failed)), pt.why.of(kl, Map.new(&2, List<&2, U32>)))
     +vk : List<&2, List<&2, U32>> <- C.col.files.lines((col ++ "/vault/repos.txt") <> C.col.cf.files(pt.cx.cfg(c), "vault-known"))
     +bk : List<&2, List<&2, U32>> <- C.col.read.lines(col ++ "/stage/pre/big.repos")
     +ds : List<&2, List<&2, U32>> = C.col.uniq(pt.dirs(failed))
@@ -1310,6 +1326,7 @@ def pt.out(+c: PtCx) -> IO(Unit):
     S.mkdir(inbox)
     +ia : String <- S.realpath(inbox)
     pt.inbox.go(ds, c, idx, rows, P.pto.set(vk), C.col.set(bk), ia, Unit{})
+    S.write(ia ++ "/README.txt", S.b("Bend files bend-corpus-v2 port could not recover (bend/CorpusV2/Port.bend): a directory a repository, its files as the port left them (the renames applied; none of a vault repository or a held-out unit), REPO/FAILING.tsv a failing file a line (path in the repository, the locked loader's class and first message, the port's reason: load, timeout, checked with failures other than the original's under the first upstream compiler that loads it, checked where the original passes under one, checked where no upstream compiler loads the original), and each failing file's whole loader output beside it as PATH.err. A fix must pass, or fail only where the author's code fails, under the locked compiler (run/gcroot-bend/bin/bend FILE --check-only, run in the file's directory), and must not delete or weaken a definition or a law.\n"))
     +rt : List<&2, List<&2, U32>> <- C.col.read.lines(pt.st(c, "route/route.tsv"))
     +ex : List<&2, List<&2, U32>> <- C.col.read.lines(pt.st(c, "excluded.tsv"))
     +sm : List<&2, U32> = S.b("port (bend-corpus-v2 port)\n"
