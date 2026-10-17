@@ -1225,6 +1225,7 @@ def pt.errs(rows: List<&2, List<&2, U32>>, +c: PtCx, +idx: Map<&2, Nat>, +inbox:
       +p = L.v2.before(l, 9)
       do IO<Unit>:
         +ck : List<&2, U32> <- S.read(pt.st(c, "check/" ++ Nat.show(pt.index.of(idx, p)) ++ ".port"))
+        S.mkdir(S.parent(inbox ++ "/" ++ S.str(p)))
         S.write(inbox ++ "/" ++ S.str(p) ++ ".err", pt.ck.text(ck))
         pt.errs(more, c, idx, inbox)
 
@@ -1307,7 +1308,8 @@ def pt.out(+c: PtCx) -> IO(Unit):
     +ds : List<&2, List<&2, U32>> = C.col.uniq(pt.dirs(failed))
     S.rm(inbox)
     S.mkdir(inbox)
-    pt.inbox.go(ds, c, idx, rows, P.pto.set(vk), C.col.set(bk), inbox, Unit{})
+    +ia : String <- S.realpath(inbox)
+    pt.inbox.go(ds, c, idx, rows, P.pto.set(vk), C.col.set(bk), ia, Unit{})
     +rt : List<&2, List<&2, U32>> <- C.col.read.lines(pt.st(c, "route/route.tsv"))
     +ex : List<&2, List<&2, U32>> <- C.col.read.lines(pt.st(c, "excluded.tsv"))
     +sm : List<&2, U32> = S.b("port (bend-corpus-v2 port)\n"
