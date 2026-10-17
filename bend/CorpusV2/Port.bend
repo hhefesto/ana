@@ -2,6 +2,7 @@ import Base
 import ../Sys.bend as S
 import ../Clock.bend as Ck
 import ../Tokenizer.bend as Tk
+import ../Sha256.bend as H
 import ../Transcript.bend as Tr
 import ./Lib.bend as L
 import ./Collect.bend as C
@@ -15,7 +16,7 @@ import ./PortOps.bend as P
 # definitions the author's compiler fails), with a repair transcript each
 # (2026-10-16).
 #
-#   bend-corpus-v2 port CFG [STEP...]      STEP: plan check refs keep out; all (the default) is plan check keep out
+#   bend-corpus-v2 port CFG [STEP...]      STEP: plan check refs seed keep out; all (the default) is plan check keep out
 #
 # Run from the repository root.  The config (collect's grammar: a directive a
 # line, `#` starts a comment):
@@ -48,18 +49,28 @@ import ./PortOps.bend as P
 #          (sibling links read through; a hub import is the loader's), PortOps'
 #          renames on all of them, each written to OUT/tree at its path (the
 #          links too): OUT/stage/plan.tsv (`path TAB changed TAB own TAB binder
-#          TAB qualified TAB alias TAB seg`), OUT/stage/inv/REPO.tsv (`new TAB old`, every
-#          rename of the repository's files).
+#          TAB qualified TAB alias TAB seg`), OUT/stage/inv/REPO.tsv (`new TAB
+#          old`, every rename of the repository's files), OUT/stage/hash.tsv
+#          (`path TAB hash`: sha256 of the loader's path and of each file of the
+#          candidate's closure in OUT/tree, its path and its text's sha256).
 #   check  the loader on every candidate in OUT/tree (OUT/stage/check/K.port, the
 #          check `STATUS 0x1F OUTPUT`; OUT/stage/check.tsv `path TAB class TAB
 #          message`); the loader on the original (in src) of every changed one
 #          that passes (K.orig: the error a transcript shows); each ref in turn on
-#          the original of every one it fails a definition of (K.ref, the first
-#          ref that loads it; OUT/stage/ref.tsv `path TAB i TAB class`, a row each
-#          attempt, i the ref's place in the config).
+#          the original of every one it fails a definition of (the first ref that
+#          loads it; OUT/stage/ref.tsv `path TAB i TAB class`, a row each attempt,
+#          i the ref's place in the config, kept across runs).  Every result is
+#          cached in OUT/stage/cache and kept across runs: a port's by its hash
+#          (p-HASH.ck), an original's by the loader and its path (o-KEY.ck), the
+#          first loading ref's by its path (r-KEY.ck; the clones never change),
+#          so a check after a re-plan runs the loader only on the candidates
+#          whose closure changed.
 #   refs   check's ref checks alone, each ref on the checked ports' originals that
 #          no ref loaded and ref.tsv does not say it tried (refs added to the
 #          config later run on what the earlier ones left).
+#   seed   OUT/stage/check's results into the cache (a run's checks made before
+#          the cache: hash.tsv anew from OUT/tree as it stands, then each K.port,
+#          K.orig and K.ref under its key); then plan and check again.
 #   keep   pass, or checked with the failures (PortOps' pto.fails: its Error and
 #          Location lines, the port's read back through the renames) equal to
 #          the original's under the first ref that loads it: OUT/stage/keep.tsv
@@ -304,6 +315,120 @@ def pt.closure(+src: String, +ls: List<&2, P.PtoLink>, +ps: List<&2, List<&2, U3
     s : PtCl <- pt.cl.go(64n, src, ls, PtCl{ps, P.pto.set(ps), Nil{}})
     return pt.cl.mods(s)
 
+# The closure hashes: a candidate's result is the loader's on it and every
+# file it imports, so it is cached by a hash of them (OUT/stage/cache, kept
+# across runs): sha256 of the loader's path, then each file of the closure in
+# OUT/tree (the candidate and everything it imports, read through the links)
+# as its path and its text's sha256, in path order.  OUT/stage/hash.tsv:
+# `path TAB hash` a candidate.
+
+type PtLm is Data:
+  PtLm{path: List<&2, U32>, h: String, imps: List<&2, List<&2, U32>>}
+
+def pt.lm.h(+m: PtLm) -> String:
+  match m:
+    case PtLm{p, h, i}:
+      h
+
+def pt.lm.imps(+m: PtLm) -> List<&2, List<&2, U32>>:
+  match m:
+    case PtLm{p, h, i}:
+      i
+
+type PtLc is Data:
+  PtLc{next: List<&2, List<&2, U32>>, seen: Set(), acc: List<&2, PtLm>}
+
+def pt.lc.put(next: List<&2, List<&2, U32>>, m: PtLm, acc: List<&2, PtLm>, u: PtCl) -> PtLc:
+  match u:
+    case PtCl{news, seen2, x}:
+      PtLc{List.append(&2, List<&2, U32>, next, news), seen2, m <> acc}
+
+def pt.lc.add(+ls: List<&2, P.PtoLink>, +p: List<&2, U32>, m: Maybe<&2, List<&2, U32>>, s: PtLc) -> PtLc:
+  match m s:
+    case None{} s2:
+      s2
+    case Some{+t} PtLc{next, +seen, acc}:
+      +imps = pt.imp.paths(P.pto.imps.res(P.pto.hd.imps(P.pto.header(t)), ls, p))
+      pt.lc.put(next, PtLm{p, H.sha256(t), imps}, acc, pt.unseen(imps, seen, Nil{}))
+
+def pt.lc.file(+root: String, +ls: List<&2, P.PtoLink>, +p: List<&2, U32>, s: PtLc) -> IO(PtLc):
+  do IO<PtLc>:
+    m : Maybe<&2, List<&2, U32>> <- S.slurp(root ++ "/" ++ S.str(p))
+    return pt.lc.add(ls, p, m, s)
+
+def pt.lc.level(ps: List<&2, List<&2, U32>>, +root: String, +ls: List<&2, P.PtoLink>, s: PtLc) -> IO(PtLc):
+  match ps:
+    case Nil{}:
+      IO.pure(PtLc, s)
+    case +p <> more:
+      IO.bind(PtLc, PtLc, pt.lc.file(root, ls, p, s), pt.lc.level(more, root, ls))
+
+def pt.lc.go(fuel: Nat, +root: String, +ls: List<&2, P.PtoLink>, s: PtLc) -> IO(PtLc):
+  match fuel s:
+    case 1n+f PtLc{next, +seen, +acc}:
+      IO.bind(PtLc, PtLc, pt.lc.level(next, root, ls, PtLc{Nil{}, seen, acc}), pt.lc.go(f, root, ls))
+    case _ s2:
+      IO.pure(PtLc, s2)
+
+def pt.lm.map(ms: List<&2, PtLm>, m: Map<&2, PtLm>) -> Map<&2, PtLm>:
+  match ms:
+    case Nil{}:
+      m
+    case PtLm{+p, h, i} <> more:
+      pt.lm.map(more, Map.set(&2, PtLm, m, P.pto.key(p), PtLm{p, h, i}))
+
+def pt.lc.map(s: PtLc) -> Map<&2, PtLm>:
+  match s:
+    case PtLc{n, z, acc}:
+      pt.lm.map(acc, Map.new(&2, PtLm))
+
+def pt.lm.snd(r: Map<&2, PtLm> & Bool) -> Bool:
+  (m, x) = r
+  x
+
+def pt.lm.val(r: Map<&2, PtLm> & PtLm) -> PtLm:
+  (m, x) = r
+  x
+
+def pt.lm.has(+m: Map<&2, PtLm>, +p: List<&2, U32>) -> Bool:
+  pt.lm.snd(Map.has(&2, PtLm, m, P.pto.key(p)))
+
+def pt.lm.get(+m: Map<&2, PtLm>, +p: List<&2, U32>) -> PtLm:
+  pt.lm.val(Map.get(PtLm, PtLm{Nil{}, "", Nil{}}, m, P.pto.key(p)))
+
+# the closure of a path: it and what it imports, transitively (paths in the map)
+def pt.reach(fuel: Nat, q: List<&2, List<&2, U32>>, +m: Map<&2, PtLm>, +seen: Set(), +acc: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match fuel q:
+    case 1n+f +p <> +more:
+      +new = Bool.and(Bool.not(P.pto.in(seen, p)), pt.lm.has(m, p))
+      pt.reach(f, Bool.pick(List<&2, List<&2, U32>>, new, List.append(&2, List<&2, U32>, more, pt.lm.imps(pt.lm.get(m, p))), more), m,
+        Bool.pick(Set(), new, Set.add(seen, P.pto.key(p)), seen), Bool.pick(List<&2, List<&2, U32>>, new, p <> acc, acc))
+    case _ _:
+      acc
+
+def pt.hash.parts(ps: List<&2, List<&2, U32>>, +m: Map<&2, PtLm>) -> List<&2, U32>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case +p <> more:
+      L.v2.concat([p, [0], S.b(pt.lm.h(pt.lm.get(m, p))), [0], pt.hash.parts(more, m)])
+
+def pt.hash(+loader: String, +m: Map<&2, PtLm>, +p: List<&2, U32>) -> String:
+  H.sha256(L.v2.concat([S.b(loader), [0], pt.hash.parts(C.col.sort(pt.reach(1000000n, [p], m, Set.new(), Nil{})), m)]))
+
+def pt.hash.lines(ps: List<&2, List<&2, U32>>, +loader: String, +m: Map<&2, PtLm>) -> List<&2, U32>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case +p <> more:
+      L.v2.concat([p, S.b("\t" ++ pt.hash(loader, m, p) ++ "\n"), pt.hash.lines(more, loader, m)])
+
+# the group's hash.tsv lines, from OUT/tree as it stands
+def pt.group.hashes(+c: PtCx, +ls: List<&2, P.PtoLink>, +g: List<&2, List<&2, U32>>) -> IO(Unit):
+  do IO<Unit>:
+    s : PtLc <- pt.lc.go(64n, pt.cx.out(c) ++ "/tree", ls, PtLc{g, P.pto.set(g), Nil{}})
+    S.add(pt.st(c, "hash.tsv"), pt.hash.lines(g, pt.loader(c), pt.lc.map(s)))
+
 # a plan's line, and its renames as `new TAB old` lines
 def pt.plan.line(+p: P.PtoPlan) -> List<&2, U32>:
   L.v2.concat([P.pto.plan.path(p), S.b("\t" ++ Nat.show(pt.b2n(P.pto.plan.changed(p))) ++ "\t" ++ Nat.show(P.pto.plan.own(p)) ++ "\t" ++ Nat.show(P.pto.plan.binder(p))
@@ -364,6 +489,7 @@ def pt.group(+c: PtCx, +b: P.PtoBase, +ls: List<&2, P.PtoLink>, +g: List<&2, Lis
     +ms : List<&2, P.PtoMod> <- pt.closure(pt.cx.src(c), ls, g)
     +ps : List<&2, P.PtoPlan> = P.pto.plans(ms, b)
     pt.write.tree(ps, pt.cx.out(c) ++ "/tree")
+    pt.group.hashes(c, ls, g)
     S.add(pt.st(c, "plan.tsv"), pt.plans.lines(ps, P.pto.set(g)))
     S.write(pt.st(c, "inv/" ++ dir ++ ".tsv"), pt.plans.inv(ps))
     +k : Nat = pt.changed.n(ps)
@@ -424,6 +550,7 @@ def pt.plan(+c: PtCx) -> IO(Unit):
     +ot : List<&2, U32> <- S.read(pt.str(c, "base-old", ""))
     +b : P.PtoBase = P.pto.base.of(bt, ot)
     S.write(pt.st(c, "plan.tsv"), Nil{})
+    S.write(pt.st(c, "hash.tsv"), Nil{})
     n : PtN <- pt.groups.run(pt.groups(cands), c, b, ls, PtN{0n, 0n, 0n})
     pt.log("plan: " ++ pt.n.show(n))
 
@@ -574,6 +701,79 @@ def pt.ks.todo(ks: List<&2, Nat>, +ps: List<&2, List<&2, U32>>, +done: Set(), +t
       +rest = pt.ks.todo(more, ps, done, tried)
       Bool.pick(List<&2, Nat>, Bool.or(P.pto.in(done, p), P.pto.in(tried, p)), rest, k <> rest)
 
+# The cache (OUT/stage/cache): a port's check by its closure hash (p-HASH.ck),
+# an original's under the loader by the loader and its path (o-KEY.ck: the
+# clones never change), the first ref's that loads an original by its path
+# (r-KEY.ck; ref.tsv says which ref)
+def pt.cache(+c: PtCx) -> String:
+  pt.st(c, "cache")
+
+def pt.hm.of(ls: List<&2, List<&2, U32>>, m: Map<&2, List<&2, U32>>) -> Map<&2, List<&2, U32>>:
+  match ls:
+    case Nil{}:
+      m
+    case +l <> more:
+      pt.hm.of(more, Map.set(&2, List<&2, U32>, m, P.pto.key(L.v2.before(l, 9)), L.v2.after(l, 9)))
+
+def pt.hm.val(r: Map<&2, List<&2, U32>> & List<&2, U32>) -> List<&2, U32>:
+  (m, x) = r
+  x
+
+def pt.ck.port(+c: PtCx, +hm: Map<&2, List<&2, U32>>, +p: List<&2, U32>) -> String:
+  pt.cache(c) ++ "/p-" ++ S.str(pt.hm.val(Map.get(List<&2, U32>, Nil{}, hm, P.pto.key(p)))) ++ ".ck"
+
+def pt.ck.orig(+c: PtCx, +p: List<&2, U32>) -> String:
+  pt.cache(c) ++ "/o-" ++ H.sha256(L.v2.concat([S.b(pt.loader(c)), [0], p])) ++ ".ck"
+
+def pt.ck.ref(+c: PtCx, +p: List<&2, U32>) -> String:
+  pt.cache(c) ++ "/r-" ++ H.sha256(p) ++ ".ck"
+
+# a job's result into its cache file (name: the file's path to its cache file)
+def pt.save.to(rs: List<&2, C.ColRes>, +ps: List<&2, List<&2, U32>>, +c: PtCx, +hm: Map<&2, List<&2, U32>>, +kind: Nat) -> IO(Unit):
+  match rs:
+    case Nil{}:
+      IO.pure(Unit, Unit{})
+    case +r <> more:
+      +p = M.mto.nth(ps, C.col.res.n(r))
+      +f = Bool.pick(String, Nat.is_eq(kind, 0n), pt.ck.port(c, hm, p), Bool.pick(String, Nat.is_eq(kind, 1n), pt.ck.orig(c, p), pt.ck.ref(c, p)))
+      do IO<Unit>:
+        S.write(f, pt.ck(r))
+        pt.save.to(more, ps, c, hm, kind)
+
+# the indices of ks whose cache file is missing
+def pt.missing(ks: List<&2, Nat>, +ps: List<&2, List<&2, U32>>, +c: PtCx, +hm: Map<&2, List<&2, U32>>, +kind: Nat, +acc: List<&2, Nat>) -> IO(List<&2, Nat>):
+  match ks:
+    case Nil{}:
+      IO.pure(List<&2, Nat>, List.reverse(&2, Nat, acc))
+    case +k <> more:
+      +p = M.mto.nth(ps, k)
+      +f = Bool.pick(String, Nat.is_eq(kind, 0n), pt.ck.port(c, hm, p), pt.ck.orig(c, p))
+      do IO<List<&2, Nat>>:
+        there : Bool <- S.exists(f)
+        pt.missing(more, ps, c, hm, kind, Bool.pick(List<&2, Nat>, there, acc, k <> acc))
+
+# each of ks from the cache into check/K.SUFFIX, and as a job's result
+def pt.fill(ks: List<&2, Nat>, +ps: List<&2, List<&2, U32>>, +c: PtCx, +hm: Map<&2, List<&2, U32>>, +kind: Nat, +suffix: String, acc: List<&2, C.ColRes>) -> IO(List<&2, C.ColRes>):
+  match ks:
+    case Nil{}:
+      IO.pure(List<&2, C.ColRes>, List.reverse(&2, C.ColRes, acc))
+    case +k <> more:
+      +p = M.mto.nth(ps, k)
+      +f = Bool.pick(String, Nat.is_eq(kind, 0n), pt.ck.port(c, hm, p), pt.ck.orig(c, p))
+      do IO<List<&2, C.ColRes>>:
+        +ck : List<&2, U32> <- S.read(f)
+        S.write(pt.st(c, "check/" ++ Nat.show(k) ++ suffix), ck)
+        pt.fill(more, ps, c, hm, kind, suffix, C.ColRes{k, pt.ck.status(ck), pt.ck.text(ck)} <> acc)
+
+# the loader on the files of ks not in the cache (kind 0 the ports in the
+# tree, 1 the originals in the clones), then every one of ks from the cache
+def pt.cached(+what: String, +ks: List<&2, Nat>, +ps: List<&2, List<&2, U32>>, +c: PtCx, +hm: Map<&2, List<&2, U32>>, +kind: Nat, +root: String, +suffix: String) -> IO(List<&2, C.ColRes>):
+  do IO<List<&2, C.ColRes>>:
+    +miss : List<&2, Nat> <- pt.missing(ks, ps, c, hm, kind, Nil{})
+    pt.log("check: " ++ what ++ ": " ++ Nat.show(List.length(&2, Nat, ks)) ++ " files, " ++ Nat.show(Nat.sub(List.length(&2, Nat, ks), List.length(&2, Nat, miss))) ++ " in the cache, the loader on " ++ Nat.show(List.length(&2, Nat, miss)) ++ ", " ++ Nat.show(pt.cx.procs(c)) ++ " at once")
+    +rs : List<&2, C.ColRes> <- C.col.pool("check: " ++ what, pt.cx.procs(c), pt.jobs(ps, miss, 0n, pt.loader(c), pt.secs(c), root))
+    pt.save.to(rs, ps, c, hm, kind)
+    pt.fill(ks, ps, c, hm, kind, suffix, Nil{})
 # each ref in turn on the checked ports' originals no earlier ref loaded
 # (resumable: what ref.tsv says was tried is not tried again)
 def pt.refs(refs: List<&2, List<&2, U32>>, +c: PtCx, +ps: List<&2, List<&2, U32>>, +ks: List<&2, Nat>, +i: Nat) -> IO(Unit):
@@ -586,7 +786,7 @@ def pt.refs(refs: List<&2, List<&2, U32>>, +c: PtCx, +ps: List<&2, List<&2, U32>
         +todo : List<&2, Nat> = pt.ks.todo(ks, ps, P.pto.set(pt.ref.loaded(rl)), P.pto.set(pt.ref.tried(rl, i)))
         +rs : List<&2, C.ColRes> <- C.col.pool("check: ref " ++ Nat.show(i) ++ " on the originals", pt.cx.procs(c), pt.jobs(ps, todo, 0n, S.str(r), pt.secs(c), pt.cx.src(c)))
         +got : List<&2, C.ColRes> = pt.keep.loaded(rs)
-        pt.save(got, pt.st(c, "check"), ".ref")
+        pt.save.to(got, ps, c, Map.new(&2, List<&2, U32>), 2n)
         S.add(pt.st(c, "ref.tsv"), pt.ref.rows(rs, ps, i))
         pt.log("check: ref " ++ Nat.show(i) ++ " (" ++ S.str(r) ++ ") loads " ++ Nat.show(List.length(&2, C.ColRes, got)) ++ " of " ++ Nat.show(List.length(&2, Nat, todo)) ++ " originals")
         pt.refs(more, c, ps, ks, 1n+i)
@@ -599,20 +799,18 @@ def pt.check(+c: PtCx) -> IO(Unit):
   do IO<Unit>:
     +ps : List<&2, List<&2, U32>> <- C.col.read.lines(pt.st(c, "cands.tsv"))
     +pl : List<&2, List<&2, U32>> <- C.col.read.lines(pt.st(c, "plan.tsv"))
+    +hl : List<&2, List<&2, U32>> <- C.col.read.lines(pt.st(c, "hash.tsv"))
+    +hm : Map<&2, List<&2, U32>> = pt.hm.of(hl, Map.new(&2, List<&2, U32>))
     S.rm(dir)
     S.mkdir(dir)
-    S.write(pt.st(c, "ref.tsv"), Nil{})
+    S.mkdir(pt.cache(c))
     +n : Nat = List.length(&2, List<&2, U32>, ps)
-    pt.log("check: the loader on " ++ Nat.show(n) ++ " ported files, " ++ Nat.show(pt.cx.procs(c)) ++ " at once")
-    +rs : List<&2, C.ColRes> <- C.col.pool("check: the ports", pt.cx.procs(c), pt.jobs(ps, pt.upto(n, 0n), 0n, pt.loader(c), pt.secs(c), pt.cx.out(c) ++ "/tree"))
-    pt.save(rs, dir, ".port")
+    +rs : List<&2, C.ColRes> <- pt.cached("the ports", pt.upto(n, 0n), ps, c, hm, 0n, pt.cx.out(c) ++ "/tree", ".port")
     S.write(pt.st(c, "check.tsv"), pt.rows(rs, ps))
     pt.log("check: pass " ++ Nat.show(pt.count(rs, "pass")) ++ ", checked " ++ Nat.show(pt.count(rs, "checked")) ++ ", load " ++ Nat.show(pt.count(rs, "load")) ++ ", timeout " ++ Nat.show(pt.count(rs, "timeout")))
     +ch : List<&2, Nat> = pt.ks.in(ps, P.pto.set(pt.changed.of(pl)), 0n)
     +os : List<&2, Nat> = pt.nats.and(pt.ks.class(rs, "pass"), ch)
-    +ro : List<&2, C.ColRes> <- C.col.pool("check: the originals", pt.cx.procs(c), pt.jobs(ps, os, 0n, pt.loader(c), pt.secs(c), pt.cx.src(c)))
-    pt.save(ro, dir, ".orig")
-    pt.log("check: the loader on " ++ Nat.show(List.length(&2, Nat, os)) ++ " originals of changed files that pass")
+    +ro : List<&2, C.ColRes> <- pt.cached("the originals of changed files that pass", os, ps, c, hm, 1n, pt.cx.src(c), ".orig")
     pt.refs(C.col.cf.all(pt.cx.cfg(c), "ref"), c, ps, pt.ks.class(rs, "checked"), 0n)
 
 # the indices of check.tsv's rows of class cls
@@ -631,6 +829,56 @@ def pt.refs.step(+c: PtCx) -> IO(Unit):
     +cl : List<&2, List<&2, U32>> <- C.col.read.lines(pt.st(c, "check.tsv"))
     pt.refs(C.col.cf.all(pt.cx.cfg(c), "ref"), c, ps, pt.ks.rows(cl, S.b("checked"), 0n), 0n)
 
+
+# seed: the results OUT/stage/check holds (a run's, before a re-plan) into the
+# cache, each port by its closure's hash in OUT/tree as it stands (hash.tsv is
+# written anew from it), each original's and ref's by its path
+def pt.seed.put(+f: String, m: Maybe<&2, List<&2, U32>>) -> IO(Unit):
+  match m:
+    case None{}:
+      IO.pure(Unit, Unit{})
+    case Some{x}:
+      S.write(f, x)
+
+def pt.seed.one(+c: PtCx, +hm: Map<&2, List<&2, U32>>, +p: List<&2, U32>, +k: Nat, u: Unit) -> IO(Unit):
+  +base = pt.st(c, "check/" ++ Nat.show(k))
+  do IO<Unit>:
+    a : Maybe<&2, List<&2, U32>> <- S.slurp(base ++ ".port")
+    pt.seed.put(pt.ck.port(c, hm, p), a)
+    b : Maybe<&2, List<&2, U32>> <- S.slurp(base ++ ".orig")
+    pt.seed.put(pt.ck.orig(c, p), b)
+    r : Maybe<&2, List<&2, U32>> <- S.slurp(base ++ ".ref")
+    pt.seed.put(pt.ck.ref(c, p), r)
+
+def pt.seed.go(ps: List<&2, List<&2, U32>>, +c: PtCx, +hm: Map<&2, List<&2, U32>>, +k: Nat, u: Unit) -> IO(Unit):
+  match ps:
+    case Nil{}:
+      IO.pure(Unit, u)
+    case +p <> more:
+      IO.bind(Unit, Unit, pt.seed.one(c, hm, p, k, u), pt.seed.go(more, c, hm, 1n+k))
+
+def pt.hashes.go(gs: List<&2, List<&2, List<&2, U32>>>, +c: PtCx, +ls: List<&2, P.PtoLink>, u: Unit) -> IO(Unit):
+  match gs:
+    case Nil{}:
+      IO.pure(Unit, u)
+    case +g <> more:
+      IO.bind(Unit, Unit, pt.group.hashes(c, ls, g), pt.hashes.go(more, c, ls))
+
+def pt.links(+c: PtCx) -> IO(List<&2, P.PtoLink>):
+  do IO<List<&2, P.PtoLink>>:
+    +lo : S.Out <- S.run(".", [], 600, "find", [pt.cx.src(c), "-maxdepth", "1", "-type", "l", "-printf", "%f\t%l\n"], Nil{})
+    return pt.links.of(S.split.lines(S.Out.text(lo)))
+
+def pt.seed(+c: PtCx) -> IO(Unit):
+  do IO<Unit>:
+    +ps : List<&2, List<&2, U32>> <- C.col.read.lines(pt.st(c, "cands.tsv"))
+    +ls : List<&2, P.PtoLink> <- pt.links(c)
+    S.write(pt.st(c, "hash.tsv"), Nil{})
+    pt.hashes.go(pt.groups(ps), c, ls, Unit{})
+    +hl : List<&2, List<&2, U32>> <- C.col.read.lines(pt.st(c, "hash.tsv"))
+    S.mkdir(pt.cache(c))
+    pt.seed.go(ps, c, pt.hm.of(hl, Map.new(&2, List<&2, U32>)), 0n, Unit{})
+    pt.log("seed: the checks of " ++ Nat.show(List.length(&2, List<&2, U32>, ps)) ++ " candidates into " ++ pt.cache(c))
 # Keep ------------------------------------------------------------------------------------------------
 
 # a ref.tsv's paths (the originals some ref loaded)
@@ -672,21 +920,22 @@ def pt.keep.line(+p: List<&2, U32>, k: PtKeep) -> List<&2, U32>:
     case PtKeep{ok, why}:
       L.v2.concat([p, S.b("\t" ++ Nat.show(pt.b2n(ok)) ++ "\t" ++ why ++ "\n")])
 
-def pt.keep.one(+c: PtCx, +refd: Set(), +p: List<&2, U32>, +k: Nat, +acc: List<&2, U32>) -> IO(List<&2, U32>):
+def pt.keep.one(+c: PtCx, +refd: Set(), +p: List<&2, U32>, +k: Nat, +acc: List<&2, List<&2, U32>>) -> IO(List<&2, List<&2, U32>>):
   +base = pt.st(c, "check/" ++ Nat.show(k))
   +has = P.pto.in(refd, p)
-  do IO<List<&2, U32>>:
+  do IO<List<&2, List<&2, U32>>>:
     +port : List<&2, U32> <- S.read(base ++ ".port")
-    +ref : List<&2, U32> <- Bool.pick(IO(List<&2, U32>), has, S.read(base ++ ".ref"), IO.pure(List<&2, U32>, Nil{}))
+    +ref : List<&2, U32> <- Bool.pick(IO(List<&2, U32>), has, S.read(pt.ck.ref(c, p)), IO.pure(List<&2, U32>, Nil{}))
     +il : List<&2, List<&2, U32>> <- Bool.pick(IO(List<&2, List<&2, U32>>), has, C.col.read.lines(pt.st(c, "inv/" ++ S.str(pt.repo.dir(p)) ++ ".tsv")), IO.pure(List<&2, List<&2, U32>>, Nil{}))
-    return S.append(acc, pt.keep.line(p, pt.judge(pt.ck.class(port), port, has, ref, pt.inv.of(il))))
+    +line : List<&2, U32> = pt.keep.line(p, pt.judge(pt.ck.class(port), port, has, ref, pt.inv.of(il)))
+    return line <> acc
 
-def pt.keep.go(ps: List<&2, List<&2, U32>>, +c: PtCx, +refd: Set(), +k: Nat, acc: List<&2, U32>) -> IO(List<&2, U32>):
+def pt.keep.go(ps: List<&2, List<&2, U32>>, +c: PtCx, +refd: Set(), +k: Nat, acc: List<&2, List<&2, U32>>) -> IO(List<&2, List<&2, U32>>):
   match ps:
     case Nil{}:
-      IO.pure(List<&2, U32>, acc)
+      IO.pure(List<&2, List<&2, U32>>, List.reverse(&2, List<&2, U32>, acc))
     case +p <> more:
-      IO.bind(List<&2, U32>, List<&2, U32>, pt.keep.one(c, refd, p, k, acc), pt.keep.go(more, c, refd, 1n+k))
+      IO.bind(List<&2, List<&2, U32>>, List<&2, List<&2, U32>>, pt.keep.one(c, refd, p, k, acc), pt.keep.go(more, c, refd, 1n+k))
 
 def pt.kept.n(ls: List<&2, List<&2, U32>>) -> Nat:
   match ls:
@@ -699,7 +948,8 @@ def pt.keep(+c: PtCx) -> IO(Unit):
   do IO<Unit>:
     +ps : List<&2, List<&2, U32>> <- C.col.read.lines(pt.st(c, "cands.tsv"))
     +rl : List<&2, List<&2, U32>> <- C.col.read.lines(pt.st(c, "ref.tsv"))
-    +out : List<&2, U32> <- pt.keep.go(ps, c, P.pto.set(pt.ref.loaded(rl)), 0n, Nil{})
+    +ls : List<&2, List<&2, U32>> <- pt.keep.go(ps, c, P.pto.set(pt.ref.loaded(rl)), 0n, Nil{})
+    +out : List<&2, U32> = L.v2.concat(ls)
     S.write(pt.st(c, "keep.tsv"), out)
     pt.log("keep: " ++ Nat.show(pt.kept.n(S.split.lines(out))) ++ " of " ++ Nat.show(List.length(&2, List<&2, U32>, ps)) ++ " ported files kept (stage/keep.tsv)")
 
@@ -1078,8 +1328,8 @@ def pt.usage() -> IO(Unit):
   IO.die(Unit, 2, "usage: bend-corpus-v2 port CFG [STEP...]   (STEP: plan check keep out all; see bend/CorpusV2/Port.bend)")
 
 def pt.step(+s: String, +c: PtCx) -> IO(Unit):
-  Bool.pick(IO(Unit), String.eq(s, "plan"), pt.plan(c), Bool.pick(IO(Unit), String.eq(s, "check"), pt.check(c), Bool.pick(IO(Unit), String.eq(s, "refs"), pt.refs.step(c),
-    Bool.pick(IO(Unit), String.eq(s, "keep"), pt.keep(c), Bool.pick(IO(Unit), String.eq(s, "out"), pt.out(c), pt.usage())))))
+  Bool.pick(IO(Unit), String.eq(s, "plan"), pt.plan(c), Bool.pick(IO(Unit), String.eq(s, "check"), pt.check(c), Bool.pick(IO(Unit), String.eq(s, "refs"), pt.refs.step(c), Bool.pick(IO(Unit), String.eq(s, "seed"), pt.seed(c),
+    Bool.pick(IO(Unit), String.eq(s, "keep"), pt.keep(c), Bool.pick(IO(Unit), String.eq(s, "out"), pt.out(c), pt.usage()))))))
 
 def pt.steps(xs: List<String>, +c: PtCx) -> IO(Unit):
   match xs:

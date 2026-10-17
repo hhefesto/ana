@@ -68,7 +68,7 @@ import ./CorpusV2/Port.bend as Pt
 #   port CFG [STEP...]              a collection's loader rejects renamed so the locked compiler loads
 #                                   them (PortOps.bend: own, alias, binder, seg), kept on a pass or the
 #                                   author's own failures, repair transcripts, an inbox for the rest:
-#                                   plan check keep out | all   (CorpusV2/Port.bend)
+#                                   plan check refs seed keep out | all   (CorpusV2/Port.bend)
 #
 # The run recipes (2026-10-15, the plan "all logic in Bend", Phase 4: the
 # tools/corpus-v2 scripts they replace in brackets):

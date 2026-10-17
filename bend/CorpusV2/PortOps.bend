@@ -121,7 +121,8 @@ def pto.drop.in(xs: List<&2, List<&2, U32>>, +s: Set()) -> List<&2, List<&2, U32
 # line (the text's first token, or one right after a blank that ends with a
 # newline: where the loader's top-level `def`, `type`, `law` and `@` are),
 # and its class for the declarations' scan: 1 a name, 2 `def` or `law`, 3
-# `type`, 4 `@`, 5 `:`, 6 `(` `[` `<`, 7 `)` `]` `}` `>`, 8 `{`, 0 any other.
+# `type`, 4 `@`, 5 `:`, 6 `(` `[` `<` (and `<-`, the lexer's one token for `<` and a
+# quantity: `type Array<-T: Type>`), 7 `)` `]` `}` `>`, 8 `{`, 0 any other.
 
 type PtoTk is Data:
   PtoTk{k: Nat, t: List<&2, U32>, bol: Bool, c: Nat}
@@ -166,7 +167,7 @@ def pto.cls.punct(+t: List<&2, U32>) -> Nat:
     case +h <> Nil{}:
       pto.cls.byte(h)
     case _:
-      0n
+      Bool.pick(Nat, S.eq(t, [60, 45]), 6n, 0n)
 
 def pto.cls(+k: Nat, +t: List<&2, U32>) -> Nat:
   match k:

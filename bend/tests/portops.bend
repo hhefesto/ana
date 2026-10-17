@@ -64,7 +64,7 @@ def po.is(+xs: List<&2, List<&2, U32>>, ys: List<&2, String>) -> Bool:
 # The texts ------------------------------------------------------------------------------------------
 
 def po.base() -> String:
-  "import Base\n\n# Key is a key; Text is what it typed\ntype Event is Data:\n  Key{code: U32, down: Bool}\n  Text{text: String}\n\ntype Ex is Data:\n  E1{op: U32, a: Ex}\n  EK{c: U32}\n\ndef Pair(-A: Type, -B: Type) -> Type:\n  A & B\n\ndef TCP.recv_bytes(n: U32) -> U32:\n  n\n\ntype Poll<a, b, -A: Kind(a), -R: Kind(b)> is Kind(a <&> b):\n  Ready{value: A}\n  Wait{rest: R}\n\n@unsafe def Unsafe.peek(n: U32) -> U32:\n  n\n\nlaw idem:\n  for n: U32\n  {n == n : U32}\n"
+  "import Base\n\n# Key is a key; Text is what it typed\ntype Event is Data:\n  Key{code: U32, down: Bool}\n  Text{text: String}\n\ntype Ex is Data:\n  E1{op: U32, a: Ex}\n  EK{c: U32}\n\ndef Pair(-A: Type, -B: Type) -> Type:\n  A & B\n\ndef TCP.recv_bytes(n: U32) -> U32:\n  n\n\ntype Poll<a, b, -A: Kind(a), -R: Kind(b)> is Kind(a <&> b):\n  Ready{value: A}\n  Wait{rest: R}\n\ntype IO.OP<-R: Type> is Type:\n  Halt{code: U32, message: String}\n\n@unsafe def Unsafe.peek(n: U32) -> U32:\n  n\n\nlaw idem:\n  for n: U32\n  {n == n : U32}\n"
 
 def po.old() -> String:
   "type Event is Data:\n  Key{code: U32, down: Bool}\n\ntype Poll<a, b, -A: Kind(a), -R: Kind(b)> is Kind(a <&> b):\n  Ready{value: A}\n  Wait{rest: R}\n"
@@ -153,8 +153,8 @@ def po.decl.checks() -> List<&2, PoCk>:
   +bd = P.pto.decls(S.b(po.base()))
   +ld = P.pto.decls(S.b(po.lib()))
   +b = po.b()
-  [PoCk{"decls: def, type with brackets and a : in its parameters, @unsafe def, law", po.is(P.pto.decl.tlds(bd), ["Event", "Ex", "Pair", "TCP.recv_bytes", "Poll", "Unsafe.peek", "idem"])},
-   PoCk{"decls: each type's constructors, a comment between types passed over", po.is(P.pto.decl.ctrs(bd), ["Key", "Text", "E1", "EK", "Ready", "Wait"])},
+  [PoCk{"decls: def, type with brackets and a : in its parameters (and <-, one token), @unsafe def, law", po.is(P.pto.decl.tlds(bd), ["Event", "Ex", "Pair", "TCP.recv_bytes", "Poll", "IO.OP", "Unsafe.peek", "idem"])},
+   PoCk{"decls: each type's constructors, a comment between types passed over", po.is(P.pto.decl.ctrs(bd), ["Key", "Text", "E1", "EK", "Ready", "Wait", "Halt"])},
    PoCk{"decls: a module's (a string and a comment after a match arm are no declaration)", Bool.and(po.is(P.pto.decl.tlds(ld), ["Input", "Pair", "show", "Text_"]), po.is(P.pto.decl.ctrs(ld), ["Text", "Other", "MkPair"]))},
    PoCk{"base: the constructors only the locked Base has", Bool.and(Bool.and(P.pto.in(P.pto.base.fresh(b), S.b("Text")), P.pto.in(P.pto.base.fresh(b), S.b("E1"))),
      Bool.and(Bool.not(P.pto.in(P.pto.base.fresh(b), S.b("Key"))), Bool.not(P.pto.in(P.pto.base.fresh(b), S.b("Ready")))))}]
