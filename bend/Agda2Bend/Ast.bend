@@ -347,6 +347,9 @@ type Ag is Data:
   # A form this grammar does not know, kept with the category it was read
   # as (the cubical forms: iapply, piapply, pdef, the interval sorts).
   AgRaw{c: AgCat, x: AgX}
+  # A definition the copy inlining (Agda2Bend/Cata.bend) has resolved as no
+  # copy: it is not looked at again.
+  AgDefX{q: AgQ, es: Ag}
 
 # Keywords ---------------------------------------------------------------
 

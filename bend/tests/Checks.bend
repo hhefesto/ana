@@ -566,8 +566,10 @@ def chk.tests() -> List<&2, ChkTest>:
    # S-expression reader's escapes, raw newlines, several and malformed inputs, field lookup, numbers,
    # and the committed exports of Agda.Builtin.Bool and Unit read whole and streamed, printing back
    # byte for byte; every FORMAT.md keyword classified as its own constructor by its hash, no two
-   # alike; both exports decoded with no raw form outside the cubical helpers, Bool a data type
-   ChkTest{"agda2bend.bend", False{}, ROks{17n}}]
+   # alike; both exports decoded with no raw form outside the cubical helpers, Bool a data type;
+   # the printer (bend/ToBend/Print.bend) writes the spike's IsEquivalence type and projection, and
+   # terms needing parentheses, templates, equations, literals, as Bend reads them
+   ChkTest{"agda2bend.bend", False{}, ROks{19n}}]
 
 def chk.rule(r: ChkRule, +out: List<&2, U32>) -> Bool:
   match r:

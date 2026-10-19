@@ -2,6 +2,8 @@ import Base
 import ../Sys.bend as S
 import ../ToBend/Sexp.bend as X
 import ../Agda2Bend/Ast.bend as A
+import ../ToBend/Ast.bend as T
+import ../ToBend/Print.bend as P
 
 # agda2bend's laws, run from this directory on the committed exports in
 # fixtures/agda2bend (agda-export's output for small modules, so the laws
@@ -231,9 +233,61 @@ def ast.laws(+bool: List<&2, U32>, +unit: List<&2, U32>) -> IO(Unit):
     IO.print(verdict("ast Bool is data with 2 constructors", ast.file.bool(sb)))
     IO.print(verdict("ast decode Agda.Builtin.Unit", ast.file.ok(ast.file(rt.nonempty(unit), AstSt{0n, 0n, 0n, 0n, False{}}))))
 
+# Print ------------------------------------------------------------------------
+
+def v(s: String) -> T.Bt:
+  T.BtVar{S.b(s)}
+
+def app(f: String, xs: List<&2, T.Bt>) -> T.Bt:
+  T.tba.call(v(f), xs)
+
+# A -> A -> Type
+def pr.rel(+a: String) -> T.Bt:
+  T.BtPi{T.BmLive{}, S.b("_"), False{}, v(a), T.BtPi{T.BmLive{}, S.b("_"), False{}, v(a), T.BtType{}}}
+
+# @-x:A -> R(x, x)
+def pr.refl.ty() -> T.Bt:
+  T.BtPi{T.BmErased{}, S.b("x"), True{}, v("A"), app("R", [v("x"), v("x")])}
+
+def pr.isequiv() -> T.BItem:
+  T.BiType{S.b("IsEquivalence"), [T.BParam{T.BmErased{}, S.b("A"), T.BtType{}}, T.BParam{T.BmErased{}, S.b("R"), pr.rel("A")}], False{},
+    [T.BCtor{S.b("IsEquivalence"), [T.BField{S.b("refl"), pr.refl.ty()}, T.BField{S.b("sym"), T.BtPi{T.BmErased{}, S.b("x"), True{}, v("A"), T.BtPi{T.BmErased{}, S.b("y"), True{}, v("A"), T.BtPi{T.BmLive{}, S.b("_"), False{}, app("R", [v("x"), v("y")]), app("R", [v("y"), v("x")])}}}}]}],
+    [S.b("IsEquivalence (agda-stdlib Relation.Binary)")]}
+
+def pr.proj() -> T.BItem:
+  T.BiDef{S.b("IsEquivalence.refl"), [T.BParam{T.BmErased{}, S.b("A"), T.BtType{}}, T.BParam{T.BmErased{}, S.b("R"), pr.rel("A")}, T.BParam{T.BmLive{}, S.b("e"), T.BtTyApp{S.b("IsEquivalence"), T.tba.args([v("A"), v("R")])}}],
+    pr.refl.ty(), T.BtMatch{T.tba.args([v("e")]), T.BtCase{T.tba.args([T.BtCon{S.b("IsEquivalence"), T.tba.args([v("refl"), v("sym")])}]), T.BtExpr{v("refl")}, T.BtCEnd{}}}, Nil{}}
+
+def pr.want() -> String:
+  "# a file\nimport Base\nimport ./Other.bend as O\n\n# IsEquivalence (agda-stdlib Relation.Binary)\ntype IsEquivalence<-A: Type, -R: A -> A -> Type> is Type:\n  IsEquivalence{refl: @-x:A -> R(x, x), sym: @-x:A -> @-y:A -> R(x, y) -> R(y, x)}\n\ndef IsEquivalence.refl(-A: Type, -R: A -> A -> Type, e: IsEquivalence<A, R>) -> @-x:A -> R(x, x):\n  match e:\n    case IsEquivalence{refl, sym}:\n      refl\n"
+
+def pr.file() -> List<&2, U32>:
+  P.tpr.file(T.BFile{[S.b("a file")], [T.BImport{S.b("./Other.bend"), S.b("O")}], [pr.isequiv(), pr.proj()]})
+
+# terms: a Pi in a domain and a lambda at a head are parenthesized; a
+# template argument; erased and live dependent Pis; an equation, a literal,
+# a successor, an annotation, a constructor with no fields
+def pr.terms() -> List<&2, U32>:
+  P.tpr.t(T.tba.args([
+    T.BtPi{T.BmLive{}, S.b("_"), False{}, T.BtPi{T.BmLive{}, S.b("_"), False{}, v("A"), v("B")}, v("C")},
+    T.BtApp{T.BtLam{T.BmLive{}, S.b("x"), v("x")}, T.tba.args([v("y")])},
+    app("f", [T.BtTplArg{v("C")}, T.BtEq{v("Nat"), T.BtNat{S.b("2")}, T.BtSucc{v("p")}}]),
+    T.BtPi{T.BmLive{}, S.b("x"), True{}, v("A"), app("B", [v("x")])},
+    T.BtAnn{T.BtCon{S.b("Unit"), T.BtANil{}}, v("Unit")},
+    T.BtLam{T.BmCopy{}, S.b("h"), T.BtStr{S.b("a\"b")}}]), P.TpLoose{}, 0n, Nil{})
+
+def pr.terms.want() -> String:
+  "(A -> B) -> C, (x => x)(y), f(~C, {2n == 1n+p : Nat}), @x:A -> B(x), {Unit{} : Unit}, +h => \"a\\\"b\""
+
+def print.laws() -> IO(Unit):
+  do IO<Unit>:
+    IO.print(verdict("print a type and a projection as the spike writes them", S.eq(pr.file(), S.b(pr.want()))))
+    IO.print(verdict("print terms", S.eq(pr.terms(), S.b(pr.terms.want()))))
+
 def main() -> IO(Unit):
   do IO<Unit>:
     +bool : List<&2, U32> <- S.read("fixtures/agda2bend/Agda.Builtin.Bool.sexp")
     +unit : List<&2, U32> <- S.read("fixtures/agda2bend/Agda.Builtin.Unit.sexp")
     sexp.laws(bool, unit)
     ast.laws(bool, unit)
+    print.laws()
