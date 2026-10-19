@@ -72,11 +72,14 @@ data Opts = Opts
     -- ^ off with --export-stored-only: no parameter reconstruction
   , optSkipExisting :: Bool
     -- ^ --export-skip-existing: keep a module whose .sexp is already there
+  , optCopyTypes :: Bool
+    -- ^ --export-copy-types: write a module application's copies in full
+    --   (by default a copy function keeps only its case tree)
   }
   deriving (Generic, NFData)
 
 defaultOpts :: Opts
-defaultOpts = Opts Nothing False True False
+defaultOpts = Opts Nothing False True False False
 
 data ModStats = ModStats
   { msModule :: Text
@@ -129,6 +132,8 @@ data Env = Env
   , envReasonPrefix :: Text
     -- ^ "no-compilation: " for the cubical helpers Agda generates (transp,
     --   hcomp; their terms do not re-check outside cubical Agda)
+  , envCompact :: Bool
+    -- ^ the definition is a copy written compactly: no clauses
   }
 
 -- | Run a TCM action in a scratch copy of the state and return its forced
@@ -202,7 +207,7 @@ exportModule opts tlm = do
   let defs = sortDefs (iSignature i ^. sigDefinitions)
   cref <- liftIO $ newIORef (Counters 0 0 0 0 Map.empty)
   debug <- liftIO $ isJust <$> lookupEnv "AGDA_EXPORT_DEBUG"
-  let env = Env opts cref "" debug ""
+  let env = Env opts cref "" debug "" False
       emit s = if optPretty opts then renderPretty 100 s else render s
   header <- moduleHeader i (length defs)
   liftIO $ createDirectoryIfMissing True dir
@@ -283,8 +288,17 @@ encodeDef env0 d = do
   let q = defName d
       n = qnameName q
       env = env0 { envDef = prettyShow q, envReasonPrefix = if defNoCompilation d then "no-compilation: " else "" }
-  ty <- attempt env "type" (typS [] <$> explicitType (defType d)) (typS [] (defType d))
-  (kind, extraFlags, details) <- defnS env d (theDef d)
+  -- A copy made by module application (`open M args`, `module N = M args`)
+  -- is the original applied to the arguments, which its case tree says.
+  -- Its type and clauses are the original's with the arguments substituted
+  -- at every occurrence of a parameter, written out as trees: 99% of a
+  -- module like Categories.Category.Monoidal.Closed (86 MB).  So by default
+  -- a copy function is written with (type none) and no clauses; a reader
+  -- inlines its case tree where it is used (FORMAT.md, "Copies").
+  let compact = defCopy d && isFun (theDef d) && not (optCopyTypes (envOpts env))
+  ty <- if compact then return none
+        else attempt env "type" (typS [] <$> explicitType (defType d)) (typS [] (defType d))
+  (kind, extraFlags, details) <- defnS env { envCompact = compact } d (theDef d)
   let flags = [A f | (f, True) <-
                 [ ("copy", defCopy d)
                 , ("instance", isJust (defInstance d))
@@ -308,6 +322,11 @@ encodeDef env0 d = do
     , L [A "type", ty]
     , details
     ])
+
+isFun :: Defn -> Bool
+isFun = \case
+  Function{} -> True
+  _ -> False
 
 fixityS :: Fixity -> Sexp
 fixityS (Fixity _ lvl assoc) = case lvl of
@@ -450,7 +469,7 @@ defnS env d = \case
       , L (A "fun-flags" : map funFlagA (SmallSet.toList fl))
       , L [A "opaque", yesNo (isOpaque op)]
       , L [A "kan-op", maybe none qnameS (funIsKanOp def)]
-      , L (A "clauses" : map fst encoded)
+      , L (A "clauses" : if envCompact env then [] else map fst encoded)
       , L [A "compiled", tree]
       ])
   where

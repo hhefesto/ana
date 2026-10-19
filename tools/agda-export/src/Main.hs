@@ -39,6 +39,8 @@ backend = Backend'
           "write the terms as Agda stores them, without reconstructing projection parameters (agda-export)"
       , Option [] ["export-skip-existing"] (NoArg (\o -> pure o { optSkipExisting = True }))
           "keep a module whose DIR/<Module>.sexp already exists (agda-export)"
+      , Option [] ["export-copy-types"] (NoArg (\o -> pure o { optCopyTypes = True }))
+          "write the copies a module application makes in full, type and clauses included (agda-export)"
       ]
   , isEnabled = \o -> maybe False (const True) (optDir o)
   , preCompile = \o -> do

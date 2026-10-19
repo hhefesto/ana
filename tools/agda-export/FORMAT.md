@@ -1,4 +1,4 @@
-# agda-export's output format (version 1, Agda 2.8.0)
+# agda-export's output format (version 2, Agda 2.8.0)
 
 agda-export is Agda 2.8.0 with one more backend. It writes Agda's elaborated
 definitions as S-expressions so that agda2bend, a Bend program, can translate
@@ -8,7 +8,7 @@ Agda's internal syntax leaves out are put back (see "Explicit and stored
 terms"). This file is the contract between the two programs.
 
     agda-export --export-dir=OUT [--export-pretty] [--export-stored-only]
-                [--export-skip-existing] [agda's flags] FILE.agda
+                [--export-skip-existing] [--export-copy-types] [agda's flags] FILE.agda
 
 Run it from the root of FILE's library (the directory that holds its
 `.agda-lib`), as agda is run. It type-checks FILE, loading interfaces that are
@@ -32,6 +32,8 @@ agda-categories 0.3.0, both with prebuilt interfaces. Flags:
 - `--export-skip-existing` keeps a module whose `.sexp` file is already
   there. A module's file is written under a temporary name first and then
   renamed, so a file that exists is complete.
+- `--export-copy-types` writes the copies a module application makes in
+  full (see "Copies"); by default a copy function is written compactly.
 - `AGDA_EXPORT_DEBUG=1` logs every term left in stored form, with the
   reason.
 
@@ -121,7 +123,8 @@ file. `X*` means zero or more, and `a|b` means one of the atoms.
     `--cubical-compatible` (implied by `--without-K`) generates;
   - `copattern-lhs`: the definition matches on copatterns;
   - `abstract-defn`: Agda wrapped the definition as abstract.
-- `type` is closed: no variables are in scope.
+- `type` is closed: no variables are in scope. It is `none` for a copy
+  function written compactly (see "Copies").
 
 DETAILS is one of the forms below, by kind:
 
@@ -354,6 +357,25 @@ Where reconstruction is known to fail:
   body is a lambda over the principal argument alone.
 
 The index counts each of these failures by reason.
+
+## Copies (version 2)
+
+A module application (`open M args`, `module N = M args`, a record module
+opened on a value) makes a copy of each definition of M: flag `copy`. A
+copy function is the original applied to the module's arguments, and its
+case tree says so: `(done (vars X*) (def ORIGINAL ARGS... VARS...))`. Its
+type and clauses are the original's with the arguments substituted at every
+occurrence of a parameter, written out in full: in agda-categories they were
+99% of some modules (Categories.Category.Monoidal.Closed: 86 MB, 155 of its
+167 definitions copies), and the version 1 export of the library ran out of
+a 10 GB heap on them.
+
+So by default a copy function is written with `(type none)` and
+`(clauses)` empty; its case tree is written as for any function. A reader
+inlines the tree where the copy is used: `(def COPY ES...)` is the leaf's
+term with the vars bound to ES. Copies of data types, records and
+constructors are written in full (they are few and small).
+`--export-copy-types` writes copy functions in full as version 1 did.
 
 ## The index (`_index.sexp`)
 

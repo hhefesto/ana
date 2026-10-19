@@ -561,7 +561,13 @@ def chk.tests() -> List<&2, ChkTest>:
      "ok mid-line: slice 1 is the lines starting before SIZE",
      "ok mid-line: slice 2 (through the FIFO) is the lines starting in [SIZE, 2 SIZE)",
      "ok mid-line: slices 1 and 2 are the file up to the first line starting at 2 SIZE or past it",
-     "ok mid-line: slice 3, the last, keeps whole 2,000s of lines: none of its few"]}}]
+     "ok mid-line: slice 3, the last, keeps whole 2,000s of lines: none of its few"]}},
+   # agda2bend's parser of Agda (bend/ToBend/Sexp.bend, bend/Agda2Bend/Ast.bend, 2026-10-19): the
+   # S-expression reader's escapes, raw newlines, several and malformed inputs, field lookup, numbers,
+   # and the committed exports of Agda.Builtin.Bool and Unit read whole and streamed, printing back
+   # byte for byte; every FORMAT.md keyword classified as its own constructor by its hash, no two
+   # alike; both exports decoded with no raw form outside the cubical helpers, Bool a data type
+   ChkTest{"agda2bend.bend", False{}, ROks{17n}}]
 
 def chk.rule(r: ChkRule, +out: List<&2, U32>) -> Bool:
   match r:
