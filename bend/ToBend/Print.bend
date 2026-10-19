@@ -14,11 +14,14 @@ import ./Ast.bend as T
 # Where a term is printed: anywhere (an argument, a body), the domain of an
 # arrow, the head of an application, the rest of an argument list (each
 # element after a comma), a statement at an indentation, a case list, or a
-# list of scrutinees or patterns (separated by spaces; TpWords for the first).
+# list of scrutinees or patterns (separated by spaces; TpWords for the first),
+# or a datatype's arguments (D<..>: a function type there takes parentheses).
 type TpK is Data:
   TpLoose{}
   TpWords{}
   TpWordsRest{}
+  TpTyArgs{}
+  TpTyRest{}
   TpDom{}
   TpHead{}
   TpRest{}
@@ -101,6 +104,12 @@ def tpr.t(t: T.Bt, k: TpK, +ind: Nat, acc: List<&2, U32>) -> List<&2, U32>:
       tpr.spaces(ind, tpr.t(e, TpLoose{}, 0n, 10 <> acc))
     case T.BtExpr{e} _:
       tpr.t(e, TpLoose{}, 0n, acc)
+    # a datatype's arguments: each as an arrow's domain is (a Pi or a
+    # lambda parenthesized)
+    case T.BtArgs{a, rest} TpTyRest{}:
+      44 <> 32 <> tpr.t(a, TpDom{}, 0n, tpr.t(rest, TpTyRest{}, 0n, acc))
+    case T.BtArgs{a, rest} TpTyArgs{}:
+      tpr.t(a, TpDom{}, 0n, tpr.t(rest, TpTyRest{}, 0n, acc))
     # scrutinees and patterns: separated by one space
     case T.BtArgs{a, rest} TpWordsRest{}:
       32 <> tpr.t(a, TpHead{}, 0n, tpr.t(rest, TpWordsRest{}, 0n, acc))
@@ -140,7 +149,7 @@ def tpr.t(t: T.Bt, k: TpK, +ind: Nat, acc: List<&2, U32>) -> List<&2, U32>:
     case T.BtTyApp{n, T.BtANil{}} _:
       tpr.b(n, acc)
     case T.BtTyApp{n, args} _:
-      tpr.b(n, 60 <> tpr.t(args, TpLoose{}, 0n, 62 <> acc))
+      tpr.b(n, 60 <> tpr.t(args, TpTyArgs{}, 0n, 62 <> acc))
     case T.BtEq{ty, a, b} _:
       123 <> tpr.t(a, TpLoose{}, 0n, tpr.s(" == ", tpr.t(b, TpLoose{}, 0n, tpr.s(" : ", tpr.t(ty, TpLoose{}, 0n, 125 <> acc)))))
     case T.BtRefl{} _:

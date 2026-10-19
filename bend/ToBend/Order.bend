@@ -72,7 +72,7 @@ def tor.visit(seen: Bool, +n: List<&2, U32>, rest: List<&2, TorFr>, sn: Map<&2, 
     case True{}:
       TorSt{rest, sn, out}
     case False{}:
-      TorSt{TorFr{n, True{}} <> tor.frames(tor.refs(tor.item(items, n)), items, rest), Map.set(&2, Bool, sn, S.str(n), True{}), out}
+      TorSt{tor.frames(tor.refs(tor.item(items, n)), items, TorFr{n, True{}} <> rest), Map.set(&2, Bool, sn, S.str(n), True{}), out}
 
 def tor.walk(fuel: Nat, s: TorSt, +items: Map<&2, T.BItem>) -> TorSt:
   match fuel s:

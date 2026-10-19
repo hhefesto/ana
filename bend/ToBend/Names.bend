@@ -452,6 +452,14 @@ def tnm.part.of(+s: String) -> String:
 def tnm.part.fixed(+s: String) -> String:
   tnm.part.of(tnm.fix(String.eq(s, ""), tnm.digit.first(s), s))
 
+# one part of a file path: as tnm.part, but a Base name or keyword is fine
+# as a file or directory name, so it is kept as it is
+def tnm.path.fixed(+s: String) -> String:
+  tnm.fix(String.eq(s, ""), tnm.digit.first(s), s)
+
+def tnm.path(s: String) -> String:
+  tnm.path.fixed(tnm.trim(tnm.raw(s)))
+
 
 # one part of a name (no dots) as a Bend identifier
 def tnm.part(s: String) -> String:

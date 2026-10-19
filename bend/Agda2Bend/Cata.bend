@@ -67,19 +67,28 @@ def asb.push(t: A.Ag, es: A.Ag) -> A.Ag:
     case t:
       t
 
+# the binder count under a lambda's or a Pi's body: one more when it
+# binds (abs), the same when it does not (noabs: FORMAT.md, "binds none")
+def asb.under(dep: Bool, +c: Nat) -> Nat:
+  match dep:
+    case True{}:
+      1n+c
+    case False{}:
+      c
+
 # variables at or above c shifted up by d
 def asb.shift(t: A.Ag, +d: Nat, +c: Nat) -> A.Ag:
   match t:
     case A.AgVar{+i, x, es}:
       A.AgVar{Bool.pick(Nat, Nat.is_lt(i, c), i, Nat.add(i, d)), x, asb.shift(es, d, c)}
-    case A.AgLam{i, x, dep, b}:
-      A.AgLam{i, x, dep, asb.shift(b, d, 1n+c)}
+    case A.AgLam{i, x, +dep, b}:
+      A.AgLam{i, x, dep, asb.shift(b, d, asb.under(dep, c))}
     case A.AgDef{q, es}:
       A.AgDef{q, asb.shift(es, d, c)}
     case A.AgCon{q, o, es}:
       A.AgCon{q, o, asb.shift(es, d, c)}
-    case A.AgPi{i, x, a, dep, b}:
-      A.AgPi{i, x, asb.shift(a, d, c), dep, asb.shift(b, d, 1n+c)}
+    case A.AgPi{i, x, a, +dep, b}:
+      A.AgPi{i, x, asb.shift(a, d, c), dep, asb.shift(b, d, asb.under(dep, c))}
     case A.AgEl{s, a}:
       A.AgEl{s, asb.shift(a, d, c)}
     case A.AgDontCare{a}:
@@ -128,14 +137,14 @@ def asb.subst(t: A.Ag, +depth: Nat, +vs: List<&2, A.Ag>, +n: Nat) -> A.Ag:
   match t:
     case A.AgVar{+i, x, es}:
       asb.subst.var(Nat.is_lt(i, depth), i, depth, vs, n, x, asb.subst(es, depth, vs, n))
-    case A.AgLam{i, x, dep, b}:
-      A.AgLam{i, x, dep, asb.subst(b, 1n+depth, vs, n)}
+    case A.AgLam{i, x, +dep, b}:
+      A.AgLam{i, x, dep, asb.subst(b, asb.under(dep, depth), vs, n)}
     case A.AgDef{q, es}:
       A.AgDef{q, asb.subst(es, depth, vs, n)}
     case A.AgCon{q, o, es}:
       A.AgCon{q, o, asb.subst(es, depth, vs, n)}
-    case A.AgPi{i, x, a, dep, b}:
-      A.AgPi{i, x, asb.subst(a, depth, vs, n), dep, asb.subst(b, 1n+depth, vs, n)}
+    case A.AgPi{i, x, a, +dep, b}:
+      A.AgPi{i, x, asb.subst(a, depth, vs, n), dep, asb.subst(b, asb.under(dep, depth), vs, n)}
     case A.AgEl{s, a}:
       A.AgEl{s, asb.subst(a, depth, vs, n)}
     case A.AgDontCare{a}:
@@ -190,9 +199,11 @@ type ActSym is Data:
   ActSym{mod: List<&2, U32>, name: List<&2, U32>, kind: A.AgKw, modes: List<&2, ActM>, arity: Nat, b: ActB, fields: List<&2, String>, ctor: List<&2, U32>, copy: Maybe<&2, ActCopy>}
 
 # What a translation sees: the module being written, the symbol table (by
-# NameId key) and each module's import alias.
+# NameId key), each module's import alias, and the leaves of the type-valued
+# definitions that unfold (by key: a header unfolds one to reach the Pis
+# its clauses take, e.g. `refl : Reflexive _≈_` with a clause on `{x}`).
 type ActEnv is Data:
-  ActEnv{mod: List<&2, U32>, tab: Map<&2, ActSym>, al: Map<&2, List<&2, U32>>}
+  ActEnv{mod: List<&2, U32>, tab: Map<&2, ActSym>, al: Map<&2, List<&2, U32>>, unf: Map<&2, ActCopy>}
 
 # a name's key in the table: its NameId
 def act.key(q: A.AgQ) -> String:
@@ -203,15 +214,25 @@ def act.key(q: A.AgQ) -> String:
 def act.sym0() -> ActSym:
   ActSym{Nil{}, Nil{}, A.AkWord{}, Nil{}, 0n, AbNone{}, Nil{}, Nil{}, None{}}
 
+def act.qs.of(q: A.AgQ) -> List<&2, U32>:
+  match q:
+    case A.AgQ{s, w, k}:
+      s
+
+# the entry of a name the table does not have: of kind AkWord, its module
+# `?` and its name Agda's, so the reason of the gap it leaves names it
+def act.sym.none(q: A.AgQ) -> ActSym:
+  ActSym{S.b("?"), act.qs.of(q), A.AkWord{}, Nil{}, 0n, AbNone{}, Nil{}, Nil{}, None{}}
+
 def act.sym.got(r: Map<&2, ActSym> & ActSym) -> ActSym:
   (m, s) = r
   s
 
 # the entry of q (an empty one, of kind AkWord, when the table has none)
-def act.sym(+env: ActEnv, q: A.AgQ) -> ActSym:
+def act.sym(+env: ActEnv, +q: A.AgQ) -> ActSym:
   match env:
-    case ActEnv{mod, tab, al}:
-      act.sym.got(Map.get(ActSym, act.sym0(), tab, act.key(q)))
+    case ActEnv{mod, tab, al, unf}:
+      act.sym.got(Map.get(ActSym, act.sym.none(q), tab, act.key(q)))
 
 def act.alias.got(r: Map<&2, List<&2, U32>> & List<&2, U32>) -> List<&2, U32>:
   (m, a) = r
@@ -219,12 +240,12 @@ def act.alias.got(r: Map<&2, List<&2, U32>> & List<&2, U32>) -> List<&2, U32>:
 
 def act.is.here(+env: ActEnv, +m: List<&2, U32>) -> Bool:
   match env:
-    case ActEnv{mod, tab, al}:
+    case ActEnv{mod, tab, al, unf}:
       S.eq(mod, m)
 
 def act.alias(+env: ActEnv, +m: List<&2, U32>) -> List<&2, U32>:
   match env:
-    case ActEnv{mod, tab, al}:
+    case ActEnv{mod, tab, al, unf}:
       act.alias.got(Map.get(List<&2, U32>, m, al, S.str(m)))
 
 def act.ref.of(here: Bool, +env: ActEnv, +m: List<&2, U32>, +n: List<&2, U32>) -> List<&2, U32>:
@@ -545,7 +566,7 @@ def act.keep(args: T.Bt, ms: List<&2, ActM>) -> List<&2, T.Bt>:
     case _ _:
       Nil{}
 
-# the first n arguments and modes, and the rest of both
+# a call's arguments split at the definition's arity
 type ActTake is Data:
   ActTake{args: T.Bt, ms: List<&2, ActM>, rest: T.Bt, rms: List<&2, ActM>, ok: Bool}
 
@@ -554,6 +575,18 @@ def act.take.put(a: T.Bt, m: ActM, t: ActTake) -> ActTake:
     case ActTake{args, ms, rest, rms, ok}:
       ActTake{T.BtArgs{a, args}, m <> ms, rest, rms, ok}
 
+# the modes of the n parameters a call left out (live past the type's Pis)
+def act.take.need(n: Nat, ms: List<&2, ActM>) -> List<&2, ActM>:
+  match n ms:
+    case 0n ms:
+      Nil{}
+    case 1n+p m <> t:
+      m <> act.take.need(p, t)
+    case 1n+p Nil{}:
+      AmLive{} <> act.take.need(p, Nil{})
+
+# the first n arguments and their modes, the rest of both; when the call
+# has fewer than n, ok is False and rms holds the missing parameters' modes
 def act.take(n: Nat, args: T.Bt, ms: List<&2, ActM>) -> ActTake:
   match n args ms:
     case 0n args ms:
@@ -562,8 +595,37 @@ def act.take(n: Nat, args: T.Bt, ms: List<&2, ActM>) -> ActTake:
       act.take.put(a, m, act.take(p, rest, t))
     case 1n+p T.BtArgs{a, rest} Nil{}:
       act.take.put(a, AmLive{}, act.take(p, rest, Nil{}))
+    case 1n+p T.BtANil{} ms:
+      ActTake{T.BtANil{}, Nil{}, T.BtANil{}, act.take.need(1n+p, ms), False{}}
     case 1n+p args ms:
       ActTake{T.BtANil{}, Nil{}, T.BtANil{}, Nil{}, False{}}
+
+# A call with fewer arguments than the def's header takes is eta-expanded:
+# a lambda for each missing kept parameter (a dropped one needs none).  The
+# names are eta1, eta2, ...: a call's own arguments were translated before
+# its lambdas exist, so they cannot mention them.
+def act.eta.names(ms: List<&2, ActM>, +k: Nat) -> List<&2, List<&2, U32>>:
+  match ms:
+    case Nil{}:
+      Nil{}
+    case AmDrop{} <> t:
+      act.eta.names(t, k)
+    case m <> t:
+      List.append(&2, U32, S.b("eta"), S.b(Nat.show(k))) <> act.eta.names(t, 1n+k)
+
+def act.eta.vars(ns: List<&2, List<&2, U32>>) -> List<&2, T.Bt>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case n <> t:
+      T.BtVar{n} <> act.eta.vars(t)
+
+def act.eta(ns: List<&2, List<&2, U32>>, b: T.Bt) -> T.Bt:
+  match ns:
+    case Nil{}:
+      b
+    case n <> t:
+      T.BtLam{T.BmLive{}, n, act.eta(t, b)}
 
 # f(first arity kept arguments)(the other kept ones), as the Bend def's
 # header takes the first group and its value the rest
@@ -572,16 +634,23 @@ def act.call.of(+f: List<&2, U32>, t: ActTake) -> T.Bt:
     case ActTake{args, ms, rest, rms, True{}}:
       act.app.list(T.BtApp{T.BtVar{f}, T.tba.args(act.keep(args, ms))}, act.keep(rest, rms))
     case ActTake{args, ms, rest, rms, False{}}:
-      act.todo("a definition applied to fewer arguments than its clauses take")
+      +ns = act.eta.names(rms, 1n)
+      act.eta(ns, T.BtApp{T.BtVar{f}, T.tba.args(List.append(&2, T.Bt, act.keep(args, ms), act.eta.vars(ns)))})
 
 def act.call(+f: List<&2, U32>, ms: List<&2, ActM>, +n: Nat, args: T.Bt) -> T.Bt:
   act.call.of(f, act.take(n, args, ms))
 
-# ≡'s kept arguments are its type and its two sides
+# ≡'s kept arguments are its type and its two sides; with fewer it is a
+# relation, eta-expanded (eqx, eqy: its arguments were translated before
+# these lambdas exist)
 def act.eq(xs: List<&2, T.Bt>) -> T.Bt:
   match xs:
     case ty <> a <> b <> Nil{}:
       T.BtEq{ty, a, b}
+    case ty <> a <> Nil{}:
+      T.BtLam{T.BmLive{}, S.b("eqy"), T.BtEq{ty, a, T.BtVar{S.b("eqy")}}}
+    case ty <> Nil{}:
+      T.BtLam{T.BmLive{}, S.b("eqx"), T.BtLam{T.BmLive{}, S.b("eqy"), T.BtEq{ty, T.BtVar{S.b("eqx")}, T.BtVar{S.b("eqy")}}}}
     case _:
       act.todo("≡ applied to other than its two sides")
 
@@ -600,7 +669,7 @@ def act.app.def.kind(k: A.AgKw, cp: Bool, +ref: List<&2, U32>, ms: List<&2, ActM
     case A.AkPostulate{} False{}:
       act.todo("a postulate")
     case _ False{}:
-      act.todo("a name the symbol table does not have")
+      T.BtTodo{List.append(&2, U32, S.b("a name the symbol table does not have: "), ref)}
 
 def act.copy.is(c: Maybe<&2, ActCopy>) -> Bool:
   match c:
@@ -637,7 +706,7 @@ def act.app.con.kind(k: A.AgKw, +ref: List<&2, U32>, ms: List<&2, ActM>, args: T
     case A.AkConstructor{}:
       T.BtCon{ref, T.tba.args(act.keep(args, ms))}
     case _:
-      act.todo("a constructor the symbol table does not have")
+      T.BtTodo{List.append(&2, U32, S.b("a constructor the symbol table does not have: "), ref)}
 
 # a constructor applied (its own arguments only, as Agda writes them)
 def act.app.con(s: ActSym, +env: ActEnv, args: T.Bt) -> T.Bt:
@@ -656,6 +725,15 @@ def act.app.con(s: ActSym, +env: ActEnv, args: T.Bt) -> T.Bt:
       T.BtCon{S.b("Unit"), T.BtANil{}}
     case ActSym{+m, +n, k, ms, ar, b, fs, c, cp}:
       act.app.con.kind(k, act.ref.of(act.is.here(env, m), env, m, n), ms, args)
+
+# the context under a binder: its entry in front when it binds (abs), the
+# same context when it does not (noabs)
+def act.bind(dep: Bool, e: T.Bt, ctx: List<&2, T.Bt>) -> List<&2, T.Bt>:
+  match dep:
+    case True{}:
+      e <> ctx
+    case False{}:
+      ctx
 
 def act.lit(l: A.Ag) -> T.Bt:
   match l:
@@ -688,11 +766,11 @@ def act.t(a: A.Ag, +ctx: List<&2, T.Bt>, +env: ActEnv) -> T.Bt:
       act.app.con(act.sym(env, q), env, act.t(es, ctx, env))
     case A.AgLam{i, +x, d, b}:
       +nm = act.fresh(x, ctx)
-      T.BtLam{T.BmLive{}, nm, act.t(b, T.BtVar{nm} <> ctx, env)}
-    case A.AgPi{i, +x, +a2, d, b}:
+      T.BtLam{T.BmLive{}, nm, act.t(b, act.bind(d, T.BtVar{nm}, ctx), env)}
+    case A.AgPi{i, +x, +a2, +d, b}:
       +lv = act.ty.level(a2)
       +nm = act.fresh(x, ctx)
-      act.pi(lv, act.mode(i, a2, False{}), nm, d, act.t(a2, ctx, env), act.t(b, Bool.pick(T.Bt, lv, act.level(), T.BtVar{nm}) <> ctx, env))
+      act.pi(lv, act.mode(i, a2, False{}), nm, d, act.t(a2, ctx, env), act.t(b, act.bind(d, Bool.pick(T.Bt, lv, act.level(), T.BtVar{nm}), ctx), env))
     case A.AgSort{s}:
       T.BtType{}
     case A.AgEl{s, t}:
@@ -868,9 +946,9 @@ def act.path.parts(xs: List<&2, List<&2, U32>>) -> List<&2, U32>:
     case Nil{}:
       S.b(".bend")
     case h <> Nil{}:
-      List.append(&2, U32, S.b(N.tnm.part(S.str(h))), S.b(".bend"))
+      List.append(&2, U32, S.b(N.tnm.path(S.str(h))), S.b(".bend"))
     case h <> t:
-      List.append(&2, U32, S.b(N.tnm.part(S.str(h))), 47 <> act.path.parts(t))
+      List.append(&2, U32, S.b(N.tnm.path(S.str(h))), 47 <> act.path.parts(t))
 
 def act.path(+m: List<&2, U32>) -> List<&2, U32>:
   act.path.parts(S.split(m, 46))
@@ -897,17 +975,46 @@ def act.params.put(m: ActM, +nm: List<&2, U32>, ty: T.Bt, r: ActPs) -> ActPs:
     case m ActPs{ps, ret, ctx, ok}:
       ActPs{T.BParam{act.bmode(m), nm, ty} <> ps, ret, ctx, ok}
 
-def act.params(n: Nat, t: A.Ag, ms: List<&2, ActM>, +ctx: List<&2, T.Bt>, +env: ActEnv) -> ActPs:
-  match n t ms:
-    case 0n t ms:
+def act.unf.got(r: Map<&2, ActCopy> & ActCopy) -> ActCopy:
+  (m, c) = r
+  c
+
+def act.unfold.split(+n: Nat, body: A.Ag, s: ActSplit) -> A.Ag:
+  match s:
+    case ActSplit{vs, rest, True{}}:
+      asb.push(asb.subst(body, 0n, List.reverse(&2, A.Ag, vs), n), rest)
+    case ActSplit{vs, rest, False{}}:
+      A.AgNone{}
+
+# the leaf a type-valued definition unfolds to, with the arguments
+# substituted (the rest applied); AgNone when it does not unfold
+def act.unfold.of(c: ActCopy, +es: A.Ag) -> A.Ag:
+  match c:
+    case ActCopy{0n, A.AgNone{}}:
+      A.AgNone{}
+    case ActCopy{+n, body}:
+      act.unfold.split(n, body, act.split(n, es))
+
+def act.unfold(+env: ActEnv, q: A.AgQ, +es: A.Ag) -> A.Ag:
+  match env:
+    case ActEnv{mod, tab, al, unf}:
+      act.unfold.of(act.unf.got(Map.get(ActCopy, ActCopy{0n, A.AgNone{}}, unf, act.key(q))), es)
+
+# The fuel bounds the unfoldings a header may take (each a type-valued
+# definition opened to reach the Pis the clauses take).
+def act.params(fuel: Nat, n: Nat, t: A.Ag, ms: List<&2, ActM>, +ctx: List<&2, T.Bt>, +env: ActEnv) -> ActPs:
+  match fuel n t ms:
+    case f 0n t ms:
       ActPs{Nil{}, act.t(t, ctx, env), ctx, True{}}
-    case 1n+p A.AgEl{s, A.AgPi{i, +x, a, d, b}} +m <> mt:
+    case f 1n+p A.AgEl{s, A.AgPi{i, +x, a, d, b}} +m <> mt:
       +nm = act.fresh(x, ctx)
-      act.params.put(m, nm, act.t(a, ctx, env), act.params(p, b, mt, act.entry(m, nm) <> ctx, env))
-    case 1n+p A.AgEl{s, A.AgPi{i, +x, a, d, b}} Nil{}:
+      act.params.put(m, nm, act.t(a, ctx, env), act.params(f, p, b, mt, act.bind(d, act.entry(m, nm), ctx), env))
+    case f 1n+p A.AgEl{s, A.AgPi{i, +x, a, d, b}} Nil{}:
       +nm = act.fresh(x, ctx)
-      act.params.put(AmLive{}, nm, act.t(a, ctx, env), act.params(p, b, Nil{}, T.BtVar{nm} <> ctx, env))
-    case 1n+p t ms:
+      act.params.put(AmLive{}, nm, act.t(a, ctx, env), act.params(f, p, b, Nil{}, act.bind(d, T.BtVar{nm}, ctx), env))
+    case 1n+g 1n+p A.AgEl{s, A.AgDef{+q, +es}} ms:
+      act.params(g, 1n+p, A.AgEl{s, act.unfold(env, q, es)}, ms, ctx, env)
+    case f 1n+p t ms:
       ActPs{Nil{}, act.todo("a type with fewer Pis than its clauses take parameters"), ctx, False{}}
 
 # Clauses ------------------------------------------------------------------------
@@ -917,8 +1024,9 @@ def act.params(n: Nat, t: A.Ag, ms: List<&2, ActM>, +ctx: List<&2, T.Bt>, +env: 
 type ActBind is Data:
   ActBind{pos: Nat, t: T.Bt}
 
-# a translated pattern (or pattern spine), its bindings, and whether it
-# holds an absurd pattern
+# a translated pattern (or pattern spine), its bindings, and whether the
+# clause is left out: it holds an absurd pattern, or a cubical one (the
+# clauses --cubical-compatible generates beside the user's, FORMAT.md)
 type ActPat is Data:
   ActPat{p: T.Bt, bs: List<&2, ActBind>, absurd: Bool}
 
@@ -978,7 +1086,7 @@ def act.pat.con.kind(k: A.AgKw, +ref: List<&2, U32>, sub: T.Bt) -> T.Bt:
     case A.AkConstructor{}:
       T.BtCon{ref, sub}
     case _:
-      act.todo("a constructor pattern the symbol table does not have")
+      T.BtTodo{List.append(&2, U32, S.b("a constructor pattern the symbol table does not have: "), ref)}
 
 def act.pat.con.p(s: ActSym, +env: ActEnv, sub: T.Bt) -> T.Bt:
   match s:
@@ -1021,8 +1129,10 @@ def act.pat(p: A.Ag, +n: Nat, +hints: List<&2, List<&2, U32>>, +pnames: List<&2,
       act.pat.con(act.sym(env, q), env, act.pat(ps, n, hints, pnames, env))
     case A.AgPLit{A.AgLNat{s}}:
       ActPat{T.BtNat{s}, Nil{}, False{}}
+    case A.AgRaw{c, x}:
+      ActPat{T.BtWild{}, Nil{}, True{}}
     case _:
-      ActPat{act.todo("a pattern not translated (a literal other than a Nat, a copattern, a cubical one)"), Nil{}, False{}}
+      ActPat{act.todo("a pattern not translated (a literal other than a Nat, a copattern)"), Nil{}, False{}}
 
 def act.top.var(p: A.Ag, +n: Nat, ent: T.Bt) -> List<&2, ActBind>:
   match p:
@@ -1212,7 +1322,7 @@ def act.field.var(s: ActSym) -> List<&2, U32>:
 
 def act.sym.key(+env: ActEnv, k: String) -> ActSym:
   match env:
-    case ActEnv{mod, tab, al}:
+    case ActEnv{mod, tab, al, unf}:
       act.sym.got(Map.get(ActSym, act.sym0(), tab, k))
 
 # a record's fields as pattern variables: their names' last parts
@@ -1406,7 +1516,7 @@ def act.item.fun(s: ActSym, d: A.AgD, +key: String, ty: A.Ag, +env: ActEnv, doc:
   match s d:
     case ActSym{m, +n, k, +ms, +ar, b, fs, c, cp} A.AgDFun{p, r, w, e, te, mu, +cls, tree}:
       +t = act.inline(100000n, ty, env)
-      act.fun.with(n, ms, ar, p, cls, key, t, env, doc, act.params(ar, t, ms, Nil{}, env))
+      act.fun.with(n, ms, ar, p, cls, key, t, env, doc, act.params(64n, ar, t, ms, Nil{}, env))
     case _ _:
       Nil{}
 
@@ -1468,7 +1578,7 @@ def act.cfields(t: A.Ag, +ctx: List<&2, T.Bt>, +env: ActEnv) -> List<&2, T.BFiel
     case A.AgEl{s, A.AgPi{i, +x, +a, d, b}}:
       +lv = act.ty.level(a)
       +nm = act.fresh(x, ctx)
-      act.cfield.put(lv, nm, act.t(a, ctx, env), act.cfields(b, Bool.pick(T.Bt, lv, act.level(), T.BtVar{nm}) <> ctx, env))
+      act.cfield.put(lv, nm, act.t(a, ctx, env), act.cfields(b, act.bind(d, Bool.pick(T.Bt, lv, act.level(), T.BtVar{nm}), ctx), env))
     case _:
       Nil{}
 
@@ -1488,7 +1598,7 @@ def act.ps.ctx(r: ActPs) -> List<&2, T.Bt>:
 def act.ctor.of(s: ActSym, +pars: Nat, +t: A.Ag, +env: ActEnv) -> T.BCtor:
   match s:
     case ActSym{m, n, k, ms, ar, b, fs, c, cp}:
-      T.BCtor{n, act.cfields(act.after(pars, t), act.ps.ctx(act.params(pars, t, act.modes(t, True{}), Nil{}, env)), env)}
+      T.BCtor{n, act.cfields(act.after(pars, t), act.ps.ctx(act.params(64n, pars, t, act.modes(t, True{}), Nil{}, env)), env)}
 
 def act.decl.got(r: Map<&2, A.AgDecl> & A.AgDecl) -> A.AgDecl:
   (m, d) = r
@@ -1545,7 +1655,7 @@ def act.item.data(s: ActSym, d: A.AgD, ty: A.Ag, +env: ActEnv, +decls: Map<&2, A
   match s d:
     case ActSym{m, +n, k, +ms, ar, b, fs, c, cp} A.AgDData{+pars, 0n, cons, sort}:
       +t = act.inline(100000n, ty, env)
-      act.item.data.of(n, act.params(pars, t, ms, Nil{}, env), act.ctors(act.keys(cons), pars, env, decls), doc)
+      act.item.data.of(n, act.params(64n, pars, t, ms, Nil{}, env), act.ctors(act.keys(cons), pars, env, decls), doc)
     case ActSym{m, n, k, ms, ar, b, fs, c, cp} A.AgDData{pars, ixs, cons, sort}:
       [T.BiComment{List.append(&2, List<&2, U32>, doc, [S.b("an indexed family: not translated yet")])}]
     case _ _:
@@ -1553,23 +1663,40 @@ def act.item.data(s: ActSym, d: A.AgD, ty: A.Ag, +env: ActEnv, +decls: Map<&2, A
 
 # The items of one definition: a function's def, a record's or data
 # type's type; nothing for a constructor (its type has it), a copy (it is
-# inlined where used), a Level name or a builtin (Base has it).
-def act.items.of(s: ActSym, k: A.AgKw, cp: Bool, d: A.AgD, +key: String, ty: A.Ag, +env: ActEnv, +decls: Map<&2, A.AgDecl>, doc: List<&2, List<&2, U32>>) -> List<&2, T.BItem>:
-  match s k cp:
-    case s _ True{}:
+# inlined where used), a Level name or a builtin (Base has it), or one of
+# the transp and hcomp helpers --cubical-compatible generates (no-compilation).
+def act.items.of(s: ActSym, k: A.AgKw, cp: Bool, nc: Bool, d: A.AgD, +key: String, ty: A.Ag, +env: ActEnv, +decls: Map<&2, A.AgDecl>, doc: List<&2, List<&2, U32>>) -> List<&2, T.BItem>:
+  match s k cp nc:
+    case s _ True{} _:
       Nil{}
-    case ActSym{m, n, k2, ms, ar, AbNone{}, fs, c, cop} A.AkFunction{} False{}:
+    case s _ False{} True{}:
+      Nil{}
+    case ActSym{m, n, k2, ms, ar, AbNone{}, fs, c, cop} A.AkFunction{} False{} False{}:
       act.item.fun(ActSym{m, n, k2, ms, ar, AbNone{}, fs, c, cop}, d, key, ty, env, doc)
-    case ActSym{m, n, k2, ms, ar, AbNone{}, fs, c, cop} A.AkRecord{} False{}:
+    case ActSym{m, n, k2, ms, ar, AbNone{}, fs, c, cop} A.AkRecord{} False{} False{}:
       act.item.rec(ActSym{m, n, k2, ms, ar, AbNone{}, fs, c, cop}, d, env, doc)
-    case ActSym{m, n, k2, ms, ar, AbNone{}, fs, c, cop} A.AkData{} False{}:
+    case ActSym{m, n, k2, ms, ar, AbNone{}, fs, c, cop} A.AkData{} False{} False{}:
       act.item.data(ActSym{m, n, k2, ms, ar, AbNone{}, fs, c, cop}, d, ty, env, decls, doc)
-    case ActSym{m, n, k2, ms, ar, AbNone{}, fs, c, cop} A.AkPostulate{} False{}:
+    case ActSym{m, n, k2, ms, ar, AbNone{}, fs, c, cop} A.AkPostulate{} False{} False{}:
       [T.BiComment{List.append(&2, List<&2, U32>, doc, [S.b("a postulate: not translated (Bend has none)")])}]
-    case _ _ _:
+    case _ _ _ _:
       Nil{}
 
 def act.items(d: A.AgDecl, +env: ActEnv, +decls: Map<&2, A.AgDecl>) -> List<&2, T.BItem>:
   match d:
     case A.AgDecl{+q, qn, md, +f, +l, l0, l1, k, m, +fl, lang, ty, dd}:
-      act.items.of(act.sym(env, q), k, act.flag(A.AkCopy{}, fl), dd, act.key(q), ty, env, decls, act.doc(act.qs(q), f, l))
+      act.items.of(act.sym(env, q), k, act.flag(A.AkCopy{}, fl), act.flag(A.AkNoCompilation{}, fl), dd, act.key(q), ty, env, decls, act.doc(act.qs(q), f, l))
+
+# A type-valued function whose case tree is one leaf (no split): it
+# unfolds, as a copy does, when a header needs the Pis behind it.
+def act.unf.d(cp: Bool, srt: Bool, d: A.AgD) -> Maybe<&2, ActCopy>:
+  match cp srt d:
+    case False{} True{} A.AgDFun{A.AgPrNone{}, r, w, e, t, mu, cls, A.AgDone{xs, body}}:
+      Some{ActCopy{act.vars.len(xs), body}}
+    case _ _ _:
+      None{}
+
+def act.unf.of(d: A.AgDecl) -> Maybe<&2, ActCopy>:
+  match d:
+    case A.AgDecl{q, qn, md, f, l, l0, l1, k, m, fl, lang, +ty, dd}:
+      act.unf.d(act.flag(A.AkCopy{}, fl), act.ends.sort(ty), dd)

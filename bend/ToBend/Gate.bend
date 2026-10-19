@@ -157,12 +157,25 @@ def tgt.location(ls: List<&2, List<&2, U32>>) -> List<&2, U32>:
     case +l <> t:
       Bool.pick(List<&2, U32>, S.prefix(l, S.b("Location:")), tgt.trim(S.strip(l, S.b("Location:"))), tgt.location(t))
 
-def tgt.digits(xs: List<&2, U32>, +acc: Nat) -> Nat:
+# whether xs starts with a digit
+def tgt.digit.hd(xs: List<&2, U32>) -> Bool:
   match xs:
     case +h <> t:
-      Bool.pick(Nat, Bool.and(U32.is_ge(h, 48), U32.is_le(h, 57)), tgt.digits(t, Nat.add(Nat.mul(acc, 10n), U32.to_nat(U32.sub(h, 48)))), acc)
+      Bool.and(U32.is_ge(h, 48), U32.is_le(h, 57))
     case Nil{}:
+      False{}
+
+# the leading digits' value (d: xs starts with a digit, decided by the
+# caller: a strict Bool.pick would read on past the digits)
+def tgt.digits(xs: List<&2, U32>, +acc: Nat, d: Bool) -> Nat:
+  match xs d:
+    case h <> +t True{}:
+      tgt.digits(t, Nat.add(Nat.mul(acc, 10n), U32.to_nat(U32.sub(h, 48))), tgt.digit.hd(t))
+    case _ _:
       acc
+
+def tgt.digits.of(+xs: List<&2, U32>) -> Nat:
+  tgt.digits(xs, 0n, tgt.digit.hd(xs))
 
 # the line a source excerpt marks with `NNN>|`, 0 when none
 def tgt.marked(ls: List<&2, List<&2, U32>>) -> Nat:
@@ -170,7 +183,7 @@ def tgt.marked(ls: List<&2, List<&2, U32>>) -> Nat:
     case Nil{}:
       0n
     case +l <> t:
-      Bool.pick(Nat, S.infix(l, S.b(">|")), tgt.digits(tgt.trim(l), 0n), tgt.marked(t))
+      Bool.pick(Nat, S.infix(l, S.b(">|")), tgt.digits.of(tgt.trim(l)), tgt.marked(t))
 
 # the reason: the first two lines of the error's fields (`- message :`,
 # `- expected :`, `- observed :`), trimmed
@@ -343,11 +356,66 @@ def tgt.final(+path: String, +head: List<&2, List<&2, U32>>, +ims: List<&2, T.BI
         S.write(path, tgt.file(head, ims, its))
         return TgtRun{TgtSt{its, ds}, d, c}
 
-# A module through the gate: its file at path holds only the items that
-# check (with the header and imports given); the answer has the kept
-# items, the drops and the number of checks run.
-def tgt.gate(+bend: String, +secs: U32, +path: String, +head: List<&2, List<&2, U32>>, +ims: List<&2, T.BImport>, +its: List<&2, T.BItem>) -> IO(TgtRun):
+# Names from other modules: an item that uses one its module dropped (an
+# alias-qualified name not among the kept ones) is dropped before any
+# check, naming it.
+def tgt.head.part(xs: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  match xs:
+    case h <> t:
+      h
+    case Nil{}:
+      Nil{}
+
+def tgt.has.got(r: Map<&2, Bool> & Bool) -> Bool:
+  (m, b) = r
+  b
+
+def tgt.al.got(r: Map<&2, List<&2, U32>> & Bool) -> Bool:
+  (m, b) = r
+  b
+
+# the first name of refs that is another module's (its first part an
+# alias) and not kept there; empty when there is none
+def tgt.missing(rs: List<&2, List<&2, U32>>, +kept: Map<&2, Bool>, +ral: Map<&2, List<&2, U32>>) -> List<&2, U32>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case +r <> t:
+      Bool.pick(List<&2, U32>, Bool.and(tgt.al.got(Map.has(&2, List<&2, U32>, ral, S.str(tgt.head.part(S.split(r, 46))))), Bool.not(tgt.has.got(Map.has(&2, Bool, kept, S.str(r))))), r, tgt.missing(t, kept, ral))
+
+def tgt.ext.put(none: Bool, +miss: List<&2, U32>, +it: T.BItem, st: TgtSt) -> TgtSt:
+  match none st:
+    case True{} TgtSt{its, ds}:
+      TgtSt{it <> its, ds}
+    case False{} TgtSt{its, ds}:
+      TgtSt{its, TgtDrop{tgt.name(it), tgt.agda(it), List.append(&2, U32, S.b("uses "), List.append(&2, U32, miss, S.b(", which its module dropped"))), True{}} <> ds}
+
+def tgt.ext.one(+miss: List<&2, U32>, +it: T.BItem, st: TgtSt) -> TgtSt:
+  tgt.ext.put(S.eq(miss, Nil{}), miss, it, st)
+
+def tgt.ext(its: List<&2, T.BItem>, +kept: Map<&2, Bool>, +ral: Map<&2, List<&2, U32>>) -> TgtSt:
+  match its:
+    case Nil{}:
+      TgtSt{Nil{}, Nil{}}
+    case +it <> t:
+      tgt.ext.one(tgt.missing(tgt.refs(it), kept, ral), it, tgt.ext(t, kept, ral))
+
+def tgt.merge(a: TgtSt, ds: List<&2, TgtDrop>) -> TgtSt:
+  match a:
+    case TgtSt{its, d0}:
+      TgtSt{its, List.append(&2, TgtDrop, d0, ds)}
+
+def tgt.gate.go(+bend: String, +secs: U32, +path: String, +head: List<&2, List<&2, U32>>, +ims: List<&2, T.BImport>, +its: List<&2, T.BItem>, +st: TgtSt) -> IO(TgtRun):
   do IO<TgtRun>:
-    +st : TgtSt = tgt.deps(S.b("uses an item with a gap"), tgt.gapless(its))
     r : TgtRun <- tgt.loop(1n+List.length(&2, T.BItem, its), bend, secs, path, head, ims, TgtRun{st, tgt.empty(st), 0n})
     tgt.final(path, head, ims, r)
+
+
+# A module through the gate: its file at path holds only the items that
+# check (with the header and imports given); the answer has the kept
+# items, the drops and the number of checks run.  pre: the items left
+# after tgt.ext, and its drops.
+def tgt.gate(+bend: String, +secs: U32, +path: String, +head: List<&2, List<&2, U32>>, +ims: List<&2, T.BImport>, pre: TgtSt) -> IO(TgtRun):
+  match pre:
+    case TgtSt{+its, d0}:
+      tgt.gate.go(bend, secs, path, head, ims, its, tgt.deps(S.b("uses a dropped item"), tgt.merge(tgt.gapless(its), d0)))

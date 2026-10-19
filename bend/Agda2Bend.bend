@@ -22,7 +22,8 @@ import ./ToBend/Gate.bend as G
 #       named and every module they import, or all of DIR's; in import order,
 #       each to OUT/src/<its path>.bend (Agda2Bend/Cata.bend's fold, printed by
 #       ToBend/Print.bend), logging per module the definitions read, the items
-#       written and the places the fold could not fill (?TODO), by reason
+#       written and the places the fold could not fill (?TODO), by reason;
+#       OUT/raw/<path>.bend holds every item before the gate (what failed)
 #
 #   agda2bend decode FILE.sexp...
 #       parse and decode every expression of each export file: per file the
@@ -266,7 +267,7 @@ def a2b.visit(seen: Bool, +n: List<&2, U32>, rest: List<&2, A2bFr>, sn: Map<&2, 
     case True{}:
       A2bDfs{rest, sn, out}
     case False{}:
-      A2bDfs{A2bFr{n, True{}} <> a2b.frames(a2b.mod.imports(a2b.mod.get(ms, n)), ms, rest), Map.set(&2, Bool, sn, S.str(n), True{}), out}
+      A2bDfs{a2b.frames(a2b.mod.imports(a2b.mod.get(ms, n)), ms, A2bFr{n, True{}} <> rest), Map.set(&2, Bool, sn, S.str(n), True{}), out}
 
 def a2b.dfs(fuel: Nat, s: A2bDfs, +ms: Map<&2, A2bMod>) -> A2bDfs:
   match fuel s:
@@ -406,19 +407,31 @@ def a2b.dq(d: A.AgDecl) -> A.AgQ:
 
 # The module's symbols added to the table, and its definitions by key.
 type A2bTabs is Data:
-  A2bTabs{tab: Map<&2, C.ActSym>, dm: Map<&2, A.AgDecl>, used: List<&2, List<&2, U32>>}
+  A2bTabs{tab: Map<&2, C.ActSym>, unf: Map<&2, C.ActCopy>, dm: Map<&2, A.AgDecl>, used: List<&2, List<&2, U32>>}
+
+# what the modules after this one see: the symbol table, the unfoldings,
+# and the names that passed their module's gate (alias-qualified)
+type A2bG is Data:
+  A2bG{tab: Map<&2, C.ActSym>, unf: Map<&2, C.ActCopy>, kept: Map<&2, Bool>}
+
+def a2b.unf.put(m: Maybe<&2, C.ActCopy>, +k: String, u: Map<&2, C.ActCopy>) -> Map<&2, C.ActCopy>:
+  match m:
+    case Some{c}:
+      Map.set(&2, C.ActCopy, u, k, c)
+    case None{}:
+      u
 
 def a2b.syms.one(+top: List<&2, U32>, +d: A.AgDecl, +nm: List<&2, U32>, t: A2bTabs) -> A2bTabs:
   match t:
-    case A2bTabs{tab, dm, used}:
-      A2bTabs{Map.set(&2, C.ActSym, tab, C.act.key(a2b.dq(d)), C.act.sym.of(top, nm, d)), Map.set(&2, A.AgDecl, dm, C.act.key(a2b.dq(d)), d), nm <> used}
+    case A2bTabs{tab, unf, dm, used}:
+      A2bTabs{Map.set(&2, C.ActSym, tab, C.act.key(a2b.dq(d)), C.act.sym.of(top, nm, d)), a2b.unf.put(C.act.unf.of(d), C.act.key(a2b.dq(d)), unf), Map.set(&2, A.AgDecl, dm, C.act.key(a2b.dq(d)), d), nm <> used}
 
 def a2b.syms(ds: List<&2, A.AgDecl>, +top: List<&2, U32>, t: A2bTabs) -> A2bTabs:
   match ds t:
     case Nil{} t:
       t
-    case +d <> rest A2bTabs{tab, dm, +used}:
-      a2b.syms(rest, top, a2b.syms.one(top, d, a2b.uniq(C.act.local(top, C.act.qs(a2b.dq(d))), used), A2bTabs{tab, dm, used}))
+    case +d <> rest A2bTabs{tab, unf, dm, +used}:
+      a2b.syms(rest, top, a2b.syms.one(top, d, a2b.uniq(C.act.local(top, C.act.qs(a2b.dq(d))), used), A2bTabs{tab, unf, dm, used}))
 
 def a2b.items(ds: List<&2, A.AgDecl>, +env: C.ActEnv, +dm: Map<&2, A.AgDecl>) -> List<&2, T.BItem>:
   match ds:
@@ -588,30 +601,64 @@ def a2b.dropped.n(ds: List<&2, G.TgtDrop>, +dep: Bool) -> Nat:
     case G.TgtDrop{n, a, w, +d} <> t:
       Nat.add(Bool.pick(Nat, Bool.or(Bool.and(d, dep), Bool.and(Bool.not(d), Bool.not(dep))), 1n, 0n), a2b.dropped.n(t, dep))
 
-def a2b.gated(+out: String, +m: List<&2, U32>, +nd: Nat, +gaps: List<&2, List<&2, U32>>, +nits: Nat, r: G.TgtRun) -> IO(Unit):
+# the names a module's kept items give the modules after it, as they write
+# them: its alias, a dot, the item's name (a type's constructors too)
+def a2b.kept.ctors(+a: List<&2, U32>, cs: List<&2, T.BCtor>, acc: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match cs:
+    case Nil{}:
+      acc
+    case T.BCtor{c, fs} <> t:
+      List.append(&2, U32, a, 46 <> c) <> a2b.kept.ctors(a, t, acc)
+
+def a2b.kept.of(+a: List<&2, U32>, its: List<&2, T.BItem>) -> List<&2, List<&2, U32>>:
+  match its:
+    case Nil{}:
+      Nil{}
+    case T.BiType{n, ps, d, cs, doc} <> t:
+      List.append(&2, U32, a, 46 <> n) <> a2b.kept.ctors(a, cs, a2b.kept.of(a, t))
+    case T.BiDef{n, ps, ret, body, doc} <> t:
+      List.append(&2, U32, a, 46 <> n) <> a2b.kept.of(a, t)
+    case i <> t:
+      a2b.kept.of(a, t)
+
+def a2b.kept.add(ns: List<&2, List<&2, U32>>, k: Map<&2, Bool>) -> Map<&2, Bool>:
+  match ns:
+    case Nil{}:
+      k
+    case n <> t:
+      a2b.kept.add(t, Map.set(&2, Bool, k, S.str(n), True{}))
+
+def a2b.gated(+out: String, +m: List<&2, U32>, +a: List<&2, U32>, +nd: Nat, +gaps: List<&2, List<&2, U32>>, +nits: Nat, r: G.TgtRun) -> IO(List<&2, List<&2, U32>>):
   match r:
     case G.TgtRun{G.TgtSt{+its, +ds}, done, checks}:
-      do IO<Unit>:
+      do IO<List<&2, List<&2, U32>>>:
         S.add(out ++ "/ledger.tsv", List.append(&2, U32, a2b.ledger.kept(m, its), a2b.ledger.drops(m, List.reverse(&2, G.TgtDrop, ds))))
         Ck.log("emit " ++ S.str(m) ++ ": " ++ Nat.show(nd) ++ " definitions, " ++ Nat.show(nits) ++ " items: " ++ Nat.show(List.length(&2, T.BItem, its)) ++ " check, " ++ Nat.show(a2b.dropped.n(ds, False{})) ++ " dropped, " ++ Nat.show(a2b.dropped.n(ds, True{})) ++ " dependents (" ++ Nat.show(checks) ++ " checks); gaps " ++ Nat.show(List.length(&2, List<&2, U32>, gaps)) ++ a2b.tally.show(a2b.tally(gaps, Nil{})))
+        return a2b.kept.of(a, its)
 
-def a2b.em.write(+out: String, +m: List<&2, U32>, its: List<&2, T.BItem>, ims: List<&2, T.BImport>, +nd: Nat, +gaps: List<&2, List<&2, U32>>, +nits: Nat) -> IO(Unit):
+# A module's items through the gate: first those using another module's
+# dropped names go (G.tgt.ext), then the checks.  The file before the gate
+# is OUT/raw/<path>.bend.
+def a2b.em.write(+out: String, +m: List<&2, U32>, +a: List<&2, U32>, +kept: Map<&2, Bool>, +ral: Map<&2, List<&2, U32>>, +its: List<&2, T.BItem>, +ims: List<&2, T.BImport>, +nd: Nat, +gaps: List<&2, List<&2, U32>>, +nits: Nat) -> IO(List<&2, List<&2, U32>>):
   +path = out ++ "/src/" ++ S.str(C.act.path(m))
-  do IO<Unit>:
+  +raw = out ++ "/raw/" ++ S.str(C.act.path(m))
+  do IO<List<&2, List<&2, U32>>>:
     S.mkdir(S.parent(path))
+    S.mkdir(S.parent(raw))
+    S.write(raw, P.tpr.file(T.BFile{a2b.head.doc(m, nd), ims, its}))
     +bend : String <- S.env("BEND", "bend")
-    r : G.TgtRun <- G.tgt.gate(bend, 900, path, a2b.head.doc(m, nd), ims, its)
-    a2b.gated(out, m, nd, gaps, nits, r)
+    r : G.TgtRun <- G.tgt.gate(bend, 900, path, a2b.head.doc(m, nd), ims, G.tgt.ext(its, kept, ral))
+    a2b.gated(out, m, a, nd, gaps, nits, r)
 
-def a2b.em.items(+out: String, +m: List<&2, U32>, +al: Map<&2, List<&2, U32>>, +ral: Map<&2, List<&2, U32>>, +nd: Nat, +its: List<&2, T.BItem>) -> IO(Unit):
-  a2b.em.write(out, m, its, a2b.imports(a2b.snd(a2b.imps(a2b.fold.items(its, False{}, Nil{}), ral, (Map.new(&2, Bool), Nil{}))), m, al), nd, a2b.fold.items(its, True{}, Nil{}), a2b.defs.n(its))
+def a2b.em.items(+out: String, +m: List<&2, U32>, +al: Map<&2, List<&2, U32>>, +ral: Map<&2, List<&2, U32>>, +kept: Map<&2, Bool>, +nd: Nat, +its: List<&2, T.BItem>) -> IO(List<&2, List<&2, U32>>):
+  a2b.em.write(out, m, a2b.ral.got(Map.get(List<&2, U32>, Nil{}, al, S.str(m))), kept, ral, its, a2b.imports(a2b.snd(a2b.imps(a2b.fold.items(its, False{}, Nil{}), ral, (Map.new(&2, Bool), Nil{}))), m, al), nd, a2b.fold.items(its, True{}, Nil{}), a2b.defs.n(its))
 
-def a2b.em.tabs(+out: String, +m: List<&2, U32>, +al: Map<&2, List<&2, U32>>, +ral: Map<&2, List<&2, U32>>, +ds: List<&2, A.AgDecl>, t: A2bTabs) -> IO(Map<&2, C.ActSym>):
+def a2b.em.tabs(+out: String, +m: List<&2, U32>, +al: Map<&2, List<&2, U32>>, +ral: Map<&2, List<&2, U32>>, +ds: List<&2, A.AgDecl>, +kept: Map<&2, Bool>, t: A2bTabs) -> IO(A2bG):
   match t:
-    case A2bTabs{+tab, +dm, used}:
-      do IO<Map<&2, C.ActSym>>:
-        a2b.em.items(out, m, al, ral, List.length(&2, A.AgDecl, ds), O.tor.order(a2b.items(ds, C.ActEnv{m, tab, al}, dm)))
-        return tab
+    case A2bTabs{+tab, +unf, +dm, used}:
+      do IO<A2bG>:
+        kn : List<&2, List<&2, U32>> <- a2b.em.items(out, m, al, ral, kept, List.length(&2, A.AgDecl, ds), O.tor.order(a2b.items(ds, C.ActEnv{m, tab, al, unf}, dm)))
+        return A2bG{tab, unf, a2b.kept.add(kn, kept)}
 
 def a2b.mod.file(m: A2bMod) -> List<&2, U32>:
   match m:
@@ -620,19 +667,21 @@ def a2b.mod.file(m: A2bMod) -> List<&2, U32>:
 
 # one module: its definitions read, its symbols added, its file written;
 # the table with its symbols for the modules after it
-def a2b.em.mod(+out: String, +ms: Map<&2, A2bMod>, +al: Map<&2, List<&2, U32>>, +ral: Map<&2, List<&2, U32>>, +m: List<&2, U32>, tab: Map<&2, C.ActSym>) -> IO(Map<&2, C.ActSym>):
-  do IO<Map<&2, C.ActSym>>:
-    +ds : List<&2, A.AgDecl> <- a2b.decls(a2b.mod.file(a2b.mod.get(ms, m)))
-    a2b.em.tabs(out, m, al, ral, ds, a2b.syms(ds, m, A2bTabs{tab, Map.new(&2, A.AgDecl), Nil{}}))
+def a2b.em.mod(+out: String, +ms: Map<&2, A2bMod>, +al: Map<&2, List<&2, U32>>, +ral: Map<&2, List<&2, U32>>, +m: List<&2, U32>, g: A2bG) -> IO(A2bG):
+  match g:
+    case A2bG{tab, unf, +kept}:
+      do IO<A2bG>:
+        +ds : List<&2, A.AgDecl> <- a2b.decls(a2b.mod.file(a2b.mod.get(ms, m)))
+        a2b.em.tabs(out, m, al, ral, ds, kept, a2b.syms(ds, m, A2bTabs{tab, unf, Map.new(&2, A.AgDecl), Nil{}}))
 
-def a2b.em.mods(order: List<&2, List<&2, U32>>, +out: String, +ms: Map<&2, A2bMod>, +al: Map<&2, List<&2, U32>>, +ral: Map<&2, List<&2, U32>>, tab: Map<&2, C.ActSym>) -> IO(Unit):
+def a2b.em.mods(order: List<&2, List<&2, U32>>, +out: String, +ms: Map<&2, A2bMod>, +al: Map<&2, List<&2, U32>>, +ral: Map<&2, List<&2, U32>>, g: A2bG) -> IO(Unit):
   match order:
     case Nil{}:
       IO.pure(Unit, Unit{})
     case m <> t:
       do IO<Unit>:
-        tab2 : Map<&2, C.ActSym> <- a2b.em.mod(out, ms, al, ral, m, tab)
-        a2b.em.mods(t, out, ms, al, ral, tab2)
+        g2 : A2bG <- a2b.em.mod(out, ms, al, ral, m, g)
+        a2b.em.mods(t, out, ms, al, ral, g2)
 
 # alias -> module, the reverse of the aliases
 def a2b.ral(ns: List<&2, List<&2, U32>>, +al: Map<&2, List<&2, U32>>, acc: Map<&2, List<&2, U32>>) -> Map<&2, List<&2, U32>>:
@@ -657,7 +706,7 @@ def a2b.emit.go(+out: String, roots: List<&2, List<&2, U32>>, +ms: Map<&2, A2bMo
   +al = a2b.aliases(order)
   do IO<Unit>:
     Ck.log("emit: " ++ Nat.show(List.length(&2, List<&2, U32>, order)) ++ " modules in import order, to " ++ out ++ "/src")
-    a2b.em.mods(order, out, ms, al, a2b.ral(order, al, Map.new(&2, List<&2, U32>)), Map.new(&2, C.ActSym))
+    a2b.em.mods(order, out, ms, al, a2b.ral(order, al, Map.new(&2, List<&2, U32>)), A2bG{Map.new(&2, C.ActSym), Map.new(&2, C.ActCopy), Map.new(&2, Bool)})
 
 def a2b.strs(xs: List<String>) -> List<&2, List<&2, U32>>:
   match xs:
