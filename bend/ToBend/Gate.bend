@@ -2,6 +2,7 @@ import Base
 import ../Sys.bend as S
 import ./Ast.bend as T
 import ./Print.bend as P
+import ./Copy.bend as Q
 
 # Gate: only Bend that checks is kept (the user, 2026-10-18: "only fully
 # proven").  A module's file is written and checked with the locked
@@ -110,19 +111,32 @@ def tgt.drop.names(ds: List<&2, TgtDrop>) -> List<&2, List<&2, U32>>:
 type TgtDep is Data:
   TgtDep{st: TgtSt, changed: Bool}
 
-def tgt.dep.put(hit: Bool, +it: T.BItem, +why: List<&2, U32>, r: TgtDep) -> TgtDep:
-  match hit r:
-    case False{} TgtDep{TgtSt{its, ds}, c}:
-      TgtDep{TgtSt{it <> its, ds}, c}
-    case True{} TgtDep{TgtSt{its, ds}, c}:
-      TgtDep{TgtSt{its, TgtDrop{tgt.name(it), tgt.agda(it), why, True{}} <> ds}, True{}}
+# the first of names that is among dead (empty when none is)
+def tgt.first.mem(ns: List<&2, List<&2, U32>>, +dead: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case +n <> t:
+      Bool.pick(List<&2, U32>, tgt.mem(n, dead), n, tgt.first.mem(t, dead))
 
+def tgt.dep.put(none: Bool, +used: List<&2, U32>, +it: T.BItem, r: TgtDep) -> TgtDep:
+  match none r:
+    case True{} TgtDep{TgtSt{its, ds}, c}:
+      TgtDep{TgtSt{it <> its, ds}, c}
+    case False{} TgtDep{TgtSt{its, ds}, c}:
+      TgtDep{TgtSt{its, TgtDrop{tgt.name(it), tgt.agda(it), List.append(&2, U32, S.b("uses "), used), True{}} <> ds}, True{}}
+
+def tgt.dep.one(+used: List<&2, U32>, +it: T.BItem, r: TgtDep) -> TgtDep:
+  tgt.dep.put(S.eq(used, Nil{}), used, it, r)
+
+# one round: each kept item that uses a dropped name is dropped too, its
+# reason naming the name (why is the fallback no longer used)
 def tgt.dep.round(its: List<&2, T.BItem>, +dead: List<&2, List<&2, U32>>, +why: List<&2, U32>, ds: List<&2, TgtDrop>) -> TgtDep:
   match its:
     case Nil{}:
       TgtDep{TgtSt{Nil{}, ds}, False{}}
     case +it <> t:
-      tgt.dep.put(tgt.any.mem(tgt.refs(it), dead), it, why, tgt.dep.round(t, dead, why, ds))
+      tgt.dep.one(tgt.first.mem(tgt.refs(it), dead), it, tgt.dep.round(t, dead, why, ds))
 
 def tgt.deps.go(fuel: Nat, +why: List<&2, U32>, r: TgtDep) -> TgtSt:
   match fuel r:
@@ -316,6 +330,67 @@ def tgt.file(+head: List<&2, List<&2, U32>>, +ims: List<&2, T.BImport>, its: Lis
 def tgt.start(+head: List<&2, List<&2, U32>>, +ims: List<&2, T.BImport>) -> Nat:
   Nat.add(List.length(&2, List<&2, U32>, head), 1n+List.length(&2, T.BImport, ims))
 
+# Repairs: a failure whose message names a binder of the blamed def (x
+# consumed more than once, -x expected where x is used live) raises that
+# binder (ToBend/Copy.bend) and checks again; only when nothing can be
+# raised is the def dropped.
+def tgt.cut.at(xs: List<&2, U32>, +stop: List<&2, U32>, at: Bool) -> List<&2, U32>:
+  match xs at:
+    case Nil{} _:
+      Nil{}
+    case h <> t True{}:
+      Nil{}
+    case h <> +t False{}:
+      h <> tgt.cut.at(t, stop, S.prefix(t, stop))
+
+def tgt.cut(+xs: List<&2, U32>, +stop: List<&2, U32>) -> List<&2, U32>:
+  tgt.cut.at(xs, stop, S.prefix(xs, stop))
+
+# the binder an "expected : V observed : ..." message names (its - aside)
+def tgt.var.of(+w: List<&2, U32>) -> List<&2, U32>:
+  S.strip(tgt.cut(S.strip(w, S.b("expected : ")), S.b(" observed")), S.b("-"))
+
+# 1: a use twice, 2: an erased binder used live, 0: neither
+def tgt.repair.kind(+w: List<&2, U32>) -> Nat:
+  Bool.pick(Nat, S.infix(w, S.b("(consumed more than once)")), 1n, Bool.pick(Nat, Bool.and(S.prefix(w, S.b("expected : -")), S.infix(w, S.b("observed : "))), 2n, 0n))
+
+def tgt.find(its: List<&2, T.BItem>, +n: List<&2, U32>) -> Maybe<&2, T.BItem>:
+  match its:
+    case Nil{}:
+      None{}
+    case +it <> t:
+      Bool.pick(Maybe<&2, T.BItem>, S.eq(tgt.name(it), n), Some{it}, tgt.find(t, n))
+
+def tgt.replace(its: List<&2, T.BItem>, +n: List<&2, U32>, +new: T.BItem) -> List<&2, T.BItem>:
+  match its:
+    case Nil{}:
+      Nil{}
+    case +it <> t:
+      Bool.pick(T.BItem, S.eq(tgt.name(it), n), new, it) <> tgt.replace(t, n, new)
+
+def tgt.raise.of(m: Maybe<&2, T.BItem>, +v: List<&2, U32>, +copy: Bool) -> Maybe<&2, T.BItem>:
+  match m:
+    case Some{it}:
+      Q.tcp.raise(it, v, copy)
+    case None{}:
+      None{}
+
+def tgt.repaired(r: Maybe<&2, T.BItem>, +blame: List<&2, U32>, +why: List<&2, U32>, +its: List<&2, T.BItem>, ds: List<&2, TgtDrop>) -> TgtSt:
+  match r:
+    case Some{new}:
+      TgtSt{tgt.replace(its, blame, new), ds}
+    case None{}:
+      tgt.after.fail(blame, why, TgtSt{its, ds})
+
+# a failure: repaired when its message names a binder the blamed def can
+# raise, else the def and its dependents dropped
+def tgt.on.fail(+k: Nat, +blame: List<&2, U32>, +why: List<&2, U32>, +its: List<&2, T.BItem>, ds: List<&2, TgtDrop>) -> TgtSt:
+  match k:
+    case 0n:
+      tgt.after.fail(blame, why, TgtSt{its, ds})
+    case 1n+p:
+      tgt.repaired(tgt.raise.of(tgt.find(its, blame), tgt.var.of(why), Nat.is_eq(k, 1n)), blame, why, its, ds)
+
 type TgtRun is Data:
   TgtRun{st: TgtSt, done: Bool, checks: Nat}
 
@@ -331,7 +406,7 @@ def tgt.round.of(v: TgtV, +head: List<&2, List<&2, U32>>, +ims: List<&2, T.BImpo
     case TgPass{} st:
       TgtRun{st, True{}, checks}
     case TgFail{+n, +l, +w} TgtSt{+its, ds}:
-      TgtRun{tgt.after.fail(tgt.blame(n, its, tgt.start(head, ims), l), w, TgtSt{its, ds}), False{}, checks}
+      TgtRun{tgt.on.fail(tgt.repair.kind(w), tgt.blame(n, its, tgt.start(head, ims), l), w, its, ds), False{}, checks}
 
 # one check: the file written, bend run on it, its verdict applied
 def tgt.round(+bend: String, +secs: U32, +path: String, +head: List<&2, List<&2, U32>>, +ims: List<&2, T.BImport>, +checks: Nat, st: TgtSt) -> IO(TgtRun):
@@ -356,6 +431,14 @@ def tgt.final(+path: String, +head: List<&2, List<&2, U32>>, +ims: List<&2, T.BI
         S.write(path, tgt.file(head, ims, its))
         return TgtRun{TgtSt{its, ds}, d, c}
 
+def tgt.has.got(r: Map<&2, Bool> & Bool) -> Bool:
+  (m, b) = r
+  b
+
+def tgt.al.got(r: Map<&2, List<&2, U32>> & Bool) -> Bool:
+  (m, b) = r
+  b
+
 # Names from other modules: an item that uses one its module dropped (an
 # alias-qualified name not among the kept ones) is dropped before any
 # check, naming it.
@@ -366,13 +449,17 @@ def tgt.head.part(xs: List<&2, List<&2, U32>>) -> List<&2, U32>:
     case Nil{}:
       Nil{}
 
-def tgt.has.got(r: Map<&2, Bool> & Bool) -> Bool:
-  (m, b) = r
-  b
+# the name after its alias (Alias.rest)
+def tgt.after.alias(xs: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  match xs:
+    case h <> t:
+      S.join(t, 46)
+    case Nil{}:
+      Nil{}
 
-def tgt.al.got(r: Map<&2, List<&2, U32>> & Bool) -> Bool:
-  (m, b) = r
-  b
+def tgt.ral.got(r: Map<&2, List<&2, U32>> & List<&2, U32>) -> List<&2, U32>:
+  (m, x) = r
+  x
 
 # the first name of refs that is another module's (its first part an
 # alias) and not kept there; empty when there is none
@@ -383,22 +470,27 @@ def tgt.missing(rs: List<&2, List<&2, U32>>, +kept: Map<&2, Bool>, +ral: Map<&2,
     case +r <> t:
       Bool.pick(List<&2, U32>, Bool.and(tgt.al.got(Map.has(&2, List<&2, U32>, ral, S.str(tgt.head.part(S.split(r, 46))))), Bool.not(tgt.has.got(Map.has(&2, Bool, kept, S.str(r))))), r, tgt.missing(t, kept, ral))
 
-def tgt.ext.put(none: Bool, +miss: List<&2, U32>, +it: T.BItem, st: TgtSt) -> TgtSt:
+# the reason of a drop for a name another module dropped: the name as that
+# module writes it, and the module (the report follows it there)
+def tgt.ext.why(+miss: List<&2, U32>, +ral: Map<&2, List<&2, U32>>) -> List<&2, U32>:
+  List.append(&2, U32, S.b("uses "), List.append(&2, U32, tgt.after.alias(S.split(miss, 46)), List.append(&2, U32, S.b(" in "), List.append(&2, U32, tgt.ral.got(Map.get(List<&2, U32>, Nil{}, ral, S.str(tgt.head.part(S.split(miss, 46))))), S.b(", which dropped it")))))
+
+def tgt.ext.put(none: Bool, +miss: List<&2, U32>, +ral: Map<&2, List<&2, U32>>, +it: T.BItem, st: TgtSt) -> TgtSt:
   match none st:
     case True{} TgtSt{its, ds}:
       TgtSt{it <> its, ds}
     case False{} TgtSt{its, ds}:
-      TgtSt{its, TgtDrop{tgt.name(it), tgt.agda(it), List.append(&2, U32, S.b("uses "), List.append(&2, U32, miss, S.b(", which its module dropped"))), True{}} <> ds}
+      TgtSt{its, TgtDrop{tgt.name(it), tgt.agda(it), tgt.ext.why(miss, ral), True{}} <> ds}
 
-def tgt.ext.one(+miss: List<&2, U32>, +it: T.BItem, st: TgtSt) -> TgtSt:
-  tgt.ext.put(S.eq(miss, Nil{}), miss, it, st)
+def tgt.ext.one(+miss: List<&2, U32>, +ral: Map<&2, List<&2, U32>>, +it: T.BItem, st: TgtSt) -> TgtSt:
+  tgt.ext.put(S.eq(miss, Nil{}), miss, ral, it, st)
 
 def tgt.ext(its: List<&2, T.BItem>, +kept: Map<&2, Bool>, +ral: Map<&2, List<&2, U32>>) -> TgtSt:
   match its:
     case Nil{}:
       TgtSt{Nil{}, Nil{}}
     case +it <> t:
-      tgt.ext.one(tgt.missing(tgt.refs(it), kept, ral), it, tgt.ext(t, kept, ral))
+      tgt.ext.one(tgt.missing(tgt.refs(it), kept, ral), ral, it, tgt.ext(t, kept, ral))
 
 def tgt.merge(a: TgtSt, ds: List<&2, TgtDrop>) -> TgtSt:
   match a:
@@ -407,7 +499,7 @@ def tgt.merge(a: TgtSt, ds: List<&2, TgtDrop>) -> TgtSt:
 
 def tgt.gate.go(+bend: String, +secs: U32, +path: String, +head: List<&2, List<&2, U32>>, +ims: List<&2, T.BImport>, +its: List<&2, T.BItem>, +st: TgtSt) -> IO(TgtRun):
   do IO<TgtRun>:
-    r : TgtRun <- tgt.loop(1n+List.length(&2, T.BItem, its), bend, secs, path, head, ims, TgtRun{st, tgt.empty(st), 0n})
+    r : TgtRun <- tgt.loop(Nat.add(8n, Nat.mul(4n, List.length(&2, T.BItem, its))), bend, secs, path, head, ims, TgtRun{st, tgt.empty(st), 0n})
     tgt.final(path, head, ims, r)
 
 

@@ -56,8 +56,9 @@ type Bt is Data:
   BtCase{p: Bt, b: Bt, rest: Bt}
   BtCEnd{}
   BtWild{}
-  # An argument at an erased parameter: printed as itself, but a dead
-  # position, so its variables' uses do not count (ToBend/Copy.bend).
+  # An argument at an erased parameter, or at one whose mode is unknown (a
+  # variable applied): printed as itself, its variables' uses not counted
+  # by the quantity pass (ToBend/Copy.bend).
   BtDead{t: Bt}
   # A pattern variable with its mode (+x when the case uses it twice).
   BtPv{m: BMode, x: List<&2, U32>}

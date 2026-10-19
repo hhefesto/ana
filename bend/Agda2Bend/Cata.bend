@@ -574,9 +574,20 @@ def act.app.list(f: T.Bt, xs: List<&2, T.Bt>) -> T.Bt:
     case h <> t:
       T.BtApp{f, T.tba.args(h <> t)}
 
-# a variable applied: its level arguments dropped
+# a variable applied: its level arguments dropped, and every argument
+# marked as at a parameter whose mode is unknown (BtDead): the variable's
+# type is not known here, and its Pi often erases the argument, so the
+# quantity pass does not count these uses (Bend's check finds a real
+# double use)
+def act.deads(xs: List<&2, T.Bt>) -> List<&2, T.Bt>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case h <> t:
+      T.BtDead{h} <> act.deads(t)
+
 def act.app.var(f: T.Bt, args: T.Bt) -> T.Bt:
-  act.app.list(f, act.list.nolevel(args))
+  act.app.list(f, act.deads(act.list.nolevel(args)))
 
 # The kept arguments of a call: an argument whose parameter is dropped is
 # left out, one at an erased parameter is marked dead, one at a template
@@ -697,14 +708,24 @@ def act.eq(xs: List<&2, T.Bt>) -> T.Bt:
     case _:
       act.todo("≡ applied to other than its two sides")
 
+# A datatype applied: Bend writes it with all its parameters (D<A, B>), so
+# one applied to fewer is eta-expanded over the missing ones (Σ-syntax = Σ).
+def act.tyapp.of(+ref: List<&2, U32>, t: ActTake) -> T.Bt:
+  match t:
+    case ActTake{args, ms, rest, rms, True{}}:
+      T.BtTyApp{ref, T.tba.args(act.keep(args, ms))}
+    case ActTake{args, ms, rest, rms, False{}}:
+      +ns = act.eta.names(rms, 1n)
+      act.eta(ns, T.BtTyApp{ref, T.tba.args(List.append(&2, T.Bt, act.keep(args, ms), act.eta.vars(ns)))})
+
 def act.app.def.kind(k: A.AgKw, cp: Bool, +ref: List<&2, U32>, ms: List<&2, ActM>, +ar: Nat, args: T.Bt) -> T.Bt:
   match k cp:
     case _ True{}:
       act.todo("a module application's copy that was not inlined")
     case A.AkRecord{} False{}:
-      T.BtTyApp{ref, T.tba.args(act.keep(args, ms))}
+      act.tyapp.of(ref, act.take(ar, args, ms))
     case A.AkData{} False{}:
-      T.BtTyApp{ref, T.tba.args(act.keep(args, ms))}
+      act.tyapp.of(ref, act.take(ar, args, ms))
     case A.AkFunction{} False{}:
       act.call(ref, ms, ar, args)
     case A.AkPrimitive{} False{}:

@@ -61,6 +61,37 @@ def tcp.mem(+x: List<&2, U32>, xs: List<&2, List<&2, U32>>) -> Bool:
     case h <> t:
       Bool.or(S.eq(h, x), tcp.mem(x, t))
 
+# whether x occurs inside a template argument: a template argument must be
+# closed, so a parameter passed there must be a template itself
+def tcp.in.tpl(+x: List<&2, U32>, t: T.Bt, +under: Bool) -> Bool:
+  match t:
+    case T.BtVar{y}:
+      Bool.and(under, S.eq(x, y))
+    case T.BtTplArg{a}:
+      tcp.in.tpl(x, a, True{})
+    case T.BtApp{f, a}:
+      Bool.or(tcp.in.tpl(x, f, under), tcp.in.tpl(x, a, under))
+    case T.BtLam{m, y, b}:
+      tcp.in.tpl(x, b, under)
+    case T.BtCon{c, a}:
+      tcp.in.tpl(x, a, under)
+    case T.BtSucc{a}:
+      tcp.in.tpl(x, a, under)
+    case T.BtAnn{a, ty}:
+      tcp.in.tpl(x, a, under)
+    case T.BtDead{a}:
+      tcp.in.tpl(x, a, under)
+    case T.BtMatch{xs, cs}:
+      tcp.in.tpl(x, cs, under)
+    case T.BtCase{p, b, rest}:
+      Bool.or(tcp.in.tpl(x, b, under), tcp.in.tpl(x, rest, under))
+    case T.BtExpr{e}:
+      tcp.in.tpl(x, e, under)
+    case T.BtArgs{a, rest}:
+      Bool.or(tcp.in.tpl(x, a, under), tcp.in.tpl(x, rest, under))
+    case _:
+      False{}
+
 # Types a + binder may have: Base's Nat, Bool, Unit, an equation, or one of
 # the Data types named in datas.
 def tcp.dataish(t: T.Bt, +datas: List<&2, List<&2, U32>>) -> Bool:
@@ -85,13 +116,15 @@ def tcp.mode.by(m: T.BMode, none: Bool, once: Bool, data: Bool) -> T.BMode:
     case False{} False{} False{}:
       T.BmTpl{}
 
-def tcp.mode.of(m: T.BMode, +n: Nat, data: Bool) -> T.BMode:
-  match m:
-    case T.BmTpl{}:
+def tcp.mode.of(m: T.BMode, +n: Nat, data: Bool, tpl: Bool) -> T.BMode:
+  match m tpl:
+    case T.BmTpl{} _:
       T.BmTpl{}
-    case T.BmCopy{}:
+    case _ True{}:
+      T.BmTpl{}
+    case T.BmCopy{} False{}:
       T.BmCopy{}
-    case _:
+    case m False{}:
       tcp.mode.by(m, Nat.is_eq(n, 0n), Nat.is_lt(n, 2n), data)
 
 # a parameter's mode from its uses in the body (a mode only rises: erased,
@@ -99,7 +132,7 @@ def tcp.mode.of(m: T.BMode, +n: Nat, data: Bool) -> T.BMode:
 def tcp.param(p: T.BParam, +body: T.Bt, +datas: List<&2, List<&2, U32>>) -> T.BMode:
   match p:
     case T.BParam{m, +x, +ty}:
-      tcp.mode.of(m, tcp.uses(x, body), tcp.dataish(ty, datas))
+      tcp.mode.of(m, tcp.uses(x, body), tcp.dataish(ty, datas), tcp.in.tpl(x, body, False{}))
 
 def tcp.params(ps: List<&2, T.BParam>, +body: T.Bt, +datas: List<&2, List<&2, U32>>) -> List<&2, T.BMode>:
   match ps:
@@ -201,3 +234,144 @@ def tcp.finish(it: T.BItem, ms: List<&2, T.BMode>) -> T.BItem:
       T.BiDef{n, tcp.tpl.first(tcp.set.modes(ps, ms)), ret, tcp.mark(body), doc}
     case it:
       it
+
+# Repairs the gate asks for -------------------------------------------------------
+#
+# When Bend's check names a binder (x consumed more than once; -x expected
+# where x is used live), the gate raises that binder and checks again
+# instead of dropping the def: + on a parameter, lambda or pattern variable
+# used twice; live for an erased parameter used as a value.  A binder that
+# is already there cannot be raised again, and the def is then dropped.
+
+type TcpR is Data:
+  TcpR{t: T.Bt, changed: Bool}
+
+# rebuild the node of kind k from its two parts
+def tcp.r.mk(k: Nat, x: T.Bt, y: T.Bt) -> T.Bt:
+  match k:
+    case 0n:
+      T.BtApp{x, y}
+    case 1n+p:
+      T.BtArgs{x, y}
+
+def tcp.r.app(a: TcpR, b: TcpR, k: Nat) -> TcpR:
+  match a b:
+    case TcpR{x, c1} TcpR{y, c2}:
+      TcpR{tcp.r.mk(k, x, y), Bool.or(c1, c2)}
+
+def tcp.r.mk1(k: Nat, x: T.Bt) -> T.Bt:
+  match k:
+    case 0n:
+      T.BtExpr{x}
+    case 1n+p:
+      T.BtDead{x}
+
+def tcp.r.one(r: TcpR, k: Nat) -> TcpR:
+  match r:
+    case TcpR{x, c}:
+      TcpR{tcp.r.mk1(k, x), c}
+
+def tcp.lam.raise(hit: Bool, +m: T.BMode, +x: List<&2, U32>, r: TcpR) -> TcpR:
+  match hit m r:
+    case True{} T.BmLive{} TcpR{b, c}:
+      TcpR{T.BtLam{T.BmCopy{}, x, b}, True{}}
+    case _ m TcpR{b, c}:
+      TcpR{T.BtLam{m, x, b}, c}
+
+def tcp.pv.raise(hit: Bool, +m: T.BMode, +x: List<&2, U32>) -> TcpR:
+  match hit m:
+    case True{} T.BmLive{}:
+      TcpR{T.BtPv{T.BmCopy{}, x}, True{}}
+    case _ m:
+      TcpR{T.BtPv{m, x}, False{}}
+
+def tcp.raise.con(c: List<&2, U32>, r: TcpR) -> TcpR:
+  match r:
+    case TcpR{a, ch}:
+      TcpR{T.BtCon{c, a}, ch}
+
+def tcp.raise.match(xs: T.Bt, r: TcpR) -> TcpR:
+  match r:
+    case TcpR{cs, ch}:
+      TcpR{T.BtMatch{xs, cs}, ch}
+
+def tcp.raise.case(p: TcpR, b: TcpR, rest: TcpR) -> TcpR:
+  match p b rest:
+    case TcpR{p1, c1} TcpR{b1, c2} TcpR{r1, c3}:
+      TcpR{T.BtCase{p1, b1, r1}, Bool.or(c1, Bool.or(c2, c3))}
+
+# the lambdas and pattern variables named v in t given +
+def tcp.raise.t(t: T.Bt, +v: List<&2, U32>) -> TcpR:
+  match t:
+    case T.BtLam{+m, +x, b}:
+      tcp.lam.raise(S.eq(x, v), m, x, tcp.raise.t(b, v))
+    case T.BtPv{+m, +x}:
+      tcp.pv.raise(S.eq(x, v), m, x)
+    case T.BtApp{f, a}:
+      tcp.r.app(tcp.raise.t(f, v), tcp.raise.t(a, v), 0n)
+    case T.BtArgs{a, rest}:
+      tcp.r.app(tcp.raise.t(a, v), tcp.raise.t(rest, v), 1n)
+    case T.BtExpr{e}:
+      tcp.r.one(tcp.raise.t(e, v), 0n)
+    case T.BtDead{e}:
+      tcp.r.one(tcp.raise.t(e, v), 1n)
+    case T.BtCon{c, a}:
+      tcp.raise.con(c, tcp.raise.t(a, v))
+    case T.BtMatch{xs, cs}:
+      tcp.raise.match(xs, tcp.raise.t(cs, v))
+    case T.BtCase{p, b, rest}:
+      tcp.raise.case(tcp.raise.t(p, v), tcp.raise.t(b, v), tcp.raise.t(rest, v))
+    case t:
+      TcpR{t, False{}}
+
+# a parameter named v raised: to + (copy) from live, or to live from erased
+type TcpP is Data:
+  TcpP{ps: List<&2, T.BParam>, changed: Bool}
+
+def tcp.p.put(p: T.BParam, r: TcpP, ch: Bool) -> TcpP:
+  match r:
+    case TcpP{ps, c}:
+      TcpP{p <> ps, Bool.or(c, ch)}
+
+def tcp.p.raise(hit: Bool, copy: Bool, p: T.BParam) -> T.BParam & Bool:
+  match hit copy p:
+    case True{} True{} T.BParam{T.BmLive{}, x, ty}:
+      (T.BParam{T.BmCopy{}, x, ty}, True{})
+    case True{} False{} T.BParam{T.BmErased{}, x, ty}:
+      (T.BParam{T.BmLive{}, x, ty}, True{})
+    case _ _ p:
+      (p, False{})
+
+def tcp.p.step(r: T.BParam & Bool, rest: TcpP) -> TcpP:
+  (p, ch) = r
+  tcp.p.put(p, rest, ch)
+
+def tcp.p.name(p: T.BParam) -> List<&2, U32>:
+  match p:
+    case T.BParam{m, x, ty}:
+      x
+
+def tcp.raise.ps(ps: List<&2, T.BParam>, +v: List<&2, U32>, +copy: Bool) -> TcpP:
+  match ps:
+    case Nil{}:
+      TcpP{Nil{}, False{}}
+    case +p <> t:
+      tcp.p.step(tcp.p.raise(S.eq(tcp.p.name(p), v), copy, p), tcp.raise.ps(t, v, copy))
+
+def tcp.raise.def(n: List<&2, U32>, r: TcpP, ret: T.Bt, b: TcpR, doc: List<&2, List<&2, U32>>) -> Maybe<&2, T.BItem>:
+  match r b:
+    case TcpP{ps, False{}} TcpR{body, False{}}:
+      None{}
+    case TcpP{ps, c1} TcpR{body, c2}:
+      Some{T.BiDef{n, ps, ret, body, doc}}
+
+# The item with binder v raised (copy: + for a use twice, else live for
+# an erased one used live), or None when nothing could be raised.
+def tcp.raise(it: T.BItem, +v: List<&2, U32>, +copy: Bool) -> Maybe<&2, T.BItem>:
+  match it copy:
+    case T.BiDef{n, ps, ret, body, doc} True{}:
+      tcp.raise.def(n, tcp.raise.ps(ps, v, True{}), ret, tcp.raise.t(body, v), doc)
+    case T.BiDef{n, ps, ret, body, doc} False{}:
+      tcp.raise.def(n, tcp.raise.ps(ps, v, False{}), ret, TcpR{body, False{}}, doc)
+    case _ _:
+      None{}

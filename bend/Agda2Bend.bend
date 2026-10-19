@@ -26,6 +26,9 @@ import ./ToBend/Copy.bend as Q
 #       written and the places the fold could not fill (?TODO), by reason;
 #       OUT/raw/<path>.bend holds every item before the gate (what failed)
 #
+#   agda2bend report OUT
+#       the ledger summed up, and the causes ranked by the items they block
+#
 #   agda2bend decode FILE.sexp...
 #       parse and decode every expression of each export file: per file the
 #       module, its definitions against the count its header announced,
@@ -36,7 +39,7 @@ import ./ToBend/Copy.bend as Q
 # Logs go to stderr, stamped in UTC-6.  Every def is prefixed `a2b.`.
 
 def a2b.usage() -> IO(Unit):
-  IO.die(Unit, 2, "usage: agda2bend emit DIR OUT [MODULE...] | decode FILE.sexp...")
+  IO.die(Unit, 2, "usage: agda2bend emit DIR OUT [MODULE...] | report OUT | decode FILE.sexp...")
 
 # decode -----------------------------------------------------------------------
 
@@ -799,6 +802,256 @@ def a2b.emit(xs: List<String>) -> IO(Unit):
     case _:
       a2b.usage()
 
+# report -----------------------------------------------------------------------
+#
+#   agda2bend report OUT
+#
+# The ledger (OUT/ledger.tsv) summed up: items checked, dropped and
+# dependent; then the causes, ranked by the items each blocks: a drop's
+# reason (its class: the variable names a checker message mentions differ
+# from item to item) blocks the item and every item that depends on it,
+# within its module and across modules (a dependent's reason names what it
+# uses, and where); each cause with its count and one item it failed, the
+# smallest example to fix first.
+
+# a ledger row: module, Bend name, Agda name, status, reason
+type A2bRow is Data:
+  A2bRow{mod: List<&2, U32>, name: List<&2, U32>, agda: List<&2, U32>, st: List<&2, U32>, why: List<&2, U32>}
+
+def a2b.rp.nth(n: Nat, xs: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  match n xs:
+    case 0n h <> t:
+      h
+    case 1n+p h <> t:
+      a2b.rp.nth(p, t)
+    case _ Nil{}:
+      Nil{}
+
+def a2b.rp.row(+fs: List<&2, List<&2, U32>>) -> A2bRow:
+  A2bRow{a2b.rp.nth(0n, fs), a2b.rp.nth(1n, fs), a2b.rp.nth(2n, fs), a2b.rp.nth(3n, fs), a2b.rp.nth(4n, fs)}
+
+def a2b.rp.rows.go(ls: List<&2, List<&2, U32>>) -> List<&2, A2bRow>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case l <> t:
+      a2b.rp.row(S.split(l, 9)) <> a2b.rp.rows.go(t)
+
+# the ledger's rows (its lines, empty ones aside)
+def a2b.rp.rows(ls: List<&2, List<&2, U32>>) -> List<&2, A2bRow>:
+  a2b.rp.rows.go(List.filter(~List<&2, U32>, ~(l => Bool.not(S.eq(l, Nil{}))), ls))
+
+def a2b.rp.key(+m: List<&2, U32>, +n: List<&2, U32>) -> String:
+  S.str(m) ++ "|" ++ S.str(n)
+
+def a2b.rp.map(rs: List<&2, A2bRow>, acc: Map<&2, A2bRow>) -> Map<&2, A2bRow>:
+  match rs:
+    case Nil{}:
+      acc
+    case A2bRow{+m, +n, a, s, w} <> t:
+      a2b.rp.map(t, Map.set(&2, A2bRow, acc, a2b.rp.key(m, n), A2bRow{m, n, a, s, w}))
+
+def a2b.rp.cut.go(xs: List<&2, U32>, +stop: List<&2, U32>, at: Bool) -> List<&2, U32>:
+  match xs at:
+    case Nil{} _:
+      Nil{}
+    case h <> t True{}:
+      Nil{}
+    case h <> +t False{}:
+      h <> a2b.rp.cut.go(t, stop, S.prefix(t, stop))
+
+# What a dependent uses, as a key: "uses NAME in MODULE, ..." (another
+# module's) or "uses NAME" (its own module's); empty when the reason is
+# not a use.
+def a2b.rp.cut(+xs: List<&2, U32>, +stop: List<&2, U32>) -> List<&2, U32>:
+  a2b.rp.cut.go(xs, stop, S.prefix(xs, stop))
+
+def a2b.rp.after.of(m: Maybe<&2, Nat>, +xs: List<&2, U32>, +n: Nat) -> List<&2, U32>:
+  match m:
+    case Some{i}:
+      List.drop(&2, U32, xs, Nat.add(i, n))
+    case None{}:
+      Nil{}
+
+def a2b.rp.after(+xs: List<&2, U32>, +p: List<&2, U32>) -> List<&2, U32>:
+  a2b.rp.after.of(S.find(xs, p, 0n), xs, S.len(p))
+
+def a2b.rp.target.of(cross: Bool, +m: List<&2, U32>, +u: List<&2, U32>) -> String:
+  match cross:
+    case True{}:
+      a2b.rp.key(a2b.rp.cut(a2b.rp.after(u, S.b(" in ")), S.b(", which")), a2b.rp.cut(u, S.b(" in ")))
+    case False{}:
+      a2b.rp.key(m, u)
+
+def a2b.rp.target(+m: List<&2, U32>, +why: List<&2, U32>) -> String:
+  a2b.rp.target.of(S.infix(why, S.b(", which dropped it")), m, S.strip(why, S.b("uses ")))
+
+# A reason's class: what a checker message says, without the names it
+# mentions.
+def a2b.rp.class(+w: List<&2, U32>) -> List<&2, U32>:
+  Bool.pick(List<&2, U32>, S.infix(w, S.b("consumed more than once")), S.b("a value used twice (consumed more than once)"),
+  Bool.pick(List<&2, U32>, Bool.and(S.prefix(w, S.b("expected : -")), S.infix(w, S.b("observed : "))), S.b("an erased binder used live (expected -x, observed x)"),
+  Bool.pick(List<&2, U32>, S.prefix(w, S.b("gap: a name the symbol table does not have")), S.b("gap: a name the symbol table does not have"),
+  Bool.pick(List<&2, U32>, S.prefix(w, S.b("gap: a constructor")), S.b("gap: a constructor the symbol table does not have"),
+  Bool.pick(List<&2, U32>, S.prefix(w, S.b("uses ")), S.b("uses a name its module never emitted"),
+  List.take(&2, U32, w, 72n))))))
+
+def a2b.rp.empty() -> A2bRow:
+  A2bRow{Nil{}, Nil{}, Nil{}, Nil{}, Nil{}}
+
+def a2b.rp.st.is(+s: String, r: A2bRow) -> Bool:
+  match r:
+    case A2bRow{m, n, a, st, w}:
+      S.eq(st, S.b(s))
+
+def a2b.rp.row.got(r: Map<&2, A2bRow> & A2bRow) -> A2bRow:
+  (x, y) = r
+  y
+
+def a2b.rp.row.get(+m: Map<&2, A2bRow>, +k: String) -> A2bRow:
+  a2b.rp.row.got(Map.get(A2bRow, A2bRow{Nil{}, Nil{}, Nil{}, Nil{}, Nil{}}, m, k))
+
+def a2b.rp.next.of(dep: Bool, +r: A2bRow, +m: Map<&2, A2bRow>) -> A2bRow:
+  match dep r:
+    case True{} A2bRow{+mo, n, a, s, +w}:
+      a2b.rp.row.get(m, a2b.rp.target(mo, w))
+    case False{} r:
+      a2b.rp.empty()
+
+# the row a dependent uses (the empty row for any other)
+def a2b.rp.next(+r: A2bRow, +m: Map<&2, A2bRow>) -> A2bRow:
+  a2b.rp.next.of(a2b.rp.st.is("dependent", r), r, m)
+
+# the root of a row: what its dependents' chain of uses ends at (nx: the
+# row r uses, decided by the caller; fuel bounds the chain)
+def a2b.rp.root(fuel: Nat, r: A2bRow, nx: A2bRow, +m: Map<&2, A2bRow>) -> A2bRow:
+  match fuel nx:
+    case 1n+p A2bRow{Nil{}, n, a, s, w}:
+      r
+    case 1n+p A2bRow{+mo, +n, +a, +s, +w}:
+      a2b.rp.root(p, A2bRow{mo, n, a, s, w}, a2b.rp.next(A2bRow{mo, n, a, s, w}, m), m)
+    case 0n nx:
+      r
+
+# A cause's tally: its class, the items it blocks, the drops at its root,
+# and an example root.
+type A2bCause is Data:
+  A2bCause{cls: List<&2, U32>, blocked: Nat, roots: Nat, ex: A2bRow}
+
+def a2b.rp.is.root(+r: A2bRow, +x: A2bRow) -> Bool:
+  match r x:
+    case A2bRow{m1, n1, a1, s1, w1} A2bRow{m2, n2, a2, s2, w2}:
+      Bool.and(S.eq(m1, m2), S.eq(n1, n2))
+
+def a2b.rp.hd(cs: List<&2, A2bCause>, +cls: List<&2, U32>) -> Bool:
+  match cs:
+    case A2bCause{c, b, n, e} <> t:
+      S.eq(c, cls)
+    case Nil{}:
+      False{}
+
+# one more item for the cause cls (hit: the first tally is cls's, decided
+# by the caller)
+def a2b.rp.add(+cls: List<&2, U32>, +self: Bool, +ex: A2bRow, cs: List<&2, A2bCause>, hit: Bool) -> List<&2, A2bCause>:
+  match cs hit:
+    case Nil{} _:
+      [A2bCause{cls, 1n, Bool.pick(Nat, self, 1n, 0n), ex}]
+    case A2bCause{c, +b, +n, e} <> t True{}:
+      A2bCause{c, 1n+b, Nat.add(n, Bool.pick(Nat, self, 1n, 0n)), e} <> t
+    case x <> +t False{}:
+      x <> a2b.rp.add(cls, self, ex, t, a2b.rp.hd(t, cls))
+
+def a2b.rp.add.of(+cls: List<&2, U32>, +self: Bool, +ex: A2bRow, +cs: List<&2, A2bCause>) -> List<&2, A2bCause>:
+  a2b.rp.add(cls, self, ex, cs, a2b.rp.hd(cs, cls))
+
+def a2b.rp.tally.root(+r: A2bRow, +root: A2bRow, cs: List<&2, A2bCause>) -> List<&2, A2bCause>:
+  match root:
+    case A2bRow{m, n, a, s, +w}:
+      a2b.rp.add.of(a2b.rp.class(w), a2b.rp.is.root(r, A2bRow{m, n, a, s, w}), A2bRow{m, n, a, s, w}, cs)
+
+def a2b.rp.tally.row(+r: A2bRow, +m: Map<&2, A2bRow>, cs: List<&2, A2bCause>) -> List<&2, A2bCause>:
+  a2b.rp.tally.root(r, a2b.rp.root(64n, r, a2b.rp.next(r, m), m), cs)
+
+def a2b.rp.tally.one(chk: Bool, +r: A2bRow, +m: Map<&2, A2bRow>, cs: List<&2, A2bCause>) -> List<&2, A2bCause>:
+  match chk:
+    case True{}:
+      cs
+    case False{}:
+      a2b.rp.tally.row(r, m, cs)
+
+def a2b.rp.tally(rs: List<&2, A2bRow>, +m: Map<&2, A2bRow>, cs: List<&2, A2bCause>) -> List<&2, A2bCause>:
+  match rs:
+    case Nil{}:
+      cs
+    case +r <> t:
+      a2b.rp.tally(t, m, a2b.rp.tally.one(a2b.rp.st.is("checked", r), r, m, cs))
+
+def a2b.rp.status(+s: String, rs: List<&2, A2bRow>) -> Nat:
+  match rs:
+    case Nil{}:
+      0n
+    case A2bRow{m, n, a, +st, w} <> t:
+      Nat.add(Bool.pick(Nat, S.eq(st, S.b(s)), 1n, 0n), a2b.rp.status(s, t))
+
+# causes by blocked count, the most first (insertion sort)
+def a2b.rp.blocked(c: A2bCause) -> Nat:
+  match c:
+    case A2bCause{cl, b, n, e}:
+      b
+
+def a2b.rp.first(+b: Nat, cs: List<&2, A2bCause>) -> Bool:
+  match cs:
+    case c <> t:
+      Nat.is_ge(b, a2b.rp.blocked(c))
+    case Nil{}:
+      True{}
+
+# c into cs (sorted, the most blocked first); here: c goes in front,
+# decided by the caller
+def a2b.rp.ins(cs: List<&2, A2bCause>, +b: Nat, c: A2bCause, here: Bool) -> List<&2, A2bCause>:
+  match cs here:
+    case cs True{}:
+      c <> cs
+    case h <> +t False{}:
+      h <> a2b.rp.ins(t, b, c, a2b.rp.first(b, t))
+    case Nil{} False{}:
+      [c]
+
+def a2b.rp.ins.of(+c: A2bCause, +cs: List<&2, A2bCause>) -> List<&2, A2bCause>:
+  a2b.rp.ins(cs, a2b.rp.blocked(c), c, a2b.rp.first(a2b.rp.blocked(c), cs))
+
+def a2b.rp.sort(cs: List<&2, A2bCause>) -> List<&2, A2bCause>:
+  match cs:
+    case Nil{}:
+      Nil{}
+    case c <> t:
+      a2b.rp.ins.of(c, a2b.rp.sort(t))
+
+def a2b.rp.show(cs: List<&2, A2bCause>) -> IO(Unit):
+  match cs:
+    case Nil{}:
+      IO.pure(Unit, Unit{})
+    case A2bCause{c, b, n, A2bRow{m, nm, a, s, w}} <> t:
+      do IO<Unit>:
+        IO.print("  " ++ Nat.show(b) ++ " blocked, " ++ Nat.show(n) ++ " at the root: " ++ S.str(c))
+        IO.print("      e.g. " ++ S.str(m) ++ " " ++ S.str(nm) ++ " (" ++ S.str(a) ++ "): " ++ S.str(List.take(&2, U32, w, 160n)))
+        a2b.rp.show(t)
+
+def a2b.report.of(+rs: List<&2, A2bRow>) -> IO(Unit):
+  do IO<Unit>:
+    IO.print("agda2bend report: " ++ Nat.show(List.length(&2, A2bRow, rs)) ++ " items: " ++ Nat.show(a2b.rp.status("checked", rs)) ++ " checked, " ++ Nat.show(a2b.rp.status("dropped", rs)) ++ " dropped, " ++ Nat.show(a2b.rp.status("dependent", rs)) ++ " dependents")
+    IO.print("causes, by the items they block (the drop itself and its dependents):")
+    a2b.rp.show(List.take(&2, A2bCause, a2b.rp.sort(a2b.rp.tally(rs, a2b.rp.map(rs, Map.new(&2, A2bRow)), Nil{})), 40n))
+
+def a2b.report(xs: List<String>) -> IO(Unit):
+  match xs:
+    case out <> more:
+      do IO<Unit>:
+        +t : List<&2, U32> <- S.read(out ++ "/ledger.tsv")
+        a2b.report.of(a2b.rp.rows(S.split.lines(t)))
+    case _:
+      a2b.usage()
+
 # main -------------------------------------------------------------------------
 
 def a2b.args(xs: List<String>) -> IO(Unit):
@@ -807,6 +1060,8 @@ def a2b.args(xs: List<String>) -> IO(Unit):
       a2b.emit(more)
     case "decode" <> more:
       a2b.decode(more)
+    case "report" <> more:
+      a2b.report(more)
     case _:
       a2b.usage()
 
