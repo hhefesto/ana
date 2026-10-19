@@ -38,7 +38,9 @@ import ./MutOps.bend as M
 #    (MutOps.bend's mto.tries: the operators in turn, at most CAP (2) an
 #    operator) are checked in order, at most TRIES (8) checks, an operator
 #    already kept passed over: a mutant the checker passes or times out on
-#    (exit 0, 124) is dropped, any other exit rejects it.  A rejected mutant
+#    (exit 0, 124), or whose check a signal ends (exit 128 and up: the OOM
+#    killer's 137 on a check that blows up), is dropped (a signal counted as a
+#    timeout), any other exit rejects it.  A rejected mutant
 #    is kept when its error kind (mtt.kind) is new for the unit, else held
 #    back; at most KEEP (3) a unit, held-back ones (of operators not kept)
 #    filling the room left.
@@ -371,7 +373,7 @@ def mtt.judge(+t: M.MtoTry, +e: U32, +ck: List<&2, U32>, +d: Nat, s: MttSt) -> M
     case MttSt{+kept, +back, +n, +ms, +st}:
       +op = M.mto.op.name(M.mto.try.op(t))
       +pass = U32.is_eq(e, 0)
-      +late = U32.is_eq(e, 124)
+      +late = Bool.or(U32.is_eq(e, 124), U32.is_ge(e, 128))
       +kind = mtt.kind(Cl.check.text(ck))
       +x = {MttK{M.mto.try.op(t), M.mto.try.k(t), kind, M.mto.try.text(t), ck} : MttK}
       +fresh = Bool.not(mtt.str.in(mtt.kinds.of(kept), kind))

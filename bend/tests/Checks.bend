@@ -536,7 +536,7 @@ def chk.tests() -> List<&2, ChkTest>:
    # every transcript format 2's repair read back by Agent/Spec (User, Context, Type, Attempt,
    # its failing check, the Term, its pass), no operator twice, a second run the same bytes
    # (compiled: the tokenizer's parse; the tool prints its summary, so only the ok count is held)
-   ChkTest{"mutate.bend", True{}, RLayout{22n}},
+   ChkTest{"mutate.bend", True{}, RLayout{23n}},
    # bend-corpus-v2 decl-new (bend/CorpusV2/Decl.bend, 2026-10-16): a unit's file, its file's text and its
    # declaration key (the pool's), the held=/seen= words; the tool on units written here, one a rule
    # (a v2 held-out repository and path, a held file's id, its text in another file, a listed key, a

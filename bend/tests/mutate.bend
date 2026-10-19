@@ -121,6 +121,9 @@ def mut.rule() -> List<&2, MuCk>:
        mut.nats.eq(Mu.mtt.ops.of(Mu.mtt.fill(mut.st.back(s), mut.st.kept(s), 2n)), [3n, 10n]))},
    MuCk{"keep: every check counted, by operator and outcome", Bool.and(Bool.and(Nat.is_eq(mut.st.n(s), 5n), Nat.is_eq(Mu.mtt.get(mut.st.st(s), "passed.swap-arms"), 1n)),
      Bool.and(Nat.is_eq(Mu.mtt.get(mut.st.st(s), "timeout.drop-line"), 1n), Nat.is_eq(Mu.mtt.get(mut.st.st(s), "rejected-kind.type"), 2n)))},
+   MuCk{"keep: a check a signal ends (137, the OOM killer) is dropped and counted as a timeout, never kept",
+     Bool.and(mut.nats.eq(Mu.mtt.ops.of(mut.st.kept(Mu.mtt.judge(mut.try(4n), 137, mut.ck(137, ""), 5n, s))), [3n, 10n]),
+       Nat.is_eq(Mu.mtt.get(mut.st.st(Mu.mtt.judge(mut.try(4n), 137, mut.ck(137, ""), 5n, s)), "timeout.drop-arg"), 1n))},
    MuCk{"want: no try of an operator kept, none past TRIES or KEEP", Bool.and(Bool.and(Bool.not(Mu.mtt.want(c, s, mut.try(3n))), Mu.mtt.want(c, s, mut.try(4n))),
      Bool.and(Bool.not(Mu.mtt.want(mut.cfg("/x", 2n), s, mut.try(4n))), Bool.not(Mu.mtt.want(c, Mu.MttSt{Nil{}, Nil{}, 8n, 0n, Nil{}}, mut.try(4n)))))}]
 
