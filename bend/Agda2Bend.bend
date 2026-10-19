@@ -9,6 +9,7 @@ import ./ToBend/Print.bend as P
 import ./ToBend/Names.bend as N
 import ./ToBend/Order.bend as O
 import ./ToBend/Gate.bend as G
+import ./ToBend/Copy.bend as Q
 
 # agda2bend: Agda in, Bend 2 out.  Agda elaborates (agda-export writes its
 # elaborated definitions as S-expressions, tools/agda-export/FORMAT.md);
@@ -407,7 +408,7 @@ def a2b.dq(d: A.AgDecl) -> A.AgQ:
 
 # The module's symbols added to the table, and its definitions by key.
 type A2bTabs is Data:
-  A2bTabs{tab: Map<&2, C.ActSym>, unf: Map<&2, C.ActCopy>, dm: Map<&2, A.AgDecl>, used: List<&2, List<&2, U32>>}
+  A2bTabs{tab: Map<&2, C.ActSym>, unf: Map<&2, C.ActCopy>, dm: Map<&2, A.AgDecl>, used: List<&2, List<&2, U32>>, nk: Map<&2, String>}
 
 # what the modules after this one see: the symbol table, the unfoldings,
 # and the names that passed their module's gate (alias-qualified)
@@ -423,15 +424,15 @@ def a2b.unf.put(m: Maybe<&2, C.ActCopy>, +k: String, u: Map<&2, C.ActCopy>) -> M
 
 def a2b.syms.one(+top: List<&2, U32>, +d: A.AgDecl, +nm: List<&2, U32>, t: A2bTabs) -> A2bTabs:
   match t:
-    case A2bTabs{tab, unf, dm, used}:
-      A2bTabs{Map.set(&2, C.ActSym, tab, C.act.key(a2b.dq(d)), C.act.sym.of(top, nm, d)), a2b.unf.put(C.act.unf.of(d), C.act.key(a2b.dq(d)), unf), Map.set(&2, A.AgDecl, dm, C.act.key(a2b.dq(d)), d), nm <> used}
+    case A2bTabs{tab, unf, dm, used, nk}:
+      A2bTabs{Map.set(&2, C.ActSym, tab, C.act.key(a2b.dq(d)), C.act.sym.of(top, nm, d)), a2b.unf.put(C.act.unf.of(d), C.act.key(a2b.dq(d)), unf), Map.set(&2, A.AgDecl, dm, C.act.key(a2b.dq(d)), d), nm <> used, Map.set(&2, String, nk, S.str(nm), C.act.key(a2b.dq(d)))}
 
 def a2b.syms(ds: List<&2, A.AgDecl>, +top: List<&2, U32>, t: A2bTabs) -> A2bTabs:
   match ds t:
     case Nil{} t:
       t
-    case +d <> rest A2bTabs{tab, unf, dm, +used}:
-      a2b.syms(rest, top, a2b.syms.one(top, d, a2b.uniq(C.act.local(top, C.act.qs(a2b.dq(d))), used), A2bTabs{tab, unf, dm, used}))
+    case +d <> rest A2bTabs{tab, unf, dm, +used, nk}:
+      a2b.syms(rest, top, a2b.syms.one(top, d, a2b.uniq(C.act.local(top, C.act.qs(a2b.dq(d))), used), A2bTabs{tab, unf, dm, used, nk}))
 
 def a2b.items(ds: List<&2, A.AgDecl>, +env: C.ActEnv, +dm: Map<&2, A.AgDecl>) -> List<&2, T.BItem>:
   match ds:
@@ -653,12 +654,78 @@ def a2b.em.write(+out: String, +m: List<&2, U32>, +a: List<&2, U32>, +kept: Map<
 def a2b.em.items(+out: String, +m: List<&2, U32>, +al: Map<&2, List<&2, U32>>, +ral: Map<&2, List<&2, U32>>, +kept: Map<&2, Bool>, +nd: Nat, +its: List<&2, T.BItem>) -> IO(List<&2, List<&2, U32>>):
   a2b.em.write(out, m, a2b.ral.got(Map.get(List<&2, U32>, Nil{}, al, S.str(m))), kept, ral, its, a2b.imports(a2b.snd(a2b.imps(a2b.fold.items(its, False{}, Nil{}), ral, (Map.new(&2, Bool), Nil{}))), m, al), nd, a2b.fold.items(its, True{}, Nil{}), a2b.defs.n(its))
 
+# The quantity rounds (ToBend/Copy.bend): the module is translated, each
+# def's parameters' modes are read off its body and put into its symbol,
+# and while any rose the module is translated again, so its calls pass
+# templates as such; modes only rise, so a few rounds settle.  The items
+# then get their lambdas and pattern variables marked and templates first.
+type A2bRe is Data:
+  A2bRe{tab: Map<&2, C.ActSym>, changed: Bool}
+
+def a2b.nk.got(r: Map<&2, String> & String) -> String:
+  (m, k) = r
+  k
+
+def a2b.re.set(+k: String, r: C.ActSym & Bool, tab: Map<&2, C.ActSym>, ch: Bool) -> A2bRe:
+  (s, c) = r
+  A2bRe{Map.set(&2, C.ActSym, tab, k, s), Bool.or(c, ch)}
+
+def a2b.re.one(+k: String, +hdr: List<&2, T.BMode>, r: A2bRe) -> A2bRe:
+  match r:
+    case A2bRe{+tab, ch}:
+      a2b.re.set(k, C.act.sym.remode(C.act.sym.got(Map.get(C.ActSym, C.act.sym0(), tab, k)), hdr), tab, ch)
+
+def a2b.re.items(its: List<&2, T.BItem>, +nk: Map<&2, String>, +datas: List<&2, List<&2, U32>>, r: A2bRe) -> A2bRe:
+  match its:
+    case Nil{}:
+      r
+    case T.BiDef{+n, ps, ret, body, doc} <> t:
+      a2b.re.items(t, nk, datas, a2b.re.one(a2b.nk.got(Map.get(String, "", nk, S.str(n))), Q.tcp.decide(T.BiDef{n, ps, ret, body, doc}, datas), r))
+    case i <> t:
+      a2b.re.items(t, nk, datas, r)
+
+type A2bRound is Data:
+  A2bRound{tab: Map<&2, C.ActSym>, its: List<&2, T.BItem>}
+
+# a round's state: the table, the items of the last translation, whether
+# that round changed a mode (the first round starts as changed)
+type A2bRst is Data:
+  A2bRst{tab: Map<&2, C.ActSym>, its: List<&2, T.BItem>, changed: Bool}
+
+def a2b.rst.of(r: A2bRe, its: List<&2, T.BItem>) -> A2bRst:
+  match r:
+    case A2bRe{tab, c}:
+      A2bRst{tab, its, c}
+
+def a2b.round(fuel: Nat, +ds: List<&2, A.AgDecl>, +m: List<&2, U32>, +al: Map<&2, List<&2, U32>>, +unf: Map<&2, C.ActCopy>, +dm: Map<&2, A.AgDecl>, +nk: Map<&2, String>, st: A2bRst) -> A2bRound:
+  match fuel st:
+    case 1n+p A2bRst{+tab, its, True{}}:
+      +its2 = a2b.items(ds, C.ActEnv{m, tab, al, unf}, dm)
+      a2b.round(p, ds, m, al, unf, dm, nk, a2b.rst.of(a2b.re.items(its2, nk, Q.tcp.datas(its2), A2bRe{tab, False{}}), its2))
+    case _ A2bRst{tab, its, c}:
+      A2bRound{tab, its}
+
+def a2b.finish(its: List<&2, T.BItem>, +datas: List<&2, List<&2, U32>>) -> List<&2, T.BItem>:
+  match its:
+    case Nil{}:
+      Nil{}
+    case +it <> t:
+      Q.tcp.finish(it, Q.tcp.decide(it, datas)) <> a2b.finish(t, datas)
+
+def a2b.finish.of(+its: List<&2, T.BItem>) -> List<&2, T.BItem>:
+  a2b.finish(its, Q.tcp.datas(its))
+
+def a2b.em.round(+out: String, +m: List<&2, U32>, +al: Map<&2, List<&2, U32>>, +ral: Map<&2, List<&2, U32>>, +nd: Nat, +kept: Map<&2, Bool>, +unf: Map<&2, C.ActCopy>, r: A2bRound) -> IO(A2bG):
+  match r:
+    case A2bRound{+tab, its}:
+      do IO<A2bG>:
+        kn : List<&2, List<&2, U32>> <- a2b.em.items(out, m, al, ral, kept, nd, O.tor.order(a2b.finish.of(its)))
+        return A2bG{tab, unf, a2b.kept.add(kn, kept)}
+
 def a2b.em.tabs(+out: String, +m: List<&2, U32>, +al: Map<&2, List<&2, U32>>, +ral: Map<&2, List<&2, U32>>, +ds: List<&2, A.AgDecl>, +kept: Map<&2, Bool>, t: A2bTabs) -> IO(A2bG):
   match t:
-    case A2bTabs{+tab, +unf, +dm, used}:
-      do IO<A2bG>:
-        kn : List<&2, List<&2, U32>> <- a2b.em.items(out, m, al, ral, kept, List.length(&2, A.AgDecl, ds), O.tor.order(a2b.items(ds, C.ActEnv{m, tab, al, unf}, dm)))
-        return A2bG{tab, unf, a2b.kept.add(kn, kept)}
+    case A2bTabs{tab, +unf, +dm, used, +nk}:
+      a2b.em.round(out, m, al, ral, List.length(&2, A.AgDecl, ds), kept, unf, a2b.round(5n, ds, m, al, unf, dm, nk, A2bRst{tab, Nil{}, True{}}))
 
 def a2b.mod.file(m: A2bMod) -> List<&2, U32>:
   match m:
@@ -672,7 +739,7 @@ def a2b.em.mod(+out: String, +ms: Map<&2, A2bMod>, +al: Map<&2, List<&2, U32>>, 
     case A2bG{tab, unf, +kept}:
       do IO<A2bG>:
         +ds : List<&2, A.AgDecl> <- a2b.decls(a2b.mod.file(a2b.mod.get(ms, m)))
-        a2b.em.tabs(out, m, al, ral, ds, kept, a2b.syms(ds, m, A2bTabs{tab, unf, Map.new(&2, A.AgDecl), Nil{}}))
+        a2b.em.tabs(out, m, al, ral, ds, kept, a2b.syms(ds, m, A2bTabs{tab, unf, Map.new(&2, A.AgDecl), Nil{}, Map.new(&2, String)}))
 
 def a2b.em.mods(order: List<&2, List<&2, U32>>, +out: String, +ms: Map<&2, A2bMod>, +al: Map<&2, List<&2, U32>>, +ral: Map<&2, List<&2, U32>>, g: A2bG) -> IO(Unit):
   match order:

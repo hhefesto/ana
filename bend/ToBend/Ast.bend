@@ -56,6 +56,11 @@ type Bt is Data:
   BtCase{p: Bt, b: Bt, rest: Bt}
   BtCEnd{}
   BtWild{}
+  # An argument at an erased parameter: printed as itself, but a dead
+  # position, so its variables' uses do not count (ToBend/Copy.bend).
+  BtDead{t: Bt}
+  # A pattern variable with its mode (+x when the case uses it twice).
+  BtPv{m: BMode, x: List<&2, U32>}
   # A place the translation could not fill, and why (printed as ?TODO with
   # the reason in a comment beside the def: a def holding one fails the
   # gate, and the reason is its cause in the ledger).
@@ -117,6 +122,8 @@ def tba.args.len(a: Bt) -> Nat:
 # in front of acc: what a file must import is read off these.
 def tba.refs(t: Bt, acc: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
   match t:
+    case BtDead{a}:
+      tba.refs(a, acc)
     case BtVar{x}:
       x <> acc
     case BtApp{f, a}:
@@ -151,6 +158,8 @@ def tba.refs(t: Bt, acc: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
 # the reasons of the places a term could not be filled, in front of acc
 def tba.todos(t: Bt, acc: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
   match t:
+    case BtDead{a}:
+      tba.todos(a, acc)
     case BtTodo{why}:
       why <> acc
     case BtApp{f, a}:

@@ -135,6 +135,11 @@ def tpr.t(t: T.Bt, k: TpK, +ind: Nat, acc: List<&2, U32>) -> List<&2, U32>:
       40 <> tpr.lam.mode(m, tpr.b(x, tpr.s(" => ", tpr.t(b, TpLoose{}, 0n, 41 <> acc))))
     case T.BtLam{m, x, b} _:
       tpr.lam.mode(m, tpr.b(x, tpr.s(" => ", tpr.t(b, TpLoose{}, 0n, acc))))
+    # a dead argument prints as itself; a pattern variable with its mode
+    case T.BtDead{a} k:
+      tpr.t(a, k, ind, acc)
+    case T.BtPv{m, x} _:
+      tpr.lam.mode(m, tpr.b(x, acc))
     # atoms and bracketed forms
     case T.BtVar{x} _:
       tpr.b(x, acc)

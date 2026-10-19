@@ -162,12 +162,15 @@ def asb.subst(t: A.Ag, +depth: Nat, +vs: List<&2, A.Ag>, +n: Nat) -> A.Ag:
 
 # Symbols ----------------------------------------------------------------------
 
-# A parameter's mode in Bend: dropped (a Level), erased, or live (the
-# passes may later make a live one a copy or a template).
+# A parameter's mode in Bend: dropped (a Level), erased, live, copied (+)
+# or a template (~); the last two, and live for a hidden parameter used as
+# a value, come from the quantity pass (ToBend/Copy.bend).
 type ActM is Data:
   AmDrop{}
   AmErased{}
   AmLive{}
+  AmCopy{}
+  AmTpl{}
 
 # What a name is in Bend when it is not translated as itself: Nat, Bool,
 # Unit, ≡ and their constructors are Base's; the Level names are dropped.
@@ -447,9 +450,16 @@ def act.fresh.of(clash: Bool, +b: List<&2, U32>, +n: Nat) -> List<&2, U32>:
 def act.fresh.go(+b: List<&2, U32>, +ctx: List<&2, T.Bt>) -> List<&2, U32>:
   act.fresh.of(act.used(b, act.names(ctx)), b, List.length(&2, T.Bt, ctx))
 
+def act.fresh.in.of(+b: List<&2, U32>, +ns: List<&2, List<&2, U32>>, +n: Nat) -> List<&2, U32>:
+  act.fresh.of(act.used(b, ns), b, n)
+
 
 # A name for a binder from Agda's hint, distinct from every name in scope
 # (a clash gets the scope's depth after an underscore).
+# a fresh name against the context and the names seen besides
+def act.fresh.in(+x: List<&2, U32>, +ctx: List<&2, T.Bt>, +seen: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  act.fresh.in.of(act.hint(x), List.append(&2, List<&2, U32>, act.names(ctx), seen), Nat.add(List.length(&2, T.Bt, ctx), List.length(&2, List<&2, U32>, seen)))
+
 def act.fresh(+x: List<&2, U32>, +ctx: List<&2, T.Bt>) -> List<&2, U32>:
   act.fresh.go(act.hint(x), ctx)
 # Copies ------------------------------------------------------------------------
@@ -524,8 +534,23 @@ def act.bmode(m: ActM) -> T.BMode:
   match m:
     case AmErased{}:
       T.BmErased{}
+    case AmCopy{}:
+      T.BmCopy{}
+    case AmTpl{}:
+      T.BmTpl{}
     case _:
       T.BmLive{}
+
+def act.m.of(m: T.BMode) -> ActM:
+  match m:
+    case T.BmErased{}:
+      AmErased{}
+    case T.BmCopy{}:
+      AmCopy{}
+    case T.BmTpl{}:
+      AmTpl{}
+    case T.BmLive{}:
+      AmLive{}
 
 def act.list.nolevel.put(lv: Bool, h: T.Bt, t: List<&2, T.Bt>) -> List<&2, T.Bt>:
   match lv:
@@ -554,11 +579,17 @@ def act.app.var(f: T.Bt, args: T.Bt) -> T.Bt:
   act.app.list(f, act.list.nolevel(args))
 
 # The kept arguments of a call: an argument whose parameter is dropped is
-# left out; past the type's Pis every argument is kept but a level.
+# left out, one at an erased parameter is marked dead, one at a template
+# is passed as such; past the type's Pis every argument is kept but a
+# level.
 def act.keep(args: T.Bt, ms: List<&2, ActM>) -> List<&2, T.Bt>:
   match args ms:
     case T.BtArgs{a, rest} AmDrop{} <> t:
       act.keep(rest, t)
+    case T.BtArgs{a, rest} AmErased{} <> t:
+      T.BtDead{a} <> act.keep(rest, t)
+    case T.BtArgs{a, rest} AmTpl{} <> t:
+      T.BtTplArg{a} <> act.keep(rest, t)
     case T.BtArgs{a, rest} m <> t:
       a <> act.keep(rest, t)
     case T.BtArgs{a, rest} Nil{}:
@@ -600,6 +631,18 @@ def act.take(n: Nat, args: T.Bt, ms: List<&2, ActM>) -> ActTake:
     case 1n+p args ms:
       ActTake{T.BtANil{}, Nil{}, T.BtANil{}, Nil{}, False{}}
 
+# a header's templates come first (ToBend/Copy.bend), so a call's template
+# arguments do too, in order, before the others
+def act.is.tpl(t: T.Bt) -> Bool:
+  match t:
+    case T.BtTplArg{a}:
+      True{}
+    case _:
+      False{}
+
+def act.tpl.first(+xs: List<&2, T.Bt>) -> List<&2, T.Bt>:
+  List.append(&2, T.Bt, List.filter(~T.Bt, ~(x => act.is.tpl(x)), xs), List.filter(~T.Bt, ~(x => Bool.not(act.is.tpl(x))), xs))
+
 # A call with fewer arguments than the def's header takes is eta-expanded:
 # a lambda for each missing kept parameter (a dropped one needs none).  The
 # names are eta1, eta2, ...: a call's own arguments were translated before
@@ -632,10 +675,10 @@ def act.eta(ns: List<&2, List<&2, U32>>, b: T.Bt) -> T.Bt:
 def act.call.of(+f: List<&2, U32>, t: ActTake) -> T.Bt:
   match t:
     case ActTake{args, ms, rest, rms, True{}}:
-      act.app.list(T.BtApp{T.BtVar{f}, T.tba.args(act.keep(args, ms))}, act.keep(rest, rms))
+      act.app.list(T.BtApp{T.BtVar{f}, T.tba.args(act.tpl.first(act.keep(args, ms)))}, act.keep(rest, rms))
     case ActTake{args, ms, rest, rms, False{}}:
       +ns = act.eta.names(rms, 1n)
-      act.eta(ns, T.BtApp{T.BtVar{f}, T.tba.args(List.append(&2, T.Bt, act.keep(args, ms), act.eta.vars(ns)))})
+      act.eta(ns, T.BtApp{T.BtVar{f}, T.tba.args(act.tpl.first(List.append(&2, T.Bt, act.keep(args, ms), act.eta.vars(ns))))})
 
 def act.call(+f: List<&2, U32>, ms: List<&2, ActM>, +n: Nat, args: T.Bt) -> T.Bt:
   act.call.of(f, act.take(n, args, ms))
@@ -956,10 +999,12 @@ def act.path(+m: List<&2, U32>) -> List<&2, U32>:
 # Headers ------------------------------------------------------------------------
 
 # A def's parameters from the first n Pis of its type, the rest of the type
-# as its result, and the context they leave; ok is False when the type has
-# fewer Pis than n.
+# as its result, the context they leave, and every parameter's entry in
+# order (ents: a non-dependent Pi's parameter binds no variable of the
+# context, but a clause's pattern still stands for it; a dropped one is
+# the level marker); ok is False when the type has fewer Pis than n.
 type ActPs is Data:
-  ActPs{ps: List<&2, T.BParam>, ret: T.Bt, ctx: List<&2, T.Bt>, ok: Bool}
+  ActPs{ps: List<&2, T.BParam>, ret: T.Bt, ctx: List<&2, T.Bt>, ents: List<&2, T.Bt>, ok: Bool}
 
 def act.entry(m: ActM, +nm: List<&2, U32>) -> T.Bt:
   match m:
@@ -970,10 +1015,10 @@ def act.entry(m: ActM, +nm: List<&2, U32>) -> T.Bt:
 
 def act.params.put(m: ActM, +nm: List<&2, U32>, ty: T.Bt, r: ActPs) -> ActPs:
   match m r:
-    case AmDrop{} r:
-      r
-    case m ActPs{ps, ret, ctx, ok}:
-      ActPs{T.BParam{act.bmode(m), nm, ty} <> ps, ret, ctx, ok}
+    case AmDrop{} ActPs{ps, ret, ctx, es, ok}:
+      ActPs{ps, ret, ctx, act.level() <> es, ok}
+    case m ActPs{ps, ret, ctx, es, ok}:
+      ActPs{T.BParam{act.bmode(m), nm, ty} <> ps, ret, ctx, T.BtVar{nm} <> es, ok}
 
 def act.unf.got(r: Map<&2, ActCopy> & ActCopy) -> ActCopy:
   (m, c) = r
@@ -1000,22 +1045,27 @@ def act.unfold(+env: ActEnv, q: A.AgQ, +es: A.Ag) -> A.Ag:
     case ActEnv{mod, tab, al, unf}:
       act.unfold.of(act.unf.got(Map.get(ActCopy, ActCopy{0n, A.AgNone{}}, unf, act.key(q))), es)
 
+# seen: the names this header has given so far (a non-dependent Pi's
+# parameter is in no context, but its name is taken)
+def act.params.go(fuel: Nat, n: Nat, t: A.Ag, ms: List<&2, ActM>, +ctx: List<&2, T.Bt>, +seen: List<&2, List<&2, U32>>, +env: ActEnv) -> ActPs:
+  match fuel n t ms:
+    case f 0n t ms:
+      ActPs{Nil{}, act.t(t, ctx, env), ctx, Nil{}, True{}}
+    case f 1n+p A.AgEl{s, A.AgPi{i, +x, a, d, b}} +m <> mt:
+      +nm = act.fresh.in(x, ctx, seen)
+      act.params.put(m, nm, act.t(a, ctx, env), act.params.go(f, p, b, mt, act.bind(d, act.entry(m, nm), ctx), nm <> seen, env))
+    case f 1n+p A.AgEl{s, A.AgPi{i, +x, a, d, b}} Nil{}:
+      +nm = act.fresh.in(x, ctx, seen)
+      act.params.put(AmLive{}, nm, act.t(a, ctx, env), act.params.go(f, p, b, Nil{}, act.bind(d, T.BtVar{nm}, ctx), nm <> seen, env))
+    case 1n+g 1n+p A.AgEl{s, A.AgDef{+q, +es}} ms:
+      act.params.go(g, 1n+p, A.AgEl{s, act.unfold(env, q, es)}, ms, ctx, seen, env)
+    case f 1n+p t ms:
+      ActPs{Nil{}, act.todo("a type with fewer Pis than its clauses take parameters"), ctx, Nil{}, False{}}
+
 # The fuel bounds the unfoldings a header may take (each a type-valued
 # definition opened to reach the Pis the clauses take).
 def act.params(fuel: Nat, n: Nat, t: A.Ag, ms: List<&2, ActM>, +ctx: List<&2, T.Bt>, +env: ActEnv) -> ActPs:
-  match fuel n t ms:
-    case f 0n t ms:
-      ActPs{Nil{}, act.t(t, ctx, env), ctx, True{}}
-    case f 1n+p A.AgEl{s, A.AgPi{i, +x, a, d, b}} +m <> mt:
-      +nm = act.fresh(x, ctx)
-      act.params.put(m, nm, act.t(a, ctx, env), act.params(f, p, b, mt, act.bind(d, act.entry(m, nm), ctx), env))
-    case f 1n+p A.AgEl{s, A.AgPi{i, +x, a, d, b}} Nil{}:
-      +nm = act.fresh(x, ctx)
-      act.params.put(AmLive{}, nm, act.t(a, ctx, env), act.params(f, p, b, Nil{}, act.bind(d, T.BtVar{nm}, ctx), env))
-    case 1n+g 1n+p A.AgEl{s, A.AgDef{+q, +es}} ms:
-      act.params(g, 1n+p, A.AgEl{s, act.unfold(env, q, es)}, ms, ctx, env)
-    case f 1n+p t ms:
-      ActPs{Nil{}, act.todo("a type with fewer Pis than its clauses take parameters"), ctx, False{}}
+  act.params.go(fuel, n, t, ms, ctx, Nil{}, env)
 
 # Clauses ------------------------------------------------------------------------
 
@@ -1122,7 +1172,7 @@ def act.pat(p: A.Ag, +n: Nat, +hints: List<&2, List<&2, U32>>, +pnames: List<&2,
     case A.AgPVar{x, +ix, o}:
       +pos = Nat.sub(Nat.sub(n, 1n), ix)
       +nm = act.pv.name(pos, hints, pnames)
-      ActPat{T.BtVar{nm}, [ActBind{pos, T.BtVar{nm}}], A.aas.kw.eq(o, A.AkAbsurd{})}
+      ActPat{T.BtPv{T.BmLive{}, nm}, [ActBind{pos, T.BtVar{nm}}], A.aas.kw.eq(o, A.AkAbsurd{})}
     case A.AgPDot{t}:
       ActPat{T.BtWild{}, Nil{}, False{}}
     case A.AgPCon{+q, r, ps}:
@@ -1285,8 +1335,10 @@ def act.live.ps(ps: List<&2, T.BParam>, scr: List<&2, Bool>, ms: List<&2, ActM>)
   match ps scr ms:
     case ps s <> st AmDrop{} <> mt:
       act.live.ps(ps, st, mt)
-    case T.BParam{m, x, ty} <> pt True{} <> st m2 <> mt:
+    case T.BParam{T.BmErased{}, x, ty} <> pt True{} <> st m2 <> mt:
       T.BParam{T.BmLive{}, x, ty} <> act.live.ps(pt, st, mt)
+    case p <> pt True{} <> st m2 <> mt:
+      p <> act.live.ps(pt, st, mt)
     case p <> pt False{} <> st m2 <> mt:
       p <> act.live.ps(pt, st, mt)
     case ps _ _:
@@ -1397,7 +1449,7 @@ def act.copat.extra(ps: A.Ag) -> A.Ag:
 
 def act.lams(xs: T.Bt, b: T.Bt) -> T.Bt:
   match xs:
-    case T.BtArgs{T.BtVar{x}, rest}:
+    case T.BtArgs{T.BtPv{m, x}, rest}:
       T.BtLam{T.BmLive{}, x, act.lams(rest, b)}
     case T.BtArgs{p, rest}:
       act.todo("a copattern clause that matches after its projection")
@@ -1501,13 +1553,13 @@ def act.fun.body(p: A.AgProj, +cls: A.Ag, +key: String, +ar: Nat, +t: A.Ag, +ent
 
 def act.fun.item(+nm: List<&2, U32>, +ms: List<&2, ActM>, +cls: A.Ag, body: T.Bt, r: ActPs, doc: List<&2, List<&2, U32>>) -> List<&2, T.BItem>:
   match r:
-    case ActPs{ps, ret, ctx, ok}:
+    case ActPs{ps, ret, ctx, es, ok}:
       [T.BiDef{nm, act.live.ps(ps, act.scr(cls), ms), ret, body, doc}]
 
 def act.ps.ents(r: ActPs) -> List<&2, T.Bt>:
   match r:
-    case ActPs{ps, ret, ctx, ok}:
-      List.reverse(&2, T.Bt, ctx)
+    case ActPs{ps, ret, ctx, es, ok}:
+      es
 
 def act.fun.with(+nm: List<&2, U32>, +ms: List<&2, ActM>, +ar: Nat, p: A.AgProj, +cls: A.Ag, +key: String, +t: A.Ag, +env: ActEnv, doc: List<&2, List<&2, U32>>, +r: ActPs) -> List<&2, T.BItem>:
   act.fun.item(nm, ms, cls, act.fun.body(p, cls, key, ar, t, act.ps.ents(r), env, act.copat.is(cls)), r, doc)
@@ -1573,12 +1625,12 @@ def act.cfield.put(lv: Bool, +nm: List<&2, U32>, ty: T.Bt, fs: List<&2, T.BField
     case False{}:
       T.BField{nm, ty} <> fs
 
-def act.cfields(t: A.Ag, +ctx: List<&2, T.Bt>, +env: ActEnv) -> List<&2, T.BField>:
+def act.cfields(t: A.Ag, +ctx: List<&2, T.Bt>, +seen: List<&2, List<&2, U32>>, +env: ActEnv) -> List<&2, T.BField>:
   match t:
     case A.AgEl{s, A.AgPi{i, +x, +a, d, b}}:
       +lv = act.ty.level(a)
-      +nm = act.fresh(x, ctx)
-      act.cfield.put(lv, nm, act.t(a, ctx, env), act.cfields(b, act.bind(d, Bool.pick(T.Bt, lv, act.level(), T.BtVar{nm}), ctx), env))
+      +nm = act.fresh.in(x, ctx, seen)
+      act.cfield.put(lv, nm, act.t(a, ctx, env), act.cfields(b, act.bind(d, Bool.pick(T.Bt, lv, act.level(), T.BtVar{nm}), ctx), nm <> seen, env))
     case _:
       Nil{}
 
@@ -1592,13 +1644,13 @@ def act.after(n: Nat, t: A.Ag) -> A.Ag:
 
 def act.ps.ctx(r: ActPs) -> List<&2, T.Bt>:
   match r:
-    case ActPs{ps, ret, ctx, ok}:
+    case ActPs{ps, ret, ctx, es, ok}:
       ctx
 
 def act.ctor.of(s: ActSym, +pars: Nat, +t: A.Ag, +env: ActEnv) -> T.BCtor:
   match s:
     case ActSym{m, n, k, ms, ar, b, fs, c, cp}:
-      T.BCtor{n, act.cfields(act.after(pars, t), act.ps.ctx(act.params(64n, pars, t, act.modes(t, True{}), Nil{}, env)), env)}
+      T.BCtor{n, act.cfields(act.after(pars, t), act.ps.ctx(act.params(64n, pars, t, act.modes(t, True{}), Nil{}, env)), Nil{}, env)}
 
 def act.decl.got(r: Map<&2, A.AgDecl> & A.AgDecl) -> A.AgDecl:
   (m, d) = r
@@ -1648,7 +1700,7 @@ def act.dataish.cs(+self: List<&2, U32>, cs: List<&2, T.BCtor>) -> Bool:
 
 def act.item.data.of(+nm: List<&2, U32>, r: ActPs, +cs: List<&2, T.BCtor>, doc: List<&2, List<&2, U32>>) -> List<&2, T.BItem>:
   match r:
-    case ActPs{ps, ret, ctx, ok}:
+    case ActPs{ps, ret, ctx, es, ok}:
       [T.BiType{nm, ps, act.dataish.cs(nm, cs), cs, doc}]
 
 def act.item.data(s: ActSym, d: A.AgD, ty: A.Ag, +env: ActEnv, +decls: Map<&2, A.AgDecl>, doc: List<&2, List<&2, U32>>) -> List<&2, T.BItem>:
@@ -1700,3 +1752,54 @@ def act.unf.of(d: A.AgDecl) -> Maybe<&2, ActCopy>:
   match d:
     case A.AgDecl{q, qn, md, f, l, l0, l1, k, m, fl, lang, +ty, dd}:
       act.unf.d(act.flag(A.AkCopy{}, fl), act.ends.sort(ty), dd)
+
+# The quantity pass's modes put back into a symbol --------------------------------
+
+def act.m.code(m: ActM) -> Nat:
+  match m:
+    case AmDrop{}:
+      0n
+    case AmErased{}:
+      1n
+    case AmLive{}:
+      2n
+    case AmCopy{}:
+      3n
+    case AmTpl{}:
+      4n
+
+type ActRe is Data:
+  ActRe{ms: List<&2, ActM>, changed: Bool}
+
+def act.re.put(m: ActM, r: ActRe, ch: Bool) -> ActRe:
+  match r:
+    case ActRe{ms, c}:
+      ActRe{m <> ms, Bool.or(c, ch)}
+
+# A symbol's modes with its header's (the first ar parameters, the dropped
+# ones skipped) replaced by the pass's; changed says whether any differs.
+def act.remode(ar: Nat, ms: List<&2, ActM>, hdr: List<&2, T.BMode>) -> ActRe:
+  match ar ms hdr:
+    case 0n ms hdr:
+      ActRe{ms, False{}}
+    case 1n+p AmDrop{} <> t hdr:
+      act.re.put(AmDrop{}, act.remode(p, t, hdr), False{})
+    case 1n+p +m <> t h <> ht:
+      +n = act.m.of(h)
+      act.re.put(n, act.remode(p, t, ht), Bool.not(Nat.is_eq(act.m.code(m), act.m.code(n))))
+    case 1n+p m <> t Nil{}:
+      act.re.put(m, act.remode(p, t, Nil{}), False{})
+    case 1n+p Nil{} hdr:
+      ActRe{Nil{}, False{}}
+
+def act.sym.remode.of(s: ActSym, r: ActRe) -> ActSym & Bool:
+  match s r:
+    case ActSym{m, n, k, x, ar, b, fs, c, cp} ActRe{ms, ch}:
+      (ActSym{m, n, k, ms, ar, b, fs, c, cp}, ch)
+
+
+# a symbol with new modes
+def act.sym.remode(s: ActSym, hdr: List<&2, T.BMode>) -> ActSym & Bool:
+  match s:
+    case ActSym{m, n, k, ms, +ar, b, fs, c, cp}:
+      act.sym.remode.of(ActSym{m, n, k, Nil{}, ar, b, fs, c, cp}, act.remode(ar, ms, hdr))
