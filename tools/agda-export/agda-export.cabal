@@ -1,0 +1,39 @@
+cabal-version:      2.4
+name:               agda-export
+version:            0.1.0
+synopsis:           Agda's elaborated definitions as S-expressions (agda2bend's front end)
+description:
+  An Agda 2.8.0 backend that writes, for every definition of every module it
+  compiles (the whole import closure), one S-expression of Agda's internal
+  syntax: types, clauses, compiled case trees, records, data types and
+  constructors.  It serializes and decides nothing; FORMAT.md is the format.
+license:            MIT
+build-type:         Simple
+extra-doc-files:    FORMAT.md
+
+executable agda-export
+  main-is:          Main.hs
+  hs-source-dirs:   src
+  other-modules:
+    AgdaExport.Sexp
+    AgdaExport.Explicit
+    AgdaExport.Encode
+    AgdaExport.Module
+  build-depends:
+    , Agda         ==2.8.0
+    , base         >=4.18 && <5
+    , bytestring
+    , containers
+    , deepseq
+    , directory
+    , filepath
+    , text
+    , time
+    , unordered-containers
+  default-language: Haskell2010
+  default-extensions:
+    LambdaCase
+    OverloadedStrings
+    ScopedTypeVariables
+    TupleSections
+  ghc-options:      -O1 -Wall -Wno-name-shadowing -Wno-unused-do-bind -rtsopts "-with-rtsopts=-M10g -A64m"
