@@ -207,6 +207,20 @@
             makeWrapper ${agdaExportFor pkgs}/bin/agda-export $out/bin/agda-export \
               --set-default AGDA_DIR ${agdaExportDir pkgs}
           '';
+          # agda2bend (bend/Agda2Bend.bend, the plan of 2026-10-19): Agda in,
+          # checked Bend 2 out.  `agda2bend translate FILE.agda OUT` runs
+          # agda-export on FILE into OUT/export and translates its module's
+          # cone into OUT/src, keeping only what the pinned bend checks
+          # (OUT/ledger.tsv says why the rest went; `agda2bend report OUT`
+          # ranks the causes).  The wrapper gives it the pinned bend (BEND),
+          # agda-export (AGDA_EXPORT, with its AGDA_DIR) and mkdir, realpath.
+          agda2bend-unwrapped = bendBinary pkgs "agda2bend" "Agda2Bend.bend";
+          agda2bend = pkgs.runCommand "agda2bend" { nativeBuildInputs = [ pkgs.makeWrapper ]; } ''
+            makeWrapper ${self.packages.${system}.agda2bend-unwrapped}/bin/agda2bend $out/bin/agda2bend \
+              --set-default BEND ${bendFor pkgs}/bin/bend \
+              --set-default AGDA_EXPORT ${self.packages.${system}.agda-export}/bin/agda-export \
+              --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.coreutils ]}
+          '';
           # the corpus tools by their job, with the toolchains they drive on
           # PATH: `nix run .#deploy -- check haskell UNITS.nul RESULTS.nul`
           # runs bend-check, `deploy transcripts all nix` bend-transcripts,
@@ -439,6 +453,11 @@
           type = "app";
           program = "${self.packages.${system}.agda-export}/bin/agda-export";
           meta.description = "Agda 2.8.0's elaborated definitions as S-expressions (agda2bend's front end)";
+        };
+        agda2bend = {
+          type = "app";
+          program = "${self.packages.${system}.agda2bend}/bin/agda2bend";
+          meta.description = "Agda in, checked Bend 2 out: translate FILE.agda OUT, emit DIR OUT, report OUT";
         };
         deploy = {
           type = "app";

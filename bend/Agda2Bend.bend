@@ -18,6 +18,10 @@ import ./ToBend/Copy.bend as Q
 # Bend syntax tree, the Bend-side passes, the printer, the check gate and
 # the ledger the translator is improved from (the plan of 2026-10-19).
 #
+#   agda2bend translate FILE.agda OUT
+#       Agda code in, Bend out: agda-export elaborates FILE (AGDA_EXPORT,
+#       AGDA_DIR) into OUT/export, then emit translates its module's cone
+#
 #   agda2bend emit DIR OUT [MODULE...]
 #       translate the export in DIR (agda-export's --export-dir): the modules
 #       named and every module they import, or all of DIR's; in import order,
@@ -39,7 +43,7 @@ import ./ToBend/Copy.bend as Q
 # Logs go to stderr, stamped in UTC-6.  Every def is prefixed `a2b.`.
 
 def a2b.usage() -> IO(Unit):
-  IO.die(Unit, 2, "usage: agda2bend emit DIR OUT [MODULE...] | report OUT | decode FILE.sexp...")
+  IO.die(Unit, 2, "usage: agda2bend translate FILE.agda OUT | emit DIR OUT [MODULE...] | report OUT | decode FILE.sexp...")
 
 # decode -----------------------------------------------------------------------
 
@@ -1052,10 +1056,88 @@ def a2b.report(xs: List<String>) -> IO(Unit):
     case _:
       a2b.usage()
 
+# translate --------------------------------------------------------------------
+#
+#   agda2bend translate FILE.agda OUT
+#
+# Agda code in, Bend out: agda-export (AGDA_EXPORT, its AGDA_DIR naming the
+# libraries) elaborates FILE and writes its module and every module it
+# imports to OUT/export, from FILE's library root (the nearest directory
+# up with an .agda-lib, as agda is run); then `emit` translates that
+# module's cone into OUT/src, gated, with OUT/ledger.tsv.  Modules already
+# exported are kept (agda-export --export-skip-existing).
+
+def a2b.libs.got(xs: List<&2, List<&2, U32>>) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case h <> t:
+      True{}
+
+def a2b.root.of(fuel: Nat, +dir: String, has: Bool) -> IO(String):
+  match fuel has:
+    case _ True{}:
+      IO.pure(String, dir)
+    case 0n False{}:
+      IO.die(String, 1, "agda2bend: no .agda-lib above the file")
+    case 1n+p False{}:
+      do IO<String>:
+        +up : String = S.parent(dir)
+        ls : List<&2, List<&2, U32>> <- S.glob(up ++ "/*.agda-lib")
+        a2b.root.of(p, up, a2b.libs.got(ls))
+
+# the nearest directory at or above dir holding an .agda-lib
+def a2b.root(+dir: String) -> IO(String):
+  do IO<String>:
+    ls : List<&2, List<&2, U32>> <- S.glob(dir ++ "/*.agda-lib")
+    a2b.root.of(64n, dir, a2b.libs.got(ls))
+
+def a2b.file.mod(ms: List<&2, A2bMod>, +file: List<&2, U32>) -> List<&2, U32>:
+  match ms:
+    case Nil{}:
+      Nil{}
+    case A2bMod{+n, +f, im} <> t:
+      Bool.pick(List<&2, U32>, S.eq(f, file), n, a2b.file.mod(t, file))
+
+def a2b.translate.ok(ok: Bool, +file: String, +out: String, +o: S.Out) -> IO(Unit):
+  match ok:
+    case False{}:
+      IO.die(Unit, 1, "agda2bend: agda-export failed:\n" ++ S.str(S.Out.text(o)))
+    case True{}:
+      do IO<Unit>:
+        fs : List<&2, List<&2, U32>> <- S.glob(out ++ "/export/*.sexp")
+        +ms : Map<&2, A2bMod> <- a2b.mods(List.filter(~List<&2, U32>, ~(f => a2b.not.index(f)), fs), Map.new(&2, A2bMod))
+        +m : List<&2, U32> = a2b.file.mod(Map.values(&2, A2bMod, ms), S.b(file))
+        a2b.emit.go(out, [m], ms)
+
+def a2b.translate.exported(+file: String, +out: String, +o: S.Out) -> IO(Unit):
+  a2b.translate.ok(U32.is_eq(S.Out.status(o), 0), file, out, o)
+
+def a2b.translate.go(+file: String, +out: String, +root: String) -> IO(Unit):
+  do IO<Unit>:
+    +agda : String <- S.env("AGDA_EXPORT", "agda-export")
+    Ck.log("translate: agda-export " ++ file ++ " from " ++ root)
+    o : S.Out <- S.run(root, Nil{}, 86400, agda, ["--export-dir=" ++ out ++ "/export", "--export-skip-existing", file], Nil{})
+    a2b.translate.exported(file, out, o)
+
+def a2b.translate(xs: List<String>) -> IO(Unit):
+  match xs:
+    case f <> +out <> more:
+      do IO<Unit>:
+        +file : String <- S.realpath(f)
+        +o : String <- S.realpath(out)
+        S.mkdir(o)
+        +root : String <- a2b.root(S.parent(file))
+        a2b.translate.go(file, o, root)
+    case _:
+      a2b.usage()
+
 # main -------------------------------------------------------------------------
 
 def a2b.args(xs: List<String>) -> IO(Unit):
   match xs:
+    case "translate" <> more:
+      a2b.translate(more)
     case "emit" <> more:
       a2b.emit(more)
     case "decode" <> more:
