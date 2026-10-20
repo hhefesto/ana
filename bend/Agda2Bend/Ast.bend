@@ -350,6 +350,10 @@ type Ag is Data:
   # A definition the copy inlining (Agda2Bend/Cata.bend) has resolved as no
   # copy: it is not looked at again.
   AgDefX{q: AgQ, es: Ag}
+  # A lambda applied to eliminations, as substitution leaves it (a copy or
+  # an unfolding put a lambda where a variable was applied); the copy
+  # inlining reduces it.
+  AgBeta{f: Ag, es: Ag}
 
 # Keywords ---------------------------------------------------------------
 

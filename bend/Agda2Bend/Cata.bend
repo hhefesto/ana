@@ -51,10 +51,7 @@ def asb.elims.cat(es: A.Ag, more: A.Ag) -> A.Ag:
     case _:
       more
 
-# t applied to the eliminations es (t a head that takes them; a lambda or
-# anything else is left as it is, with es lost: the translation then fails
-# on the arity, never silently)
-def asb.push(t: A.Ag, es: A.Ag) -> A.Ag:
+def asb.push.head(t: A.Ag, es: A.Ag) -> A.Ag:
   match t:
     case A.AgVar{i, x, es0}:
       A.AgVar{i, x, asb.elims.cat(es0, es)}
@@ -66,6 +63,19 @@ def asb.push(t: A.Ag, es: A.Ag) -> A.Ag:
       A.AgMeta{asb.elims.cat(es0, es)}
     case t:
       t
+
+# t applied to the eliminations es: a head takes them; a lambda becomes a
+# redex (AgBeta) the copy inlining reduces; anything else is left as it is
+def asb.push(t: A.Ag, es: A.Ag) -> A.Ag:
+  match t es:
+    case t A.AgENil{}:
+      t
+    case A.AgLam{i, x, d, b} es:
+      A.AgBeta{A.AgLam{i, x, d, b}, es}
+    case A.AgBeta{f, es0} es:
+      A.AgBeta{f, asb.elims.cat(es0, es)}
+    case t es:
+      asb.push.head(t, es)
 
 # the binder count under a lambda's or a Pi's body: one more when it
 # binds (abs), the same when it does not (noabs: FORMAT.md, "binds none")
@@ -79,6 +89,8 @@ def asb.under(dep: Bool, +c: Nat) -> Nat:
 # variables at or above c shifted up by d
 def asb.shift(t: A.Ag, +d: Nat, +c: Nat) -> A.Ag:
   match t:
+    case A.AgBeta{f, es}:
+      A.AgBeta{asb.shift(f, d, c), asb.shift(es, d, c)}
     case A.AgVar{+i, x, es}:
       A.AgVar{Bool.pick(Nat, Nat.is_lt(i, c), i, Nat.add(i, d)), x, asb.shift(es, d, c)}
     case A.AgLam{i, x, +dep, b}:
@@ -135,6 +147,8 @@ def asb.subst.var(bound: Bool, +i: Nat, +depth: Nat, +vs: List<&2, A.Ag>, +n: Na
 # last variable) up
 def asb.subst(t: A.Ag, +depth: Nat, +vs: List<&2, A.Ag>, +n: Nat) -> A.Ag:
   match t:
+    case A.AgBeta{f, es}:
+      A.AgBeta{asb.subst(f, depth, vs, n), asb.subst(es, depth, vs, n)}
     case A.AgVar{+i, x, es}:
       asb.subst.var(Nat.is_lt(i, depth), i, depth, vs, n, x, asb.subst(es, depth, vs, n))
     case A.AgLam{i, x, +dep, b}:
@@ -499,12 +513,26 @@ def act.expand(s: ActSym, q: A.AgQ, +es: A.Ag) -> A.Ag:
     case _:
       A.AgDefX{q, es}
 
-# Every copy in a term inlined, through chains of copies of copies.  Each
-# expansion spends one unit of fuel (a resolved definition too), and the
+# a lambda's body with its one argument: put for variable 0 when the
+# lambda binds (abs); a constant lambda (noabs) binds none
+def act.beta1(d: Bool, b: A.Ag, v: A.Ag) -> A.Ag:
+  match d:
+    case True{}:
+      asb.subst(b, 0n, [v], 1n)
+    case False{}:
+      b
+
+# Every copy in a term inlined, through chains of copies of copies, and
+# the lambda redexes substitution leaves reduced.  Each expansion or
+# reduction spends one unit of fuel (a resolved definition too), and the
 # fuel bounds the nesting: what is left when it runs out stays as it is
 # and fails at the translation as an unknown copy.
 def act.inline(+fuel: Nat, a: A.Ag, +env: ActEnv) -> A.Ag:
   match fuel a:
+    case 1n+p A.AgBeta{A.AgLam{i, x, d, b}, A.AgEApp{i2, v, rest}}:
+      act.inline(p, asb.push(act.beta1(d, b, v), rest), env)
+    case f A.AgBeta{g, A.AgENil{}}:
+      act.inline(f, g, env)
     case 1n+p A.AgDef{+q, +es}:
       act.inline(p, act.expand(act.sym(env, q), q, es), env)
     case f A.AgDefX{q, es}:
@@ -697,14 +725,24 @@ def act.call(+f: List<&2, U32>, ms: List<&2, ActM>, +n: Nat, args: T.Bt) -> T.Bt
 # ≡'s kept arguments are its type and its two sides; with fewer it is a
 # relation, eta-expanded (eqx, eqy: its arguments were translated before
 # these lambdas exist)
+# (its arguments arrive marked dead: ≡ is type-valued, so all its
+# parameters are erased; an equation's sides are dead anyway, and the
+# rewrites read them as plain variables, so the marks come off)
+def act.undead(t: T.Bt) -> T.Bt:
+  match t:
+    case T.BtDead{a}:
+      a
+    case t:
+      t
+
 def act.eq(xs: List<&2, T.Bt>) -> T.Bt:
   match xs:
     case ty <> a <> b <> Nil{}:
-      T.BtEq{ty, a, b}
+      T.BtEq{act.undead(ty), act.undead(a), act.undead(b)}
     case ty <> a <> Nil{}:
-      T.BtLam{T.BmLive{}, S.b("eqy"), T.BtEq{ty, a, T.BtVar{S.b("eqy")}}}
+      T.BtLam{T.BmLive{}, S.b("eqy"), T.BtEq{act.undead(ty), act.undead(a), T.BtVar{S.b("eqy")}}}
     case ty <> Nil{}:
-      T.BtLam{T.BmLive{}, S.b("eqx"), T.BtLam{T.BmLive{}, S.b("eqy"), T.BtEq{ty, T.BtVar{S.b("eqx")}, T.BtVar{S.b("eqy")}}}}
+      T.BtLam{T.BmLive{}, S.b("eqx"), T.BtLam{T.BmLive{}, S.b("eqy"), T.BtEq{act.undead(ty), T.BtVar{S.b("eqx")}, T.BtVar{S.b("eqy")}}}}
     case _:
       act.todo("≡ applied to other than its two sides")
 
@@ -851,6 +889,8 @@ def act.t(a: A.Ag, +ctx: List<&2, T.Bt>, +env: ActEnv) -> T.Bt:
       act.todo("an unsolved metavariable")
     case A.AgRaw{c, x}:
       act.todo("a cubical or unknown form")
+    case A.AgBeta{f, es}:
+      act.todo("a lambda applied that the inlining did not reduce")
     case A.AgENil{}:
       T.BtANil{}
     case A.AgEApp{i, +t, rest}:
@@ -1110,7 +1150,7 @@ def act.params.go(fuel: Nat, n: Nat, t: A.Ag, ms: List<&2, ActM>, +ctx: List<&2,
       +nm = act.fresh.in(x, ctx, seen)
       act.params.put(AmLive{}, nm, act.t(a, ctx, env), act.params.go(f, p, b, Nil{}, act.bind(d, T.BtVar{nm}, ctx), nm <> seen, env))
     case 1n+g 1n+p A.AgEl{s, A.AgDef{+q, +es}} ms:
-      act.params.go(g, 1n+p, A.AgEl{s, act.unfold(env, q, es)}, ms, ctx, seen, env)
+      act.params.go(g, 1n+p, A.AgEl{s, act.inline(1024n, act.unfold(env, q, es), env)}, ms, ctx, seen, env)
     case f 1n+p t ms:
       ActPs{Nil{}, act.todo("a type with fewer Pis than its clauses take parameters"), ctx, Nil{}, False{}}
 
@@ -1401,14 +1441,38 @@ def act.dotted(t: T.Bt, +ds: List<&2, List<&2, U32>>) -> Bool:
 type ActStep is Data:
   ActStep{k: Nat, p: T.Bt, goal: T.Bt, sym: T.Bt, e2: List<&2, U32>}
 
-def act.step.dir(rb: Bool, ra: Bool, +t: T.Bt, +a: T.Bt, +b: T.Bt, +e: T.Bt, +goal: T.Bt) -> ActStep:
-  match rb ra:
-    case True{} _:
+# The side to mark in the goal: the dotted variable when the goal mentions
+# it (the goal then says what the body proves of the other side), else
+# the other side (the body's hypotheses mention the dotted one: `trans
+# refl eq = eq` proves i ≡ k from eq : j ≡ k, so i becomes j).  Marking b
+# rewrites with e; marking a, with e reversed.
+def act.mark.b(rb: Bool, ra: Bool, inb: Bool, ina: Bool) -> Nat:
+  match rb ra inb ina:
+    case True{} _ True{} _:
+      1n
+    case True{} _ False{} True{}:
+      2n
+    case False{} True{} _ True{}:
+      2n
+    case False{} True{} True{} False{}:
+      1n
+    case _ _ _ _:
+      0n
+
+def act.occurs(+x: List<&2, U32>, +t: T.Bt) -> Bool:
+  act.used(x, T.tba.refs(t, Nil{}))
+
+def act.step.k(k: Nat, +t: T.Bt, +a: T.Bt, +b: T.Bt, +e: T.Bt, +goal: T.Bt) -> ActStep:
+  match k:
+    case 1n:
       ActStep{1n, T.tba.subst(goal, act.var.name(b), T.BtWild{}), T.tba.subst(goal, act.var.name(b), a), T.BtWild{}, Nil{}}
-    case False{} True{}:
+    case 2n:
       ActStep{2n, T.tba.subst(goal, act.var.name(a), T.BtWild{}), T.tba.subst(goal, act.var.name(a), b), T.BtApp{T.BtVar{S.b("Equal.sym")}, T.tba.args([t, a, b, e])}, List.append(&2, U32, act.var.name(e), S.b("_sym"))}
-    case False{} False{}:
+    case _:
       ActStep{0n, T.BtWild{}, goal, T.BtWild{}, Nil{}}
+
+def act.step.dir(rb: Bool, ra: Bool, +t: T.Bt, +a: T.Bt, +b: T.Bt, +e: T.Bt, +goal: T.Bt) -> ActStep:
+  act.step.k(act.mark.b(rb, ra, act.occurs(act.var.name(b), goal), act.occurs(act.var.name(a), goal)), t, a, b, e, goal)
 
 def act.step(ty: T.Bt, +e: T.Bt, +ds: List<&2, List<&2, U32>>, +goal: T.Bt) -> ActStep:
   match ty:
