@@ -304,6 +304,14 @@ def tcp.datas(its: List<&2, T.BItem>) -> List<&2, List<&2, U32>>:
 def tcp.lam.mode(+n: Nat) -> T.BMode:
   Bool.pick(T.BMode, Nat.is_lt(n, 2n), T.BmLive{}, T.BmCopy{})
 
+# an erased lambda (an eta-expansion's, at an erased parameter) stays erased
+def tcp.lam.keep(m: T.BMode, +n: Nat) -> T.BMode:
+  match m:
+    case T.BmErased{}:
+      T.BmErased{}
+    case _:
+      tcp.lam.mode(n)
+
 # a case's patterns, each variable the body uses twice marked +
 def tcp.pats(p: T.Bt, +body: T.Bt) -> T.Bt:
   match p:
@@ -326,7 +334,7 @@ def tcp.mark(t: T.Bt) -> T.Bt:
     case T.BtLet{y, v, b}:
       T.BtLet{y, tcp.mark(v), tcp.mark(b)}
     case T.BtLam{m, +x, +b}:
-      T.BtLam{tcp.lam.mode(tcp.uses(x, b)), x, tcp.mark(b)}
+      T.BtLam{tcp.lam.keep(m, tcp.uses(x, b)), x, tcp.mark(b)}
     case T.BtApp{f, a}:
       T.BtApp{tcp.mark(f), tcp.mark(a)}
     case T.BtTplArg{a}:

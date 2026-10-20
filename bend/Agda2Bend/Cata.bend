@@ -709,15 +709,46 @@ def act.eta(ns: List<&2, List<&2, U32>>, b: T.Bt) -> T.Bt:
     case n <> t:
       T.BtLam{T.BmLive{}, n, act.eta(t, b)}
 
+# A call missing arguments is eta-expanded, each lambda in the mode of the
+# callee's parameter it stands for (an erased one is -eta, its variable
+# passed in a dead position), as the call's type has it.
+def act.eta.ms(ms: List<&2, ActM>) -> List<&2, ActM>:
+  match ms:
+    case Nil{}:
+      Nil{}
+    case AmDrop{} <> t:
+      act.eta.ms(t)
+    case m <> t:
+      m <> act.eta.ms(t)
+
+def act.eta.by(ns: List<&2, List<&2, U32>>, ms: List<&2, ActM>, b: T.Bt) -> T.Bt:
+  match ns ms:
+    case n <> t AmErased{} <> mt:
+      T.BtLam{T.BmErased{}, n, act.eta.by(t, mt, b)}
+    case n <> t m <> mt:
+      T.BtLam{T.BmLive{}, n, act.eta.by(t, mt, b)}
+    case _ _:
+      b
+
+def act.eta.args(ns: List<&2, List<&2, U32>>, ms: List<&2, ActM>) -> List<&2, T.Bt>:
+  match ns ms:
+    case n <> t AmErased{} <> mt:
+      T.BtDead{T.BtVar{n}} <> act.eta.args(t, mt)
+    case n <> t m <> mt:
+      T.BtVar{n} <> act.eta.args(t, mt)
+    case _ _:
+      Nil{}
+
 # f(first arity kept arguments)(the other kept ones), as the Bend def's
 # header takes the first group and its value the rest
 def act.call.of(+f: List<&2, U32>, t: ActTake) -> T.Bt:
   match t:
     case ActTake{args, ms, rest, rms, True{}}:
       act.app.list(T.BtApp{T.BtVar{f}, T.tba.args(act.tpl.first(act.keep(args, ms)))}, act.keep(rest, rms))
-    case ActTake{args, ms, rest, rms, False{}}:
+    case ActTake{args, ms, rest, +rms, False{}}:
       +ns = act.eta.names(rms, 1n)
-      act.eta(ns, T.BtApp{T.BtVar{f}, T.tba.args(act.tpl.first(List.append(&2, T.Bt, act.keep(args, ms), act.eta.vars(ns))))})
+      +em = act.eta.ms(rms)
+      act.eta.by(ns, em, T.BtApp{T.BtVar{f}, T.tba.args(act.tpl.first(List.append(&2, T.Bt, act.keep(args, ms), act.eta.args(ns, em))))})
 
 def act.call(+f: List<&2, U32>, ms: List<&2, ActM>, +n: Nat, args: T.Bt) -> T.Bt:
   act.call.of(f, act.take(n, args, ms))
@@ -1248,9 +1279,10 @@ def act.params.go(fuel: Nat, n: Nat, t: A.Ag, ms: List<&2, ActM>, +ctx: List<&2,
     case f 1n+p A.AgEl{s, A.AgPi{i, +x, a, d, b}} +m <> mt:
       +nm = act.fresh.in(x, ctx, seen)
       act.params.put(m, nm, act.t(a, ctx, env), act.params.go(f, p, b, mt, act.bind(d, act.entry(m, nm), ctx), nm <> seen, env))
-    case f 1n+p A.AgEl{s, A.AgPi{i, +x, a, d, b}} Nil{}:
+    case f 1n+p A.AgEl{s, A.AgPi{i, +x, +a, d, b}} Nil{}:
       +nm = act.fresh.in(x, ctx, seen)
-      act.params.put(AmLive{}, nm, act.t(a, ctx, env), act.params.go(f, p, b, Nil{}, act.bind(d, T.BtVar{nm}, ctx), nm <> seen, env))
+      +m = act.mode(i, a, False{})
+      act.params.put(m, nm, act.t(a, ctx, env), act.params.go(f, p, b, Nil{}, act.bind(d, act.entry(m, nm), ctx), nm <> seen, env))
     case 1n+g 1n+p A.AgEl{s, A.AgDef{+q, +es}} ms:
       act.params.go(g, 1n+p, A.AgEl{s, act.inline(1024n, act.unfold(env, q, es), env)}, ms, ctx, seen, env)
     case f 1n+p t ms:
@@ -2353,6 +2385,8 @@ def act.re.put(m: ActM, r: ActRe, ch: Bool) -> ActRe:
 
 # A symbol's modes with its header's (the first ar parameters, the dropped
 # ones skipped) replaced by the pass's; changed says whether any differs.
+# A header longer than the modes (its type a definition the header opened
+# to reach more Pis) adds the rest, which callers otherwise take as live.
 def act.remode(ar: Nat, ms: List<&2, ActM>, hdr: List<&2, T.BMode>) -> ActRe:
   match ar ms hdr:
     case 0n ms hdr:
@@ -2364,7 +2398,10 @@ def act.remode(ar: Nat, ms: List<&2, ActM>, hdr: List<&2, T.BMode>) -> ActRe:
       act.re.put(n, act.remode(p, t, ht), Bool.not(Nat.is_eq(act.m.code(m), act.m.code(n))))
     case 1n+p m <> t Nil{}:
       act.re.put(m, act.remode(p, t, Nil{}), False{})
-    case 1n+p Nil{} hdr:
+    case 1n+p Nil{} h <> ht:
+      +n = act.m.of(h)
+      act.re.put(n, act.remode(p, Nil{}, ht), Bool.not(Nat.is_eq(act.m.code(n), 2n)))
+    case 1n+p Nil{} Nil{}:
       ActRe{Nil{}, False{}}
 
 def act.sym.remode.of(s: ActSym, r: ActRe) -> ActSym & Bool:
