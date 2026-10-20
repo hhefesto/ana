@@ -177,6 +177,9 @@ bend-ops guard tools/runs/run4.cfg              # starts chain, watch and handov
      - Values used twice (16 roots).
      - Dependent J (Bend limit).
   3. Decide what to do about record eta. Options: ask upstream Bend, give the fork eta for single-constructor types, or encode Product's homs differently.
+- **Erasure oracle (2026-10-20, 972bef1 and 9411f76):** `agda-export --export-erasure-only` writes OUT/<Module>.erasure.sexp, one `(erasure Q (args N) (erased I*) (unused I*) …)` per definition (FORMAT.md, "The erasure sidecar"). All 767 modules of run/a2b/export2 have one; the driver is /tmp/claude-1000/a2b/erasure-each.sh, ad hoc.
+  - In agda-categories, Agda's compiler erases little beyond levels, types and record parameters. glue keeps its objects and morphisms, and step-≈-⟩ keeps its point. So a sidecar is a lower bound on what is safe to erase, not a stand-in for agda2bend's heuristics.
+  - Not read by agda2bend yet, which is optional per the user.
 - **Export:** run/a2b/export2 has 768 modules. Not exported:
   - 6 agda-categories modules timed out at 1200 s: Bicategory.Construction.Spans and Spans.Properties, Category.Construction.SymmetricMonoidalFunctors, Functor.Monoidal.PointwiseTensor, Functor.Profunctor, Profunctor.Cograph.
   - 4 ran out of the 12 GB heap: EnrichedCats, End.Fubini, End.Parameterized, EnrichedUnderlying.
