@@ -149,7 +149,8 @@ bend-ops guard tools/runs/run4.cfg              # starts chain, watch and handov
   | yoneda8 | 1678 | 175 | destructuring record parameters: reverted, see below |
   | yoneda9 | 1886 | 351 | yoneda7 + the eta unfolding through the symbol table (it fires: Product's `_⇒_` is a pair of hom types; Product then stops at zip, eta) + opaque seen through AgDefX: neutral |
   | yoneda10 | 1898 | 351 | a live parameter with no live use falls to erased (a variable's arguments count as uses); the Data repair raises a point-free def's return-type Pi; 13 gains, Function.Base golden 32 of 33 check |
-  | yoneda11 | (running) | | copattern reductions: a field projected out of a copattern def is its clause (`isPartialEquivalence(partialSetoid(S))`), so reasoning lemmas need no object templates |
+  | yoneda11 | 1901 | 355 | copattern reductions: a field projected out of a copattern def is its clause (`isPartialEquivalence(partialSetoid(S))` -> `isPartialEquivalence(isEquivalence S)`, glue loses its hom-setoid template); 6 gains, 2 regressions (`≉-respʳ`: S now used twice at a variable's arguments, which Copy does not count) |
+  | yoneda12 | (running) | | the return type's Pis (bound by head lambdas) get their raised modes into the symbol past the arity; lowering them was tried and reverted (a Pi is part of the type: `const` passed as `B -> A`) |
 
 - **Bend limits found** (memory project-bend2-silent-traps):
   - A type-valued def's body is live at its top.
@@ -158,6 +159,7 @@ bend-ops guard tools/runs/run4.cfg              # starts chain, watch and handov
   - **No record eta.** Product's `_∘_ = zip _∘_ _∘_` stays stuck on morphism-pair variables in its laws. A projection-based zip would copy a pair of morphisms, and morphisms are Type: Setoids' are `Func` records. Setoids' composition hits the same wall.
   - **Templates are inlining:** `Carrier(partialSetoid(~S))` reduces. Destructuring the record (yoneda8) made it affine but stuck on variables, and the reasoning layer fell (Categories 351 to 175). It is unwired in a2b.destr; its code and laws stay.
   - So Yoneda itself (12 items) waits on Product (through Bifunctor) and Setoids.
+- **Why the reasoning lemmas still take their objects and morphisms as templates** (debug build, 2026-10-20 01:30): a chain's points (`(f ∘ a) ∘ b`) go live to `step-≈-⟩`, whose point is a Pi of its return type, so each morphism counts as used twice. Lowering that Pi changes the def's type. The next step is to lift a point-free def's head lambdas into header parameters (the arity grows through remode), then lower them as parameters are.
 - **Next:**
   1. Commit yoneda9 if it holds against yoneda7.
   2. The top causes in yoneda7.report:

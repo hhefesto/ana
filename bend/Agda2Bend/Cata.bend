@@ -3028,6 +3028,20 @@ def act.re.put(m: ActM, r: ActRe, ch: Bool) -> ActRe:
     case ActRe{ms, c}:
       ActRe{m <> ms, Bool.or(c, ch)}
 
+# past the header, the modes Copy gives the return type's Pis the body's
+# lambdas bind (a lowered point of `step-≈-⟩`), on the modes after the arity
+def act.remode.rest(ms: List<&2, ActM>, hdr: List<&2, T.BMode>) -> ActRe:
+  match ms hdr:
+    case AmDrop{} <> t hdr:
+      act.re.put(AmDrop{}, act.remode.rest(t, hdr), False{})
+    case +m <> t h <> ht:
+      +n = act.m.of(h)
+      act.re.put(n, act.remode.rest(t, ht), Bool.not(Nat.is_eq(act.m.code(m), act.m.code(n))))
+    case ms Nil{}:
+      ActRe{ms, False{}}
+    case Nil{} hdr:
+      ActRe{Nil{}, False{}}
+
 # A symbol's modes with its header's (the first ar parameters, the dropped
 # ones skipped) replaced by the pass's; changed says whether any differs.
 # A header longer than the modes (its type a definition the header opened
@@ -3035,7 +3049,7 @@ def act.re.put(m: ActM, r: ActRe, ch: Bool) -> ActRe:
 def act.remode(ar: Nat, ms: List<&2, ActM>, hdr: List<&2, T.BMode>) -> ActRe:
   match ar ms hdr:
     case 0n ms hdr:
-      ActRe{ms, False{}}
+      act.remode.rest(ms, hdr)
     case 1n+p AmDrop{} <> t hdr:
       act.re.put(AmDrop{}, act.remode(p, t, hdr), False{})
     case 1n+p +m <> t h <> ht:

@@ -377,12 +377,50 @@ def tcp.close(fuel: Nat, +ps: List<&2, T.BParam>, +ms: List<&2, T.BMode>) -> Lis
     case 1n+p:
       tcp.close(p, ps, tcp.tpl.raise(ps, ms, tcp.tpl.names(ps, ms, Nil{})))
 
+# A return type's Pi raised to live where the body's head lambda for it uses
+# its variable live (a lambda takes its Pi's mode): an erased Pi over an
+# opaque type, `_∼ᵒ_ = flip _∼_`, whose y x the relation takes live.
+# (a live Pi does NOT fall to erased when its lambda has no use, as a
+# parameter does: the Pi is part of the def's type, and `∣_⟫-_` passes
+# `const` where a live `B -> A` is wanted; tried 2026-10-20.  Lowering
+# `step-≈-⟩`'s point would need its head lambdas lifted into the header first)
+def tcp.ret.mode(m: T.BMode, used: Bool, none: Bool) -> T.BMode:
+  match m used none:
+    case T.BmErased{} True{} _:
+      T.BmLive{}
+    case m _ _:
+      m
+
+def tcp.ret.at(pm: T.BMode, +x: List<&2, U32>, +bb: T.Bt) -> T.BMode:
+  tcp.ret.mode(pm, Bool.not(Nat.is_eq(tcp.uses(x, bb), 0n)), Nat.is_eq(tcp.uses.unk(x, bb), 0n))
+
+# the modes of the return type's Pis the body's head lambdas bind, as set
+# here: the symbol takes them after its header's, so a call marks those
+# arguments as it does the header's
+def tcp.ret.ms(b: T.Bt, ret: T.Bt) -> List<&2, T.BMode>:
+  match b ret:
+    case T.BtLam{m, +x, +bb} T.BtPi{pm, px, dep, a, rb}:
+      tcp.ret.at(pm, x, bb) <> tcp.ret.ms(bb, rb)
+    case T.BtExpr{e} ret:
+      tcp.ret.ms(e, ret)
+    case _ ret:
+      Nil{}
+
+def tcp.ret.live(b: T.Bt, ret: T.Bt) -> T.Bt:
+  match b ret:
+    case T.BtLam{m, +x, +bb} T.BtPi{pm, px, dep, a, rb}:
+      T.BtPi{tcp.ret.at(pm, x, bb), px, dep, a, tcp.ret.live(bb, rb)}
+    case T.BtExpr{e} ret:
+      tcp.ret.live(e, ret)
+    case _ ret:
+      ret
+
 # a def's parameters' modes as its body needs them, in header order (the
-# empty list for any other item)
+# empty list for any other item), then its return type's Pis its head lambdas bind
 def tcp.decide(it: T.BItem, +datas: List<&2, List<&2, U32>>) -> List<&2, T.BMode>:
   match it:
-    case T.BiDef{n, +ps, ret, body, doc}:
-      tcp.close(List.length(&2, T.BParam, ps), ps, tcp.params(ps, body, List.append(&2, List<&2, U32>, tcp.ty.params(ps), datas)))
+    case T.BiDef{n, +ps, +ret, +body, doc}:
+      List.append(&2, T.BMode, tcp.close(List.length(&2, T.BParam, ps), ps, tcp.params(ps, body, List.append(&2, List<&2, U32>, tcp.ty.params(ps), datas))), tcp.ret.ms(body, ret))
     case _:
       Nil{}
 
@@ -734,25 +772,6 @@ def tcp.is.tpl(p: T.BParam) -> Bool:
 
 def tcp.tpl.first(+ps: List<&2, T.BParam>) -> List<&2, T.BParam>:
   List.append(&2, T.BParam, List.filter(~T.BParam, ~(p => tcp.is.tpl(p)), ps), List.filter(~T.BParam, ~(p => Bool.not(tcp.is.tpl(p))), ps))
-
-# A return type's Pi raised to live where the body's head lambda for it uses
-# its variable live (a lambda takes its Pi's mode): an erased Pi over an
-# opaque type, `_∼ᵒ_ = flip _∼_`, whose y x the relation takes live.
-def tcp.ret.mode(m: T.BMode, used: Bool) -> T.BMode:
-  match m used:
-    case T.BmErased{} True{}:
-      T.BmLive{}
-    case m _:
-      m
-
-def tcp.ret.live(b: T.Bt, ret: T.Bt) -> T.Bt:
-  match b ret:
-    case T.BtLam{m, +x, +bb} T.BtPi{pm, px, dep, a, rb}:
-      T.BtPi{tcp.ret.mode(pm, Bool.not(Nat.is_eq(tcp.uses(x, bb), 0n))), px, dep, a, tcp.ret.live(bb, rb)}
-    case T.BtExpr{e} ret:
-      tcp.ret.live(e, ret)
-    case _ ret:
-      ret
 
 # A def with its header's modes set (templates first) and its lambdas and
 # pattern variables marked.
