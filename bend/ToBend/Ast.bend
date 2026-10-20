@@ -1,4 +1,5 @@
 import Base
+import ../Sys.bend as S
 
 # Ast: the Bend 2 syntax agda2bend (and later lean2bend) writes: the target
 # of the translation, a fold over the parsed Agda (Agda2Bend/Cata.bend),
@@ -53,6 +54,10 @@ type Bt is Data:
   BtMatch{xs: Bt, cs: Bt}
   # a def's or a case's body that is one expression, not a match
   BtExpr{e: Bt}
+  # statements before a body: a rewrite (%e : P, then the body), a let
+  # (x = v, then the body)
+  BtRw{e: Bt, p: Bt, b: Bt}
+  BtLet{x: List<&2, U32>, v: Bt, b: Bt}
   BtCase{p: Bt, b: Bt, rest: Bt}
   BtCEnd{}
   BtWild{}
@@ -123,6 +128,10 @@ def tba.args.len(a: Bt) -> Nat:
 # in front of acc: what a file must import is read off these.
 def tba.refs(t: Bt, acc: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
   match t:
+    case BtRw{e, p, b}:
+      tba.refs(e, tba.refs(p, tba.refs(b, acc)))
+    case BtLet{x, v, b}:
+      tba.refs(v, tba.refs(b, acc))
     case BtDead{a}:
       tba.refs(a, acc)
     case BtVar{x}:
@@ -159,6 +168,10 @@ def tba.refs(t: Bt, acc: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
 # the reasons of the places a term could not be filled, in front of acc
 def tba.todos(t: Bt, acc: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
   match t:
+    case BtRw{e, p, b}:
+      tba.todos(e, tba.todos(p, tba.todos(b, acc)))
+    case BtLet{x, v, b}:
+      tba.todos(v, tba.todos(b, acc))
     case BtDead{a}:
       tba.todos(a, acc)
     case BtTodo{why}:
@@ -223,3 +236,34 @@ def tba.item.fold(~f: Bt -> List<&2, List<&2, U32>> -> List<&2, List<&2, U32>>, 
       tba.params.fold(~f, ps, tba.ctors.fold(~f, cs, acc))
     case BiComment{doc}:
       acc
+
+# t with the variable x replaced by v (names are unique within a def, so
+# no binder captures v)
+def tba.subst(t: Bt, +x: List<&2, U32>, +v: Bt) -> Bt:
+  match t:
+    case BtVar{+y}:
+      Bool.pick(Bt, S.eq(x, y), v, BtVar{y})
+    case BtApp{f, a}:
+      BtApp{tba.subst(f, x, v), tba.subst(a, x, v)}
+    case BtTplArg{a}:
+      BtTplArg{tba.subst(a, x, v)}
+    case BtLam{m, y, b}:
+      BtLam{m, y, tba.subst(b, x, v)}
+    case BtPi{m, y, d, a, b}:
+      BtPi{m, y, d, tba.subst(a, x, v), tba.subst(b, x, v)}
+    case BtCon{c, a}:
+      BtCon{c, tba.subst(a, x, v)}
+    case BtTyApp{n, a}:
+      BtTyApp{n, tba.subst(a, x, v)}
+    case BtEq{ty, a, b}:
+      BtEq{tba.subst(ty, x, v), tba.subst(a, x, v), tba.subst(b, x, v)}
+    case BtSucc{a}:
+      BtSucc{tba.subst(a, x, v)}
+    case BtAnn{a, ty}:
+      BtAnn{tba.subst(a, x, v), tba.subst(ty, x, v)}
+    case BtDead{a}:
+      BtDead{tba.subst(a, x, v)}
+    case BtArgs{a, rest}:
+      BtArgs{tba.subst(a, x, v), tba.subst(rest, x, v)}
+    case t:
+      t

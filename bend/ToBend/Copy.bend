@@ -31,6 +31,10 @@ def tcp.max(+a: Nat, +b: Nat) -> Nat:
 # the live uses of x in t
 def tcp.uses(+x: List<&2, U32>, t: T.Bt) -> Nat:
   match t:
+    case T.BtRw{e, p, b}:
+      tcp.uses(x, b)
+    case T.BtLet{y, v, b}:
+      Nat.add(tcp.uses(x, v), tcp.uses(x, b))
     case T.BtVar{y}:
       Bool.pick(Nat, S.eq(x, y), 1n, 0n)
     case T.BtApp{f, a}:
@@ -65,6 +69,10 @@ def tcp.mem(+x: List<&2, U32>, xs: List<&2, List<&2, U32>>) -> Bool:
 # closed, so a parameter passed there must be a template itself
 def tcp.in.tpl(+x: List<&2, U32>, t: T.Bt, +under: Bool) -> Bool:
   match t:
+    case T.BtRw{e, p, b}:
+      tcp.in.tpl(x, b, under)
+    case T.BtLet{y, v, b}:
+      Bool.or(tcp.in.tpl(x, v, under), tcp.in.tpl(x, b, under))
     case T.BtVar{y}:
       Bool.and(under, S.eq(x, y))
     case T.BtTplArg{a}:
@@ -141,12 +149,40 @@ def tcp.params(ps: List<&2, T.BParam>, +body: T.Bt, +datas: List<&2, List<&2, U3
     case +p <> t:
       tcp.param(p, body, datas) <> tcp.params(t, body, datas)
 
+# Templates go first, so a parameter a template's type mentions must be a
+# template too (`~x: A` cannot come before A otherwise): the names the
+# templates' types mention, and the modes with those raised, to a fixed
+# point (one parameter more each round at least, so the parameter count of
+# rounds is enough).
+def tcp.tpl.names(ps: List<&2, T.BParam>, ms: List<&2, T.BMode>, acc: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match ps ms:
+    case T.BParam{x, n, ty} <> pt T.BmTpl{} <> mt:
+      tcp.tpl.names(pt, mt, T.tba.refs(ty, acc))
+    case p <> pt m <> mt:
+      tcp.tpl.names(pt, mt, acc)
+    case _ _:
+      acc
+
+def tcp.tpl.raise(ps: List<&2, T.BParam>, ms: List<&2, T.BMode>, +ns: List<&2, List<&2, U32>>) -> List<&2, T.BMode>:
+  match ps ms:
+    case T.BParam{x, +n, ty} <> pt m <> mt:
+      Bool.pick(T.BMode, tcp.mem(n, ns), T.BmTpl{}, m) <> tcp.tpl.raise(pt, mt, ns)
+    case _ ms:
+      ms
+
+def tcp.close(fuel: Nat, +ps: List<&2, T.BParam>, +ms: List<&2, T.BMode>) -> List<&2, T.BMode>:
+  match fuel:
+    case 0n:
+      ms
+    case 1n+p:
+      tcp.close(p, ps, tcp.tpl.raise(ps, ms, tcp.tpl.names(ps, ms, Nil{})))
+
 # a def's parameters' modes as its body needs them, in header order (the
 # empty list for any other item)
 def tcp.decide(it: T.BItem, +datas: List<&2, List<&2, U32>>) -> List<&2, T.BMode>:
   match it:
-    case T.BiDef{n, ps, ret, body, doc}:
-      tcp.params(ps, body, datas)
+    case T.BiDef{n, +ps, ret, body, doc}:
+      tcp.close(List.length(&2, T.BParam, ps), ps, tcp.params(ps, body, datas))
     case _:
       Nil{}
 
@@ -182,6 +218,10 @@ def tcp.pats(p: T.Bt, +body: T.Bt) -> T.Bt:
 # lambdas and pattern variables used twice marked +
 def tcp.mark(t: T.Bt) -> T.Bt:
   match t:
+    case T.BtRw{e, p, b}:
+      T.BtRw{e, p, tcp.mark(b)}
+    case T.BtLet{y, v, b}:
+      T.BtLet{y, tcp.mark(v), tcp.mark(b)}
     case T.BtLam{m, +x, +b}:
       T.BtLam{tcp.lam.mode(tcp.uses(x, b)), x, tcp.mark(b)}
     case T.BtApp{f, a}:
@@ -300,9 +340,16 @@ def tcp.raise.case(p: TcpR, b: TcpR, rest: TcpR) -> TcpR:
     case TcpR{p1, c1} TcpR{b1, c2} TcpR{r1, c3}:
       TcpR{T.BtCase{p1, b1, r1}, Bool.or(c1, Bool.or(c2, c3))}
 
+def tcp.raise.rw(e: T.Bt, p: T.Bt, r: TcpR) -> TcpR:
+  match r:
+    case TcpR{b, ch}:
+      TcpR{T.BtRw{e, p, b}, ch}
+
 # the lambdas and pattern variables named v in t given +
 def tcp.raise.t(t: T.Bt, +v: List<&2, U32>) -> TcpR:
   match t:
+    case T.BtRw{e, p, b}:
+      tcp.raise.rw(e, p, tcp.raise.t(b, v))
     case T.BtLam{+m, +x, b}:
       tcp.lam.raise(S.eq(x, v), m, x, tcp.raise.t(b, v))
     case T.BtPv{+m, +x}:

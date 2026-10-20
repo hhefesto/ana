@@ -355,7 +355,7 @@ def act.builtin(+s: List<&2, U32>) -> ActB:
   act.bi(s, "Agda.Builtin.Nat.Nat", AbNat{}, act.bi(s, "Agda.Builtin.Nat.Nat.zero", AbZero{}, act.bi(s, "Agda.Builtin.Nat.Nat.suc", AbSuc{},
   act.bi(s, "Agda.Builtin.Bool.Bool", AbBool{}, act.bi(s, "Agda.Builtin.Bool.Bool.true", AbTrue{}, act.bi(s, "Agda.Builtin.Bool.Bool.false", AbFalse{},
   act.bi(s, "Agda.Builtin.Equality._≡_", AbEq{}, act.bi(s, "Agda.Builtin.Equality._≡_.refl", AbRefl{},
-  act.bi(s, "Agda.Builtin.Unit.⊤", AbUnit{}, act.bi(s, "Agda.Builtin.Unit.⊤.tt", AbTt{},
+  act.bi(s, "Agda.Builtin.Unit.⊤", AbUnit{}, act.bi(s, "Agda.Builtin.Unit.tt", AbTt{},
   act.bi(s, "Agda.Primitive.Level", AbLevel{}, act.bi(s, "Agda.Primitive.lzero", AbLevel{}, act.bi(s, "Agda.Primitive.lsuc", AbLevel{},
   act.bi(s, "Agda.Primitive._⊔_", AbLevel{}, AbNone{}))))))))))))))
 
@@ -916,6 +916,18 @@ def act.flag(+k: A.AgKw, fl: List<&2, A.AgKw>) -> Bool:
     case h <> t:
       Bool.or(A.aas.kw.eq(h, k), act.flag(k, t))
 
+# A constructor's own arguments are its fields, values in Bend (a
+# record's Carrier : Set c is a field like any other): live, a Level
+# still dropped.
+def act.ms.live(ms: List<&2, ActM>) -> List<&2, ActM>:
+  match ms:
+    case Nil{}:
+      Nil{}
+    case AmDrop{} <> t:
+      AmDrop{} <> act.ms.live(t)
+    case m <> t:
+      AmLive{} <> act.ms.live(t)
+
 def act.drop.n(n: Nat, ms: List<&2, ActM>) -> List<&2, ActM>:
   match n ms:
     case 1n+p m <> t:
@@ -974,6 +986,25 @@ def act.local.of(here: Bool, +top: List<&2, U32>, +qs: List<&2, U32>) -> List<&2
 def act.local(+top: List<&2, U32>, +qs: List<&2, U32>) -> List<&2, U32>:
   act.local.of(S.prefix(qs, List.append(&2, U32, top, 46 <> Nil{})), top, qs)
 
+# A type-valued function whose case tree is one leaf headed by a variable
+# (a module parameter: `_∙_ IdempotentOn x = (x ∙ x) ≈ x` over `_≈_`) uses
+# its parameters live in its body, which Bend checks as code; inlined where
+# it is used, its body sits in a type, a dead position.  So its symbol is
+# made a copy (inlined, not emitted).
+def act.var.head(t: A.Ag) -> Bool:
+  match t:
+    case A.AgVar{i, x, es}:
+      True{}
+    case _:
+      False{}
+
+def act.inl.d(srt: Bool, d: A.AgD) -> Bool:
+  match srt d:
+    case True{} A.AgDFun{A.AgPrNone{}, r, w, e, t, mu, cls, A.AgDone{xs, body}}:
+      act.var.head(body)
+    case _ _:
+      False{}
+
 def act.sym.d(d: A.AgD, cp: Bool, +mo: List<&2, U32>, +nm: List<&2, U32>, +ms: List<&2, ActM>, b: ActB) -> ActSym:
   match d:
     case A.AgDFun{p, r, w, e, t, mu, cls, tree}:
@@ -983,7 +1014,7 @@ def act.sym.d(d: A.AgD, cp: Bool, +mo: List<&2, U32>, +nm: List<&2, U32>, +ms: L
     case A.AgDData{+pars, ixs, cs, s}:
       ActSym{mo, nm, A.AkData{}, ms, pars, b, act.keys(cs), Nil{}, None{}}
     case A.AgDCon{dq, +pars, ar, ck}:
-      ActSym{mo, act.con.name(nm), A.AkConstructor{}, act.drop.n(pars, ms), ar, b, Nil{}, Nil{}, None{}}
+      ActSym{mo, act.con.name(nm), A.AkConstructor{}, act.ms.live(act.drop.n(pars, ms)), ar, b, Nil{}, Nil{}, None{}}
     case A.AgDPost{}:
       ActSym{mo, nm, A.AkPostulate{}, ms, 0n, b, Nil{}, Nil{}, None{}}
     case A.AgDPrim{n, cls, tree}:
@@ -1001,8 +1032,8 @@ def act.role(+qs: List<&2, U32>, lv: Bool) -> ActB:
 # A definition's entry, given its module and its (unique) Bend name.
 def act.sym.of(+mo: List<&2, U32>, +nm: List<&2, U32>, d: A.AgDecl) -> ActSym:
   match d:
-    case A.AgDecl{q, qn, md, f, l, l0, l1, k, m, +fl, lang, +ty, dd}:
-      act.sym.d(dd, act.flag(A.AkCopy{}, fl), mo, nm, act.modes(ty, act.ends.sort(ty)), act.role(act.qs(q), act.ends.level(ty)))
+    case A.AgDecl{q, qn, md, f, l, l0, l1, k, m, +fl, lang, +ty, +dd}:
+      act.sym.d(dd, Bool.or(act.flag(A.AkCopy{}, fl), act.inl.d(act.ends.sort(ty), dd)), mo, nm, act.modes(ty, act.ends.sort(ty)), act.role(act.qs(q), act.ends.level(ty)))
 
 # a module's file under src/: its name's parts, each a plain name
 def act.path.parts(xs: List<&2, List<&2, U32>>) -> List<&2, U32>:
@@ -1251,39 +1282,210 @@ def act.tel.len(t: A.Ag) -> Nat:
     case _:
       0n
 
-def act.case.of(a: ActPat, +n: Nat, body: A.Ag, +env: ActEnv, rest: T.Bt) -> T.Bt:
-  match a:
-    case ActPat{p, +bs, True{}}:
+# Equations: Bend cannot match on an equation, so a clause matching refl
+# (`sym refl = refl`, `cong f refl = refl`) is translated as a rewrite of
+# the goal before its body.  Agda's match makes one side of the equation a
+# dot pattern (that variable is gone from the clause); with e : {a == b},
+# Bend's `%e : P` needs the goal to be P with b at the holes and leaves P
+# with a there, so when the dotted variable d is b the rewrite is
+# `%e : G[d := _]`, and when it is a, the reversed equation first
+# (`e2 = Equal.sym(T, a, b, e)`, then `%e2 : G[d := _]`).  G is the case's
+# goal: the def's result type with the case's patterns put for the
+# parameters it splits.  A clause may hold several; each rewrites the goal
+# the one before left.
+type ActRw is Data:
+  ActRw{rws: List<&2, T.Bt>, dots: List<&2, List<&2, U32>>}
+
+def act.var.name(t: T.Bt) -> List<&2, U32>:
+  match t:
+    case T.BtVar{x}:
+      x
+    case _:
+      S.b("r")
+
+def act.rw.add(e: T.Bt, r: ActRw) -> ActRw:
+  match r:
+    case ActRw{rs, ds}:
+      ActRw{e <> rs, ds}
+
+def act.rw.dot(e: T.Bt, r: ActRw) -> ActRw:
+  match r:
+    case ActRw{rs, ds}:
+      ActRw{rs, act.var.name(e) <> ds}
+
+def act.is.refl(s: ActSym) -> Bool:
+  match s:
+    case ActSym{m, n, k, ms, ar, AbRefl{}, fs, c, cp}:
+      True{}
+    case _:
+      False{}
+
+def act.rw.refl(hit: Bool, e: T.Bt, r: ActRw) -> ActRw:
+  match hit:
+    case True{}:
+      act.rw.add(e, r)
+    case False{}:
+      r
+
+def act.rw.pat(p: A.Ag, +e: T.Bt, +env: ActEnv, r: ActRw) -> ActRw:
+  match p:
+    case A.AgPCon{+q, rec, ps}:
+      act.rw.refl(act.is.refl(act.sym(env, q)), e, r)
+    case A.AgPDot{t}:
+      act.rw.dot(e, r)
+    case _:
+      r
+
+# a clause's top-level refl and dot patterns, by parameter
+def act.rw.scan(ps: A.Ag, ents: List<&2, T.Bt>, +env: ActEnv) -> ActRw:
+  match ps ents:
+    case A.AgPArg{i, x, p, rest} +e <> et:
+      act.rw.pat(p, e, env, act.rw.scan(rest, et, env))
+    case _ _:
+      ActRw{Nil{}, Nil{}}
+
+# a pattern as the term it stands for
+def act.pat.term(p: T.Bt) -> T.Bt:
+  match p:
+    case T.BtPv{m, x}:
+      T.BtVar{x}
+    case T.BtCon{c, a}:
+      T.BtCon{c, act.pat.term(a)}
+    case T.BtSucc{a}:
+      T.BtSucc{act.pat.term(a)}
+    case T.BtArgs{a, rest}:
+      T.BtArgs{act.pat.term(a), act.pat.term(rest)}
+    case p:
+      p
+
+def act.goal.put(t: T.Bt, +x: List<&2, U32>, +p: T.Bt, wild: Bool) -> T.Bt:
+  match wild:
+    case True{}:
+      t
+    case False{}:
+      T.tba.subst(t, x, act.pat.term(p))
+
+def act.wild(p: T.Bt) -> Bool:
+  match p:
+    case T.BtWild{}:
+      True{}
+    case _:
+      False{}
+
+# the def's result type with each split parameter replaced by the case's
+# pattern for it (a catch-all leaves it as it is)
+def act.goal(xs: List<&2, T.Bt>, ps: T.Bt, t: T.Bt) -> T.Bt:
+  match xs ps:
+    case x <> xt T.BtArgs{+p, rest}:
+      act.goal(xt, rest, act.goal.put(t, act.var.name(x), p, act.wild(p)))
+    case _ _:
+      t
+
+def act.param.ty(ps: List<&2, T.BParam>, +x: List<&2, U32>) -> T.Bt:
+  match ps:
+    case Nil{}:
+      T.BtWild{}
+    case T.BParam{m, +n, ty} <> t:
+      Bool.pick(T.Bt, S.eq(n, x), ty, act.param.ty(t, x))
+
+def act.dotted(t: T.Bt, +ds: List<&2, List<&2, U32>>) -> Bool:
+  match t:
+    case T.BtVar{x}:
+      act.used(x, ds)
+    case _:
+      False{}
+
+# One rewrite's plan: 0 none (no side of e is a dotted variable), 1 with
+# e, 2 with e reversed (sym: the Equal.sym call, named e2); the motive P
+# and the goal the rewrite leaves.
+type ActStep is Data:
+  ActStep{k: Nat, p: T.Bt, goal: T.Bt, sym: T.Bt, e2: List<&2, U32>}
+
+def act.step.dir(rb: Bool, ra: Bool, +t: T.Bt, +a: T.Bt, +b: T.Bt, +e: T.Bt, +goal: T.Bt) -> ActStep:
+  match rb ra:
+    case True{} _:
+      ActStep{1n, T.tba.subst(goal, act.var.name(b), T.BtWild{}), T.tba.subst(goal, act.var.name(b), a), T.BtWild{}, Nil{}}
+    case False{} True{}:
+      ActStep{2n, T.tba.subst(goal, act.var.name(a), T.BtWild{}), T.tba.subst(goal, act.var.name(a), b), T.BtApp{T.BtVar{S.b("Equal.sym")}, T.tba.args([t, a, b, e])}, List.append(&2, U32, act.var.name(e), S.b("_sym"))}
+    case False{} False{}:
+      ActStep{0n, T.BtWild{}, goal, T.BtWild{}, Nil{}}
+
+def act.step(ty: T.Bt, +e: T.Bt, +ds: List<&2, List<&2, U32>>, +goal: T.Bt) -> ActStep:
+  match ty:
+    case T.BtEq{+t, +a, +b}:
+      act.step.dir(act.dotted(b, ds), act.dotted(a, ds), t, a, b, e, goal)
+    case _:
+      ActStep{0n, T.BtWild{}, goal, T.BtWild{}, Nil{}}
+
+def act.step.goal(s: ActStep) -> T.Bt:
+  match s:
+    case ActStep{k, p, g, y, e2}:
+      g
+
+# the rewrite a step plans, in front of the rest
+def act.step.wrap(s: ActStep, e: T.Bt, inner: T.Bt) -> T.Bt:
+  match s:
+    case ActStep{0n, p, g, y, e2}:
+      inner
+    case ActStep{1n, p, g, y, e2}:
+      T.BtRw{e, p, inner}
+    case ActStep{k, p, g, y, +e2}:
+      T.BtLet{e2, y, T.BtRw{T.BtVar{e2}, p, inner}}
+
+# the clause's rewrites, in order, before its body
+def act.rws(fuel: Nat, es: List<&2, T.Bt>, +ds: List<&2, List<&2, U32>>, +goal: T.Bt, +hps: List<&2, T.BParam>, body: T.Bt) -> T.Bt:
+  match fuel es:
+    case 1n+p +e <> t:
+      +s = act.step(act.param.ty(hps, act.var.name(e)), e, ds, goal)
+      act.step.wrap(s, e, act.rws(p, t, ds, act.step.goal(s), hps, body))
+    case _ _:
+      body
+
+# the scrutinees: the entries of the split parameters
+def act.scr.vars(scr: List<&2, Bool>, ents: List<&2, T.Bt>) -> List<&2, T.Bt>:
+  match scr ents:
+    case True{} <> st e <> et:
+      e <> act.scr.vars(st, et)
+    case False{} <> st e <> et:
+      act.scr.vars(st, et)
+    case _ _:
+      Nil{}
+
+# a case: its patterns, and its body after the rewrites its refl patterns
+# need (an absurd or cubical clause is left out)
+def act.case.of(a: ActPat, +n: Nat, body: A.Ag, +env: ActEnv, rest: T.Bt, rw: ActRw, +svars: List<&2, T.Bt>, +hps: List<&2, T.BParam>, +ret: T.Bt) -> T.Bt:
+  match a rw:
+    case ActPat{p, +bs, True{}} rw:
       rest
-    case ActPat{p, +bs, False{}}:
-      T.BtCase{p, T.BtExpr{act.t(act.inline(100000n, body, env), act.ctx.of(n, bs), env)}, rest}
+    case ActPat{+p, +bs, False{}} ActRw{rs, ds}:
+      T.BtCase{p, act.rws(64n, rs, ds, act.goal(svars, p, ret), hps, T.BtExpr{act.t(act.inline(100000n, body, env), act.ctx.of(n, bs), env)}), rest}
 
 # the cases of a match from the clauses (an absurd clause is left out)
-def act.cases(cls: A.Ag, +scr: List<&2, Bool>, +ents: List<&2, T.Bt>, +pnames: List<&2, List<&2, U32>>, +env: ActEnv) -> T.Bt:
+def act.cases(cls: A.Ag, +scr: List<&2, Bool>, +ents: List<&2, T.Bt>, +pnames: List<&2, List<&2, U32>>, +env: ActEnv, +hps: List<&2, T.BParam>, +ret: T.Bt) -> T.Bt:
   match cls:
-    case A.AgCl{+tel, ps, body, ty, ca, rest}:
+    case A.AgCl{+tel, +ps, body, ty, ca, rest}:
       +n = act.tel.len(tel)
-      act.case.of(act.top(ps, scr, ents, n, act.tel.hints(tel), pnames, env), n, body, env, act.cases(rest, scr, ents, pnames, env))
+      act.case.of(act.top(ps, scr, ents, n, act.tel.hints(tel), pnames, env), n, body, env, act.cases(rest, scr, ents, pnames, env, hps, ret), act.rw.scan(ps, ents, env), act.scr.vars(scr, ents), hps, ret)
     case _:
       T.BtCEnd{}
 
 # which of the first k parameters a clause splits (a constructor or a
 # literal pattern there)
-def act.split.one(p: A.Ag) -> Bool:
+def act.split.one(p: A.Ag, +env: ActEnv) -> Bool:
   match p:
-    case A.AgPCon{q, r, ps}:
-      True{}
+    case A.AgPCon{+q, r, ps}:
+      Bool.not(act.is.refl(act.sym(env, q)))
     case A.AgPLit{l}:
       True{}
     case _:
       False{}
 
-def act.split.pos(ps: A.Ag) -> List<&2, Bool>:
+def act.split.pos(ps: A.Ag, +env: ActEnv) -> List<&2, Bool>:
   match ps:
     case A.AgPArg{i, x, A.AgPProj{q}, rest}:
       Nil{}
     case A.AgPArg{i, x, p, rest}:
-      act.split.one(p) <> act.split.pos(rest)
+      act.split.one(p, env) <> act.split.pos(rest, env)
     case _:
       Nil{}
 
@@ -1297,10 +1499,10 @@ def act.or.lists(a: List<&2, Bool>, b: List<&2, Bool>) -> List<&2, Bool>:
       a
 
 # the parameters any clause splits
-def act.scr(cls: A.Ag) -> List<&2, Bool>:
+def act.scr(cls: A.Ag, +env: ActEnv) -> List<&2, Bool>:
   match cls:
     case A.AgCl{tel, ps, body, ty, ca, rest}:
-      act.or.lists(act.split.pos(ps), act.scr(rest))
+      act.or.lists(act.split.pos(ps, env), act.scr(rest, env))
     case _:
       Nil{}
 
@@ -1310,16 +1512,6 @@ def act.any(xs: List<&2, Bool>) -> Bool:
       False{}
     case h <> t:
       Bool.or(h, act.any(t))
-
-# the scrutinees: the entries of the split parameters
-def act.scr.vars(scr: List<&2, Bool>, ents: List<&2, T.Bt>) -> List<&2, T.Bt>:
-  match scr ents:
-    case True{} <> st e <> et:
-      e <> act.scr.vars(st, et)
-    case False{} <> st e <> et:
-      act.scr.vars(st, et)
-    case _ _:
-      Nil{}
 
 def act.ent.names(ents: List<&2, T.Bt>) -> List<&2, List<&2, U32>>:
   act.names(ents)
@@ -1332,21 +1524,21 @@ def act.body.first(cs: T.Bt) -> T.Bt:
     case _:
       T.BtExpr{act.todo("a function with no clause")}
 
-def act.body.of(split: Bool, +scr: List<&2, Bool>, cls: A.Ag, +ents: List<&2, T.Bt>, +pnames: List<&2, List<&2, U32>>, +env: ActEnv) -> T.Bt:
+def act.body.of(split: Bool, +scr: List<&2, Bool>, cls: A.Ag, +ents: List<&2, T.Bt>, +pnames: List<&2, List<&2, U32>>, +env: ActEnv, +hps: List<&2, T.BParam>, +ret: T.Bt) -> T.Bt:
   match split:
     case True{}:
-      T.BtMatch{T.tba.args(act.scr.vars(scr, ents)), act.cases(cls, scr, ents, pnames, env)}
+      T.BtMatch{T.tba.args(act.scr.vars(scr, ents)), act.cases(cls, scr, ents, pnames, env, hps, ret)}
     case False{}:
-      act.body.first(act.cases(cls, scr, ents, pnames, env))
+      act.body.first(act.cases(cls, scr, ents, pnames, env, hps, ret))
 
-def act.body.with(+scr: List<&2, Bool>, cls: A.Ag, +ents: List<&2, T.Bt>, +env: ActEnv) -> T.Bt:
-  act.body.of(act.any(scr), scr, cls, ents, act.names(ents), env)
+def act.body.with(+scr: List<&2, Bool>, cls: A.Ag, +ents: List<&2, T.Bt>, +env: ActEnv, +hps: List<&2, T.BParam>, +ret: T.Bt) -> T.Bt:
+  act.body.of(act.any(scr), scr, cls, ents, act.names(ents), env, hps, ret)
 
 
 # A def's body from its clauses: one match on the parameters they split,
 # in parameter order, or the one clause's body when none splits.
-def act.body(+cls: A.Ag, +ents: List<&2, T.Bt>, +env: ActEnv) -> T.Bt:
-  act.body.with(act.scr(cls), cls, ents, env)
+def act.body(+cls: A.Ag, +ents: List<&2, T.Bt>, +env: ActEnv, +hps: List<&2, T.BParam>, +ret: T.Bt) -> T.Bt:
+  act.body.with(act.scr(cls, env), cls, ents, env, hps, ret)
 # Items ------------------------------------------------------------------------
 
 # A parameter a clause splits must be live (Bend matches erased values only
@@ -1423,13 +1615,6 @@ def act.last.t(xs: List<&2, T.Bt>) -> T.Bt:
       act.last.t(t)
     case Nil{}:
       act.todo("a projection with no record argument")
-
-def act.var.name(t: T.Bt) -> List<&2, U32>:
-  match t:
-    case T.BtVar{x}:
-      x
-    case _:
-      S.b("r")
 
 # A record field's projection: a match on the record (its last parameter)
 # that answers the field.
@@ -1560,30 +1745,40 @@ def act.copat.body(q: Maybe<&2, A.AgQ>, +env: ActEnv, +cls: A.Ag, +ents: List<&2
     case None{}:
       T.BtExpr{act.todo("copattern clauses whose type is not a record")}
 
+def act.ps.ents(r: ActPs) -> List<&2, T.Bt>:
+  match r:
+    case ActPs{ps, ret, ctx, es, ok}:
+      es
+
+def act.ps.ps(r: ActPs) -> List<&2, T.BParam>:
+  match r:
+    case ActPs{ps, ret, ctx, es, ok}:
+      ps
+
+def act.ps.ret(r: ActPs) -> T.Bt:
+  match r:
+    case ActPs{ps, ret, ctx, es, ok}:
+      ret
+
 # a function: its header from its type, its body from its clauses (or, for
 # a record field, a match on the record; for copattern clauses, the
 # record's constructor)
-def act.fun.body(p: A.AgProj, +cls: A.Ag, +key: String, +ar: Nat, +t: A.Ag, +ents: List<&2, T.Bt>, +env: ActEnv, copat: Bool) -> T.Bt:
+def act.fun.body(p: A.AgProj, +cls: A.Ag, +key: String, +ar: Nat, +t: A.Ag, +ents: List<&2, T.Bt>, +env: ActEnv, copat: Bool, +r: ActPs) -> T.Bt:
   match p copat:
     case A.AgPrOf{Some{r}, o, ix} _:
       act.proj.body(act.sym(env, r), env, key, ents)
     case _ True{}:
       act.copat.body(act.cod.q(ar, t), env, cls, ents)
     case _ False{}:
-      act.body(cls, ents, env)
+      act.body(cls, ents, env, act.ps.ps(r), act.ps.ret(r))
 
-def act.fun.item(+nm: List<&2, U32>, +ms: List<&2, ActM>, +cls: A.Ag, body: T.Bt, r: ActPs, doc: List<&2, List<&2, U32>>) -> List<&2, T.BItem>:
+def act.fun.item(+nm: List<&2, U32>, +ms: List<&2, ActM>, +cls: A.Ag, body: T.Bt, r: ActPs, doc: List<&2, List<&2, U32>>, +env: ActEnv) -> List<&2, T.BItem>:
   match r:
     case ActPs{ps, ret, ctx, es, ok}:
-      [T.BiDef{nm, act.live.ps(ps, act.scr(cls), ms), ret, body, doc}]
-
-def act.ps.ents(r: ActPs) -> List<&2, T.Bt>:
-  match r:
-    case ActPs{ps, ret, ctx, es, ok}:
-      es
+      [T.BiDef{nm, act.live.ps(ps, act.scr(cls, env), ms), ret, body, doc}]
 
 def act.fun.with(+nm: List<&2, U32>, +ms: List<&2, ActM>, +ar: Nat, p: A.AgProj, +cls: A.Ag, +key: String, +t: A.Ag, +env: ActEnv, doc: List<&2, List<&2, U32>>, +r: ActPs) -> List<&2, T.BItem>:
-  act.fun.item(nm, ms, cls, act.fun.body(p, cls, key, ar, t, act.ps.ents(r), env, act.copat.is(cls)), r, doc)
+  act.fun.item(nm, ms, cls, act.fun.body(p, cls, key, ar, t, act.ps.ents(r), env, act.copat.is(cls), r), r, doc, env)
 
 def act.item.fun(s: ActSym, d: A.AgD, +key: String, ty: A.Ag, +env: ActEnv, doc: List<&2, List<&2, U32>>) -> List<&2, T.BItem>:
   match s d:
@@ -1755,10 +1950,16 @@ def act.items.of(s: ActSym, k: A.AgKw, cp: Bool, nc: Bool, d: A.AgD, +key: Strin
     case _ _ _ _:
       Nil{}
 
+# whether a symbol is inlined where used (a copy, or made one)
+def act.sym.copied(s: ActSym) -> Bool:
+  match s:
+    case ActSym{m, n, k, ms, ar, b, fs, c, cp}:
+      act.copy.is(cp)
+
 def act.items(d: A.AgDecl, +env: ActEnv, +decls: Map<&2, A.AgDecl>) -> List<&2, T.BItem>:
   match d:
     case A.AgDecl{+q, qn, md, +f, +l, l0, l1, k, m, +fl, lang, ty, dd}:
-      act.items.of(act.sym(env, q), k, act.flag(A.AkCopy{}, fl), act.flag(A.AkNoCompilation{}, fl), dd, act.key(q), ty, env, decls, act.doc(act.qs(q), f, l))
+      act.items.of(act.sym(env, q), k, Bool.or(act.flag(A.AkCopy{}, fl), act.sym.copied(act.sym(env, q))), act.flag(A.AkNoCompilation{}, fl), dd, act.key(q), ty, env, decls, act.doc(act.qs(q), f, l))
 
 # A type-valued function whose case tree is one leaf (no split): it
 # unfolds, as a copy does, when a header needs the Pis behind it.

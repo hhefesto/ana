@@ -100,6 +100,10 @@ def tpr.t(t: T.Bt, k: TpK, +ind: Nat, acc: List<&2, U32>) -> List<&2, U32>:
       tpr.spaces(ind, tpr.s("case ", tpr.t(p, TpWords{}, 0n, 58 <> 10 <> tpr.t(b, TpStmt{}, Nat.add(ind, 2n), tpr.t(rest, TpCases{}, ind, acc)))))
     case T.BtCEnd{} TpCases{}:
       acc
+    case T.BtRw{e, p, b} TpStmt{}:
+      tpr.spaces(ind, 37 <> tpr.t(e, TpHead{}, 0n, tpr.s(" : ", tpr.t(p, TpLoose{}, 0n, 10 <> tpr.t(b, TpStmt{}, ind, acc)))))
+    case T.BtLet{x, v, b} TpStmt{}:
+      tpr.spaces(ind, tpr.b(x, tpr.s(" = ", tpr.t(v, TpLoose{}, 0n, 10 <> tpr.t(b, TpStmt{}, ind, acc)))))
     case T.BtExpr{e} TpStmt{}:
       tpr.spaces(ind, tpr.t(e, TpLoose{}, 0n, 10 <> acc))
     case T.BtExpr{e} _:
