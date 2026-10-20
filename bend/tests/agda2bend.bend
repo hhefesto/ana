@@ -315,6 +315,11 @@ def gt.contra.want() -> String:
 def gt.use() -> T.BItem:
   T.BiDef{S.b("use"), [T.BParam{T.BmErased{}, S.b("B"), T.BtType{}}, T.BParam{T.BmLive{}, S.b("y"), v("B")}], v("B"), T.BtExpr{v("y")}, Nil{}}
 
+# def lb() -> @-A:Type -> A -> A: eta1 => x => x, a point-free def whose
+# type parameter is its return type's Pi
+def gt.lb() -> T.BItem:
+  T.BiDef{S.b("lb"), Nil{}, T.BtPi{T.BmErased{}, S.b("A"), True{}, T.BtType{}, T.BtPi{T.BmLive{}, S.b("_"), False{}, v("A"), v("A")}}, T.BtExpr{T.BtLam{T.BmLive{}, S.b("eta1"), T.BtLam{T.BmLive{}, S.b("x"), v("x")}}}, Nil{}}
+
 # def to(-x: Type) -> Type: anon.Box<x>, written above the type it names,
 # whose field binds the name to as well
 def ord.to() -> T.BItem:
@@ -330,6 +335,15 @@ def ord.first(xs: List<&2, List<&2, U32>>) -> List<&2, U32>:
     case h <> t:
       h
 
+# def f(r: M.R) -> T: g(M.R.a(r), M.R.b(r)), M.R a record of two fields:
+# destructured, r is matched once and each projection is its field
+def ds.env() -> Q.TcpEnv:
+  Q.TcpEnv{Map.set(&2, Q.TcpProj, Map.set(&2, Q.TcpProj, Map.new(&2, Q.TcpProj), "M.R.a", Q.TcpProj{S.b("M.R"), 0n, 2n}), "M.R.b", Q.TcpProj{S.b("M.R"), 1n, 2n}), S.b("N.")}
+
+def ds.f(twice: Bool) -> T.BItem:
+  +b = Bool.pick(String, twice, "M.R.a", "M.R.b")
+  T.BiDef{S.b("f"), [T.BParam{T.BmLive{}, S.b("r"), T.BtTyApp{S.b("M.R"), T.BtANil{}}}], v("T"), T.BtExpr{app("g", [app("M.R.a", [v("r")]), app(b, [v("r")])])}, Nil{}}
+
 def gate.laws() -> IO(Unit):
   do IO<Unit>:
     IO.print(verdict("the carets mark a binder", S.eq(G.tgt.span(S.split.lines(S.b("Location: u\n1 | def u(-A: Type) -> A -> A:\n2>|   +x_8 => x_8\n  |   ^^^^^\n3 | "))), S.b("+x_8"))))
@@ -339,8 +353,11 @@ def gate.laws() -> IO(Unit):
     IO.print(verdict("the gate's + repair declares the type parameter Data", S.eq(gt.prm(Q.tcp.raise(gt.contra(True{}), S.b("x_5"), True{})), S.b(gt.contra.want()))))
     IO.print(verdict("a caller's type parameter is declared Data", S.eq(gt.prm(Q.tcp.data.raise(gt.use(), S.b("B"))), S.b("import Base\n\ndef use(-B: Data, y: B) -> B:\n  y\n"))))
     IO.print(verdict("only a type parameter is declared Data", S.eq(gt.prm(Q.tcp.data.raise(gt.use(), S.b("y"))), S.b("none"))))
+    IO.print(verdict("a point-free def's type parameter is declared Data", S.eq(gt.prm(Q.tcp.data.raise(gt.lb(), S.b("eta1"))), S.b("import Base\n\ndef lb() -> @-A:Data -> A -> A:\n  eta1 => x => x\n"))))
     IO.print(verdict("a field is no use of the def it is named like", Bool.not(G.tgt.mem(S.b("to"), T.tba.item.refs(ord.box())))))
     IO.print(verdict("Order writes a type above the def that names it", S.eq(ord.first(O.tor.names(O.tor.order([ord.to(), ord.box()]))), S.b("anon.Box"))))
+    IO.print(verdict("a record used through two fields is matched once", S.eq(gt.pr(Q.tcp.destr(ds.f(False{}), ds.env())), S.b("import Base\n\ndef f(r: M.R) -> T:\n  match r:\n    case M.R{r_f0, r_f1}:\n      g(r_f0, r_f1)\n"))))
+    IO.print(verdict("a field used twice keeps the record whole", S.eq(gt.pr(Q.tcp.destr(ds.f(True{}), ds.env())), gt.pr(ds.f(True{})))))
 
 # Translation --------------------------------------------------------------------
 #
@@ -348,7 +365,7 @@ def gate.laws() -> IO(Unit):
 # import cone) translated in process, each module's file before the gate
 # against fixtures/agda2bend/golden/<Module>.bend: the translator's output
 # when the goldens were made, reviewed, of which the gate kept
-# golden/Function.Base.checked.bend (20 of Function.Base's 33 items) under
+# golden/Function.Base.checked.bend (32 of Function.Base's 33 items) under
 # the locked compiler.  A change to the translation shows up here first.
 
 def gold.of(+m: String, +al: Map<&2, List<&2, U32>>, +ral: Map<&2, List<&2, U32>>, +ds: List<&2, A.AgDecl>, +want: List<&2, U32>, tr: D.A2bTr) -> D.A2bG & Bool:
@@ -373,7 +390,7 @@ def gold.laws() -> IO(Unit):
   +al : Map<&2, List<&2, U32>> = D.a2b.aliases(order)
   +ral : Map<&2, List<&2, U32>> = D.a2b.ral(order, al, Map.new(&2, List<&2, U32>))
   do IO<Unit>:
-    r1 : D.A2bG & Bool <- gold.one("Agda.Primitive", al, ral, D.A2bG{Map.new(&2, C.ActSym), Map.new(&2, C.ActCopy), Map.new(&2, Bool)})
+    r1 : D.A2bG & Bool <- gold.one("Agda.Primitive", al, ral, D.A2bG{Map.new(&2, C.ActSym), Map.new(&2, C.ActCopy), Map.new(&2, Bool), Map.new(&2, Q.TcpProj)})
     g1 : D.A2bG <- gold.next("Agda.Primitive", al, ral, r1)
     r2 : D.A2bG & Bool <- gold.one("Level", al, ral, g1)
     g2 : D.A2bG <- gold.next("Level", al, ral, r2)
@@ -391,7 +408,7 @@ def gold.fix.laws() -> IO(Unit):
   +al : Map<&2, List<&2, U32>> = D.a2b.aliases(order)
   +ral : Map<&2, List<&2, U32>> = D.a2b.ral(order, al, Map.new(&2, List<&2, U32>))
   do IO<Unit>:
-    r1 : D.A2bG & Bool <- gold.one("Agda.Primitive", al, ral, D.A2bG{Map.new(&2, C.ActSym), Map.new(&2, C.ActCopy), Map.new(&2, Bool)})
+    r1 : D.A2bG & Bool <- gold.one("Agda.Primitive", al, ral, D.A2bG{Map.new(&2, C.ActSym), Map.new(&2, C.ActCopy), Map.new(&2, Bool), Map.new(&2, Q.TcpProj)})
     g1 : D.A2bG <- gold.next("Agda.Primitive", al, ral, r1)
     r2 : D.A2bG & Bool <- gold.one("Agda.Builtin.Bool", al, ral, g1)
     g2 : D.A2bG <- gold.next("Agda.Builtin.Bool", al, ral, r2)

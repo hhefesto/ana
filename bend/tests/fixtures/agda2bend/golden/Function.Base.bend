@@ -15,7 +15,7 @@ def const(-A: Type, -B: Type, x: A) -> B -> A:
 
 # Agda: Function.Base.constᵣ
 # Base.agda, line 35
-def const_u1d63(-A: Type, -B: Type, x: A) -> B -> B:
+def const_u1d63(-A: Type, -B: Type, -x: A) -> B -> B:
   eta1 => id(B, eta1)
 
 # Agda: Function.Base._∘_

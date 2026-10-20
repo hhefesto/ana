@@ -130,7 +130,46 @@ bend-ops guard tools/runs/run4.cfg              # starts chain, watch and handov
   - resume rewrites the stage's STAGES line and keeps the old one as STAGES.OLD_INSTANCE.
 - `bend-ops sim drive all run/sim-drive` runs 7 scenarios against run 3's boot-guard.sh, s2-driver.sh and move.sh. Not yet shown: act-ensure, act-pull, `move restage` and `move act`, which need real nix on a box, and `guard install` against real systemd.
 
-## ▶ CONTINUE HERE (2026-10-19, evening UTC-6): agda2bend translates Agda into checked Bend 2; Categories.Category.Core translates completely
+## ▶ CONTINUE HERE (2026-10-20, 01:30 UTC-6): agda2bend on the Yoneda cone, 1898 of 2527 items check; Product and Setoids hit Bend's missing record eta
+
+- **The loop:** `run/a2b/bin/agda2bend-O0 emit run/a2b/export2 run/a2b/yonedaN Categories.Yoneda` translates Categories.Yoneda's 121-module import cone (stdlib and agda-categories) with that day's translator. Each run is about 40 min and about 80 MB. Then `agda2bend report run/a2b/yonedaN run/a2b/yonedaM` ranks the causes against the previous run. Dev tools, uncommitted, in /tmp/claude-1000/a2b:
+  - build.sh: the dev binary.
+  - test.sh: the tests, 36 laws.
+  - probe.sh: `probe.sh OUT MODPATH AGDANAME`, a gated module plus raw items, checked.
+  - export-each.sh: the per-module exporter.
+- **Runs** (checked of 2527 items; Categories items of 523):
+
+  | Run | Checked | Categories | Change |
+  |---|---|---|---|
+  | yoneda2 | 1430 | 149 | Data kinds, indexed families |
+  | yoneda3 | 1752 | 287 | re-exported copy modules, absurd clauses, unfolded Pis |
+  | yoneda5 | 1859 | 337 | a field named like a def is no use (7169da6); a template in a dead argument no longer makes one; projections' type-valuedness by their own type |
+  | yoneda6 | 1869 | 349 | objects, morphisms and setoid points erased in dependent visible Pis (an opaque type: a record field that is a type) |
+  | yoneda7 | 1886 | 351 | arguments of a variable marked "mode unknown" (live for templates); a return-type Pi raised when its lambda is used live; functions type-valued once opened, projections by their own type |
+  | yoneda8 | 1678 | 175 | destructuring record parameters: reverted, see below |
+  | yoneda9 | 1886 | 351 | yoneda7 + the eta unfolding through the symbol table (it fires: Product's `_⇒_` is a pair of hom types; Product then stops at zip, eta) + opaque seen through AgDefX: neutral |
+  | yoneda10 | 1898 | 351 | a live parameter with no live use falls to erased (a variable's arguments count as uses); the Data repair raises a point-free def's return-type Pi; 13 gains, Function.Base golden 32 of 33 check |
+  | yoneda11 | (running) | | copattern reductions: a field projected out of a copattern def is its clause (`isPartialEquivalence(partialSetoid(S))`), so reasoning lemmas need no object templates |
+
+- **Bend limits found** (memory project-bend2-silent-traps):
+  - A type-valued def's body is live at its top.
+  - A template argument in a dead place may be any variable.
+  - A later dotted type fails through an import.
+  - **No record eta.** Product's `_∘_ = zip _∘_ _∘_` stays stuck on morphism-pair variables in its laws. A projection-based zip would copy a pair of morphisms, and morphisms are Type: Setoids' are `Func` records. Setoids' composition hits the same wall.
+  - **Templates are inlining:** `Carrier(partialSetoid(~S))` reduces. Destructuring the record (yoneda8) made it affine but stuck on variables, and the reasoning layer fell (Categories 351 to 175). It is unwired in a2b.destr; its code and laws stay.
+  - So Yoneda itself (12 items) waits on Product (through Bifunctor) and Setoids.
+- **Next:**
+  1. Commit yoneda9 if it holds against yoneda7.
+  2. The top causes in yoneda7.report:
+     - "expected Data observed Type", 51 roots, 325 blocked: setoid points used twice in reasoning chains, and eta-lambda type parameters the Data repair cannot raise.
+     - Values used twice (16 roots).
+     - Dependent J (Bend limit).
+  3. Decide what to do about record eta. Options: ask upstream Bend, give the fork eta for single-constructor types, or encode Product's homs differently.
+- **Export:** run/a2b/export2 has 768 modules. Not exported:
+  - 6 agda-categories modules timed out at 1200 s: Bicategory.Construction.Spans and Spans.Properties, Category.Construction.SymmetricMonoidalFunctors, Functor.Monoidal.PointwiseTensor, Functor.Profunctor, Profunctor.Cograph.
+  - 4 ran out of the 12 GB heap: EnrichedCats, End.Fubini, End.Parameterized, EnrichedUnderlying.
+
+## Previous (2026-10-19, evening UTC-6): agda2bend translates Agda into checked Bend 2; Categories.Category.Core translates completely
 
 The user (2026-10-19): "I want something that takes in agda code and spits out bend code … a parser of lean or agda in bend and then a cata that turns that parsed code into more regular bend code. After that it should be easier to fix anything that didn't translate so well and iterate over the translator." Plan: ~/.claude/plans/humming-brewing-shannon.md (approved; Agda first, only ALL PROOFS CHECK output, every Agda CT repository in scope; Lean later on the same back end). The user on an Agda/Lean oracle pass: "take it into consideration … Don't forcefully use it" (optional; not used yet).
 

@@ -509,6 +509,101 @@ def act.split(n: Nat, es: A.Ag) -> ActSplit:
     case 1n+p es:
       ActSplit{Nil{}, es, False{}}
 
+def act.unf.got(r: Map<&2, ActCopy> & ActCopy) -> ActCopy:
+  (m, c) = r
+  c
+
+def act.unfold.split(+n: Nat, body: A.Ag, s: ActSplit) -> A.Ag:
+  match s:
+    case ActSplit{vs, rest, True{}}:
+      asb.push(asb.subst(body, 0n, List.reverse(&2, A.Ag, vs), n), rest)
+    case ActSplit{vs, rest, False{}}:
+      A.AgNone{}
+
+# the leaf a type-valued definition unfolds to, with the arguments
+# substituted (the rest applied); AgNone when it does not unfold
+def act.unfold.of(c: ActCopy, +es: A.Ag) -> A.Ag:
+  match c:
+    case ActCopy{0n, A.AgNone{}}:
+      A.AgNone{}
+    case ActCopy{+n, body}:
+      act.unfold.split(n, body, act.split(n, es))
+
+# Opaque types: a record field that is a type (Category.Obj C, C [ A , B ],
+# Setoid.Carrier S) has elements no clause can split on; the projection's
+# symbol carries the mark in its fields.  A visible Pi over such a type
+# whose codomain mentions its variable (`η : ∀ X → D [ F₀ X , G₀ X ]`, a
+# law's `∀ f → …`) is erased, as the spike erases objects and morphisms:
+# Bend cannot copy an element of a Type, and these are used only in types
+# and at other erased places (a non-dependent one, `F₁ : C [ A , B ] → …`,
+# stays live: it is data).
+def act.opaque.mark(srt: Bool) -> List<&2, String>:
+  match srt:
+    case True{}:
+      ["opaque-sort"]
+    case False{}:
+      Nil{}
+
+def act.opaque.fs(fs: List<&2, String>) -> Bool:
+  match fs:
+    case h <> Nil{}:
+      String.eq(h, "opaque-sort")
+    case _:
+      False{}
+
+def act.opaque.is(s: ActSym) -> Bool:
+  match s:
+    case ActSym{m, n, k, ms, ar, b, fs, c, None{}}:
+      act.opaque.fs(fs)
+    case _:
+      False{}
+
+def act.opaque.copy(s: ActSym) -> ActCopy:
+  match s:
+    case ActSym{m, n, k, ms, ar, b, fs, c, Some{cp}}:
+      cp
+    case _:
+      ActCopy{0n, A.AgNone{}}
+
+# whether an elimination spine projects an opaque field (C .Obj)
+def act.opaque.es(es: A.Ag, +tab: Map<&2, ActSym>) -> Bool:
+  match es:
+    case A.AgEProj{+q, rest}:
+      Bool.or(act.opaque.is(act.sym.got(Map.get(ActSym, act.sym0(), tab, act.key(q)))), act.opaque.es(rest, tab))
+    case A.AgEApp{i, a, rest}:
+      act.opaque.es(rest, tab)
+    case _:
+      False{}
+
+# whether a TYPE is opaque, seen through copies and type-valued definitions
+def act.opaque(fuel: Nat, t: A.Ag, +tab: Map<&2, ActSym>, +unf: Map<&2, ActCopy>) -> Bool:
+  match fuel t:
+    case f A.AgEl{s, x}:
+      act.opaque(f, x, tab, unf)
+    case 1n+(+f) A.AgDef{+q, +es}:
+      +s = act.sym.got(Map.get(ActSym, act.sym0(), tab, act.key(q)))
+      Bool.or(act.opaque.is(s), Bool.or(act.opaque(f, act.unfold.of(act.opaque.copy(s), es), tab, unf), act.opaque(f, act.unfold.of(act.unf.got(Map.get(ActCopy, ActCopy{0n, A.AgNone{}}, unf, act.key(q))), es), tab, unf)))
+    case 1n+(+f) A.AgDefX{+q, +es}:
+      +s = act.sym.got(Map.get(ActSym, act.sym0(), tab, act.key(q)))
+      Bool.or(act.opaque.is(s), Bool.or(act.opaque(f, act.unfold.of(act.opaque.copy(s), es), tab, unf), act.opaque(f, act.unfold.of(act.unf.got(Map.get(ActCopy, ActCopy{0n, A.AgNone{}}, unf, act.key(q))), es), tab, unf)))
+    case f A.AgVar{i, x, es}:
+      act.opaque.es(es, tab)
+    case _ _:
+      False{}
+
+# a Pi binder erased as over an opaque type (dep: its codomain mentions it)
+def act.opaque.dep(dep: Bool, +a: A.Ag, +tab: Map<&2, ActSym>, +unf: Map<&2, ActCopy>) -> Bool:
+  match dep:
+    case True{}:
+      act.opaque(8n, a, tab, unf)
+    case False{}:
+      False{}
+
+def act.opaque.env(dep: Bool, +a: A.Ag, +env: ActEnv) -> Bool:
+  match env:
+    case ActEnv{mod, +tab, al, +unf}:
+      act.opaque.dep(dep, a, tab, unf)
+
 def act.expand.copy(+n: Nat, body: A.Ag, q: A.AgQ, +es: A.Ag, s: ActSplit) -> A.Ag:
   match s:
     case ActSplit{vs, rest, True{}}:
@@ -534,6 +629,190 @@ def act.beta1(d: Bool, b: A.Ag, v: A.Ag) -> A.Ag:
     case False{}:
       b
 
+# Eta unfoldings ---------------------------------------------------------------
+#
+# A function whose case tree splits only records with eta (Σ's _,_) before
+# its one leaf unfolds where its value is a type.  Product's
+# `_⇒_ = zipWith C._⇒_ D._⇒_ _×_` matches its two pairs, so `A ⇒ B` stays
+# stuck on the variables A B in Bend (which has no record eta), and the
+# record's `id` then has no type it fits.  The unfolding (made by
+# act.etu.of) writes each split field as the projection of its parameter
+# (`proj₁ A`); act.inline takes it only when the call's value is a type (a
+# sort, a Pi, a data type or record, a type-valued definition), where every
+# place is dead, so the parameters repeat freely.  The unfoldings sit in
+# the unfoldings map under "eta:" KEY.
+
+def act.etu.key(q: A.AgQ) -> String:
+  "eta:" ++ act.key(q)
+
+def act.etu.get(+env: ActEnv, q: A.AgQ) -> ActCopy:
+  match env:
+    case ActEnv{mod, tab, al, unf}:
+      act.unf.got(Map.get(ActCopy, ActCopy{0n, A.AgNone{}}, unf, act.etu.key(q)))
+
+# whether an elimination spine is applications only
+def act.es.plain(es: A.Ag) -> Bool:
+  match es:
+    case A.AgEApp{i, t, rest}:
+      act.es.plain(rest)
+    case A.AgENil{}:
+      True{}
+    case _:
+      False{}
+
+def act.es.apps(es: A.Ag) -> Nat:
+  match es:
+    case A.AgEApp{i, t, rest}:
+      1n+act.es.apps(rest)
+    case _:
+      0n
+
+# the arguments var k-1 ... var 0
+def act.etu.args(k: Nat) -> A.Ag:
+  match k:
+    case 0n:
+      A.AgENil{}
+    case 1n+(+p):
+      A.AgEApp{A.aas.i.vis(), A.AgVar{p, S.b("eta"), A.AgENil{}}, act.etu.args(p)}
+
+def act.etu.lam(k: Nat, b: A.Ag) -> A.Ag:
+  match k:
+    case 0n:
+      b
+    case 1n+p:
+      A.AgLam{A.aas.i.vis(), S.b("eta"), True{}, act.etu.lam(p, b)}
+
+def act.etu.short(plain: Bool, +k: Nat, +n: Nat, body: A.Ag, +es: A.Ag) -> A.Ag:
+  match plain:
+    case True{}:
+      act.etu.lam(k, act.unfold.of(ActCopy{n, body}, asb.elims.cat(asb.shift(es, k, 0n), act.etu.args(k))))
+    case False{}:
+      A.AgNone{}
+
+# the unfolding applied to a call's arguments, under a lambda for each one
+# the call leaves out (`zipWith f g h` is a relation); AgNone for none
+def act.etu.at(c: ActCopy, +es: A.Ag) -> A.Ag:
+  match c:
+    case ActCopy{0n, A.AgNone{}}:
+      A.AgNone{}
+    case ActCopy{+n, body}:
+      act.etu.short(Bool.or(Bool.not(Nat.is_lt(act.es.apps(es), n)), act.es.plain(es)), Nat.sub(n, act.es.apps(es)), n, body, es)
+
+def act.unf.has.got(r: Map<&2, ActCopy> & Bool) -> Bool:
+  (m, b) = r
+  b
+
+def act.kind.type(s: ActSym) -> Bool:
+  match s:
+    case ActSym{m, n, A.AkRecord{}, ms, ar, b, fs, c, cp}:
+      True{}
+    case ActSym{m, n, A.AkData{}, ms, ar, b, fs, c, cp}:
+      True{}
+    case _:
+      False{}
+
+def act.type.sym(s: ActSym, +env: ActEnv, q: A.AgQ) -> Bool:
+  match env:
+    case ActEnv{mod, tab, al, unf}:
+      Bool.or(act.kind.type(s), act.unf.has.got(Map.has(&2, ActCopy, unf, act.key(q))))
+
+# whether a term is a type by its head (a copy seen through)
+def act.type.head(fuel: Nat, t: A.Ag, +env: ActEnv) -> Bool:
+  match fuel t:
+    case f A.AgSort{s}:
+      True{}
+    case f A.AgPi{i, x, a, d, b}:
+      True{}
+    case f A.AgEl{s, x}:
+      True{}
+    case f A.AgLam{i, x, d, b}:
+      act.type.head(f, b, env)
+    case f A.AgBeta{g, es}:
+      act.type.head(f, g, env)
+    case f A.AgDefX{+q, es}:
+      act.type.sym(act.sym(env, q), env, q)
+    case 1n+f A.AgDef{+q, +es}:
+      Bool.or(act.type.sym(act.sym(env, q), env, q), act.type.head(f, act.expand(act.sym(env, q), q, es), env))
+    case _ _:
+      False{}
+
+def act.etu.pick(+u: A.Ag, d: A.Ag, +env: ActEnv) -> A.Ag:
+  Bool.pick(A.Ag, act.type.head(16n, u, env), u, d)
+
+# a call act.inline resolved as no copy (AgDefX), unfolded instead when it
+# has an eta unfolding and its value there is a type
+def act.etu.try(t: A.Ag, +q: A.AgQ, +es: A.Ag, +env: ActEnv) -> A.Ag:
+  match t:
+    case A.AgDefX{q2, es2}:
+      act.etu.pick(act.etu.at(act.etu.get(env, q), es), A.AgDefX{q2, es2}, env)
+    case t:
+      t
+
+# Copattern reductions --------------------------------------------------------
+#
+# A field projected out of a definition made by copatterns reduces here to
+# that field's clause: `isPartialEquivalence (partialSetoid S)` is
+# `IsEquivalence.isPartialEquivalence (isEquivalence S)`, and through
+# Category's hom-setoid a reasoning lemma's `partialSetoid(~hom-setoid(~C,
+# X, Y))` (a template argument, which must be closed: its objects had to be
+# templates, and no caller with a lambda's objects could use the lemma)
+# becomes C's equiv at X Y, with S or C used once.  Bend would do the same
+# when it inlines a template; doing it here also takes non-closed records.
+# The clauses sit in the unfoldings under "cop:" DEF "|" FIELD (act.cop.add).
+
+def act.cop.key(f: A.AgQ, q: A.AgQ) -> String:
+  "cop:" ++ act.key(f) ++ "|" ++ act.key(q)
+
+def act.ag.none(t: A.Ag) -> Bool:
+  match t:
+    case A.AgNone{}:
+      True{}
+    case _:
+      False{}
+
+def act.ag.last(xs: List<&2, A.Ag>) -> Maybe<&2, A.Ag>:
+  match xs:
+    case Nil{}:
+      None{}
+    case h <> Nil{}:
+      Some{h}
+    case h <> t:
+      act.ag.last(t)
+
+def act.sym.arity(s: ActSym) -> Nat:
+  match s:
+    case ActSym{m, n, k, ms, ar, b, fs, c, cp}:
+      ar
+
+def act.cop.push(u: A.Ag, rest: A.Ag) -> A.Ag:
+  match u:
+    case A.AgNone{}:
+      A.AgNone{}
+    case u:
+      asb.push(u, rest)
+
+def act.cop.rec(m: Maybe<&2, A.Ag>, +q: A.AgQ, rest: A.Ag, +unf: Map<&2, ActCopy>) -> A.Ag:
+  match m:
+    case Some{A.AgDef{f, +es}}:
+      act.cop.push(act.unfold.of(act.unf.got(Map.get(ActCopy, ActCopy{0n, A.AgNone{}}, unf, act.cop.key(f, q))), es), rest)
+    case Some{A.AgDefX{f, +es}}:
+      act.cop.push(act.unfold.of(act.unf.got(Map.get(ActCopy, ActCopy{0n, A.AgNone{}}, unf, act.cop.key(f, q))), es), rest)
+    case _:
+      A.AgNone{}
+
+def act.cop.split(s: ActSplit, +q: A.AgQ, +unf: Map<&2, ActCopy>) -> A.Ag:
+  match s:
+    case ActSplit{vs, rest, True{}}:
+      act.cop.rec(act.ag.last(vs), q, rest, unf)
+    case _:
+      A.AgNone{}
+
+# q applied to es reduced as a copattern definition's field (AgNone when not)
+def act.cop.at(+env: ActEnv, +q: A.AgQ, +es: A.Ag) -> A.Ag:
+  match env:
+    case ActEnv{mod, +tab, al, +unf}:
+      act.cop.split(act.split(act.sym.arity(act.sym.got(Map.get(ActSym, act.sym0(), tab, act.key(q)))), es), q, unf)
+
 # Every copy in a term inlined, through chains of copies of copies, and
 # the lambda redexes substitution leaves reduced.  Each expansion or
 # reduction spends one unit of fuel (a resolved definition too), and the
@@ -546,9 +825,11 @@ def act.inline(+fuel: Nat, a: A.Ag, +env: ActEnv) -> A.Ag:
     case f A.AgBeta{g, A.AgENil{}}:
       act.inline(f, g, env)
     case 1n+p A.AgDef{+q, +es}:
-      act.inline(p, act.expand(act.sym(env, q), q, es), env)
-    case f A.AgDefX{q, es}:
-      A.AgDef{q, act.inline(f, es, env)}
+      act.inline(p, act.etu.try(act.expand(act.sym(env, q), q, es), q, es, env), env)
+    case 1n+p A.AgDefX{+q, es}:
+      +es2 = act.inline(p, es, env)
+      +r = act.cop.at(env, q, es2)
+      Bool.pick(A.Ag, act.ag.none(r), A.AgDef{q, es2}, act.inline(p, r, env))
     case f A.AgVar{i, x, es}:
       A.AgVar{i, x, act.inline(f, es, env)}
     case f A.AgCon{q, o, es}:
@@ -618,13 +899,14 @@ def act.app.list(f: T.Bt, xs: List<&2, T.Bt>) -> T.Bt:
 # marked as at a parameter whose mode is unknown (BtDead): the variable's
 # type is not known here, and its Pi often erases the argument, so the
 # quantity pass does not count these uses (Bend's check finds a real
-# double use)
+# double use); the mark is doubled (BtDead of BtDead) as "unknown", which
+# the template test takes as live: a template argument there must be closed
 def act.deads(xs: List<&2, T.Bt>) -> List<&2, T.Bt>:
   match xs:
     case Nil{}:
       Nil{}
     case h <> t:
-      T.BtDead{h} <> act.deads(t)
+      T.BtDead{T.BtDead{h}} <> act.deads(t)
 
 def act.app.var(f: T.Bt, args: T.Bt) -> T.Bt:
   act.app.list(f, act.deads(act.list.nolevel(args)))
@@ -746,6 +1028,8 @@ def act.eta.args(ns: List<&2, List<&2, U32>>, ms: List<&2, ActM>) -> List<&2, T.
   match ns ms:
     case n <> t AmErased{} <> mt:
       T.BtDead{T.BtVar{n}} <> act.eta.args(t, mt)
+    case n <> t AmTpl{} <> mt:
+      T.BtTplArg{T.BtVar{n}} <> act.eta.args(t, mt)
     case n <> t m <> mt:
       T.BtVar{n} <> act.eta.args(t, mt)
     case _ _:
@@ -923,7 +1207,7 @@ def act.t(a: A.Ag, +ctx: List<&2, T.Bt>, +env: ActEnv) -> T.Bt:
     case A.AgPi{i, +x, +a2, +d, b}:
       +lv = act.ty.level(a2)
       +nm = act.fresh(x, ctx)
-      act.pi(lv, act.mode(i, a2, False{}), nm, d, act.t(a2, ctx, env), act.t(b, act.bind(d, Bool.pick(T.Bt, lv, act.level(), T.BtVar{nm}), ctx), env))
+      act.pi(lv, act.mode(i, a2, act.opaque.env(d, a2, env)), nm, d, act.t(a2, ctx, env), act.t(b, act.bind(d, Bool.pick(T.Bt, lv, act.level(), T.BtVar{nm}), ctx), env))
     case A.AgSort{s}:
       T.BtType{}
     case A.AgEl{s, t}:
@@ -1038,12 +1322,12 @@ def act.sym.copy(c: Maybe<&2, ActCopy>, +mo: List<&2, U32>, +nm: List<&2, U32>, 
 # any other function, a projection-like one included (Agda's index there
 # only says which argument determines the ones before it), what its first
 # clause matches.
-def act.sym.fun(cp: Bool, p: A.AgProj, cls: A.Ag, tree: A.Ag, +mo: List<&2, U32>, +nm: List<&2, U32>, ms: List<&2, ActM>, b: ActB) -> ActSym:
+def act.sym.fun(cp: Bool, srt: Bool, p: A.AgProj, cls: A.Ag, tree: A.Ag, +mo: List<&2, U32>, +nm: List<&2, U32>, ms: List<&2, ActM>, b: ActB) -> ActSym:
   match cp p:
     case True{} p:
       act.sym.copy(act.copy.of(tree), mo, nm, ms, b)
     case False{} A.AgPrOf{Some{r}, o, ix}:
-      ActSym{mo, nm, A.AkFunction{}, ms, ix, b, Nil{}, Nil{}, None{}}
+      ActSym{mo, nm, A.AkFunction{}, ms, ix, b, act.opaque.mark(srt), Nil{}, None{}}
     case False{} A.AgPrOf{None{}, o, ix}:
       ActSym{mo, nm, A.AkFunction{}, ms, act.cls.arity(cls), b, Nil{}, Nil{}, None{}}
     case False{} A.AgPrNone{}:
@@ -1190,10 +1474,10 @@ def act.ix.names(n: Nat) -> List<&2, String>:
     case 1n+p:
       "ix_eq" <> act.ix.names(p)
 
-def act.sym.d(d: A.AgD, cp: Bool, +mo: List<&2, U32>, +nm: List<&2, U32>, +ms: List<&2, ActM>, b: ActB, ix: Nat) -> ActSym:
+def act.sym.d(d: A.AgD, cp: Bool, srt: Bool, +mo: List<&2, U32>, +nm: List<&2, U32>, +ms: List<&2, ActM>, b: ActB, ix: Nat) -> ActSym:
   match d:
     case A.AgDFun{p, r, w, e, t, mu, cls, tree}:
-      act.sym.fun(cp, p, cls, tree, mo, nm, ms, b)
+      act.sym.fun(cp, srt, p, cls, tree, mo, nm, ms, b)
     case A.AgDRec{+pars, c, named, ind, fs, tel, eta, pm, rcl}:
       ActSym{mo, nm, A.AkRecord{}, ms, pars, b, act.keys(fs), act.con.name(act.local(mo, act.qs(c))), act.copy.cl(cp, rcl)}
     case A.AgDData{+pars, +ixs, cs, s, dcl}:
@@ -1251,26 +1535,6 @@ def act.params.put(m: ActM, +nm: List<&2, U32>, ty: T.Bt, r: ActPs) -> ActPs:
     case m ActPs{ps, ret, ctx, es, ok}:
       ActPs{T.BParam{act.bmode(m), nm, ty} <> ps, ret, ctx, T.BtVar{nm} <> es, ok}
 
-def act.unf.got(r: Map<&2, ActCopy> & ActCopy) -> ActCopy:
-  (m, c) = r
-  c
-
-def act.unfold.split(+n: Nat, body: A.Ag, s: ActSplit) -> A.Ag:
-  match s:
-    case ActSplit{vs, rest, True{}}:
-      asb.push(asb.subst(body, 0n, List.reverse(&2, A.Ag, vs), n), rest)
-    case ActSplit{vs, rest, False{}}:
-      A.AgNone{}
-
-# the leaf a type-valued definition unfolds to, with the arguments
-# substituted (the rest applied); AgNone when it does not unfold
-def act.unfold.of(c: ActCopy, +es: A.Ag) -> A.Ag:
-  match c:
-    case ActCopy{0n, A.AgNone{}}:
-      A.AgNone{}
-    case ActCopy{+n, body}:
-      act.unfold.split(n, body, act.split(n, es))
-
 def act.unfold(+env: ActEnv, q: A.AgQ, +es: A.Ag) -> A.Ag:
   match env:
     case ActEnv{mod, tab, al, unf}:
@@ -1294,24 +1558,39 @@ def act.ends.sort.u(fuel: Nat, t: A.Ag, +unf: Map<&2, ActCopy>) -> Bool:
 # the modes of every Pi of a TYPE, the Pis of the type-valued definitions it
 # ends in included (sym : Symmetric _≈_ takes {x y} after the record: both
 # erased, as Symmetric opens to them), so a call keeps those arguments dead
-def act.modes.u(fuel: Nat, t: A.Ag, +tylevel: Bool, +unf: Map<&2, ActCopy>) -> List<&2, ActM>:
+def act.modes.u(fuel: Nat, t: A.Ag, +tylevel: Bool, +tab: Map<&2, ActSym>, +unf: Map<&2, ActCopy>) -> List<&2, ActM>:
   match fuel t:
     case f A.AgEl{s, x}:
-      act.modes.u(f, x, tylevel, unf)
-    case f A.AgPi{i, x, a, d, b}:
-      act.mode(i, a, tylevel) <> act.modes.u(f, b, tylevel, unf)
+      act.modes.u(f, x, tylevel, tab, unf)
+    case f A.AgPi{i, x, +a, +d, b}:
+      act.mode(i, a, Bool.or(tylevel, act.opaque.dep(d, a, tab, unf))) <> act.modes.u(f, b, tylevel, tab, unf)
     case f A.AgStored{x}:
-      act.modes.u(f, x, tylevel, unf)
+      act.modes.u(f, x, tylevel, tab, unf)
     case 1n+f A.AgDef{+q, +es}:
-      act.modes.u(f, act.unfold.of(act.unf.got(Map.get(ActCopy, ActCopy{0n, A.AgNone{}}, unf, act.key(q))), es), tylevel, unf)
+      act.modes.u(f, act.unfold.of(act.unf.got(Map.get(ActCopy, ActCopy{0n, A.AgNone{}}, unf, act.key(q))), es), tylevel, tab, unf)
     case _ _:
       Nil{}
 
+# Whether a definition is type-valued (every Pi erased): its type ends in a
+# sort once the type-valued definitions it ends in are opened (`_⊓_ : PT A B
+# → PT A B → PT A B` is a predicate transformer: its P and Q are used only
+# in dead places, and live they would make X a copy), but a record field's
+# projection by its own type only, as the field's Bend type has it
+# (`_≈_ : Rel (A ⇒ B) e` opens to two morphisms the field takes live;
+# erased, a call's arguments were dead, so Copy left CommutativeSquare's
+# f g h i erased where the body uses them live, and Bend refused it).
+def act.tylevel(d: A.AgD, +ty: A.Ag, +unf: Map<&2, ActCopy>) -> Bool:
+  match d:
+    case A.AgDFun{A.AgPrOf{Some{r}, o, ix}, rs, w, e, t, mu, cls, tree}:
+      act.ends.sort(ty)
+    case _:
+      act.ends.sort.u(8n, ty, unf)
+
 # A definition's entry, given its module and its (unique) Bend name.
-def act.sym.of(+mo: List<&2, U32>, +nm: List<&2, U32>, d: A.AgDecl, +unf: Map<&2, ActCopy>) -> ActSym:
+def act.sym.of(+mo: List<&2, U32>, +nm: List<&2, U32>, d: A.AgDecl, +tab: Map<&2, ActSym>, +unf: Map<&2, ActCopy>) -> ActSym:
   match d:
     case A.AgDecl{q, qn, md, f, l, l0, l1, k, m, +fl, lang, +ty, +dd}:
-      act.sym.d(dd, Bool.or(act.flag(A.AkCopy{}, fl), act.inl.d(act.ends.sort(ty), dd)), mo, nm, act.modes.u(8n, ty, act.ends.sort.u(8n, ty, unf), unf), act.role(act.qs(q), act.ends.level(ty)), act.ixs.of(dd, ty))
+      act.sym.d(dd, Bool.or(act.flag(A.AkCopy{}, fl), act.inl.d(act.ends.sort(ty), dd)), act.ends.sort(ty), mo, nm, act.modes.u(8n, ty, act.tylevel(dd, ty, unf), tab, unf), act.role(act.qs(q), act.ends.level(ty)), act.ixs.of(dd, ty))
 
 # seen: the names this header has given so far (a non-dependent Pi's
 # parameter is in no context, but its name is taken)
@@ -1322,9 +1601,9 @@ def act.params.go(fuel: Nat, n: Nat, t: A.Ag, ms: List<&2, ActM>, +ctx: List<&2,
     case f 1n+p A.AgEl{s, A.AgPi{i, +x, a, d, b}} +m <> mt:
       +nm = act.fresh.in(x, ctx, seen)
       act.params.put(m, nm, act.t(a, ctx, env), act.params.go(f, p, b, mt, act.bind(d, act.entry(m, nm), ctx), nm <> seen, env))
-    case f 1n+p A.AgEl{s, A.AgPi{i, +x, +a, d, b}} Nil{}:
+    case f 1n+p A.AgEl{s, A.AgPi{i, +x, +a, +d, b}} Nil{}:
       +nm = act.fresh.in(x, ctx, seen)
-      +m = act.mode(i, a, False{})
+      +m = act.mode(i, a, act.opaque.env(d, a, env))
       act.params.put(m, nm, act.t(a, ctx, env), act.params.go(f, p, b, Nil{}, act.bind(d, act.entry(m, nm), ctx), nm <> seen, env))
     case 1n+g 1n+p A.AgEl{s, A.AgDef{+q, +es}} ms:
       act.params.go(g, 1n+p, A.AgEl{s, act.inline(1024n, act.unfold(env, q, es), env)}, ms, ctx, seen, env)
@@ -2521,6 +2800,210 @@ def act.unf.of(d: A.AgDecl, +unf: Map<&2, ActCopy>) -> Maybe<&2, ActCopy>:
   match d:
     case A.AgDecl{q, qn, md, f, l, l0, l1, k, m, fl, lang, +ty, dd}:
       act.unf.d(act.flag(A.AkCopy{}, fl), act.ends.sort.u(8n, ty, unf), dd)
+
+# A definition's eta unfolding (see act.etu.key): its case tree walked with
+# the terms its leaf's variables stand for, over its n parameters; a split
+# of a parameter whose type is a record with eta puts the record's
+# projections of it in its place.  Anything else (a data split, a nested
+# split, a catch-all, no split at all) has none.
+
+# a record type's fields and arguments (the record found through
+# type-valued definitions: A × B is Σ A (λ _ → B))
+type ActRec is Data:
+  ActRec{fs: List<&2, String>, es: A.Ag, ok: Bool}
+
+# (the record by its symbol: the module's own declarations are all the
+# decl map has, and Σ is Agda.Builtin.Sigma's; a split's eta branch already
+# says the record has eta)
+def act.etu.rec.fs(s: ActSym, es: A.Ag) -> ActRec:
+  match s:
+    case ActSym{m, n, A.AkRecord{}, ms, ar, b, fs, c, cp}:
+      ActRec{fs, es, True{}}
+    case _:
+      ActRec{Nil{}, A.AgENil{}, False{}}
+
+def act.etu.rec.pick(a: ActRec, b: ActRec) -> ActRec:
+  match a:
+    case ActRec{fs, es, True{}}:
+      ActRec{fs, es, True{}}
+    case _:
+      b
+
+def act.etu.rec(fuel: Nat, t: A.Ag, +tab: Map<&2, ActSym>, +unf: Map<&2, ActCopy>) -> ActRec:
+  match fuel t:
+    case f A.AgEl{s, x}:
+      act.etu.rec(f, x, tab, unf)
+    case 1n+f A.AgDef{+q, +es}:
+      act.etu.rec.pick(act.etu.rec.fs(act.sym.got(Map.get(ActSym, act.sym0(), tab, act.key(q))), es), act.etu.rec(f, act.unfold.of(act.unf.got(Map.get(ActCopy, ActCopy{0n, A.AgNone{}}, unf, act.key(q))), es), tab, unf))
+    case _ _:
+      ActRec{Nil{}, A.AgENil{}, False{}}
+
+# a name from its key (w:k), the only part a translation looks up
+def act.q.parts(ps: List<&2, List<&2, U32>>) -> A.AgQ:
+  match ps:
+    case w <> k <> Nil{}:
+      A.AgQ{Nil{}, w, k}
+    case _:
+      A.AgQ{Nil{}, Nil{}, Nil{}}
+
+def act.q.of.key(k: String) -> A.AgQ:
+  act.q.parts(S.split(S.b(k), 58))
+
+# each field's projection of p (the record's arguments, then p)
+def act.etu.projs(fs: List<&2, String>, +es: A.Ag, +p: A.Ag) -> List<&2, A.Ag>:
+  match fs:
+    case q <> rest:
+      A.AgDef{act.q.of.key(q), asb.elims.cat(es, A.AgEApp{A.aas.i.vis(), p, A.AgENil{}})} <> act.etu.projs(rest, es, p)
+    case _:
+      Nil{}
+
+def act.etu.len.ok(+xs: List<&2, A.Ag>, +nf: Nat) -> List<&2, A.Ag>:
+  Bool.pick(List<&2, A.Ag>, Nat.is_eq(List.length(&2, A.Ag, xs), nf), xs, [A.AgNone{}])
+
+def act.etu.fields.of(r: ActRec, +p: A.Ag, +nf: Nat) -> List<&2, A.Ag>:
+  match r:
+    case ActRec{fs, +es, True{}}:
+      act.etu.len.ok(act.etu.projs(fs, es, p), nf)
+    case _:
+      [A.AgNone{}]
+
+def act.etu.dom(m: Maybe<&2, A.Ag>) -> A.Ag:
+  match m:
+    case Some{d}:
+      d
+    case None{}:
+      A.AgNone{}
+
+# the fields a split puts in place of the term it splits (a parameter)
+def act.etu.fields(m: Maybe<&2, A.Ag>, +nf: Nat, +doms: List<&2, A.Ag>, +n: Nat, +unf: Map<&2, ActCopy>, +tab: Map<&2, ActSym>) -> List<&2, A.Ag>:
+  match m:
+    case Some{A.AgVar{+vi, x, A.AgENil{}}}:
+      act.etu.fields.of(act.etu.rec(8n, act.etu.dom(asb.nth(Nat.sub(Nat.sub(n, 1n), vi), doms)), tab, unf), A.AgVar{vi, x, A.AgENil{}}, nf)
+    case _:
+      [A.AgNone{}]
+
+def act.etu.at.k(+k: Nat, +nf: Nat, +terms: List<&2, A.Ag>, +doms: List<&2, A.Ag>, +n: Nat, +unf: Map<&2, ActCopy>, +tab: Map<&2, ActSym>) -> List<&2, A.Ag>:
+  List.append(&2, A.Ag, List.take(&2, A.Ag, terms, k), List.append(&2, A.Ag, act.etu.fields(asb.nth(k, terms), nf, doms, n, unf, tab), List.drop(&2, A.Ag, terms, 1n+k)))
+
+def act.etu.ok(ts: List<&2, A.Ag>) -> Bool:
+  match ts:
+    case Nil{}:
+      True{}
+    case A.AgNone{} <> t:
+      False{}
+    case h <> t:
+      act.etu.ok(t)
+
+def act.etu.done.ok(ok: Bool, +n: Nat, body: A.Ag, +terms: List<&2, A.Ag>) -> Maybe<&2, ActCopy>:
+  match ok:
+    case True{}:
+      Some{ActCopy{n, asb.subst(body, 0n, List.reverse(&2, A.Ag, terms), List.length(&2, A.Ag, terms))}}
+    case False{}:
+      None{}
+
+def act.etu.done(split: Bool, +n: Nat, body: A.Ag, +terms: List<&2, A.Ag>) -> Maybe<&2, ActCopy>:
+  match split:
+    case True{}:
+      act.etu.done.ok(act.etu.ok(terms), n, body, terms)
+    case False{}:
+      None{}
+
+def act.etu.tree(fuel: Nat, tree: A.Ag, +terms: List<&2, A.Ag>, +doms: List<&2, A.Ag>, +n: Nat, split: Bool, +unf: Map<&2, ActCopy>, +tab: Map<&2, ActSym>) -> Maybe<&2, ActCopy>:
+  match fuel tree:
+    case 1n+f A.AgCase{i, +k, A.AgBranches{False{}, A.AgBEnd{}, A.AgBr{cq, +nf, sub, A.AgBEnd{}}, A.AgBEnd{}, A.AgNone{}}}:
+      act.etu.tree(f, sub, act.etu.at.k(k, nf, terms, doms, n, unf, tab), doms, n, True{}, unf, tab)
+    case f A.AgDone{xs, body}:
+      act.etu.done(split, n, body, terms)
+    case _ _:
+      None{}
+
+# the parameters' terms: var n-1 (the first) ... var 0
+def act.etu.init(k: Nat) -> List<&2, A.Ag>:
+  match k:
+    case 0n:
+      Nil{}
+    case 1n+(+p):
+      A.AgVar{p, S.b("x"), A.AgENil{}} <> act.etu.init(p)
+
+# the variables, among n parameters, of the dependent binders at positions ps
+def act.etu.vs(ps: List<&2, Nat>, +n: Nat) -> List<&2, A.Ag>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case p <> t:
+      A.AgVar{Nat.sub(Nat.sub(n, 1n), p), S.b("x"), A.AgENil{}} <> act.etu.vs(t, n)
+
+def act.etu.dep(d: Bool, +j: Nat, deps: List<&2, Nat>) -> List<&2, Nat>:
+  match d:
+    case True{}:
+      j <> deps
+    case False{}:
+      deps
+
+# each Pi's domain in the scope of all n parameters (a non-dependent Pi
+# binds no variable, so each domain is renamed, not shifted)
+def act.etu.doms(t: A.Ag, +j: Nat, +n: Nat, +deps: List<&2, Nat>) -> List<&2, A.Ag>:
+  match t:
+    case A.AgEl{s, x}:
+      act.etu.doms(x, j, n, deps)
+    case A.AgPi{i, x, a, +d, b}:
+      asb.subst(a, 0n, act.etu.vs(deps, n), List.length(&2, Nat, deps)) <> act.etu.doms(b, 1n+j, n, act.etu.dep(d, j, deps))
+    case _:
+      Nil{}
+
+def act.etu.go(skip: Bool, +n: Nat, +ty: A.Ag, tree: A.Ag, +unf: Map<&2, ActCopy>, +tab: Map<&2, ActSym>) -> Maybe<&2, ActCopy>:
+  match skip:
+    case True{}:
+      None{}
+    case False{}:
+      act.etu.tree(64n, tree, act.etu.init(n), act.etu.doms(ty, 0n, n, Nil{}), n, False{}, unf, tab)
+
+# a function's eta unfolding (not a projection, a copy or a type-valued one)
+def act.etu.of(d: A.AgDecl, +unf: Map<&2, ActCopy>, +tab: Map<&2, ActSym>) -> Maybe<&2, ActCopy>:
+  match d:
+    case A.AgDecl{q, qn, md, f, l, l0, l1, k, m, +fl, lang, +ty, A.AgDFun{A.AgPrNone{}, r, w, e, t, mu, cls, tree}}:
+      act.etu.go(Bool.or(act.flag(A.AkCopy{}, fl), act.ends.sort(ty)), act.cls.arity(cls), ty, tree, unf, tab)
+    case _:
+      None{}
+
+# a copattern definition's field clauses into the unfoldings (see
+# act.cop.key): a tree that splits its result by copatterns first, each
+# field a leaf (a field taking more patterns has none)
+def act.cop.brs(+dq: A.AgQ, brs: A.Ag, u: Map<&2, ActCopy>) -> Map<&2, ActCopy>:
+  match brs:
+    case A.AgBr{fq, k, A.AgDone{xs, body}, rest}:
+      act.cop.brs(dq, rest, Map.set(&2, ActCopy, u, act.cop.key(dq, fq), ActCopy{act.vars.len(xs), body}))
+    case A.AgBr{fq, k, t, rest}:
+      act.cop.brs(dq, rest, u)
+    case _:
+      u
+
+def act.cop.add(d: A.AgDecl, unf: Map<&2, ActCopy>) -> Map<&2, ActCopy>:
+  match d:
+    case A.AgDecl{q, qn, md, f, l, l0, l1, k, m, fl, lang, ty, A.AgDFun{p, r, w, e, t, mu, cls, A.AgCase{i, n, A.AgBranches{True{}, brs, eta, lits, ca}}}}:
+      act.cop.brs(q, brs, unf)
+    case _:
+      unf
+
+# A record field's projection, for the quantity pass's destructuring
+# (ToBend/Copy.bend): its record's module and constructor (Bend names), the
+# field's index and the field count; ok False for any other definition.
+type ActPj is Data:
+  ActPj{cmod: List<&2, U32>, ctor: List<&2, U32>, i: Nat, k: Nat, ok: Bool}
+
+def act.pj.rec(s: ActSym, +key: String) -> ActPj:
+  match s:
+    case ActSym{m, n, A.AkRecord{}, ms, ar, b, +fs, c, cp}:
+      ActPj{m, c, act.key.pos(key, fs), List.length(&2, String, fs), True{}}
+    case _:
+      ActPj{Nil{}, Nil{}, 0n, 0n, False{}}
+
+def act.pj.of(d: A.AgDecl, +tab: Map<&2, ActSym>) -> ActPj:
+  match d:
+    case A.AgDecl{+q, qn, md, f, l, l0, l1, k, m, fl, lang, ty, A.AgDFun{A.AgPrOf{Some{r}, o, ix}, rs, w, e, t, mu, cls, tree}}:
+      act.pj.rec(act.sym.got(Map.get(ActSym, act.sym0(), tab, act.key(r))), act.key(q))
+    case _:
+      ActPj{Nil{}, Nil{}, 0n, 0n, False{}}
 
 # The quantity pass's modes put back into a symbol --------------------------------
 

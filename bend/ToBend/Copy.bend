@@ -58,6 +58,42 @@ def tcp.uses(+x: List<&2, U32>, t: T.Bt) -> Nat:
     case _:
       0n
 
+# the uses of x in t, those at a variable's arguments (mode unknown) counted
+# as live: a parameter falls to erased only when it has none
+def tcp.uses.unk(+x: List<&2, U32>, t: T.Bt) -> Nat:
+  match t:
+    case T.BtRw{e, p, b}:
+      Nat.add(tcp.uses.unk(x, e), tcp.uses.unk(x, b))
+    case T.BtTplArg{a}:
+      tcp.uses.unk(x, a)
+    case T.BtLet{y, v, b}:
+      Nat.add(tcp.uses.unk(x, v), tcp.uses.unk(x, b))
+    case T.BtVar{y}:
+      Bool.pick(Nat, S.eq(x, y), 1n, 0n)
+    case T.BtApp{f, a}:
+      Nat.add(tcp.uses.unk(x, f), tcp.uses.unk(x, a))
+    case T.BtLam{m, +y, b}:
+      Bool.pick(Nat, S.eq(x, y), 0n, tcp.uses.unk(x, b))
+    case T.BtCon{c, a}:
+      tcp.uses.unk(x, a)
+    case T.BtSucc{a}:
+      tcp.uses.unk(x, a)
+    case T.BtAnn{a, ty}:
+      tcp.uses.unk(x, a)
+    case T.BtMatch{xs, cs}:
+      Nat.add(tcp.uses.unk(x, xs), tcp.uses.unk(x, cs))
+    case T.BtCase{p, b, rest}:
+      tcp.max(tcp.uses.unk(x, b), tcp.uses.unk(x, rest))
+    case T.BtExpr{e}:
+      tcp.uses.unk(x, e)
+    case T.BtArgs{a, rest}:
+      Nat.add(tcp.uses.unk(x, a), tcp.uses.unk(x, rest))
+    case T.BtDead{T.BtDead{a}}:
+      tcp.uses.unk(x, a)
+    case _:
+      0n
+
+
 def tcp.mem(+x: List<&2, U32>, xs: List<&2, List<&2, U32>>) -> Bool:
   match xs:
     case Nil{}:
@@ -67,6 +103,11 @@ def tcp.mem(+x: List<&2, U32>, xs: List<&2, List<&2, U32>>) -> Bool:
 
 # whether x occurs inside a template argument: a template argument must be
 # closed, so a parameter passed there must be a template itself
+# (at a live place only: in a dead one, a Pi, an equation or an argument at
+# an erased parameter, Bend takes any variable there, even an erased one, so
+# `P =[ f ]⇒ Q = P ⇒ (Q on f)` keeps f erased and `_on_`'s template stops
+# there instead of reaching every Congruent₁ f with a variable f); a
+# variable's argument, whose mode is not known (BtDead twice), counts as live
 def tcp.in.tpl(+x: List<&2, U32>, t: T.Bt, +under: Bool) -> Bool:
   match t:
     case T.BtRw{e, p, b}:
@@ -87,8 +128,10 @@ def tcp.in.tpl(+x: List<&2, U32>, t: T.Bt, +under: Bool) -> Bool:
       tcp.in.tpl(x, a, under)
     case T.BtAnn{a, ty}:
       tcp.in.tpl(x, a, under)
-    case T.BtDead{a}:
+    case T.BtDead{T.BtDead{a}}:
       tcp.in.tpl(x, a, under)
+    case T.BtDead{a}:
+      Bool.and(under, tcp.in.tpl(x, a, under))
     case T.BtMatch{xs, cs}:
       tcp.in.tpl(x, cs, under)
     case T.BtCase{p, b, rest}:
@@ -207,19 +250,73 @@ def tcp.data.of(hit: Bool, it: T.BItem) -> Maybe<&2, T.BItem>:
     case False{}:
       None{}
 
-# The item with its type parameter v declared Data (the gate's repair when
-# a call passes v where Data is expected), or None when v is not one.
-def tcp.data.raise(it: T.BItem, +v: List<&2, U32>) -> Maybe<&2, T.BItem>:
-  match it:
-    case T.BiDef{n, +ps, ret, body, doc}:
-      tcp.data.of(tcp.has.type(ps, v), T.BiDef{n, tcp.kinds.ps(ps, v <> Nil{}), ret, body, doc})
+# A point-free def's type parameters are its return type's Pis, bound by
+# the body's head lambdas (`_-[_]-_`'s eta1 … eta5): the return type with
+# the Pi whose lambda is v declared Data, and whether there was one.
+type TcpRet is Data:
+  TcpRet{ret: T.Bt, hit: Bool}
+
+def tcp.ret.put(+hit: Bool, pm: T.BMode, px: List<&2, U32>, dep: Bool, a: T.Bt, r: TcpRet) -> TcpRet:
+  match r:
+    case TcpRet{rb, h}:
+      TcpRet{T.BtPi{pm, px, dep, Bool.pick(T.Bt, hit, T.BtVar{S.b("Data")}, a), rb}, Bool.or(hit, h)}
+
+def tcp.ret.data(b: T.Bt, ret: T.Bt, +v: List<&2, U32>) -> TcpRet:
+  match b ret:
+    case T.BtLam{m, +x, bb} T.BtPi{pm, px, dep, T.BtType{}, rb}:
+      tcp.ret.put(S.eq(x, v), pm, px, dep, T.BtType{}, tcp.ret.data(bb, rb, v))
+    case T.BtLam{m, x, bb} T.BtPi{pm, px, dep, a, rb}:
+      tcp.ret.put(False{}, pm, px, dep, a, tcp.ret.data(bb, rb, v))
+    case T.BtExpr{e} ret:
+      tcp.ret.data(e, ret, v)
+    case _ ret:
+      TcpRet{ret, False{}}
+
+def tcp.data.ret(r: TcpRet, n: List<&2, U32>, ps: List<&2, T.BParam>, body: T.Bt, doc: List<&2, List<&2, U32>>) -> Maybe<&2, T.BItem>:
+  match r:
+    case TcpRet{ret, True{}}:
+      Some{T.BiDef{n, ps, ret, body, doc}}
     case _:
       None{}
 
-def tcp.mode.by(m: T.BMode, none: Bool, once: Bool, data: Bool) -> T.BMode:
+def tcp.data.or(hit: Bool, +it: T.BItem, r: TcpRet, n: List<&2, U32>, ps: List<&2, T.BParam>, body: T.Bt, doc: List<&2, List<&2, U32>>) -> Maybe<&2, T.BItem>:
+  match hit:
+    case True{}:
+      Some{it}
+    case False{}:
+      tcp.data.ret(r, n, ps, body, doc)
+
+# The item with its type parameter v declared Data (the gate's repair when
+# a call passes v where Data is expected), or None when v is not one; a
+# head lambda v of a point-free def has its return type's Pi raised instead.
+def tcp.data.raise(it: T.BItem, +v: List<&2, U32>) -> Maybe<&2, T.BItem>:
+  match it:
+    case T.BiDef{+n, +ps, +ret, +body, +doc}:
+      tcp.data.or(tcp.has.type(ps, v), T.BiDef{n, tcp.kinds.ps(ps, v <> Nil{}), ret, body, doc}, tcp.ret.data(body, ret, v), n, ps, body, doc)
+    case _:
+      None{}
+
+# a live parameter with no live use falls to erased: a reasoning chain's
+# points (`step-≈-⟩ x …` takes x explicitly, but only its type mentions it)
+# are then dead wherever they are passed, so a proof may repeat them
+def tcp.lower(m: T.BMode) -> T.BMode:
+  match m:
+    case T.BmLive{}:
+      T.BmErased{}
+    case m:
+      m
+
+def tcp.mode.low(m: T.BMode, low: Bool) -> T.BMode:
+  match low:
+    case True{}:
+      tcp.lower(m)
+    case False{}:
+      m
+
+def tcp.mode.by(m: T.BMode, none: Bool, once: Bool, data: Bool, low: Bool) -> T.BMode:
   match none once data:
     case True{} _ _:
-      m
+      tcp.mode.low(m, low)
     case False{} True{} _:
       T.BmLive{}
     case False{} False{} True{}:
@@ -227,7 +324,7 @@ def tcp.mode.by(m: T.BMode, none: Bool, once: Bool, data: Bool) -> T.BMode:
     case False{} False{} False{}:
       T.BmTpl{}
 
-def tcp.mode.of(m: T.BMode, +n: Nat, data: Bool, tpl: Bool) -> T.BMode:
+def tcp.mode.of(m: T.BMode, +n: Nat, data: Bool, tpl: Bool, low: Bool) -> T.BMode:
   match m tpl:
     case T.BmTpl{} _:
       T.BmTpl{}
@@ -236,14 +333,14 @@ def tcp.mode.of(m: T.BMode, +n: Nat, data: Bool, tpl: Bool) -> T.BMode:
     case T.BmCopy{} False{}:
       T.BmCopy{}
     case m False{}:
-      tcp.mode.by(m, Nat.is_eq(n, 0n), Nat.is_lt(n, 2n), data)
+      tcp.mode.by(m, Nat.is_eq(n, 0n), Nat.is_lt(n, 2n), data, low)
 
-# a parameter's mode from its uses in the body (a mode only rises: erased,
-# live, then copied or a template)
+# a parameter's mode from its uses in the body (a mode rises: erased, live,
+# then copied or a template; a live one with no live use falls to erased)
 def tcp.param(p: T.BParam, +body: T.Bt, +datas: List<&2, List<&2, U32>>) -> T.BMode:
   match p:
     case T.BParam{m, +x, +ty}:
-      tcp.mode.of(m, tcp.uses(x, body), tcp.dataish(ty, datas), tcp.in.tpl(x, body, False{}))
+      tcp.mode.of(m, tcp.uses(x, body), tcp.dataish(ty, datas), tcp.in.tpl(x, body, False{}), Nat.is_eq(tcp.uses.unk(x, body), 0n))
 
 def tcp.params(ps: List<&2, T.BParam>, +body: T.Bt, +datas: List<&2, List<&2, U32>>) -> List<&2, T.BMode>:
   match ps:
@@ -298,6 +395,267 @@ def tcp.datas(its: List<&2, T.BItem>) -> List<&2, List<&2, U32>>:
       n <> tcp.datas(t)
     case i <> t:
       tcp.datas(t)
+
+# Destructuring ----------------------------------------------------------------
+#
+# A record parameter used live only through projections of distinct fields
+# (`partialSetoid` takes S's Carrier, _≈_ and isEquivalence; composing two
+# Funcs takes f's to and cong) is matched once instead, each projection
+# becoming its field's variable and any other (dead) mention the record
+# rebuilt: then it is used once, live, where Copy made it a template (a
+# record of functions cannot be +), and a template wants closed arguments,
+# so its callers' lambdas (Setoids' `_∘_ = λ f g → …`) and, through
+# `partialSetoid(~hom-setoid(~C, X, Y))`, every reasoning lemma's objects
+# had to be templates too.  Only a body that is one expression is
+# destructured (a match then starts it, in parameter order); a field used
+# live twice keeps the template.
+
+# a projection, by its name as a module prints it: the record's
+# constructor (alias-qualified), the field's index and the field count
+type TcpProj is Data:
+  TcpProj{ctor: List<&2, U32>, i: Nat, k: Nat}
+
+# the projections (by alias-qualified name) and the module's own alias
+# with its dot (its own names are printed bare)
+type TcpEnv is Data:
+  TcpEnv{pj: Map<&2, TcpProj>, here: List<&2, U32>}
+
+def tcp.pj.got(r: Map<&2, TcpProj> & TcpProj) -> TcpProj:
+  (m, p) = r
+  p
+
+def tcp.pj.has(r: Map<&2, TcpProj> & Bool) -> Bool:
+  (m, b) = r
+  b
+
+def tcp.pj.pick(hit: Bool, +f: List<&2, U32>, +pj: Map<&2, TcpProj>, +here: List<&2, U32>) -> TcpProj:
+  match hit:
+    case True{}:
+      tcp.pj.got(Map.get(TcpProj, TcpProj{Nil{}, 0n, 0n}, pj, S.str(f)))
+    case False{}:
+      tcp.pj.got(Map.get(TcpProj, TcpProj{Nil{}, 0n, 0n}, pj, S.str(List.append(&2, U32, here, f))))
+
+# the projection a callee is (k = 0 when none)
+def tcp.pj.of(+e: TcpEnv, +f: List<&2, U32>) -> TcpProj:
+  match e:
+    case TcpEnv{+pj, +here}:
+      tcp.pj.pick(tcp.pj.has(Map.has(&2, TcpProj, pj, S.str(f))), f, pj, here)
+
+# the variable an argument spine ends in (Nil when it ends otherwise)
+def tcp.last.var(a: T.Bt) -> List<&2, U32>:
+  match a:
+    case T.BtArgs{T.BtVar{x}, T.BtANil{}}:
+      x
+    case T.BtArgs{h, rest}:
+      tcp.last.var(rest)
+    case _:
+      Nil{}
+
+# the spine without its last argument
+def tcp.init.args(a: T.Bt) -> T.Bt:
+  match a:
+    case T.BtArgs{h, T.BtANil{}}:
+      T.BtANil{}
+    case T.BtArgs{h, rest}:
+      T.BtArgs{h, tcp.init.args(rest)}
+    case a:
+      a
+
+# whether f(a) projects x: the field's projection, else k = 0
+def tcp.proj.at(+e: TcpEnv, f: T.Bt, +a: T.Bt, +x: List<&2, U32>) -> TcpProj:
+  match f:
+    case T.BtVar{+fn}:
+      Bool.pick(TcpProj, S.eq(tcp.last.var(a), x), tcp.pj.of(e, fn), TcpProj{Nil{}, 0n, 0n})
+    case _:
+      TcpProj{Nil{}, 0n, 0n}
+
+# x's live uses: those that are not a projection's record, and the fields
+# its live projections take (with the record's constructor and size)
+type TcpPU is Data:
+  TcpPU{other: Nat, fs: List<&2, Nat>, ctor: List<&2, U32>, k: Nat}
+
+def tcp.pu0() -> TcpPU:
+  TcpPU{0n, Nil{}, Nil{}, 0n}
+
+def tcp.pu.ctor(+a: List<&2, U32>, +b: List<&2, U32>) -> List<&2, U32>:
+  Bool.pick(List<&2, U32>, Nat.is_eq(S.len(a), 0n), b, a)
+
+# a projection's arguments counted without its record (x, the last, once)
+def tcp.pu.less(u: TcpPU) -> TcpPU:
+  match u:
+    case TcpPU{o, fs, c, k}:
+      TcpPU{Nat.sub(o, 1n), fs, c, k}
+
+def tcp.pu.add(a: TcpPU, b: TcpPU) -> TcpPU:
+  match a b:
+    case TcpPU{o1, f1, +c1, k1} TcpPU{o2, f2, +c2, k2}:
+      TcpPU{Nat.add(o1, o2), List.append(&2, Nat, f1, f2), tcp.pu.ctor(c1, c2), tcp.max(k1, k2)}
+
+# whether t is a projection of x (the field's projection, else k = 0); the
+# walks below take it as a parameter (Bend has no mutual recursion)
+def tcp.proj.t(+e: TcpEnv, t: T.Bt, +x: List<&2, U32>) -> TcpProj:
+  match t:
+    case T.BtApp{f, +a}:
+      tcp.proj.at(e, f, a, x)
+    case _:
+      TcpProj{Nil{}, 0n, 0n}
+
+def tcp.pu(+x: List<&2, U32>, t: T.Bt, +e: TcpEnv, p: TcpProj) -> TcpPU:
+  match t p:
+    case T.BtApp{f, +a} TcpProj{c, i, 1n+k}:
+      tcp.pu.add(TcpPU{0n, [i], c, 1n+k}, tcp.pu.less(tcp.pu(x, a, e, tcp.proj.t(e, a, x))))
+    case T.BtApp{+f, +a} q:
+      tcp.pu.add(tcp.pu(x, f, e, tcp.proj.t(e, f, x)), tcp.pu(x, a, e, tcp.proj.t(e, a, x)))
+    case T.BtRw{r, p2, +b} q:
+      tcp.pu(x, b, e, tcp.proj.t(e, b, x))
+    case T.BtLet{y, +v, +b} q:
+      tcp.pu.add(tcp.pu(x, v, e, tcp.proj.t(e, v, x)), tcp.pu(x, b, e, tcp.proj.t(e, b, x)))
+    case T.BtVar{y} q:
+      TcpPU{Bool.pick(Nat, S.eq(x, y), 1n, 0n), Nil{}, Nil{}, 0n}
+    case T.BtTplArg{+a} q:
+      tcp.pu(x, a, e, tcp.proj.t(e, a, x))
+    case T.BtLam{m, +y, +b} q:
+      Bool.pick(TcpPU, S.eq(x, y), tcp.pu0(), tcp.pu(x, b, e, tcp.proj.t(e, b, x)))
+    case T.BtCon{c2, +a} q:
+      tcp.pu(x, a, e, tcp.proj.t(e, a, x))
+    case T.BtSucc{+a} q:
+      tcp.pu(x, a, e, tcp.proj.t(e, a, x))
+    case T.BtAnn{+a, ty} q:
+      tcp.pu(x, a, e, tcp.proj.t(e, a, x))
+    case T.BtMatch{+xs, +cs} q:
+      tcp.pu.add(tcp.pu(x, xs, e, tcp.proj.t(e, xs, x)), tcp.pu(x, cs, e, tcp.proj.t(e, cs, x)))
+    case T.BtCase{p2, +b, +rest} q:
+      tcp.pu.add(tcp.pu(x, b, e, tcp.proj.t(e, b, x)), tcp.pu(x, rest, e, tcp.proj.t(e, rest, x)))
+    case T.BtExpr{+b} q:
+      tcp.pu(x, b, e, tcp.proj.t(e, b, x))
+    case T.BtArgs{+a, +rest} q:
+      tcp.pu.add(tcp.pu(x, a, e, tcp.proj.t(e, a, x)), tcp.pu(x, rest, e, tcp.proj.t(e, rest, x)))
+    case _ q:
+      tcp.pu0()
+
+def tcp.nat.mem(+n: Nat, xs: List<&2, Nat>) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case h <> t:
+      Bool.or(Nat.is_eq(h, n), tcp.nat.mem(n, t))
+
+def tcp.distinct(xs: List<&2, Nat>) -> Bool:
+  match xs:
+    case Nil{}:
+      True{}
+    case +h <> +t:
+      Bool.and(Bool.not(tcp.nat.mem(h, t)), tcp.distinct(t))
+
+# whether the uses call for destructuring: two live projections at least,
+# of distinct fields, and no other live use
+def tcp.pu.ok(u: TcpPU) -> Bool:
+  match u:
+    case TcpPU{o, +fs, c, k}:
+      Bool.and(Nat.is_eq(o, 0n), Bool.and(Bool.not(Nat.is_lt(List.length(&2, Nat, fs), 2n)), tcp.distinct(fs)))
+
+def tcp.nth.name(ns: List<&2, List<&2, U32>>, +i: Nat) -> List<&2, U32>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case h <> t:
+      Bool.pick(List<&2, U32>, Nat.is_eq(i, 0n), h, tcp.nth.name(t, Nat.sub(i, 1n)))
+
+def tcp.vars(ns: List<&2, List<&2, U32>>) -> T.Bt:
+  match ns:
+    case Nil{}:
+      T.BtANil{}
+    case n <> t:
+      T.BtArgs{T.BtVar{n}, tcp.vars(t)}
+
+# x's field variables: x_f0, x_f1, ...
+def tcp.fnames(k: Nat, +x: List<&2, U32>, +j: Nat) -> List<&2, List<&2, U32>>:
+  match k:
+    case 0n:
+      Nil{}
+    case 1n+p:
+      List.append(&2, U32, x, S.b("_f" ++ Nat.show(j))) <> tcp.fnames(p, x, 1n+j)
+
+# t with x's projections its field variables, and x itself the record
+# rebuilt from them (only dead mentions are left); p: whether t projects x
+def tcp.pr(+x: List<&2, U32>, t: T.Bt, +e: TcpEnv, +ns: List<&2, List<&2, U32>>, +con: T.Bt, p: TcpProj) -> T.Bt:
+  match t p:
+    case T.BtApp{f, a} TcpProj{c, +i, 1n+k}:
+      T.BtVar{tcp.nth.name(ns, i)}
+    case T.BtApp{+f, +a} q:
+      T.BtApp{tcp.pr(x, f, e, ns, con, tcp.proj.t(e, f, x)), tcp.pr(x, a, e, ns, con, tcp.proj.t(e, a, x))}
+    case T.BtRw{+r, +p2, +b} q:
+      T.BtRw{tcp.pr(x, r, e, ns, con, tcp.proj.t(e, r, x)), tcp.pr(x, p2, e, ns, con, tcp.proj.t(e, p2, x)), tcp.pr(x, b, e, ns, con, tcp.proj.t(e, b, x))}
+    case T.BtLet{y, +v, +b} q:
+      T.BtLet{y, tcp.pr(x, v, e, ns, con, tcp.proj.t(e, v, x)), tcp.pr(x, b, e, ns, con, tcp.proj.t(e, b, x))}
+    case T.BtVar{+y} q:
+      Bool.pick(T.Bt, S.eq(x, y), con, T.BtVar{y})
+    case T.BtTplArg{+a} q:
+      T.BtTplArg{tcp.pr(x, a, e, ns, con, tcp.proj.t(e, a, x))}
+    case T.BtLam{m, y, +b} q:
+      T.BtLam{m, y, tcp.pr(x, b, e, ns, con, tcp.proj.t(e, b, x))}
+    case T.BtPi{m, y, d, +a, +b} q:
+      T.BtPi{m, y, d, tcp.pr(x, a, e, ns, con, tcp.proj.t(e, a, x)), tcp.pr(x, b, e, ns, con, tcp.proj.t(e, b, x))}
+    case T.BtCon{c2, +a} q:
+      T.BtCon{c2, tcp.pr(x, a, e, ns, con, tcp.proj.t(e, a, x))}
+    case T.BtTyApp{n, +a} q:
+      T.BtTyApp{n, tcp.pr(x, a, e, ns, con, tcp.proj.t(e, a, x))}
+    case T.BtEq{+ty, +a, +b} q:
+      T.BtEq{tcp.pr(x, ty, e, ns, con, tcp.proj.t(e, ty, x)), tcp.pr(x, a, e, ns, con, tcp.proj.t(e, a, x)), tcp.pr(x, b, e, ns, con, tcp.proj.t(e, b, x))}
+    case T.BtSucc{+a} q:
+      T.BtSucc{tcp.pr(x, a, e, ns, con, tcp.proj.t(e, a, x))}
+    case T.BtAnn{+a, +ty} q:
+      T.BtAnn{tcp.pr(x, a, e, ns, con, tcp.proj.t(e, a, x)), tcp.pr(x, ty, e, ns, con, tcp.proj.t(e, ty, x))}
+    case T.BtDead{+a} q:
+      T.BtDead{tcp.pr(x, a, e, ns, con, tcp.proj.t(e, a, x))}
+    case T.BtMatch{+xs, +cs} q:
+      T.BtMatch{tcp.pr(x, xs, e, ns, con, tcp.proj.t(e, xs, x)), tcp.pr(x, cs, e, ns, con, tcp.proj.t(e, cs, x))}
+    case T.BtCase{p2, +b, +rest} q:
+      T.BtCase{p2, tcp.pr(x, b, e, ns, con, tcp.proj.t(e, b, x)), tcp.pr(x, rest, e, ns, con, tcp.proj.t(e, rest, x))}
+    case T.BtExpr{+b} q:
+      T.BtExpr{tcp.pr(x, b, e, ns, con, tcp.proj.t(e, b, x))}
+    case T.BtArgs{+a, +rest} q:
+      T.BtArgs{tcp.pr(x, a, e, ns, con, tcp.proj.t(e, a, x)), tcp.pr(x, rest, e, ns, con, tcp.proj.t(e, rest, x))}
+    case t q:
+      t
+
+# the record's constructor as this module prints it
+def tcp.ctor.here(+c: List<&2, U32>, +e: TcpEnv) -> List<&2, U32>:
+  match e:
+    case TcpEnv{pj, +here}:
+      S.strip(c, here)
+
+def tcp.wrap.of(u: TcpPU, +x: List<&2, U32>, +b: T.Bt, +e: TcpEnv) -> T.Bt:
+  match u:
+    case TcpPU{o, fs, +c, +k}:
+      +ns = tcp.fnames(k, x, 0n)
+      +con : T.Bt = T.BtCon{tcp.ctor.here(c, e), tcp.vars(ns)}
+      T.BtMatch{T.BtArgs{T.BtVar{x}, T.BtANil{}}, T.BtCase{T.BtArgs{con, T.BtANil{}}, tcp.pr(x, b, e, ns, con, tcp.proj.t(e, b, x)), T.BtCEnd{}}}
+
+def tcp.wrap.if(ok: Bool, +u: TcpPU, +x: List<&2, U32>, +b: T.Bt, +e: TcpEnv) -> T.Bt:
+  match ok:
+    case True{}:
+      tcp.wrap.of(u, x, b, e)
+    case False{}:
+      b
+
+# the parameters from the last: the later ones' matches go innermost
+def tcp.destr.ps(ps: List<&2, T.BParam>, +b: T.Bt, +e: TcpEnv) -> T.Bt:
+  match ps:
+    case Nil{}:
+      b
+    case T.BParam{m, +x, ty} <> t:
+      +inner = tcp.destr.ps(t, b, e)
+      +u = tcp.pu(x, inner, e, tcp.proj.t(e, inner, x))
+      tcp.wrap.if(tcp.pu.ok(u), u, x, inner, e)
+
+# a def whose body is one expression, its record parameters destructured
+def tcp.destr(it: T.BItem, +e: TcpEnv) -> T.BItem:
+  match it:
+    case T.BiDef{n, +ps, ret, T.BtExpr{b}, doc}:
+      T.BiDef{n, ps, ret, tcp.destr.ps(ps, T.BtExpr{b}, e), doc}
+    case it:
+      it
 
 # Marking ----------------------------------------------------------------------
 
@@ -377,12 +735,31 @@ def tcp.is.tpl(p: T.BParam) -> Bool:
 def tcp.tpl.first(+ps: List<&2, T.BParam>) -> List<&2, T.BParam>:
   List.append(&2, T.BParam, List.filter(~T.BParam, ~(p => tcp.is.tpl(p)), ps), List.filter(~T.BParam, ~(p => Bool.not(tcp.is.tpl(p))), ps))
 
+# A return type's Pi raised to live where the body's head lambda for it uses
+# its variable live (a lambda takes its Pi's mode): an erased Pi over an
+# opaque type, `_∼ᵒ_ = flip _∼_`, whose y x the relation takes live.
+def tcp.ret.mode(m: T.BMode, used: Bool) -> T.BMode:
+  match m used:
+    case T.BmErased{} True{}:
+      T.BmLive{}
+    case m _:
+      m
+
+def tcp.ret.live(b: T.Bt, ret: T.Bt) -> T.Bt:
+  match b ret:
+    case T.BtLam{m, +x, +bb} T.BtPi{pm, px, dep, a, rb}:
+      T.BtPi{tcp.ret.mode(pm, Bool.not(Nat.is_eq(tcp.uses(x, bb), 0n))), px, dep, a, tcp.ret.live(bb, rb)}
+    case T.BtExpr{e} ret:
+      tcp.ret.live(e, ret)
+    case _ ret:
+      ret
+
 # A def with its header's modes set (templates first) and its lambdas and
 # pattern variables marked.
 def tcp.finish(it: T.BItem, ms: List<&2, T.BMode>) -> T.BItem:
   match it:
-    case T.BiDef{n, ps, ret, body, doc}:
-      tcp.kinds(T.BiDef{n, tcp.tpl.first(tcp.set.modes(ps, ms)), ret, tcp.mark(body), doc})
+    case T.BiDef{n, ps, ret, +body, doc}:
+      tcp.kinds(T.BiDef{n, tcp.tpl.first(tcp.set.modes(ps, ms)), tcp.ret.live(body, ret), tcp.mark(body), doc})
     case it:
       it
 

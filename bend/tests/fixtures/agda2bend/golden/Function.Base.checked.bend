@@ -15,7 +15,7 @@ def const(-A: Type, -B: Type, x: A) -> B -> A:
 
 # Agda: Function.Base.constᵣ
 # Base.agda, line 35
-def const_u1d63(-A: Type, -B: Type, x: A) -> B -> B:
+def const_u1d63(-A: Type, -B: Type, -x: A) -> B -> B:
   eta1 => id(B, eta1)
 
 # Agda: Function.Base._∘_
@@ -42,6 +42,11 @@ def dollar(-A: Type, -B: A -> Type, x: @x:A -> B(x), x_9: A) -> B(x_9):
 # Base.agda, line 84
 def bar_gt(-A: Type, -B: A -> Type) -> @a:A -> (@a_5:A -> B(a_5)) -> B(a):
   y => x => x(y)
+
+# Agda: Function.Base._ˢ_
+# Base.agda, line 93
+def u02e2(-A: Data, -B: A -> Type, -C: @x:A -> B(x) -> Type, x: @x:A -> @y:B(x) -> C(x, y), g: @x:A -> B(x)) -> @x:A -> C(x, g(x)):
+  +x_8 => x(x_8, g(x_8))
 
 # Agda: Function.Base._$-
 # Base.agda, line 102
@@ -102,3 +107,58 @@ def u220b(-A: Type, x: A) -> A:
 # Base.agda, line 187
 def it(-A: Type, x: A) -> A:
   x
+
+# Agda: Function.Base._-⟪_⟫-_
+# Base.agda, line 200
+def u27ea_u27eb(-A: Data, -B: Data, -C: Type, -D: Type, -E: Type, x: A -> B -> C, x_21: C -> D -> E, x_22: A -> B -> D) -> A -> B -> E:
+  +x_13 => +y => x_21(x(x_13, y), x_22(x_13, y))
+
+# Agda: Function.Base._-⟪_∣
+# Base.agda, line 205
+def u27ea_div(-A: Data, -B: Data, -C: Type, -D: Type, x: A -> B -> C, x_17: C -> B -> D) -> A -> B -> D:
+  u27ea_u27eb(A, B, C, B, D, x, x_17, eta1 => const_u1d63(A, B, eta1))
+
+# Agda: Function.Base.∣_⟫-_
+# Base.agda, line 210
+def div_u27eb(-A: Data, -C: Type, -D: Type, -B: Data, x: A -> C -> D, x_17: A -> B -> C) -> A -> B -> D:
+  u27ea_u27eb(A, B, A, C, D, eta1 => const(A, B, eta1), x, x_17)
+
+# Agda: Function.Base._-⟨_∣
+# Base.agda, line 215
+def la_div(-A: Data, -C: Type, -B: Data, -D: Type, x: A -> C, x_17: C -> B -> D) -> A -> B -> D:
+  u27ea_div(A, B, C, D, comp_2(A, v => B, x_10 => x_11 => A, x_10 => y => x_12 => C, x_10 => y => x, eta1 => const(A, B, eta1)), x_17)
+
+# Agda: Function.Base.∣_⟩-_
+# Base.agda, line 220
+def div_ra(-A: Data, -C: Type, -D: Type, -B: Data, x: A -> C -> D, x_17: B -> C) -> A -> B -> D:
+  div_u27eb(A, C, D, B, x, comp_2(A, v => B, x_10 => x_11 => B, x_10 => y => x_12 => C, x_10 => y => x_17, eta1 => const_u1d63(A, B, eta1)))
+
+# Agda: Function.Base._-⟪_⟩-_
+# Base.agda, line 225
+def u27ea_ra(-A: Data, -B: Data, -C: Type, -D: Type, -E: Type, x: A -> B -> C, x_21: C -> D -> E, x_22: B -> D) -> A -> B -> E:
+  u27ea_u27eb(A, B, C, D, E, x, x_21, div_ra(A, D, D, B, eta1 => const_u1d63(A, D, eta1), x_22))
+
+# Agda: Function.Base._-⟨_⟫-_
+# Base.agda, line 230
+def la_u27eb(-A: Data, -C: Type, -D: Type, -E: Type, -B: Data, x: A -> C, x_21: C -> D -> E, x_22: A -> B -> D) -> A -> B -> E:
+  u27ea_u27eb(A, B, C, D, E, la_div(A, C, B, C, x, eta1 => const(C, B, eta1)), x_21, x_22)
+
+# Agda: Function.Base._-⟨_⟩-_
+# Base.agda, line 235
+def la_ra_2(-A: Data, -C: Type, -D: Type, -E: Type, -B: Data, x: A -> C, x_21: C -> D -> E, x_22: B -> D) -> A -> B -> E:
+  u27ea_u27eb(A, B, C, D, E, la_div(A, C, B, C, x, eta1 => const(C, B, eta1)), x_21, div_ra(A, D, D, B, eta1 => const_u1d63(A, D, eta1), x_22))
+
+# Agda: Function.Base._on₂_
+# Base.agda, line 240
+def on_2(~C: Type, ~A: Data, ~B: Data, ~x_17: A -> B -> C, -D: Type, x: C -> C -> D) -> A -> B -> D:
+  u27ea_u27eb(A, B, C, C, D, x_17, x, x_17)
+
+# Agda: Function.Base._on_
+# Base.agda, line 245
+def on(~B: Type, ~A: Data, ~x_13: A -> B, -C: Type, x: B -> B -> C) -> A -> A -> C:
+  la_ra_2(A, B, B, C, A, x_13, x, x_13)
+
+# Agda: Function.Base._-[_]-_
+# Base.agda, line 257
+def lb_rb() -> @-A:Data -> @-B:Data -> @-C:Type -> @-D:Type -> @-E:Type -> (A -> B -> C) -> (C -> D -> E) -> (A -> B -> D) -> A -> B -> E:
+  eta1 => eta2 => eta3 => eta4 => eta5 => eta6 => eta7 => eta8 => u27ea_u27eb(eta1, eta2, eta3, eta4, eta5, eta6, eta7, eta8)
