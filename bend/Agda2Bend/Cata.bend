@@ -454,18 +454,30 @@ def act.hint.of(+b: List<&2, U32>) -> List<&2, U32>:
 def act.hint(+x: List<&2, U32>) -> List<&2, U32>:
   act.hint.of(S.b(N.tnm.part(S.str(x))))
 
-def act.fresh.of(clash: Bool, +b: List<&2, U32>, +n: Nat) -> List<&2, U32>:
+def act.nth.name(+b: List<&2, U32>, +n: Nat) -> List<&2, U32>:
+  List.append(&2, U32, b, 95 <> S.b(Nat.show(n)))
+
+# b_n, or b_(n+1) and so on while that one is taken too (clash: b_n is)
+def act.fresh.try(fuel: Nat, clash: Bool, +b: List<&2, U32>, +ns: List<&2, List<&2, U32>>, +n: Nat) -> List<&2, U32>:
+  match fuel clash:
+    case 1n+f True{}:
+      act.fresh.try(f, act.used(act.nth.name(b, 1n+n), ns), b, ns, 1n+n)
+    case _ _:
+      act.nth.name(b, n)
+
+def act.fresh.of(clash: Bool, +b: List<&2, U32>, +n: Nat, +ns: List<&2, List<&2, U32>>) -> List<&2, U32>:
   match clash:
     case True{}:
-      List.append(&2, U32, b, 95 <> S.b(Nat.show(n)))
+      act.fresh.try(64n, act.used(act.nth.name(b, n), ns), b, ns, n)
     case False{}:
       b
 
 def act.fresh.go(+b: List<&2, U32>, +ctx: List<&2, T.Bt>) -> List<&2, U32>:
-  act.fresh.of(act.used(b, act.names(ctx)), b, List.length(&2, T.Bt, ctx))
+  +ns = act.names(ctx)
+  act.fresh.of(act.used(b, ns), b, List.length(&2, T.Bt, ctx), ns)
 
 def act.fresh.in.of(+b: List<&2, U32>, +ns: List<&2, List<&2, U32>>, +n: Nat) -> List<&2, U32>:
-  act.fresh.of(act.used(b, ns), b, n)
+  act.fresh.of(act.used(b, ns), b, n, ns)
 
 
 # A name for a binder from Agda's hint, distinct from every name in scope
