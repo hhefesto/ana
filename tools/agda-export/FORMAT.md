@@ -411,6 +411,10 @@ about each definition's parameters. It writes no `.sexp` file and no
 lines with the `def`s on the name's NameId. It does not change the main
 format.
 
+A sidecar is written under a temporary name of the writing process's own
+(`.part.PID`) and then renamed. So a sidecar that exists is complete, and
+two runs can write the same one at once.
+
     (erasure-module STRING (version 1)
                     (sources (erased STRING) (unused STRING)) (evaluation lazy)
                     (entries N) (args N) (erased N) (unused N) (failed N))

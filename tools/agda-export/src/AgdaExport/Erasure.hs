@@ -48,6 +48,7 @@ import Numeric (showFFloat)
 import System.Directory (createDirectoryIfMissing, doesFileExist, renameFile)
 import System.FilePath ((</>))
 import System.IO
+import System.Posix.Process (getProcessID)
 
 import Agda.Compiler.Common (curIF, sortDefs)
 import Agda.Compiler.ToTreeless (toTreeless)
@@ -90,8 +91,11 @@ erasureModule :: Opts -> TopLevelModuleName -> TCM ModStats
 erasureModule opts tlm = do
   let dir = maybe "." id (optDir opts)
       out = erasureFile dir tlm
-      tmp = out ++ ".part"
       name = T.pack (prettyShow tlm)
+  -- the temporary name is the process's own: two runs may write the same
+  -- sidecar at once (byte-identical; the last rename wins)
+  pid <- liftIO getProcessID
+  let tmp = out ++ ".part." ++ show pid
   t0 <- liftIO getMonotonicTime
   i <- curIF
   let defs = map snd (sortDefs (iSignature i ^. sigDefinitions))
