@@ -2355,10 +2355,26 @@ def act.unf.d(cp: Bool, srt: Bool, d: A.AgD) -> Maybe<&2, ActCopy>:
     case _ _ _:
       None{}
 
-def act.unf.of(d: A.AgDecl) -> Maybe<&2, ActCopy>:
+# whether a TYPE ends in a sort once the type-valued definitions it ends in
+# are opened (`_≉_ : Rel A ℓ` is a relation: Rel opens to A -> A -> Set)
+def act.ends.sort.u(fuel: Nat, t: A.Ag, +unf: Map<&2, ActCopy>) -> Bool:
+  match fuel t:
+    case f A.AgEl{s, x}:
+      act.ends.sort.u(f, x, unf)
+    case f A.AgPi{i, x, a, d, b}:
+      act.ends.sort.u(f, b, unf)
+    case f A.AgSort{s}:
+      True{}
+    case 1n+f A.AgDef{+q, +es}:
+      act.ends.sort.u(f, act.unfold.of(act.unf.got(Map.get(ActCopy, ActCopy{0n, A.AgNone{}}, unf, act.key(q))), es), unf)
+    case _ _:
+      False{}
+
+# a definition's opening, when it is a type-valued one (unf: the earlier ones)
+def act.unf.of(d: A.AgDecl, +unf: Map<&2, ActCopy>) -> Maybe<&2, ActCopy>:
   match d:
     case A.AgDecl{q, qn, md, f, l, l0, l1, k, m, fl, lang, +ty, dd}:
-      act.unf.d(act.flag(A.AkCopy{}, fl), act.ends.sort(ty), dd)
+      act.unf.d(act.flag(A.AkCopy{}, fl), act.ends.sort.u(8n, ty, unf), dd)
 
 # The quantity pass's modes put back into a symbol --------------------------------
 

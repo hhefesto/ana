@@ -443,8 +443,8 @@ def a2b.sym.for(+top: List<&2, U32>, +nm: List<&2, U32>, +d: A.AgDecl, +tab: Map
 
 def a2b.syms.one(+top: List<&2, U32>, +d: A.AgDecl, +nm: List<&2, U32>, t: A2bTabs) -> A2bTabs:
   match t:
-    case A2bTabs{+tab, unf, dm, used, nk}:
-      A2bTabs{Map.set(&2, C.ActSym, tab, C.act.key(a2b.dq(d)), a2b.sym.for(top, nm, d, tab)), a2b.unf.put(C.act.unf.of(d), C.act.key(a2b.dq(d)), unf), Map.set(&2, A.AgDecl, dm, C.act.key(a2b.dq(d)), d), nm <> used, Map.set(&2, String, nk, S.str(nm), C.act.key(a2b.dq(d)))}
+    case A2bTabs{+tab, +unf, dm, used, nk}:
+      A2bTabs{Map.set(&2, C.ActSym, tab, C.act.key(a2b.dq(d)), a2b.sym.for(top, nm, d, tab)), a2b.unf.put(C.act.unf.of(d, unf), C.act.key(a2b.dq(d)), unf), Map.set(&2, A.AgDecl, dm, C.act.key(a2b.dq(d)), d), nm <> used, Map.set(&2, String, nk, S.str(nm), C.act.key(a2b.dq(d)))}
 
 def a2b.syms(ds: List<&2, A.AgDecl>, +top: List<&2, U32>, t: A2bTabs) -> A2bTabs:
   match ds t:
