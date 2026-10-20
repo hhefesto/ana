@@ -431,20 +431,20 @@ def a2b.unf.put(m: Maybe<&2, C.ActCopy>, +k: String, u: Map<&2, C.ActCopy>) -> M
 
 # a definition's symbol; a constructor copy's is its original's (an
 # earlier module's, already in the table)
-def a2b.sym.src(m: Maybe<&2, A.AgQ>, +top: List<&2, U32>, +nm: List<&2, U32>, +d: A.AgDecl, +tab: Map<&2, C.ActSym>) -> C.ActSym:
+def a2b.sym.src(m: Maybe<&2, A.AgQ>, +top: List<&2, U32>, +nm: List<&2, U32>, +d: A.AgDecl, +tab: Map<&2, C.ActSym>, +unf: Map<&2, C.ActCopy>) -> C.ActSym:
   match m:
     case Some{q}:
-      C.act.sym.got(Map.get(C.ActSym, C.act.sym.of(top, nm, d), tab, C.act.key(q)))
+      C.act.sym.got(Map.get(C.ActSym, C.act.sym.of(top, nm, d, unf), tab, C.act.key(q)))
     case None{}:
-      C.act.sym.of(top, nm, d)
+      C.act.sym.of(top, nm, d, unf)
 
-def a2b.sym.for(+top: List<&2, U32>, +nm: List<&2, U32>, +d: A.AgDecl, +tab: Map<&2, C.ActSym>) -> C.ActSym:
-  a2b.sym.src(C.act.con.src(d), top, nm, d, tab)
+def a2b.sym.for(+top: List<&2, U32>, +nm: List<&2, U32>, +d: A.AgDecl, +tab: Map<&2, C.ActSym>, +unf: Map<&2, C.ActCopy>) -> C.ActSym:
+  a2b.sym.src(C.act.con.src(d), top, nm, d, tab, unf)
 
 def a2b.syms.one(+top: List<&2, U32>, +d: A.AgDecl, +nm: List<&2, U32>, t: A2bTabs) -> A2bTabs:
   match t:
     case A2bTabs{+tab, +unf, dm, used, nk}:
-      A2bTabs{Map.set(&2, C.ActSym, tab, C.act.key(a2b.dq(d)), a2b.sym.for(top, nm, d, tab)), a2b.unf.put(C.act.unf.of(d, unf), C.act.key(a2b.dq(d)), unf), Map.set(&2, A.AgDecl, dm, C.act.key(a2b.dq(d)), d), nm <> used, Map.set(&2, String, nk, S.str(nm), C.act.key(a2b.dq(d)))}
+      A2bTabs{Map.set(&2, C.ActSym, tab, C.act.key(a2b.dq(d)), a2b.sym.for(top, nm, d, tab, unf)), a2b.unf.put(C.act.unf.of(d, unf), C.act.key(a2b.dq(d)), unf), Map.set(&2, A.AgDecl, dm, C.act.key(a2b.dq(d)), d), nm <> used, Map.set(&2, String, nk, S.str(nm), C.act.key(a2b.dq(d)))}
 
 def a2b.syms(ds: List<&2, A.AgDecl>, +top: List<&2, U32>, t: A2bTabs) -> A2bTabs:
   match ds t:

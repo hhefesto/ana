@@ -1214,12 +1214,6 @@ def act.role(+qs: List<&2, U32>, lv: Bool) -> ActB:
     case False{}:
       act.builtin(qs)
 
-# A definition's entry, given its module and its (unique) Bend name.
-def act.sym.of(+mo: List<&2, U32>, +nm: List<&2, U32>, d: A.AgDecl) -> ActSym:
-  match d:
-    case A.AgDecl{q, qn, md, f, l, l0, l1, k, m, +fl, lang, +ty, +dd}:
-      act.sym.d(dd, Bool.or(act.flag(A.AkCopy{}, fl), act.inl.d(act.ends.sort(ty), dd)), mo, nm, act.modes(ty, act.ends.sort(ty)), act.role(act.qs(q), act.ends.level(ty)), act.ixs.of(dd, ty))
-
 # a module's file under src/: its name's parts, each a plain name
 def act.path.parts(xs: List<&2, List<&2, U32>>) -> List<&2, U32>:
   match xs:
@@ -1281,6 +1275,43 @@ def act.unfold(+env: ActEnv, q: A.AgQ, +es: A.Ag) -> A.Ag:
   match env:
     case ActEnv{mod, tab, al, unf}:
       act.unfold.of(act.unf.got(Map.get(ActCopy, ActCopy{0n, A.AgNone{}}, unf, act.key(q))), es)
+
+# whether a TYPE ends in a sort once the type-valued definitions it ends in
+# are opened (`_≉_ : Rel A ℓ` is a relation: Rel opens to A -> A -> Set)
+def act.ends.sort.u(fuel: Nat, t: A.Ag, +unf: Map<&2, ActCopy>) -> Bool:
+  match fuel t:
+    case f A.AgEl{s, x}:
+      act.ends.sort.u(f, x, unf)
+    case f A.AgPi{i, x, a, d, b}:
+      act.ends.sort.u(f, b, unf)
+    case f A.AgSort{s}:
+      True{}
+    case 1n+f A.AgDef{+q, +es}:
+      act.ends.sort.u(f, act.unfold.of(act.unf.got(Map.get(ActCopy, ActCopy{0n, A.AgNone{}}, unf, act.key(q))), es), unf)
+    case _ _:
+      False{}
+
+# the modes of every Pi of a TYPE, the Pis of the type-valued definitions it
+# ends in included (sym : Symmetric _≈_ takes {x y} after the record: both
+# erased, as Symmetric opens to them), so a call keeps those arguments dead
+def act.modes.u(fuel: Nat, t: A.Ag, +tylevel: Bool, +unf: Map<&2, ActCopy>) -> List<&2, ActM>:
+  match fuel t:
+    case f A.AgEl{s, x}:
+      act.modes.u(f, x, tylevel, unf)
+    case f A.AgPi{i, x, a, d, b}:
+      act.mode(i, a, tylevel) <> act.modes.u(f, b, tylevel, unf)
+    case f A.AgStored{x}:
+      act.modes.u(f, x, tylevel, unf)
+    case 1n+f A.AgDef{+q, +es}:
+      act.modes.u(f, act.unfold.of(act.unf.got(Map.get(ActCopy, ActCopy{0n, A.AgNone{}}, unf, act.key(q))), es), tylevel, unf)
+    case _ _:
+      Nil{}
+
+# A definition's entry, given its module and its (unique) Bend name.
+def act.sym.of(+mo: List<&2, U32>, +nm: List<&2, U32>, d: A.AgDecl, +unf: Map<&2, ActCopy>) -> ActSym:
+  match d:
+    case A.AgDecl{q, qn, md, f, l, l0, l1, k, m, +fl, lang, +ty, +dd}:
+      act.sym.d(dd, Bool.or(act.flag(A.AkCopy{}, fl), act.inl.d(act.ends.sort(ty), dd)), mo, nm, act.modes.u(8n, ty, act.ends.sort.u(8n, ty, unf), unf), act.role(act.qs(q), act.ends.level(ty)), act.ixs.of(dd, ty))
 
 # seen: the names this header has given so far (a non-dependent Pi's
 # parameter is in no context, but its name is taken)
@@ -2484,21 +2515,6 @@ def act.unf.d(cp: Bool, srt: Bool, d: A.AgD) -> Maybe<&2, ActCopy>:
       Some{ActCopy{act.vars.len(xs), body}}
     case _ _ _:
       None{}
-
-# whether a TYPE ends in a sort once the type-valued definitions it ends in
-# are opened (`_≉_ : Rel A ℓ` is a relation: Rel opens to A -> A -> Set)
-def act.ends.sort.u(fuel: Nat, t: A.Ag, +unf: Map<&2, ActCopy>) -> Bool:
-  match fuel t:
-    case f A.AgEl{s, x}:
-      act.ends.sort.u(f, x, unf)
-    case f A.AgPi{i, x, a, d, b}:
-      act.ends.sort.u(f, b, unf)
-    case f A.AgSort{s}:
-      True{}
-    case 1n+f A.AgDef{+q, +es}:
-      act.ends.sort.u(f, act.unfold.of(act.unf.got(Map.get(ActCopy, ActCopy{0n, A.AgNone{}}, unf, act.key(q))), es), unf)
-    case _ _:
-      False{}
 
 # a definition's opening, when it is a type-valued one (unf: the earlier ones)
 def act.unf.of(d: A.AgDecl, +unf: Map<&2, ActCopy>) -> Maybe<&2, ActCopy>:
