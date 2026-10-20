@@ -113,6 +113,109 @@ def tcp.dataish(t: T.Bt, +datas: List<&2, List<&2, U32>>) -> Bool:
     case _:
       False{}
 
+# Data kinds: a + binder's type must be Data.  When that type is a type
+# parameter of the def (`+x: A` with `-A: Type`), the parameter is declared
+# `-A: Data` instead; a caller then passes a Data type, or its own type
+# parameter, which the gate declares Data the same way (Bend refuses any
+# other).  The binders looked at are the parameters and the lambdas at the
+# head of the body, whose types are the return type's Pi domains.
+def tcp.kind.ty(t: T.Bt) -> Bool:
+  match t:
+    case T.BtType{}:
+      True{}
+    case T.BtVar{+d}:
+      S.eq(d, S.b("Data"))
+    case _:
+      False{}
+
+def tcp.ty.put(k: Bool, x: List<&2, U32>, rest: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match k:
+    case True{}:
+      x <> rest
+    case False{}:
+      rest
+
+# the parameters that are types (Type or Data): a binder of one of them may
+# be +, its parameter then declared Data
+def tcp.ty.params(ps: List<&2, T.BParam>) -> List<&2, List<&2, U32>>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case T.BParam{m, x, ty} <> t:
+      tcp.ty.put(tcp.kind.ty(ty), x, tcp.ty.params(t))
+
+# the name a + binder's type is, put on acc
+def tcp.want.put(m: T.BMode, ty: T.Bt, acc: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match m ty:
+    case T.BmCopy{} T.BtVar{x}:
+      x <> acc
+    case _ _:
+      acc
+
+def tcp.want.ps(ps: List<&2, T.BParam>, acc: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match ps:
+    case Nil{}:
+      acc
+    case T.BParam{m, x, ty} <> t:
+      tcp.want.ps(t, tcp.want.put(m, ty, acc))
+
+# the lambdas at the head of a body against the return type's Pis
+def tcp.want.lams(b: T.Bt, ret: T.Bt, acc: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match b ret:
+    case T.BtLam{m, x, bb} T.BtPi{pm, px, dep, a, rb}:
+      tcp.want.lams(bb, rb, tcp.want.put(m, a, acc))
+    case T.BtExpr{e} ret:
+      tcp.want.lams(e, ret, acc)
+    case _ _:
+      acc
+
+def tcp.kind.set(p: T.BParam, +want: List<&2, List<&2, U32>>) -> T.BParam:
+  match p:
+    case T.BParam{m, +x, T.BtType{}}:
+      T.BParam{m, x, Bool.pick(T.Bt, tcp.mem(x, want), T.BtVar{S.b("Data")}, T.BtType{})}
+    case p:
+      p
+
+def tcp.kinds.ps(ps: List<&2, T.BParam>, +want: List<&2, List<&2, U32>>) -> List<&2, T.BParam>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case p <> t:
+      tcp.kind.set(p, want) <> tcp.kinds.ps(t, want)
+
+# a def with the type parameters its + binders' types name declared Data
+def tcp.kinds(it: T.BItem) -> T.BItem:
+  match it:
+    case T.BiDef{n, +ps, +ret, +body, doc}:
+      T.BiDef{n, tcp.kinds.ps(ps, tcp.want.lams(body, ret, tcp.want.ps(ps, Nil{}))), ret, body, doc}
+    case it:
+      it
+
+def tcp.has.type(ps: List<&2, T.BParam>, +v: List<&2, U32>) -> Bool:
+  match ps:
+    case Nil{}:
+      False{}
+    case T.BParam{m, +x, T.BtType{}} <> t:
+      Bool.or(S.eq(x, v), tcp.has.type(t, v))
+    case p <> t:
+      tcp.has.type(t, v)
+
+def tcp.data.of(hit: Bool, it: T.BItem) -> Maybe<&2, T.BItem>:
+  match hit:
+    case True{}:
+      Some{it}
+    case False{}:
+      None{}
+
+# The item with its type parameter v declared Data (the gate's repair when
+# a call passes v where Data is expected), or None when v is not one.
+def tcp.data.raise(it: T.BItem, +v: List<&2, U32>) -> Maybe<&2, T.BItem>:
+  match it:
+    case T.BiDef{n, +ps, ret, body, doc}:
+      tcp.data.of(tcp.has.type(ps, v), T.BiDef{n, tcp.kinds.ps(ps, v <> Nil{}), ret, body, doc})
+    case _:
+      None{}
+
 def tcp.mode.by(m: T.BMode, none: Bool, once: Bool, data: Bool) -> T.BMode:
   match none once data:
     case True{} _ _:
@@ -182,7 +285,7 @@ def tcp.close(fuel: Nat, +ps: List<&2, T.BParam>, +ms: List<&2, T.BMode>) -> Lis
 def tcp.decide(it: T.BItem, +datas: List<&2, List<&2, U32>>) -> List<&2, T.BMode>:
   match it:
     case T.BiDef{n, +ps, ret, body, doc}:
-      tcp.close(List.length(&2, T.BParam, ps), ps, tcp.params(ps, body, datas))
+      tcp.close(List.length(&2, T.BParam, ps), ps, tcp.params(ps, body, List.append(&2, List<&2, U32>, tcp.ty.params(ps), datas)))
     case _:
       Nil{}
 
@@ -271,7 +374,7 @@ def tcp.tpl.first(+ps: List<&2, T.BParam>) -> List<&2, T.BParam>:
 def tcp.finish(it: T.BItem, ms: List<&2, T.BMode>) -> T.BItem:
   match it:
     case T.BiDef{n, ps, ret, body, doc}:
-      T.BiDef{n, tcp.tpl.first(tcp.set.modes(ps, ms)), ret, tcp.mark(body), doc}
+      tcp.kinds(T.BiDef{n, tcp.tpl.first(tcp.set.modes(ps, ms)), ret, tcp.mark(body), doc})
     case it:
       it
 
@@ -410,7 +513,7 @@ def tcp.raise.def(n: List<&2, U32>, r: TcpP, ret: T.Bt, b: TcpR, doc: List<&2, L
     case TcpP{ps, False{}} TcpR{body, False{}}:
       None{}
     case TcpP{ps, c1} TcpR{body, c2}:
-      Some{T.BiDef{n, ps, ret, body, doc}}
+      Some{tcp.kinds(T.BiDef{n, ps, ret, body, doc})}
 
 # The item with binder v raised (copy: + for a use twice, else live for
 # an erased one used live), or None when nothing could be raised.

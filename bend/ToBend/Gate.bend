@@ -25,7 +25,7 @@ type TgtDrop is Data:
 # when the error names none, at a line of the file), for a reason.
 type TgtV is Data:
   TgPass{}
-  TgFail{name: List<&2, U32>, line: Nat, why: List<&2, U32>}
+  TgFail{name: List<&2, U32>, line: Nat, why: List<&2, U32>, span: List<&2, U32>}
 
 def tgt.name(it: T.BItem) -> List<&2, U32>:
   match it:
@@ -236,12 +236,70 @@ def tgt.why.of(+w: List<&2, U32>, +ls: List<&2, List<&2, U32>>) -> List<&2, U32>
 def tgt.why(+ls: List<&2, List<&2, U32>>) -> List<&2, U32>:
   tgt.why.of(tgt.why.go(ls, 2n, tgt.field.hd(ls)), ls)
 
+# the text the carets mark (`^^^` on the line under the `>|` one), empty
+# when there is none: the two lines' columns agree after their first `|`
+def tgt.bar(xs: List<&2, U32>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case h <> +t:
+      Bool.pick(List<&2, U32>, U32.is_eq(h, 124), t, tgt.bar(t))
+
+# how many c the text starts with (on: no other character came before)
+def tgt.lead(xs: List<&2, U32>, +c: U32, on: Bool) -> Nat:
+  match xs:
+    case Nil{}:
+      0n
+    case +h <> t:
+      +k = Bool.and(on, U32.is_eq(h, c))
+      Nat.add(Bool.pick(Nat, k, 1n, 0n), tgt.lead(t, c, k))
+
+def tgt.cols.drop(n: Nat, xs: List<&2, U32>) -> List<&2, U32>:
+  match n xs:
+    case 1n+p h <> t:
+      tgt.cols.drop(p, t)
+    case _ xs:
+      xs
+
+def tgt.cols.take(n: Nat, xs: List<&2, U32>) -> List<&2, U32>:
+  match n xs:
+    case 1n+p h <> t:
+      h <> tgt.cols.take(p, t)
+    case _ xs:
+      Nil{}
+
+# the span up to its first space (Bend marks a binder with the space after it)
+def tgt.word(xs: List<&2, U32>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +h <> t:
+      Bool.pick(List<&2, U32>, U32.is_eq(h, 32), Nil{}, h <> tgt.word(t))
+
+def tgt.span.at(+ml: List<&2, U32>, +cl: List<&2, U32>) -> List<&2, U32>:
+  +k = tgt.lead(tgt.bar(cl), 32, True{})
+  tgt.word(tgt.cols.take(tgt.lead(tgt.cols.drop(k, tgt.bar(cl)), 94, True{}), tgt.cols.drop(k, tgt.bar(ml))))
+
+def tgt.line.hd(ls: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  match ls:
+    case l <> t:
+      l
+    case Nil{}:
+      Nil{}
+
+def tgt.span(ls: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  match ls:
+    case +l <> +t:
+      Bool.pick(List<&2, U32>, S.infix(l, S.b(">|")), tgt.span.at(l, tgt.line.hd(t)), tgt.span(t))
+    case Nil{}:
+      Nil{}
+
 def tgt.verdict.of(pass: Bool, +ls: List<&2, List<&2, U32>>) -> TgtV:
   match pass:
     case True{}:
       TgPass{}
     case False{}:
-      TgFail{tgt.location(ls), tgt.marked(ls), tgt.why(ls)}
+      TgFail{tgt.location(ls), tgt.marked(ls), tgt.why(ls), tgt.span(ls)}
 
 def tgt.verdict(+out: List<&2, U32>) -> TgtV:
   tgt.verdict.of(S.infix(out, S.b("ALL PROOFS CHECK")), S.split.lines(out))
@@ -350,9 +408,10 @@ def tgt.cut(+xs: List<&2, U32>, +stop: List<&2, U32>) -> List<&2, U32>:
 def tgt.var.of(+w: List<&2, U32>) -> List<&2, U32>:
   S.strip(tgt.cut(S.strip(w, S.b("expected : ")), S.b(" observed")), S.b("-"))
 
-# 1: a use twice, 2: an erased binder used live, 0: neither
+# 1: a use twice, 2: an erased binder used live, 3: a Type where Data is
+# expected (the marked span a type parameter), 0: none of these
 def tgt.repair.kind(+w: List<&2, U32>) -> Nat:
-  Bool.pick(Nat, S.infix(w, S.b("(consumed more than once)")), 1n, Bool.pick(Nat, Bool.and(S.prefix(w, S.b("expected : -")), S.infix(w, S.b("observed : "))), 2n, 0n))
+  Bool.pick(Nat, S.infix(w, S.b("(consumed more than once)")), 1n, Bool.pick(Nat, Bool.and(S.prefix(w, S.b("expected : -")), S.infix(w, S.b("observed : "))), 2n, Bool.pick(Nat, Bool.and(S.prefix(w, S.b("expected : Data")), S.infix(w, S.b("observed : Type"))), 3n, 0n)))
 
 def tgt.find(its: List<&2, T.BItem>, +n: List<&2, U32>) -> Maybe<&2, T.BItem>:
   match its:
@@ -375,6 +434,13 @@ def tgt.raise.of(m: Maybe<&2, T.BItem>, +v: List<&2, U32>, +copy: Bool) -> Maybe
     case None{}:
       None{}
 
+def tgt.data.of(m: Maybe<&2, T.BItem>, +v: List<&2, U32>) -> Maybe<&2, T.BItem>:
+  match m:
+    case Some{it}:
+      Q.tcp.data.raise(it, v)
+    case None{}:
+      None{}
+
 def tgt.repaired(r: Maybe<&2, T.BItem>, +blame: List<&2, U32>, +why: List<&2, U32>, +its: List<&2, T.BItem>, ds: List<&2, TgtDrop>) -> TgtSt:
   match r:
     case Some{new}:
@@ -383,11 +449,14 @@ def tgt.repaired(r: Maybe<&2, T.BItem>, +blame: List<&2, U32>, +why: List<&2, U3
       tgt.after.fail(blame, why, TgtSt{its, ds})
 
 # a failure: repaired when its message names a binder the blamed def can
-# raise, else the def and its dependents dropped
-def tgt.on.fail(+k: Nat, +blame: List<&2, U32>, +why: List<&2, U32>, +its: List<&2, T.BItem>, ds: List<&2, TgtDrop>) -> TgtSt:
+# raise (or its carets mark a type parameter to declare Data), else the def
+# and its dependents dropped
+def tgt.on.fail(+k: Nat, +blame: List<&2, U32>, +why: List<&2, U32>, +sp: List<&2, U32>, +its: List<&2, T.BItem>, ds: List<&2, TgtDrop>) -> TgtSt:
   match k:
     case 0n:
       tgt.after.fail(blame, why, TgtSt{its, ds})
+    case 3n:
+      tgt.repaired(tgt.data.of(tgt.find(its, blame), S.strip(S.strip(sp, S.b("~")), S.b("-"))), blame, why, its, ds)
     case 1n+p:
       tgt.repaired(tgt.raise.of(tgt.find(its, blame), tgt.var.of(why), Nat.is_eq(k, 1n)), blame, why, its, ds)
 
@@ -405,8 +474,8 @@ def tgt.round.of(v: TgtV, +head: List<&2, List<&2, U32>>, +ims: List<&2, T.BImpo
   match v st:
     case TgPass{} st:
       TgtRun{st, True{}, checks}
-    case TgFail{+n, +l, +w} TgtSt{+its, ds}:
-      TgtRun{tgt.on.fail(tgt.repair.kind(w), tgt.blame(n, its, tgt.start(head, ims), l), w, its, ds), False{}, checks}
+    case TgFail{+n, +l, +w, sp} TgtSt{+its, ds}:
+      TgtRun{tgt.on.fail(tgt.repair.kind(w), tgt.blame(n, its, tgt.start(head, ims), l), w, sp, its, ds), False{}, checks}
 
 # one check: the file written, bend run on it, its verdict applied
 def tgt.round(+bend: String, +secs: U32, +path: String, +head: List<&2, List<&2, U32>>, +ims: List<&2, T.BImport>, +checks: Nat, st: TgtSt) -> IO(TgtRun):

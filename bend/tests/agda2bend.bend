@@ -6,6 +6,8 @@ import ../ToBend/Ast.bend as T
 import ../ToBend/Print.bend as P
 import ../Agda2Bend/Cata.bend as C
 import ../Agda2Bend.bend as D
+import ../ToBend/Gate.bend as G
+import ../ToBend/Copy.bend as Q
 
 # agda2bend's laws, run from this directory on the committed exports in
 # fixtures/agda2bend (agda-export's output for small modules, so the laws
@@ -286,6 +288,42 @@ def print.laws() -> IO(Unit):
     IO.print(verdict("print a type and a projection as the spike writes them", S.eq(pr.file(), S.b(pr.want()))))
     IO.print(verdict("print terms", S.eq(pr.terms(), S.b(pr.terms.want()))))
 
+# Gate and quantity repairs ----------------------------------------------------------
+
+def gt.pr(it: T.BItem) -> List<&2, U32>:
+  P.tpr.file(T.BFile{Nil{}, Nil{}, [it]})
+
+def gt.prm(m: Maybe<&2, T.BItem>) -> List<&2, U32>:
+  match m:
+    case Some{it}:
+      gt.pr(it)
+    case None{}:
+      S.b("none")
+
+# def contra(-A: Type, x: A -> A -> Nat, x_5: A) -> Nat: x(x_5, x_5), the
+# arguments dead (x is a variable) when dead is True
+def gt.contra(dead: Bool) -> T.BItem:
+  +a = Bool.pick(T.Bt, dead, T.BtDead{v("x_5")}, v("x_5"))
+  T.BiDef{S.b("contra"), [T.BParam{T.BmErased{}, S.b("A"), T.BtType{}}, T.BParam{T.BmLive{}, S.b("x"), T.BtPi{T.BmLive{}, S.b("_"), False{}, v("A"), T.BtPi{T.BmLive{}, S.b("_"), False{}, v("A"), v("Nat")}}}, T.BParam{T.BmLive{}, S.b("x_5"), v("A")}],
+    v("Nat"), T.BtExpr{app("x", [a, a])}, Nil{}}
+
+def gt.contra.want() -> String:
+  "import Base\n\ndef contra(-A: Data, x: A -> A -> Nat, +x_5: A) -> Nat:\n  x(x_5, x_5)\n"
+
+# def use(-B: Type, y: B) -> B: y
+def gt.use() -> T.BItem:
+  T.BiDef{S.b("use"), [T.BParam{T.BmErased{}, S.b("B"), T.BtType{}}, T.BParam{T.BmLive{}, S.b("y"), v("B")}], v("B"), T.BtExpr{v("y")}, Nil{}}
+
+def gate.laws() -> IO(Unit):
+  do IO<Unit>:
+    IO.print(verdict("the carets mark a binder", S.eq(G.tgt.span(S.split.lines(S.b("Location: u\n1 | def u(-A: Type) -> A -> A:\n2>|   +x_8 => x_8\n  |   ^^^^^\n3 | "))), S.b("+x_8"))))
+    IO.print(verdict("the carets mark an argument", S.eq(G.tgt.span(S.split.lines(S.b("  12>|   u02e2(A, B, C, x, g)\n     |         ^\n  13 | "))), S.b("A"))))
+    IO.print(verdict("a Type where Data is expected is repair 3", Nat.is_eq(G.tgt.repair.kind(S.b("expected : Data observed : Type ")), 3n)))
+    IO.print(verdict("a + parameter typed by a type parameter declares it Data", S.eq(gt.pr(Q.tcp.finish(gt.contra(False{}), Q.tcp.decide(gt.contra(False{}), Nil{}))), S.b(gt.contra.want()))))
+    IO.print(verdict("the gate's + repair declares the type parameter Data", S.eq(gt.prm(Q.tcp.raise(gt.contra(True{}), S.b("x_5"), True{})), S.b(gt.contra.want()))))
+    IO.print(verdict("a caller's type parameter is declared Data", S.eq(gt.prm(Q.tcp.data.raise(gt.use(), S.b("B"))), S.b("import Base\n\ndef use(-B: Data, y: B) -> B:\n  y\n"))))
+    IO.print(verdict("only a type parameter is declared Data", S.eq(gt.prm(Q.tcp.data.raise(gt.use(), S.b("y"))), S.b("none"))))
+
 # Translation --------------------------------------------------------------------
 #
 # The committed exports of Agda.Primitive, Level and Function.Base (a whole
@@ -332,4 +370,5 @@ def main() -> IO(Unit):
     sexp.laws(bool, unit)
     ast.laws(bool, unit)
     print.laws()
+    gate.laws()
     gold.laws()
