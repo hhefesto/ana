@@ -363,6 +363,24 @@ def gold.laws() -> IO(Unit):
     g3 : D.A2bG <- gold.next("Function.Base", al, ral, r3)
     return Unit{}
 
+# fixtures/agda2bend/src/A2bFix.agda (its export A2bFix.sexp, after
+# Agda.Primitive and Agda.Builtin.Bool): an indexed family (equation fields,
+# rewrites at the dot patterns), an absurd clause through a one-field record
+# and a type parameter's value used twice; the gate kept all 10 items
+# (golden/A2bFix.checked.bend).
+def gold.fix.laws() -> IO(Unit):
+  +order : List<&2, List<&2, U32>> = [S.b("Agda.Primitive"), S.b("Agda.Builtin.Bool"), S.b("A2bFix")]
+  +al : Map<&2, List<&2, U32>> = D.a2b.aliases(order)
+  +ral : Map<&2, List<&2, U32>> = D.a2b.ral(order, al, Map.new(&2, List<&2, U32>))
+  do IO<Unit>:
+    r1 : D.A2bG & Bool <- gold.one("Agda.Primitive", al, ral, D.A2bG{Map.new(&2, C.ActSym), Map.new(&2, C.ActCopy), Map.new(&2, Bool)})
+    g1 : D.A2bG <- gold.next("Agda.Primitive", al, ral, r1)
+    r2 : D.A2bG & Bool <- gold.one("Agda.Builtin.Bool", al, ral, g1)
+    g2 : D.A2bG <- gold.next("Agda.Builtin.Bool", al, ral, r2)
+    r3 : D.A2bG & Bool <- gold.one("A2bFix", al, ral, g2)
+    g3 : D.A2bG <- gold.next("A2bFix", al, ral, r3)
+    return Unit{}
+
 def main() -> IO(Unit):
   do IO<Unit>:
     +bool : List<&2, U32> <- S.read("fixtures/agda2bend/Agda.Builtin.Bool.sexp")
@@ -372,3 +390,4 @@ def main() -> IO(Unit):
     print.laws()
     gate.laws()
     gold.laws()
+    gold.fix.laws()

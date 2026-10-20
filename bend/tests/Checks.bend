@@ -571,7 +571,7 @@ def chk.tests() -> List<&2, ChkTest>:
    # terms needing parentheses, templates, equations, literals, as Bend reads them; the whole
    # translation (bend/Agda2Bend.bend, Cata.bend and the passes) of the committed Function.Base cone
    # against its goldens, compiled (the interpreter's stack does not hold Level)
-   ChkTest{"agda2bend.bend", True{}, ROks{29n}}]
+   ChkTest{"agda2bend.bend", True{}, ROks{32n}}]
 
 def chk.rule(r: ChkRule, +out: List<&2, U32>) -> Bool:
   match r:
