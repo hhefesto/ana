@@ -150,7 +150,7 @@ bend-ops guard tools/runs/run4.cfg              # starts chain, watch and handov
   | yoneda9 | 1886 | 351 | yoneda7 + the eta unfolding through the symbol table (it fires: Product's `_⇒_` is a pair of hom types; Product then stops at zip, eta) + opaque seen through AgDefX: neutral |
   | yoneda10 | 1898 | 351 | a live parameter with no live use falls to erased (a variable's arguments count as uses); the Data repair raises a point-free def's return-type Pi; 13 gains, Function.Base golden 32 of 33 check |
   | yoneda11 | 1901 | 355 | copattern reductions: a field projected out of a copattern def is its clause (`isPartialEquivalence(partialSetoid(S))` -> `isPartialEquivalence(isEquivalence S)`, glue loses its hom-setoid template); 6 gains, 2 regressions (`≉-respʳ`: S now used twice at a variable's arguments, which Copy does not count) |
-  | yoneda12 | 1901 | 355 | (same as yoneda11; the committed tree 8cdccfa) | the return type's Pis (bound by head lambdas) get their raised modes into the symbol past the arity; lowering them was tried and reverted (a Pi is part of the type: `const` passed as `B -> A`) |
+  | yoneda12 | 1901 | 355 | the return type's Pis (bound by head lambdas) get their raised modes into the symbol past the arity; lowering them was tried and reverted (a Pi is part of the type: `const` passed as `B -> A`); same as yoneda11 (the committed tree 8cdccfa) |
 
 - **Bend limits found** (memory project-bend2-silent-traps):
   - A type-valued def's body is live at its top.
