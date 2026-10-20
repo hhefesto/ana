@@ -168,6 +168,8 @@ def tcp.kind.ty(t: T.Bt) -> Bool:
       True{}
     case T.BtVar{+d}:
       S.eq(d, S.b("Data"))
+    case T.BtApp{T.BtVar{+k}, a}:
+      S.eq(k, S.b("Kind"))
     case _:
       False{}
 
@@ -216,6 +218,8 @@ def tcp.kind.set(p: T.BParam, +want: List<&2, List<&2, U32>>) -> T.BParam:
   match p:
     case T.BParam{m, +x, T.BtType{}}:
       T.BParam{m, x, Bool.pick(T.Bt, tcp.mem(x, want), T.BtVar{S.b("Data")}, T.BtType{})}
+    case T.BParam{m, +x, T.BtApp{T.BtVar{+k}, +a}}:
+      T.BParam{m, x, Bool.pick(T.Bt, Bool.and(S.eq(k, S.b("Kind")), tcp.mem(x, want)), T.BtVar{S.b("Data")}, T.BtApp{T.BtVar{k}, a})}
     case p:
       p
 
@@ -240,6 +244,8 @@ def tcp.has.type(ps: List<&2, T.BParam>, +v: List<&2, U32>) -> Bool:
       False{}
     case T.BParam{m, +x, T.BtType{}} <> t:
       Bool.or(S.eq(x, v), tcp.has.type(t, v))
+    case T.BParam{m, +x, T.BtApp{T.BtVar{+k}, a}} <> t:
+      Bool.or(Bool.and(S.eq(k, S.b("Kind")), S.eq(x, v)), tcp.has.type(t, v))
     case p <> t:
       tcp.has.type(t, v)
 
@@ -312,6 +318,159 @@ def tcp.mode.low(m: T.BMode, low: Bool) -> T.BMode:
       tcp.lower(m)
     case False{}:
       m
+
+# Quantity specialisation (a repair the gate asks for) -------------------------
+#
+# A def that copies a value whose type's kind is a quantity parameter's (`+p`
+# with p a morphism pair, of Kind(qℓ <&> qℓ′)) does not check at every
+# quantity.  So it is specialised to &2 (Data) in each quantity parameter
+# the checker's observed type names.  The parameter stays, since callers
+# still pass it; its uses become &2.  A caller that passes its own quantity
+# where &2 is now expected is specialised the same way.  The result is
+# weaker than the Agda original (it holds for Data homs only), as the user
+# chose on 2026-10-20; the def's comment says so.
+
+def tcp.q.params(ps: List<&2, T.BParam>) -> List<&2, List<&2, U32>>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case T.BParam{m, +x, T.BtVar{+k}} <> t:
+      tcp.ty.put(S.eq(k, S.b("Quant")), x, tcp.q.params(t))
+    case p <> t:
+      tcp.q.params(t)
+
+# whether a byte can be part of a name
+def tcp.namec(+c: U32) -> Bool:
+  Bool.or(Bool.or(Bool.and(U32.is_le(48, c), U32.is_le(c, 57)), Bool.and(U32.is_le(65, c), U32.is_le(c, 90))), Bool.or(Bool.and(U32.is_le(97, c), U32.is_le(c, 122)), Bool.or(U32.is_eq(c, 95), U32.is_eq(c, 46))))
+
+def tcp.bound.at(xs: List<&2, U32>) -> Bool:
+  match xs:
+    case Nil{}:
+      True{}
+    case +c <> t:
+      Bool.not(tcp.namec(c))
+
+# whether q occurs in xs as a whole name
+def tcp.tok.in(xs: List<&2, U32>, +q: List<&2, U32>, prev: Bool) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case +c <> +t:
+      Bool.or(Bool.and(prev, Bool.and(S.prefix(c <> t, q), tcp.bound.at(List.drop(&2, U32, c <> t, S.len(q))))), tcp.tok.in(t, q, Bool.not(tcp.namec(c))))
+
+# the text before and after "observed : "
+def tcp.obs.of(m: Maybe<&2, Nat>, +w: List<&2, U32>) -> List<&2, U32>:
+  match m:
+    case Some{i}:
+      List.drop(&2, U32, w, i)
+    case None{}:
+      Nil{}
+
+def tcp.obs(+w: List<&2, U32>) -> List<&2, U32>:
+  tcp.obs.of(S.find(w, S.b("observed : "), 0n), w)
+
+def tcp.exp.of(m: Maybe<&2, Nat>, +w: List<&2, U32>) -> List<&2, U32>:
+  match m:
+    case Some{i}:
+      List.take(&2, U32, w, i)
+    case None{}:
+      w
+
+# the quantity parameters the observed type names and the expected does not
+def tcp.q.cands(qs: List<&2, List<&2, U32>>, +exp: List<&2, U32>, +obs: List<&2, U32>) -> List<&2, List<&2, U32>>:
+  match qs:
+    case Nil{}:
+      Nil{}
+    case +q <> t:
+      tcp.ty.put(Bool.and(tcp.tok.in(obs, q, True{}), Bool.not(tcp.tok.in(exp, q, True{}))), q, tcp.q.cands(t, exp, obs))
+
+# a name with q as &2: q itself, or q inside a minimum "(a <&> b)"
+def tcp.q.name(+n: List<&2, U32>, +q: List<&2, U32>) -> List<&2, U32>:
+  Bool.pick(List<&2, U32>, S.eq(n, q), S.b("&2"), S.replace(S.replace(n, 40 <> List.append(&2, U32, q, [32]), S.b("(&2 ")), 32 <> List.append(&2, U32, q, [41]), S.b(" &2)")))
+
+# t with the quantity q as &2 everywhere
+def tcp.qsub(t: T.Bt, +q: List<&2, U32>) -> T.Bt:
+  match t:
+    case T.BtVar{+n}:
+      T.BtVar{tcp.q.name(n, q)}
+    case T.BtApp{f, a}:
+      T.BtApp{tcp.qsub(f, q), tcp.qsub(a, q)}
+    case T.BtArgs{a, rest}:
+      T.BtArgs{tcp.qsub(a, q), tcp.qsub(rest, q)}
+    case T.BtTplArg{a}:
+      T.BtTplArg{tcp.qsub(a, q)}
+    case T.BtLam{m, y, b}:
+      T.BtLam{m, y, tcp.qsub(b, q)}
+    case T.BtPi{m, y, d, a, b}:
+      T.BtPi{m, y, d, tcp.qsub(a, q), tcp.qsub(b, q)}
+    case T.BtCon{c, a}:
+      T.BtCon{c, tcp.qsub(a, q)}
+    case T.BtTyApp{c, a}:
+      T.BtTyApp{c, tcp.qsub(a, q)}
+    case T.BtEq{ty, a, b}:
+      T.BtEq{tcp.qsub(ty, q), tcp.qsub(a, q), tcp.qsub(b, q)}
+    case T.BtSucc{a}:
+      T.BtSucc{tcp.qsub(a, q)}
+    case T.BtAnn{a, ty}:
+      T.BtAnn{tcp.qsub(a, q), tcp.qsub(ty, q)}
+    case T.BtDead{a}:
+      T.BtDead{tcp.qsub(a, q)}
+    case T.BtMatch{xs, cs}:
+      T.BtMatch{tcp.qsub(xs, q), tcp.qsub(cs, q)}
+    case T.BtCase{p, b, rest}:
+      T.BtCase{p, tcp.qsub(b, q), tcp.qsub(rest, q)}
+    case T.BtExpr{e}:
+      T.BtExpr{tcp.qsub(e, q)}
+    case T.BtRw{e, p, b}:
+      T.BtRw{tcp.qsub(e, q), tcp.qsub(p, q), tcp.qsub(b, q)}
+    case T.BtLet{y, v, b}:
+      T.BtLet{y, tcp.qsub(v, q), tcp.qsub(b, q)}
+    case t:
+      t
+
+def tcp.qsub.ps(ps: List<&2, T.BParam>, +q: List<&2, U32>) -> List<&2, T.BParam>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case T.BParam{m, x, ty} <> t:
+      T.BParam{m, x, tcp.qsub(ty, q)} <> tcp.qsub.ps(t, q)
+
+def tcp.q.one(it: T.BItem, +q: List<&2, U32>) -> T.BItem:
+  match it:
+    case T.BiDef{n, ps, ret, body, doc}:
+      T.BiDef{n, tcp.qsub.ps(ps, q), tcp.qsub(ret, q), tcp.qsub(body, q), List.append(&2, List<&2, U32>, doc, [S.b("specialised: quantity " ++ S.str(q) ++ " is &2 (Data), weaker than the Agda original")])}
+    case it:
+      it
+
+def tcp.q.item(qs: List<&2, List<&2, U32>>, it: T.BItem) -> T.BItem:
+  match qs:
+    case Nil{}:
+      it
+    case +q <> t:
+      tcp.q.item(t, tcp.q.one(it, q))
+
+def tcp.q.done(+qs: List<&2, List<&2, U32>>, it: T.BItem) -> Maybe<&2, T.BItem>:
+  match qs:
+    case Nil{}:
+      None{}
+    case q <> t:
+      Some{tcp.q.item(qs, it)}
+
+# The item specialised in the quantities the failure names, or None.
+def tcp.q.spec(+it: T.BItem, +why: List<&2, U32>) -> Maybe<&2, T.BItem>:
+  match it:
+    case T.BiDef{n, +ps, ret, body, doc}:
+      tcp.q.done(tcp.q.cands(tcp.q.params(ps), tcp.exp.of(S.find(why, S.b("observed : "), 0n), why), tcp.obs(why)), it)
+    case _:
+      None{}
+
+# the gate's Data repair, then the quantity one
+def tcp.data.or.q(m: Maybe<&2, T.BItem>, +it: T.BItem, +why: List<&2, U32>) -> Maybe<&2, T.BItem>:
+  match m:
+    case Some{x}:
+      Some{x}
+    case None{}:
+      tcp.q.spec(it, why)
 
 def tcp.mode.by(m: T.BMode, none: Bool, once: Bool, data: Bool, low: Bool) -> T.BMode:
   match none once data:
@@ -424,13 +583,27 @@ def tcp.decide(it: T.BItem, +datas: List<&2, List<&2, U32>>) -> List<&2, T.BMode
     case _:
       Nil{}
 
+def tcp.is.data(k: T.Bt) -> Bool:
+  match k:
+    case T.BtVar{+d}:
+      S.eq(d, S.b("Data"))
+    case _:
+      False{}
+
+def tcp.datas.put(k: Bool, +n: List<&2, U32>, rest: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match k:
+    case True{}:
+      n <> rest
+    case False{}:
+      rest
+
 # the names of the Data types an item list declares
 def tcp.datas(its: List<&2, T.BItem>) -> List<&2, List<&2, U32>>:
   match its:
     case Nil{}:
       Nil{}
-    case T.BiType{n, ps, True{}, cs, doc} <> t:
-      n <> tcp.datas(t)
+    case T.BiType{+n, ps, k, cs, doc} <> t:
+      tcp.datas.put(tcp.is.data(k), n, tcp.datas(t))
     case i <> t:
       tcp.datas(t)
 

@@ -130,7 +130,7 @@ bend-ops guard tools/runs/run4.cfg              # starts chain, watch and handov
   - resume rewrites the stage's STAGES line and keeps the old one as STAGES.OLD_INSTANCE.
 - `bend-ops sim drive all run/sim-drive` runs 7 scenarios against run 3's boot-guard.sh, s2-driver.sh and move.sh. Not yet shown: act-ensure, act-pull, `move restage` and `move act`, which need real nix on a box, and `guard install` against real systemd.
 
-## ▶ CONTINUE HERE (2026-10-20, 01:30 UTC-6): agda2bend on the Yoneda cone, 1898 of 2527 items check; Product and Setoids hit Bend's missing record eta
+## ▶ CONTINUE HERE (2026-10-20, 08:00 UTC-6): agda2bend on the Yoneda cone, 1923 of 2527 items check; Product and Setoids hit Bend's missing record eta
 
 - **The loop:** `run/a2b/bin/agda2bend-O0 emit run/a2b/export2 run/a2b/yonedaN Categories.Yoneda` translates Categories.Yoneda's 121-module import cone (stdlib and agda-categories) with that day's translator. Each run is about 40 min and about 80 MB. Then `agda2bend report run/a2b/yonedaN run/a2b/yonedaM` ranks the causes against the previous run. Dev tools, uncommitted, in /tmp/claude-1000/a2b:
   - build.sh: the dev binary.
@@ -151,6 +151,9 @@ bend-ops guard tools/runs/run4.cfg              # starts chain, watch and handov
   | yoneda10 | 1898 | 351 | a live parameter with no live use falls to erased (a variable's arguments count as uses); the Data repair raises a point-free def's return-type Pi; 13 gains, Function.Base golden 32 of 33 check |
   | yoneda11 | 1901 | 355 | copattern reductions: a field projected out of a copattern def is its clause (`isPartialEquivalence(partialSetoid(S))` -> `isPartialEquivalence(isEquivalence S)`, glue loses its hom-setoid template); 6 gains, 2 regressions (`≉-respʳ`: S now used twice at a variable's arguments, which Copy does not count) |
   | yoneda12 | 1901 | 355 | the return type's Pis (bound by head lambdas) get their raised modes into the symbol past the arity; lowering them was tried and reverted (a Pi is part of the type: `const` passed as `B -> A`); same as yoneda11 (the committed tree 8cdccfa) |
+  | yoneda13 | 1858 | 290 | lambda lifting (a plain function takes all its Pis as parameters, its body applied to the extras): lifted erased parameters were passed live, so Copy raised `Functor.₁`'s objects and `_∘F_` fell |
+  | yoneda14 | (stopped) | | levels as quantities: unsound (a type at a variable level may be a function type, which Bend makes Type), switched off |
+  | yoneda15 | 1923 | 355 | lifting with erased lifted parameters passed dead (+22, 23 gains); quantity code present behind `act.quant.on()` = False |
 
 - **Bend limits found** (memory project-bend2-silent-traps):
   - A type-valued def's body is live at its top.
@@ -160,6 +163,13 @@ bend-ops guard tools/runs/run4.cfg              # starts chain, watch and handov
   - **Templates are inlining:** `Carrier(partialSetoid(~S))` reduces. Destructuring the record (yoneda8) made it affine but stuck on variables, and the reasoning layer fell (Categories 351 to 175). It is unwired in a2b.destr; its code and laws stay.
   - So Yoneda itself (12 items) waits on Product (through Bifunctor) and Setoids.
 - **Why the reasoning lemmas still take their objects and morphisms as templates** (debug build, 2026-10-20 01:30): a chain's points (`(f ∘ a) ∘ b`) go live to `step-≈-⟩`, whose point is a Pi of its return type, so each morphism counts as used twice. Lowering that Pi changes the def's type. The next step is to lift a point-free def's head lambdas into header parameters (the arity grows through remode), then lower them as parameters are.
+- **Product, specialised to Data homs (the user's choice, 2026-10-20):** tested in Bend (scratchpad prod/r.bend, s.bend, t.bend). A `Cat<q>` with `Arr: Obj -> Obj -> Kind(q)` and Product at `&2` checks with Agda's own `assoc = (C.assoc , D.assoc)` and projection-based composition. The translator side is in the tree but switched OFF (`act.quant.on()` in Cata.bend). It covers:
+  - Level binders as `Quant` parameters, `Set ℓ` as `Kind(qℓ)`.
+  - A declaration's kind from its fields (`Σ` is `Kind(a <&> b)`).
+  - The gate's `&2` specialisation repair (Copy tcp.q.spec, gate kind 4).
+  - Inlining partial pair-building eta-only calls (Product's `_∘_ = zip …`).
+
+  Deriving quantities from levels failed: `Setoids c ℓ` has `Func` homs (Type) at the variable level `c ⊔ ℓ`, and a probe of the Product cone checked 146 of 2226. A quantity argument must instead be the kind of the type it governs (`Arr(C)(…)`: C's hom quantity; a function type: &1; Data: &2), which needs kind inference over the Bend terms. That is the next step for Product.
 - **Next:**
   1. Commit yoneda9 if it holds against yoneda7.
   2. The top causes in yoneda7.report:

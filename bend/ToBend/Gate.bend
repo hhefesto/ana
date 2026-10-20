@@ -411,7 +411,7 @@ def tgt.var.of(+w: List<&2, U32>) -> List<&2, U32>:
 # 1: a use twice, 2: an erased binder used live, 3: a Type where Data is
 # expected (the marked span a type parameter), 0: none of these
 def tgt.repair.kind(+w: List<&2, U32>) -> Nat:
-  Bool.pick(Nat, S.infix(w, S.b("(consumed more than once)")), 1n, Bool.pick(Nat, Bool.and(S.prefix(w, S.b("expected : -")), S.infix(w, S.b("observed : "))), 2n, Bool.pick(Nat, Bool.and(S.prefix(w, S.b("expected : Data")), S.infix(w, S.b("observed : Type"))), 3n, 0n)))
+  Bool.pick(Nat, S.infix(w, S.b("(consumed more than once)")), 1n, Bool.pick(Nat, Bool.and(S.prefix(w, S.b("expected : -")), S.infix(w, S.b("observed : "))), 2n, Bool.pick(Nat, Bool.and(S.prefix(w, S.b("expected : Data")), Bool.or(S.infix(w, S.b("observed : Type")), S.infix(w, S.b("observed : Kind(")))), 3n, Bool.pick(Nat, Bool.and(S.prefix(w, S.b("expected : ")), S.infix(w, S.b("&2"))), 4n, 0n))))
 
 def tgt.find(its: List<&2, T.BItem>, +n: List<&2, U32>) -> Maybe<&2, T.BItem>:
   match its:
@@ -434,10 +434,18 @@ def tgt.raise.of(m: Maybe<&2, T.BItem>, +v: List<&2, U32>, +copy: Bool) -> Maybe
     case None{}:
       None{}
 
-def tgt.data.of(m: Maybe<&2, T.BItem>, +v: List<&2, U32>) -> Maybe<&2, T.BItem>:
+def tgt.data.of(m: Maybe<&2, T.BItem>, +v: List<&2, U32>, +why: List<&2, U32>) -> Maybe<&2, T.BItem>:
   match m:
-    case Some{it}:
-      Q.tcp.data.raise(it, v)
+    case Some{+it}:
+      Q.tcp.data.or.q(Q.tcp.data.raise(it, v), it, why)
+    case None{}:
+      None{}
+
+# a caller passing its own quantity where &2 is expected: specialised too
+def tgt.q.of(m: Maybe<&2, T.BItem>, +why: List<&2, U32>) -> Maybe<&2, T.BItem>:
+  match m:
+    case Some{+it}:
+      Q.tcp.q.spec(it, why)
     case None{}:
       None{}
 
@@ -456,7 +464,9 @@ def tgt.on.fail(+k: Nat, +blame: List<&2, U32>, +why: List<&2, U32>, +sp: List<&
     case 0n:
       tgt.after.fail(blame, why, TgtSt{its, ds})
     case 3n:
-      tgt.repaired(tgt.data.of(tgt.find(its, blame), S.strip(S.strip(sp, S.b("~")), S.b("-"))), blame, why, its, ds)
+      tgt.repaired(tgt.data.of(tgt.find(its, blame), S.strip(S.strip(sp, S.b("~")), S.b("-")), why), blame, why, its, ds)
+    case 4n:
+      tgt.repaired(tgt.q.of(tgt.find(its, blame), why), blame, why, its, ds)
     case 1n+p:
       tgt.repaired(tgt.raise.of(tgt.find(its, blame), tgt.var.of(why), Nat.is_eq(k, 1n)), blame, why, its, ds)
 

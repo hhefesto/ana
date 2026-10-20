@@ -89,7 +89,7 @@ type BCtor is Data:
 # A top-level item, each with its comment lines (without the `# `).
 type BItem is Data:
   BiDef{name: List<&2, U32>, ps: List<&2, BParam>, ret: Bt, body: Bt, doc: List<&2, List<&2, U32>>}
-  BiType{name: List<&2, U32>, ps: List<&2, BParam>, data: Bool, cs: List<&2, BCtor>, doc: List<&2, List<&2, U32>>}
+  BiType{name: List<&2, U32>, ps: List<&2, BParam>, kind: Bt, cs: List<&2, BCtor>, doc: List<&2, List<&2, U32>>}
   BiComment{doc: List<&2, List<&2, U32>>}
 
 # An import: the file's path (relative, `./`-led) and its alias.
@@ -358,8 +358,8 @@ def tba.minus(xs: List<&2, List<&2, U32>>, +bound: Map<&2, Bool>) -> List<&2, Li
 def tba.item.refs(+it: BItem) -> List<&2, List<&2, U32>>:
   tba.minus(tba.item.fold(~tba.refs, it, Nil{}), tba.set(tba.item.names(it, tba.item.fold(~tba.binds, it, Nil{})), Map.new(&2, Bool)))
 
-# t with the variable x replaced by v (names are unique within a def, so
-# no binder captures v)
+# t with the variable x replaced by v (a binder of x shadows it; names are
+# unique within a def, so no binder captures v)
 def tba.subst(t: Bt, +x: List<&2, U32>, +v: Bt) -> Bt:
   match t:
     case BtVar{+y}:
@@ -368,10 +368,10 @@ def tba.subst(t: Bt, +x: List<&2, U32>, +v: Bt) -> Bt:
       BtApp{tba.subst(f, x, v), tba.subst(a, x, v)}
     case BtTplArg{a}:
       BtTplArg{tba.subst(a, x, v)}
-    case BtLam{m, y, b}:
-      BtLam{m, y, tba.subst(b, x, v)}
-    case BtPi{m, y, d, a, b}:
-      BtPi{m, y, d, tba.subst(a, x, v), tba.subst(b, x, v)}
+    case BtLam{m, +y, +b}:
+      BtLam{m, y, Bool.pick(Bt, S.eq(x, y), b, tba.subst(b, x, v))}
+    case BtPi{m, +y, d, a, +b}:
+      BtPi{m, y, d, tba.subst(a, x, v), Bool.pick(Bt, S.eq(x, y), b, tba.subst(b, x, v))}
     case BtCon{c, a}:
       BtCon{c, tba.subst(a, x, v)}
     case BtTyApp{n, a}:

@@ -255,7 +255,7 @@ def pr.refl.ty() -> T.Bt:
   T.BtPi{T.BmErased{}, S.b("x"), True{}, v("A"), app("R", [v("x"), v("x")])}
 
 def pr.isequiv() -> T.BItem:
-  T.BiType{S.b("IsEquivalence"), [T.BParam{T.BmErased{}, S.b("A"), T.BtType{}}, T.BParam{T.BmErased{}, S.b("R"), pr.rel("A")}], False{},
+  T.BiType{S.b("IsEquivalence"), [T.BParam{T.BmErased{}, S.b("A"), T.BtType{}}, T.BParam{T.BmErased{}, S.b("R"), pr.rel("A")}], T.BtType{},
     [T.BCtor{S.b("IsEquivalence"), [T.BField{S.b("refl"), pr.refl.ty()}, T.BField{S.b("sym"), T.BtPi{T.BmErased{}, S.b("x"), True{}, v("A"), T.BtPi{T.BmErased{}, S.b("y"), True{}, v("A"), T.BtPi{T.BmLive{}, S.b("_"), False{}, app("R", [v("x"), v("y")]), app("R", [v("y"), v("x")])}}}}]}],
     [S.b("IsEquivalence (agda-stdlib Relation.Binary)")]}
 
@@ -326,7 +326,7 @@ def ord.to() -> T.BItem:
   T.BiDef{S.b("to"), [T.BParam{T.BmErased{}, S.b("x"), T.BtType{}}], T.BtType{}, T.BtExpr{T.BtTyApp{S.b("anon.Box"), T.tba.args([v("x")])}}, Nil{}}
 
 def ord.box() -> T.BItem:
-  T.BiType{S.b("anon.Box"), [T.BParam{T.BmErased{}, S.b("A"), T.BtType{}}], False{}, [T.BCtor{S.b("anon.Box"), [T.BField{S.b("to"), v("A")}, T.BField{S.b("k"), app("P", [v("to")])}]}], Nil{}}
+  T.BiType{S.b("anon.Box"), [T.BParam{T.BmErased{}, S.b("A"), T.BtType{}}], T.BtType{}, [T.BCtor{S.b("anon.Box"), [T.BField{S.b("to"), v("A")}, T.BField{S.b("k"), app("P", [v("to")])}]}], Nil{}}
 
 def ord.first(xs: List<&2, List<&2, U32>>) -> List<&2, U32>:
   match xs:
@@ -365,7 +365,7 @@ def gate.laws() -> IO(Unit):
 # import cone) translated in process, each module's file before the gate
 # against fixtures/agda2bend/golden/<Module>.bend: the translator's output
 # when the goldens were made, reviewed, of which the gate kept
-# golden/Function.Base.checked.bend (32 of Function.Base's 33 items) under
+# golden/Function.Base.checked.bend (all 33 of Function.Base's items) under
 # the locked compiler.  A change to the translation shows up here first.
 
 def gold.of(+m: String, +al: Map<&2, List<&2, U32>>, +ral: Map<&2, List<&2, U32>>, +ds: List<&2, A.AgDecl>, +want: List<&2, U32>, tr: D.A2bTr) -> D.A2bG & Bool:

@@ -237,7 +237,7 @@ def tpr.item(it: T.BItem, acc: List<&2, U32>) -> List<&2, U32>:
     case T.BiDef{n, ps, ret, body, doc}:
       tpr.doc(doc, tpr.s("def ", tpr.b(n, 40 <> tpr.params(ps, True{}, tpr.s(") -> ", tpr.t(ret, TpLoose{}, 0n, 58 <> 10 <> tpr.t(body, TpStmt{}, 2n, acc)))))))
     case T.BiType{n, ps, d, cs, doc}:
-      tpr.doc(doc, tpr.s("type ", tpr.b(n, tpr.typarams(ps, tpr.s(Bool.pick(String, d, " is Data:", " is Type:"), 10 <> tpr.ctors(cs, acc))))))
+      tpr.doc(doc, tpr.s("type ", tpr.b(n, tpr.typarams(ps, tpr.s(" is ", tpr.t(d, TpLoose{}, 0n, 58 <> 10 <> tpr.ctors(cs, acc)))))))
     case T.BiComment{doc}:
       tpr.doc(doc, acc)
 

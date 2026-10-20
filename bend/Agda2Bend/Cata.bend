@@ -32,6 +32,15 @@ import ./Ast.bend as A
 # that def at the gate and names the cause in the ledger.  Every def is
 # prefixed `act.` (the substitution `asb.`).
 
+# The switch for quantities: OFF since 2026-10-20 07:20.  Mapping every level
+# to a quantity was unsound: a type at a variable level may be a function
+# type, which Bend makes Type, so `Setoids c ℓ` cannot have homs of kind
+# Kind(qc <&> qℓ) (probe: 146 of 2226 items checked).  A quantity argument
+# has to be the kind of the type it governs, which needs kind inference;
+# until then levels are dropped as before.
+def act.quant.on() -> Bool:
+  False{}
+
 # Substitution -----------------------------------------------------------------
 #
 # A copy's leaf is a term in the scope of its own variables; inlining it
@@ -187,9 +196,15 @@ type ActM is Data:
   AmTpl{}
 
 # What a name is in Bend when it is not translated as itself: Nat, Bool,
-# Unit, ≡ and their constructors are Base's; the Level names are dropped.
+# Unit, ≡ and their constructors are Base's.  Levels are quantities
+# (2026-10-20, so a category's homs may be Data, as Product needs): Level is
+# Quant, lzero and lsuc ℓ are &1 (Type), ℓ ⊔ ℓ' the smaller of the two, and
+# another level-valued definition (AbLevel) &1.
 type ActB is Data:
   AbNone{}
+  AbQuant{}
+  AbQone{}
+  AbQmin{}
   AbNat{}
   AbZero{}
   AbSuc{}
@@ -337,7 +352,7 @@ def act.info.erased(i: A.AgI) -> Bool:
 def act.mode.of(lv: Bool, er: Bool) -> ActM:
   match lv er:
     case True{} _:
-      AmDrop{}
+      Bool.pick(ActM, act.quant.on(), AmErased{}, AmDrop{})
     case False{} True{}:
       AmErased{}
     case False{} False{}:
@@ -370,8 +385,8 @@ def act.builtin(+s: List<&2, U32>) -> ActB:
   act.bi(s, "Agda.Builtin.Bool.Bool", AbBool{}, act.bi(s, "Agda.Builtin.Bool.Bool.true", AbTrue{}, act.bi(s, "Agda.Builtin.Bool.Bool.false", AbFalse{},
   act.bi(s, "Agda.Builtin.Equality._≡_", AbEq{}, act.bi(s, "Agda.Builtin.Equality._≡_.refl", AbRefl{},
   act.bi(s, "Agda.Builtin.Unit.⊤", AbUnit{}, act.bi(s, "Agda.Builtin.Unit.tt", AbTt{},
-  act.bi(s, "Agda.Primitive.Level", AbLevel{}, act.bi(s, "Agda.Primitive.lzero", AbLevel{}, act.bi(s, "Agda.Primitive.lsuc", AbLevel{},
-  act.bi(s, "Agda.Primitive._⊔_", AbLevel{}, AbNone{}))))))))))))))
+  act.bi(s, "Agda.Primitive.Level", AbQuant{}, act.bi(s, "Agda.Primitive.lzero", AbQone{}, act.bi(s, "Agda.Primitive.lsuc", AbQone{},
+  act.bi(s, "Agda.Primitive._⊔_", AbQmin{}, AbNone{}))))))))))))))
 
 # Terms ------------------------------------------------------------------------
 
@@ -390,6 +405,98 @@ def act.ctx.at(i: Nat, ctx: List<&2, T.Bt>) -> T.Bt:
       act.ctx.at(p, t)
     case _ Nil{}:
       act.todo("a variable outside its scope")
+
+# Quantities ------------------------------------------------------------------
+#
+# A level is a quantity in Bend: a type of sort Set ℓ has kind Kind(qℓ), so
+# a type whose level is a variable may be Data where its user needs copies
+# (Product's morphism pairs), and `Set ℓ` built from variables only is
+# `Kind(…)`.  A constant level or a successor is a universe of sets: Type
+# (&1).  The smaller of two quantities is `a <&> b`; &1 absorbs the rest.
+
+def act.q1() -> T.Bt:
+  T.BtVar{S.b("&1")}
+
+def act.is.q1(t: T.Bt) -> Bool:
+  match t:
+    case T.BtVar{n}:
+      S.eq(n, S.b("&1"))
+    case _:
+      False{}
+
+# (quantity terms are names, so the minimum is written as one: "(a <&> b)")
+def act.q.name(t: T.Bt) -> List<&2, U32>:
+  match t:
+    case T.BtVar{n}:
+      n
+    case _:
+      S.b("&1")
+
+def act.q2() -> T.Bt:
+  T.BtVar{S.b("&2")}
+
+def act.is.q2(t: T.Bt) -> Bool:
+  match t:
+    case T.BtVar{n}:
+      S.eq(n, S.b("&2"))
+    case _:
+      False{}
+
+# (&2 is the unit of the minimum, &1 absorbs it)
+def act.qmin(+a: T.Bt, +b: T.Bt) -> T.Bt:
+  Bool.pick(T.Bt, act.is.q2(a), b, Bool.pick(T.Bt, act.is.q2(b), a, Bool.pick(T.Bt, Bool.or(act.is.q1(a), act.is.q1(b)), act.q1(), T.BtVar{List.append(&2, U32, 40 <> act.q.name(a), List.append(&2, U32, S.b(" <&> "), List.append(&2, U32, act.q.name(b), [41])))})))
+
+# ⊔ applied: its two (kept) arguments
+def act.qmin.args(args: T.Bt) -> T.Bt:
+  match args:
+    case T.BtArgs{T.BtDead{a}, T.BtArgs{T.BtDead{b}, T.BtANil{}}}:
+      act.qmin(a, b)
+    case T.BtArgs{a, T.BtArgs{b, T.BtANil{}}}:
+      act.qmin(a, b)
+    case _:
+      act.q1()
+
+def act.qt.ismin(s: ActSym) -> Bool:
+  match s:
+    case ActSym{m, n, k, ms, ar, AbQmin{}, fs, c, cp}:
+      True{}
+    case _:
+      False{}
+
+# a level term as a quantity
+def act.qt(t: A.Ag, +ctx: List<&2, T.Bt>, +env: ActEnv) -> T.Bt:
+  match t:
+    case A.AgLevel{l}:
+      Bool.pick(T.Bt, act.quant.on(), act.qt(l, ctx, env), act.level())
+    case A.AgLMax{0n, ps}:
+      act.qt(ps, ctx, env)
+    case A.AgLMax{1n+n, ps}:
+      act.q1()
+    case A.AgLPlus{0n, x, A.AgLEnd{}}:
+      act.qt(x, ctx, env)
+    case A.AgLPlus{0n, x, rest}:
+      act.qmin(act.qt(x, ctx, env), act.qt(rest, ctx, env))
+    case A.AgLPlus{1n+k, x, rest}:
+      act.q1()
+    case A.AgVar{+i, x, es}:
+      act.ctx.at(i, ctx)
+    case A.AgDef{+q, A.AgEApp{i, a, A.AgEApp{i2, b, A.AgENil{}}}}:
+      Bool.pick(T.Bt, act.qt.ismin(act.sym(env, q)), act.qmin(act.qt(a, ctx, env), act.qt(b, ctx, env)), act.q1())
+    case A.AgDefX{+q, A.AgEApp{i, a, A.AgEApp{i2, b, A.AgENil{}}}}:
+      Bool.pick(T.Bt, act.qt.ismin(act.sym(env, q)), act.qmin(act.qt(a, ctx, env), act.qt(b, ctx, env)), act.q1())
+    case _:
+      act.q1()
+
+# a sort: Set ℓ is Kind(qℓ), unless qℓ is &1 (Type); any other sort is Type
+def act.kind.of(+q: T.Bt) -> T.Bt:
+  Bool.pick(T.Bt, act.is.q1(q), T.BtType{}, T.BtApp{T.BtVar{S.b("Kind")}, T.BtArgs{q, T.BtANil{}}})
+
+def act.sort(s: A.Ag, +ctx: List<&2, T.Bt>, +env: ActEnv) -> T.Bt:
+  match s:
+    case A.AgSSet{l}:
+      act.kind.of(act.qt(l, ctx, env))
+    case _:
+      T.BtType{}
 
 # the context entry of a Level binder
 def act.is.marker(t: T.Bt) -> Bool:
@@ -736,15 +843,36 @@ def act.type.head(fuel: Nat, t: A.Ag, +env: ActEnv) -> Bool:
     case _ _:
       False{}
 
-def act.etu.pick(+u: A.Ag, d: A.Ag, +env: ActEnv) -> A.Ag:
-  Bool.pick(A.Ag, act.type.head(16n, u, env), u, d)
+# whether a term builds a constructor (under its lambdas)
+def act.con.head(t: A.Ag) -> Bool:
+  match t:
+    case A.AgLam{i, x, d, b}:
+      act.con.head(b)
+    case A.AgBeta{g, es}:
+      act.con.head(g)
+    case A.AgCon{q, o, es}:
+      True{}
+    case _:
+      False{}
+
+def act.etu.n(c: ActCopy) -> Nat:
+  match c:
+    case ActCopy{n, b}:
+      n
+
+def act.etu.pick(+u: A.Ag, d: A.Ag, part: Bool, +env: ActEnv) -> A.Ag:
+  Bool.pick(A.Ag, Bool.or(act.type.head(16n, u, env), Bool.and(Bool.and(part, act.quant.on()), act.con.head(u))), u, d)
 
 # a call act.inline resolved as no copy (AgDefX), unfolded instead when it
-# has an eta unfolding and its value there is a type
+# has an eta unfolding and its value there is a type, or it is partial and
+# builds a pair (Product's `_∘_ = zip C._∘_ D._∘_`: by projections its laws
+# reduce on morphism variables; a pair used twice then needs Data homs,
+# which the quantity repairs specialise it to)
 def act.etu.try(t: A.Ag, +q: A.AgQ, +es: A.Ag, +env: ActEnv) -> A.Ag:
   match t:
     case A.AgDefX{q2, es2}:
-      act.etu.pick(act.etu.at(act.etu.get(env, q), es), A.AgDefX{q2, es2}, env)
+      +c = act.etu.get(env, q)
+      act.etu.pick(act.etu.at(c, es), A.AgDefX{q2, es2}, Nat.is_lt(act.es.apps(es), act.etu.n(c)), env)
     case t:
       t
 
@@ -1111,7 +1239,13 @@ def act.copy.is(c: Maybe<&2, ActCopy>) -> Bool:
 def act.app.def(s: ActSym, +env: ActEnv, args: T.Bt) -> T.Bt:
   match s:
     case ActSym{m, n, k, ms, ar, AbLevel{}, fs, c, cp}:
-      act.level()
+      Bool.pick(T.Bt, act.quant.on(), act.q1(), act.level())
+    case ActSym{m, n, k, ms, ar, AbQuant{}, fs, c, cp}:
+      Bool.pick(T.Bt, act.quant.on(), T.BtVar{S.b("Quant")}, act.level())
+    case ActSym{m, n, k, ms, ar, AbQone{}, fs, c, cp}:
+      Bool.pick(T.Bt, act.quant.on(), act.q1(), act.level())
+    case ActSym{m, n, k, ms, ar, AbQmin{}, fs, c, cp}:
+      Bool.pick(T.Bt, act.quant.on(), act.qmin.args(args), act.level())
     case ActSym{m, n, k, ms, ar, AbNat{}, fs, c, cp}:
       T.BtVar{S.b("Nat")}
     case ActSym{m, n, k, ms, ar, AbBool{}, fs, c, cp}:
@@ -1182,12 +1316,8 @@ def act.lit(l: A.Ag) -> T.Bt:
       act.todo("a literal Bend has no counterpart for (Word64, Float, Char, a quoted name)")
 
 # a Pi: a Level binder leaves only the codomain
-def act.pi(lv: Bool, m: ActM, nm: List<&2, U32>, d: Bool, a: T.Bt, b: T.Bt) -> T.Bt:
-  match lv:
-    case True{}:
-      b
-    case False{}:
-      T.BtPi{act.bmode(m), nm, d, a, b}
+def act.pi(lv: Bool, m: ActM, nm: List<&2, U32>, d: Bool, a: T.Bt, +b: T.Bt) -> T.Bt:
+  Bool.pick(T.Bt, Bool.and(lv, Bool.not(act.quant.on())), b, T.BtPi{act.bmode(m), nm, d, a, b})
 
 # The fold over terms (and elimination spines, which become argument
 # spines).  ctx: the Bend term of each binder in scope, index 0 first.
@@ -1207,15 +1337,15 @@ def act.t(a: A.Ag, +ctx: List<&2, T.Bt>, +env: ActEnv) -> T.Bt:
     case A.AgPi{i, +x, +a2, +d, b}:
       +lv = act.ty.level(a2)
       +nm = act.fresh(x, ctx)
-      act.pi(lv, act.mode(i, a2, act.opaque.env(d, a2, env)), nm, d, act.t(a2, ctx, env), act.t(b, act.bind(d, Bool.pick(T.Bt, lv, act.level(), T.BtVar{nm}), ctx), env))
+      act.pi(lv, act.mode(i, a2, act.opaque.env(d, a2, env)), nm, d, act.t(a2, ctx, env), act.t(b, act.bind(d, Bool.pick(T.Bt, Bool.and(lv, Bool.not(act.quant.on())), act.level(), T.BtVar{nm}), ctx), env))
     case A.AgSort{s}:
-      T.BtType{}
+      Bool.pick(T.Bt, act.quant.on(), act.sort(s, ctx, env), T.BtType{})
     case A.AgEl{s, t}:
       act.t(t, ctx, env)
     case A.AgLit{l}:
       act.lit(l)
     case A.AgLevel{l}:
-      act.level()
+      act.qt(l, ctx, env)
     case A.AgDontCare{t}:
       act.t(t, ctx, env)
     case A.AgStored{t}:
@@ -1229,7 +1359,7 @@ def act.t(a: A.Ag, +ctx: List<&2, T.Bt>, +env: ActEnv) -> T.Bt:
     case A.AgENil{}:
       T.BtANil{}
     case A.AgEApp{i, +t, rest}:
-      T.BtArgs{act.arg(act.is.level(t, ctx, env), act.t(t, ctx, env)), act.t(rest, ctx, env)}
+      T.BtArgs{act.arg(Bool.and(Bool.not(act.quant.on()), act.is.level(t, ctx, env)), act.t(t, ctx, env)), act.t(rest, ctx, env)}
     case A.AgEProj{q, rest}:
       T.BtArgs{act.todo("a projection elimination (stored form)"), act.t(rest, ctx, env)}
     case A.AgERaw{x, rest}:
@@ -1322,7 +1452,39 @@ def act.sym.copy(c: Maybe<&2, ActCopy>, +mo: List<&2, U32>, +nm: List<&2, U32>, 
 # any other function, a projection-like one included (Agda's index there
 # only says which argument determines the ones before it), what its first
 # clause matches.
-def act.sym.fun(cp: Bool, srt: Bool, p: A.AgProj, cls: A.Ag, tree: A.Ag, +mo: List<&2, U32>, +nm: List<&2, U32>, ms: List<&2, ActM>, b: ActB) -> ActSym:
+# Lifting: a plain function takes every Pi of its type as a parameter, not
+# only those its clauses bind (`step-≈-⟩ = forward …` binds none of its
+# points; `flip f = λ y x → …` binds f).  Its body is then applied to the
+# extra parameters (act.lift.app) and a call fills them all (a partial one
+# is eta-expanded), so the quantity pass may erase a lifted parameter its
+# body never uses, as it does a header's: a chain's points are then dead
+# where they are passed.  Not lifted: projections and projection-like
+# functions, copies, copattern definitions, type-valued definitions, and a
+# definition without clauses.
+def act.pats.proj(ps: A.Ag) -> Bool:
+  match ps:
+    case A.AgPArg{i, x, A.AgPProj{q}, rest}:
+      True{}
+    case A.AgPArg{i, x, p, rest}:
+      act.pats.proj(rest)
+    case _:
+      False{}
+
+def act.cls.liftable(cls: A.Ag) -> Bool:
+  match cls:
+    case A.AgCl{tel, ps, body, ty, ca, rest}:
+      Bool.not(act.pats.proj(ps))
+    case _:
+      False{}
+
+def act.lift.ar(+n: Nat, +m: Nat, ok: Bool) -> Nat:
+  match ok:
+    case True{}:
+      Bool.pick(Nat, Nat.is_lt(n, m), m, n)
+    case False{}:
+      n
+
+def act.sym.fun(cp: Bool, srt: Bool, tl: Bool, p: A.AgProj, +cls: A.Ag, tree: A.Ag, +mo: List<&2, U32>, +nm: List<&2, U32>, +ms: List<&2, ActM>, b: ActB) -> ActSym:
   match cp p:
     case True{} p:
       act.sym.copy(act.copy.of(tree), mo, nm, ms, b)
@@ -1331,7 +1493,7 @@ def act.sym.fun(cp: Bool, srt: Bool, p: A.AgProj, cls: A.Ag, tree: A.Ag, +mo: Li
     case False{} A.AgPrOf{None{}, o, ix}:
       ActSym{mo, nm, A.AkFunction{}, ms, act.cls.arity(cls), b, Nil{}, Nil{}, None{}}
     case False{} A.AgPrNone{}:
-      ActSym{mo, nm, A.AkFunction{}, ms, act.cls.arity(cls), b, Nil{}, Nil{}, None{}}
+      ActSym{mo, nm, A.AkFunction{}, ms, act.lift.ar(act.cls.arity(cls), List.length(&2, ActM, ms), Bool.and(Bool.not(tl), act.cls.liftable(cls))), b, Nil{}, Nil{}, None{}}
 
 def act.con.name.of(un: Bool, +nm: List<&2, U32>) -> List<&2, U32>:
   match un:
@@ -1474,10 +1636,10 @@ def act.ix.names(n: Nat) -> List<&2, String>:
     case 1n+p:
       "ix_eq" <> act.ix.names(p)
 
-def act.sym.d(d: A.AgD, cp: Bool, srt: Bool, +mo: List<&2, U32>, +nm: List<&2, U32>, +ms: List<&2, ActM>, b: ActB, ix: Nat) -> ActSym:
+def act.sym.d(d: A.AgD, cp: Bool, srt: Bool, tl: Bool, +mo: List<&2, U32>, +nm: List<&2, U32>, +ms: List<&2, ActM>, b: ActB, ix: Nat) -> ActSym:
   match d:
     case A.AgDFun{p, r, w, e, t, mu, cls, tree}:
-      act.sym.fun(cp, srt, p, cls, tree, mo, nm, ms, b)
+      act.sym.fun(cp, srt, tl, p, cls, tree, mo, nm, ms, b)
     case A.AgDRec{+pars, c, named, ind, fs, tel, eta, pm, rcl}:
       ActSym{mo, nm, A.AkRecord{}, ms, pars, b, act.keys(fs), act.con.name(act.local(mo, act.qs(c))), act.copy.cl(cp, rcl)}
     case A.AgDData{+pars, +ixs, cs, s, dcl}:
@@ -1491,12 +1653,15 @@ def act.sym.d(d: A.AgD, cp: Bool, srt: Bool, +mo: List<&2, U32>, +nm: List<&2, U
     case A.AgDOther{x}:
       ActSym{mo, nm, A.AkWord{}, ms, 0n, b, Nil{}, Nil{}, None{}}
 
-def act.role(+qs: List<&2, U32>, lv: Bool) -> ActB:
-  match lv:
-    case True{}:
+def act.role.pick(b: ActB, lv: Bool) -> ActB:
+  match b lv:
+    case AbNone{} True{}:
       AbLevel{}
-    case False{}:
-      act.builtin(qs)
+    case b _:
+      b
+
+def act.role(+qs: List<&2, U32>, lv: Bool) -> ActB:
+  act.role.pick(act.builtin(qs), lv)
 
 # a module's file under src/: its name's parts, each a plain name
 def act.path.parts(xs: List<&2, List<&2, U32>>) -> List<&2, U32>:
@@ -1590,7 +1755,7 @@ def act.tylevel(d: A.AgD, +ty: A.Ag, +unf: Map<&2, ActCopy>) -> Bool:
 def act.sym.of(+mo: List<&2, U32>, +nm: List<&2, U32>, d: A.AgDecl, +tab: Map<&2, ActSym>, +unf: Map<&2, ActCopy>) -> ActSym:
   match d:
     case A.AgDecl{q, qn, md, f, l, l0, l1, k, m, +fl, lang, +ty, +dd}:
-      act.sym.d(dd, Bool.or(act.flag(A.AkCopy{}, fl), act.inl.d(act.ends.sort(ty), dd)), act.ends.sort(ty), mo, nm, act.modes.u(8n, ty, act.tylevel(dd, ty, unf), tab, unf), act.role(act.qs(q), act.ends.level(ty)), act.ixs.of(dd, ty))
+      act.sym.d(dd, Bool.or(act.flag(A.AkCopy{}, fl), act.inl.d(act.ends.sort(ty), dd)), act.ends.sort(ty), act.tylevel(dd, ty, unf), mo, nm, act.modes.u(8n, ty, act.tylevel(dd, ty, unf), tab, unf), act.role(act.qs(q), act.ends.level(ty)), act.ixs.of(dd, ty))
 
 # seen: the names this header has given so far (a non-dependent Pi's
 # parameter is in no context, but its name is taken)
@@ -2553,14 +2718,150 @@ def act.ps.ret(r: ActPs) -> T.Bt:
 # a function: its header from its type, its body from its clauses (or, for
 # a record field, a match on the record; for copattern clauses, the
 # record's constructor)
-def act.fun.body(p: A.AgProj, +cls: A.Ag, +key: String, +ar: Nat, +t: A.Ag, +ents: List<&2, T.Bt>, +env: ActEnv, copat: Bool, +r: ActPs) -> T.Bt:
+# the kept (not dropped) parameters among the first n
+def act.kept.n(n: Nat, ms: List<&2, ActM>) -> Nat:
+  match n ms:
+    case 1n+p AmDrop{} <> t:
+      act.kept.n(p, t)
+    case 1n+p m <> t:
+      1n+act.kept.n(p, t)
+    case _ _:
+      0n
+
+def act.bp.names(ps: List<&2, T.BParam>) -> List<&2, List<&2, U32>>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case T.BParam{m, x, ty} <> t:
+      x <> act.bp.names(t)
+
+def act.mem.name(+n: List<&2, U32>, xs: List<&2, List<&2, U32>>) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case h <> t:
+      Bool.or(S.eq(h, n), act.mem.name(n, t))
+
+# a body (match, cases, rewrites, lets, expressions) with the variable n
+# renamed n2, a case or let binding n shadowing it
+def act.sub.deep(t: T.Bt, +n: List<&2, U32>, +n2: List<&2, U32>) -> T.Bt:
+  match t:
+    case T.BtExpr{e}:
+      T.BtExpr{T.tba.subst(e, n, T.BtVar{n2})}
+    case T.BtMatch{xs, cs}:
+      T.BtMatch{T.tba.subst(xs, n, T.BtVar{n2}), act.sub.deep(cs, n, n2)}
+    case T.BtCase{+p, +b, rest}:
+      T.BtCase{p, Bool.pick(T.Bt, act.mem.name(n, T.tba.pvars(p, Nil{})), b, act.sub.deep(b, n, n2)), act.sub.deep(rest, n, n2)}
+    case T.BtRw{e, p, b}:
+      T.BtRw{T.tba.subst(e, n, T.BtVar{n2}), T.tba.subst(p, n, T.BtVar{n2}), act.sub.deep(b, n, n2)}
+    case T.BtLet{+y, v, +b}:
+      T.BtLet{y, T.tba.subst(v, n, T.BtVar{n2}), Bool.pick(T.Bt, S.eq(y, n), b, act.sub.deep(b, n, n2))}
+    case t:
+      T.tba.subst(t, n, T.BtVar{n2})
+
+# a case pattern with its variable n renamed n2
+def act.alpha.pat(p: T.Bt, +n: List<&2, U32>, +n2: List<&2, U32>) -> T.Bt:
+  match p:
+    case T.BtVar{+y}:
+      Bool.pick(T.Bt, S.eq(y, n), T.BtVar{n2}, T.BtVar{y})
+    case T.BtPv{+m, +y}:
+      Bool.pick(T.Bt, S.eq(y, n), T.BtPv{m, n2}, T.BtPv{m, y})
+    case T.BtCon{c, a}:
+      T.BtCon{c, act.alpha.pat(a, n, n2)}
+    case T.BtArgs{a, rest}:
+      T.BtArgs{act.alpha.pat(a, n, n2), act.alpha.pat(rest, n, n2)}
+    case T.BtSucc{a}:
+      T.BtSucc{act.alpha.pat(a, n, n2)}
+    case p:
+      p
+
+# t with each binder named n (a lambda's, a Pi's, a let's, a case's
+# pattern variable) renamed n2 in its scope; a free n, the lifted
+# parameter itself, stays
+def act.alpha(t: T.Bt, +n: List<&2, U32>, +n2: List<&2, U32>) -> T.Bt:
+  match t:
+    case T.BtLam{+m, +y, b}:
+      +b2 = act.alpha(b, n, n2)
+      Bool.pick(T.Bt, S.eq(y, n), T.BtLam{m, n2, T.tba.subst(b2, n, T.BtVar{n2})}, T.BtLam{m, y, b2})
+    case T.BtPi{+m, +y, +d, +a, b}:
+      +b2 = act.alpha(b, n, n2)
+      Bool.pick(T.Bt, S.eq(y, n), T.BtPi{m, n2, d, act.alpha(a, n, n2), T.tba.subst(b2, n, T.BtVar{n2})}, T.BtPi{m, y, d, act.alpha(a, n, n2), b2})
+    case T.BtLet{+y, +v, b}:
+      +b2 = act.alpha(b, n, n2)
+      Bool.pick(T.Bt, S.eq(y, n), T.BtLet{n2, act.alpha(v, n, n2), T.tba.subst(b2, n, T.BtVar{n2})}, T.BtLet{y, act.alpha(v, n, n2), b2})
+    case T.BtCase{+p, b, +rest}:
+      +b2 = act.alpha(b, n, n2)
+      Bool.pick(T.Bt, act.mem.name(n, T.tba.pvars(p, Nil{})), T.BtCase{act.alpha.pat(p, n, n2), act.sub.deep(b2, n, n2), act.alpha(rest, n, n2)}, T.BtCase{p, b2, act.alpha(rest, n, n2)})
+    case T.BtApp{f, a}:
+      T.BtApp{act.alpha(f, n, n2), act.alpha(a, n, n2)}
+    case T.BtArgs{a, rest}:
+      T.BtArgs{act.alpha(a, n, n2), act.alpha(rest, n, n2)}
+    case T.BtTplArg{a}:
+      T.BtTplArg{act.alpha(a, n, n2)}
+    case T.BtCon{c, a}:
+      T.BtCon{c, act.alpha(a, n, n2)}
+    case T.BtTyApp{c, a}:
+      T.BtTyApp{c, act.alpha(a, n, n2)}
+    case T.BtEq{ty, a, b}:
+      T.BtEq{act.alpha(ty, n, n2), act.alpha(a, n, n2), act.alpha(b, n, n2)}
+    case T.BtSucc{a}:
+      T.BtSucc{act.alpha(a, n, n2)}
+    case T.BtAnn{a, ty}:
+      T.BtAnn{act.alpha(a, n, n2), act.alpha(ty, n, n2)}
+    case T.BtDead{a}:
+      T.BtDead{act.alpha(a, n, n2)}
+    case T.BtRw{e, p, b}:
+      T.BtRw{act.alpha(e, n, n2), act.alpha(p, n, n2), act.alpha(b, n, n2)}
+    case T.BtMatch{xs, cs}:
+      T.BtMatch{act.alpha(xs, n, n2), act.alpha(cs, n, n2)}
+    case T.BtExpr{e}:
+      T.BtExpr{act.alpha(e, n, n2)}
+    case t:
+      t
+
+# a body applied to one more parameter, n: a head lambda takes it (in each
+# case of a match, under a rewrite or a let), else the value is applied, an
+# erased parameter (dead: m) in a dead place so Copy does not raise it
+def act.lift.arg(m: T.BMode, +n: List<&2, U32>) -> T.Bt:
+  match m:
+    case T.BmErased{}:
+      T.BtDead{T.BtVar{n}}
+    case _:
+      T.BtVar{n}
+
+def act.lift.one(b: T.Bt, +m: T.BMode, +n: List<&2, U32>) -> T.Bt:
+  match b:
+    case T.BtExpr{T.BtLam{lm, x, e}}:
+      T.BtExpr{T.tba.subst(e, x, T.BtVar{n})}
+    case T.BtExpr{e}:
+      T.BtExpr{T.BtApp{e, T.BtArgs{act.lift.arg(m, n), T.BtANil{}}}}
+    case T.BtMatch{xs, cs}:
+      T.BtMatch{xs, act.lift.one(cs, m, n)}
+    case T.BtCase{p, cb, rest}:
+      T.BtCase{p, act.lift.one(cb, m, n), act.lift.one(rest, m, n)}
+    case T.BtRw{e, p, rb}:
+      T.BtRw{e, p, act.lift.one(rb, m, n)}
+    case T.BtLet{x, v, rb}:
+      T.BtLet{x, v, act.lift.one(rb, m, n)}
+    case b:
+      b
+
+# (a binder in the body named like n is renamed first, so n is not captured)
+def act.lift.app(ps: List<&2, T.BParam>, b: T.Bt) -> T.Bt:
+  match ps:
+    case Nil{}:
+      b
+    case T.BParam{m, +n, ty} <> t:
+      act.lift.app(t, act.lift.one(act.alpha(b, n, List.append(&2, U32, n, S.b("_b"))), m, n))
+
+def act.fun.body(p: A.AgProj, +cls: A.Ag, +key: String, +ar: Nat, +t: A.Ag, +ents: List<&2, T.Bt>, +env: ActEnv, copat: Bool, +r: ActPs, +ms: List<&2, ActM>) -> T.Bt:
   match p copat:
     case A.AgPrOf{Some{r}, o, ix} _:
       act.proj.body(act.sym(env, r), env, key, ents)
     case _ True{}:
       act.copat.body(act.cod.q(ar, t), env, cls, ents)
     case _ False{}:
-      act.body(cls, ents, env, act.ps.ps(r), act.ps.ret(r))
+      act.lift.app(List.drop(&2, T.BParam, act.ps.ps(r), act.kept.n(act.cls.arity(cls), ms)), act.body(cls, ents, env, act.ps.ps(r), act.ps.ret(r)))
 
 def act.fun.item(+nm: List<&2, U32>, +ms: List<&2, ActM>, +cls: A.Ag, body: T.Bt, r: ActPs, doc: List<&2, List<&2, U32>>, +env: ActEnv) -> List<&2, T.BItem>:
   match r:
@@ -2568,7 +2869,7 @@ def act.fun.item(+nm: List<&2, U32>, +ms: List<&2, ActM>, +cls: A.Ag, body: T.Bt
       [T.BiDef{nm, act.live.ps(ps, act.or.lists(act.scr(cls, env), act.abs.pos(cls)), ms), ret, body, doc}]
 
 def act.fun.with(+nm: List<&2, U32>, +ms: List<&2, ActM>, +ar: Nat, p: A.AgProj, +cls: A.Ag, +key: String, +t: A.Ag, +env: ActEnv, doc: List<&2, List<&2, U32>>, +r: ActPs) -> List<&2, T.BItem>:
-  act.fun.item(nm, ms, cls, act.fun.body(p, cls, key, ar, t, act.ps.ents(r), env, act.copat.is(cls), r), r, doc, env)
+  act.fun.item(nm, ms, cls, act.fun.body(p, cls, key, ar, t, act.ps.ents(r), env, act.copat.is(cls), r, ms), r, doc, env)
 
 def act.item.fun(s: ActSym, d: A.AgD, +key: String, ty: A.Ag, +env: ActEnv, doc: List<&2, List<&2, U32>>) -> List<&2, T.BItem>:
   match s d:
@@ -2610,10 +2911,74 @@ def act.rtel(tel: A.Ag, np: Nat, ms: List<&2, ActM>, +ctx: List<&2, T.Bt>, +env:
     case _ _ _:
       ActRt{Nil{}, Nil{}}
 
+# Kinds of the declared types (2026-10-20) ------------------------------------
+#
+# A type is as reusable as its fields' types, as Base's List is.  A field of
+# a type parameter `-A: Kind(q)` contributes q (and so does a family
+# `-B: A -> Kind(q)` applied); Nat, Bool, Unit, an equation or the type
+# itself contribute &2; anything else contributes &1 (a function, a type, or
+# another type).  The kind is the smallest: Data for &2, Type for &1, and
+# Kind(q) in between.  So Σ A B is Kind(a <&> b), and Product's morphism
+# pairs are Data when its homs are.
+
+# the quantity a type's values have, from its type: Kind(q) is q, Data &2
+def act.ty.endq(t: T.Bt) -> T.Bt:
+  match t:
+    case T.BtPi{m, y, d, a, b}:
+      act.ty.endq(b)
+    case T.BtApp{T.BtVar{+k}, T.BtArgs{+q, T.BtANil{}}}:
+      Bool.pick(T.Bt, S.eq(k, S.b("Kind")), q, act.q1())
+    case T.BtVar{+d}:
+      Bool.pick(T.Bt, S.eq(d, S.b("Data")), act.q2(), act.q1())
+    case _:
+      act.q1()
+
+# the quantity of the parameter named x's values (&1 if it is no parameter)
+def act.p.q(ps: List<&2, T.BParam>, +x: List<&2, U32>) -> T.Bt:
+  match ps:
+    case Nil{}:
+      act.q1()
+    case T.BParam{m, +y, ty} <> t:
+      Bool.pick(T.Bt, S.eq(x, y), act.ty.endq(ty), act.p.q(t, x))
+
+def act.base.data(+x: List<&2, U32>) -> Bool:
+  Bool.or(Bool.or(S.eq(x, S.b("Nat")), S.eq(x, S.b("Bool"))), S.eq(x, S.b("Unit")))
+
+# a field's contribution
+def act.fq(+self: List<&2, U32>, ty: T.Bt, +ps: List<&2, T.BParam>) -> T.Bt:
+  match ty:
+    case T.BtVar{+x}:
+      Bool.pick(T.Bt, act.base.data(x), act.q2(), act.p.q(ps, x))
+    case T.BtApp{T.BtVar{+x}, a}:
+      act.p.q(ps, x)
+    case T.BtTyApp{+x, a}:
+      Bool.pick(T.Bt, S.eq(x, self), act.q2(), act.q1())
+    case T.BtEq{t, a, b}:
+      act.q2()
+    case _:
+      act.q1()
+
+def act.kind.fs(+self: List<&2, U32>, fs: List<&2, T.BField>, +ps: List<&2, T.BParam>) -> T.Bt:
+  match fs:
+    case Nil{}:
+      act.q2()
+    case T.BField{x, ty} <> t:
+      act.qmin(act.fq(self, ty, ps), act.kind.fs(self, t, ps))
+
+def act.kind.cs(+self: List<&2, U32>, cs: List<&2, T.BCtor>, +ps: List<&2, T.BParam>) -> T.Bt:
+  match cs:
+    case Nil{}:
+      act.q2()
+    case T.BCtor{c, fs} <> t:
+      act.qmin(act.kind.fs(self, fs, ps), act.kind.cs(self, t, ps))
+
+def act.kind.term(+q: T.Bt) -> T.Bt:
+  Bool.pick(T.Bt, act.is.q2(q), T.BtVar{S.b("Data")}, Bool.pick(T.Bt, act.is.q1(q), T.BtType{}, T.BtApp{T.BtVar{S.b("Kind")}, T.BtArgs{q, T.BtANil{}}}))
+
 def act.item.rec.of(+nm: List<&2, U32>, +c: List<&2, U32>, r: ActRt, doc: List<&2, List<&2, U32>>) -> List<&2, T.BItem>:
   match r:
-    case ActRt{ps, fs}:
-      [T.BiType{nm, ps, False{}, [T.BCtor{c, fs}], doc}]
+    case ActRt{+ps, +fs}:
+      [T.BiType{nm, ps, Bool.pick(T.Bt, act.quant.on(), act.kind.term(act.kind.fs(nm, fs, ps)), T.BtType{}), [T.BCtor{c, fs}], doc}]
 
 def act.item.rec(s: ActSym, d: A.AgD, +env: ActEnv, doc: List<&2, List<&2, U32>>) -> List<&2, T.BItem>:
   match s d:
@@ -2742,8 +3107,8 @@ def act.ps.last(+n: Nat, ps: List<&2, T.BParam>) -> List<&2, T.BParam>:
 
 def act.item.data.of(+nm: List<&2, U32>, r: ActPs, +cs: List<&2, T.BCtor>, doc: List<&2, List<&2, U32>>) -> List<&2, T.BItem>:
   match r:
-    case ActPs{ps, ret, ctx, es, ok}:
-      [T.BiType{nm, ps, act.dataish.cs(nm, cs), cs, doc}]
+    case ActPs{+ps, ret, ctx, es, ok}:
+      [T.BiType{nm, ps, act.kind.term(act.kind.cs(nm, cs, ps)), cs, doc}]
 
 def act.item.data(s: ActSym, d: A.AgD, ty: A.Ag, +env: ActEnv, +decls: Map<&2, A.AgDecl>, doc: List<&2, List<&2, U32>>) -> List<&2, T.BItem>:
   match s d:
