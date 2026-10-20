@@ -1799,23 +1799,133 @@ def act.scr.vars(scr: List<&2, Bool>, ents: List<&2, T.Bt>) -> List<&2, T.Bt>:
     case _ _:
       Nil{}
 
+# Absurd clauses: Agda's `f ()` needs no split when the variable's type is
+# empty (⊥ = Irrelevant Empty), but Bend has to see the emptiness, so the
+# clause's body matches the variable down to an empty data type: a
+# type-valued definition is opened, a one-field record (Irrelevant A, Lift
+# A) is matched and its field, whose type is taken to be the record's last
+# argument, eliminated in turn, and an empty data type is a match with no
+# cases.  One step of that walk:
+type ActAbsSt is Data:
+  AbsDone{}
+  AbsOpen{t: A.Ag}
+  AbsWrap{c: List<&2, U32>, t: A.Ag}
+  AbsFail{}
+
+# the last argument of a spine
+def act.es.last(es: A.Ag) -> A.Ag:
+  match es:
+    case A.AgEApp{i, t, A.AgENil{}}:
+      t
+    case A.AgEApp{i, t, rest}:
+      act.es.last(rest)
+    case _:
+      A.AgNone{}
+
+def act.abs.sym(s: ActSym, q: A.AgQ, +es: A.Ag, +env: ActEnv) -> ActAbsSt:
+  match s:
+    case ActSym{m, n, A.AkData{}, ms, ar, b, Nil{}, c, cp}:
+      AbsDone{}
+    case ActSym{+m, n, A.AkRecord{}, ms, ar, b, f <> Nil{}, +c, cp}:
+      AbsWrap{act.ref.of(act.is.here(env, m), env, m, c), act.es.last(es)}
+    case ActSym{m, n, A.AkFunction{}, ms, ar, b, fs, c, cp}:
+      AbsOpen{act.inline(1024n, act.unfold(env, q, es), env)}
+    case _:
+      AbsFail{}
+
+def act.abs.def(t: A.Ag, +env: ActEnv) -> ActAbsSt:
+  match t:
+    case A.AgDef{+q, +es}:
+      act.abs.sym(act.sym(env, q), q, es, env)
+    case _:
+      AbsFail{}
+
+def act.abs.step(t: A.Ag, +env: ActEnv) -> ActAbsSt:
+  match t:
+    case A.AgEl{s, a}:
+      act.abs.def(a, env)
+    case t:
+      act.abs.def(t, env)
+
+def act.abs.match(+x: List<&2, U32>, cs: T.Bt) -> T.Bt:
+  T.BtMatch{T.tba.args([T.BtVar{x}]), cs}
+
+# the elimination of x, a step at a time
+def act.abs.elim(fuel: Nat, st: ActAbsSt, +x: List<&2, U32>, +env: ActEnv) -> T.Bt:
+  match fuel st:
+    case _ AbsDone{}:
+      act.abs.match(x, T.BtCEnd{})
+    case 1n+f AbsOpen{t}:
+      act.abs.elim(f, act.abs.step(t, env), x, env)
+    case 1n+f AbsWrap{c, t}:
+      +y = List.append(&2, U32, x, S.b("_f"))
+      act.abs.match(x, T.BtCase{T.tba.args([T.BtCon{c, T.tba.args([T.BtPv{T.BmLive{}, y}])}]), act.abs.elim(f, act.abs.step(t, env), y, env), T.BtCEnd{}})
+    case _ _:
+      T.BtExpr{act.todo("an absurd pattern on a type agda2bend cannot see is empty")}
+
+# a clause's first top-level absurd pattern variable: its parameter and type
+type ActAbs is Data:
+  ActAbs{x: List<&2, U32>, ty: A.Ag}
+
+def act.tel.nth(tel: A.Ag, n: Nat) -> A.Ag:
+  match tel n:
+    case A.AgTel{x, i, ty, rest} 0n:
+      ty
+    case A.AgTel{x, i, ty, rest} 1n+p:
+      act.tel.nth(rest, p)
+    case _ _:
+      A.AgNone{}
+
+def act.abs.find(ps: A.Ag, ents: List<&2, T.Bt>, +tel: A.Ag, +n: Nat) -> Maybe<&2, ActAbs>:
+  match ps ents:
+    case A.AgPArg{i, x, A.AgPVar{v, +ix, A.AkAbsurd{}}, rest} e <> et:
+      Some{ActAbs{act.var.name(e), act.tel.nth(tel, Nat.sub(Nat.sub(n, 1n), ix))}}
+    case A.AgPArg{i, x, p, rest} e <> et:
+      act.abs.find(rest, et, tel, n)
+    case _ _:
+      None{}
+
+# a clause's body: an absurd one's elimination, else the body translated
+def act.abs.body(m: Maybe<&2, ActAbs>, body: A.Ag, +ctx: List<&2, T.Bt>, +env: ActEnv) -> T.Bt:
+  match m body:
+    case Some{ActAbs{x, ty}} A.AgAbsurd{}:
+      act.abs.elim(16n, act.abs.step(ty, env), x, env)
+    case _ body:
+      T.BtExpr{act.t(act.inline(100000n, body, env), ctx, env)}
+
+# the parameters some clause has an absurd pattern variable at (they must
+# be live, as a split one: the elimination matches them)
+def act.abs.one(p: A.Ag) -> Bool:
+  match p:
+    case A.AgPVar{x, n, A.AkAbsurd{}}:
+      True{}
+    case _:
+      False{}
+
+def act.abs.ps(ps: A.Ag) -> List<&2, Bool>:
+  match ps:
+    case A.AgPArg{i, x, p, rest}:
+      act.abs.one(p) <> act.abs.ps(rest)
+    case _:
+      Nil{}
+
 # a case: its patterns, and its body after the rewrites its refl patterns
 # need (an absurd or cubical clause is left out)
-def act.case.of(a: ActPat, +n: Nat, body: A.Ag, +env: ActEnv, rest: T.Bt, rw: ActRw, +dots: List<&2, ActDot>, +svars: List<&2, T.Bt>, +hps: List<&2, T.BParam>, +ret: T.Bt) -> T.Bt:
+def act.case.of(a: ActPat, +n: Nat, body: A.Ag, +env: ActEnv, rest: T.Bt, rw: ActRw, abs: Maybe<&2, ActAbs>, +dots: List<&2, ActDot>, +svars: List<&2, T.Bt>, +hps: List<&2, T.BParam>, +ret: T.Bt) -> T.Bt:
   match a:
     case ActPat{p, +bs, True{}}:
       rest
     case ActPat{p, +bs, False{}}:
       +q = act.eq.spine(p, svars)
       +ctx = act.ctx.of(n, bs)
-      T.BtCase{q, act.case.body(act.eq.tops(q, svars, hps, dots, ctx, env), rw, act.goal(svars, q, ret), hps, T.BtExpr{act.t(act.inline(100000n, body, env), ctx, env)}), rest}
+      T.BtCase{q, act.case.body(act.eq.tops(q, svars, hps, dots, ctx, env), rw, act.goal(svars, q, ret), hps, act.abs.body(abs, body, ctx, env)), rest}
 
 # the cases of a match from the clauses (an absurd clause is left out)
 def act.cases(cls: A.Ag, +scr: List<&2, Bool>, +ents: List<&2, T.Bt>, +pnames: List<&2, List<&2, U32>>, +env: ActEnv, +hps: List<&2, T.BParam>, +ret: T.Bt) -> T.Bt:
   match cls:
     case A.AgCl{+tel, +ps, body, ty, ca, rest}:
       +n = act.tel.len(tel)
-      act.case.of(act.top(ps, scr, ents, n, act.tel.hints(tel), pnames, env), n, body, env, act.cases(rest, scr, ents, pnames, env, hps, ret), act.rw.scan(ps, ents, env), act.dots(ps, ents), act.scr.vars(scr, ents), hps, ret)
+      act.case.of(act.top(ps, scr, ents, n, act.tel.hints(tel), pnames, env), n, body, env, act.cases(rest, scr, ents, pnames, env, hps, ret), act.rw.scan(ps, ents, env), act.abs.find(ps, ents, tel, n), act.dots(ps, ents), act.scr.vars(scr, ents), hps, ret)
     case _:
       T.BtCEnd{}
 
@@ -1853,6 +1963,14 @@ def act.scr(cls: A.Ag, +env: ActEnv) -> List<&2, Bool>:
   match cls:
     case A.AgCl{tel, ps, body, ty, ca, rest}:
       act.or.lists(act.split.pos(ps, env), act.scr(rest, env))
+    case _:
+      Nil{}
+
+# the parameters any clause has an absurd pattern variable at
+def act.abs.pos(cls: A.Ag) -> List<&2, Bool>:
+  match cls:
+    case A.AgCl{tel, ps, body, ty, ca, rest}:
+      act.or.lists(act.abs.ps(ps), act.abs.pos(rest))
     case _:
       Nil{}
 
@@ -2125,7 +2243,7 @@ def act.fun.body(p: A.AgProj, +cls: A.Ag, +key: String, +ar: Nat, +t: A.Ag, +ent
 def act.fun.item(+nm: List<&2, U32>, +ms: List<&2, ActM>, +cls: A.Ag, body: T.Bt, r: ActPs, doc: List<&2, List<&2, U32>>, +env: ActEnv) -> List<&2, T.BItem>:
   match r:
     case ActPs{ps, ret, ctx, es, ok}:
-      [T.BiDef{nm, act.live.ps(ps, act.scr(cls, env), ms), ret, body, doc}]
+      [T.BiDef{nm, act.live.ps(ps, act.or.lists(act.scr(cls, env), act.abs.pos(cls)), ms), ret, body, doc}]
 
 def act.fun.with(+nm: List<&2, U32>, +ms: List<&2, ActM>, +ar: Nat, p: A.AgProj, +cls: A.Ag, +key: String, +t: A.Ag, +env: ActEnv, doc: List<&2, List<&2, U32>>, +r: ActPs) -> List<&2, T.BItem>:
   act.fun.item(nm, ms, cls, act.fun.body(p, cls, key, ar, t, act.ps.ents(r), env, act.copat.is(cls), r), r, doc, env)
