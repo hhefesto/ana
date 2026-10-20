@@ -4,6 +4,8 @@ import ../ToBend/Sexp.bend as X
 import ../Agda2Bend/Ast.bend as A
 import ../ToBend/Ast.bend as T
 import ../ToBend/Print.bend as P
+import ../Agda2Bend/Cata.bend as C
+import ../Agda2Bend.bend as D
 
 # agda2bend's laws, run from this directory on the committed exports in
 # fixtures/agda2bend (agda-export's output for small modules, so the laws
@@ -284,6 +286,45 @@ def print.laws() -> IO(Unit):
     IO.print(verdict("print a type and a projection as the spike writes them", S.eq(pr.file(), S.b(pr.want()))))
     IO.print(verdict("print terms", S.eq(pr.terms(), S.b(pr.terms.want()))))
 
+# Translation --------------------------------------------------------------------
+#
+# The committed exports of Agda.Primitive, Level and Function.Base (a whole
+# import cone) translated in process, each module's file before the gate
+# against fixtures/agda2bend/golden/<Module>.bend: the translator's output
+# when the goldens were made, reviewed, of which the gate kept
+# golden/Function.Base.checked.bend (20 of Function.Base's 33 items) under
+# the locked compiler.  A change to the translation shows up here first.
+
+def gold.of(+m: String, +al: Map<&2, List<&2, U32>>, +ral: Map<&2, List<&2, U32>>, +ds: List<&2, A.AgDecl>, +want: List<&2, U32>, tr: D.A2bTr) -> D.A2bG & Bool:
+  match tr:
+    case D.A2bTr{its, g}:
+      (g, S.eq(D.a2b.raw.text(S.b(m), al, ral, List.length(&2, A.AgDecl, ds), its), want))
+
+def gold.one(+m: String, +al: Map<&2, List<&2, U32>>, +ral: Map<&2, List<&2, U32>>, g: D.A2bG) -> IO(D.A2bG & Bool):
+  do IO<D.A2bG & Bool>:
+    +ds : List<&2, A.AgDecl> <- D.a2b.decls(S.b("fixtures/agda2bend/" ++ m ++ ".sexp"))
+    +want : List<&2, U32> <- S.read("fixtures/agda2bend/golden/" ++ m ++ ".bend")
+    return gold.of(m, al, ral, ds, want, D.a2b.mod.items(S.b(m), al, ds, g))
+
+def gold.next(+m: String, +al: Map<&2, List<&2, U32>>, +ral: Map<&2, List<&2, U32>>, r: D.A2bG & Bool) -> IO(D.A2bG):
+  (g, ok) = r
+  do IO<D.A2bG>:
+    IO.print(verdict("translate " ++ m ++ " as its golden", ok))
+    return g
+
+def gold.laws() -> IO(Unit):
+  +order : List<&2, List<&2, U32>> = [S.b("Agda.Primitive"), S.b("Level"), S.b("Function.Base")]
+  +al : Map<&2, List<&2, U32>> = D.a2b.aliases(order)
+  +ral : Map<&2, List<&2, U32>> = D.a2b.ral(order, al, Map.new(&2, List<&2, U32>))
+  do IO<Unit>:
+    r1 : D.A2bG & Bool <- gold.one("Agda.Primitive", al, ral, D.A2bG{Map.new(&2, C.ActSym), Map.new(&2, C.ActCopy), Map.new(&2, Bool)})
+    g1 : D.A2bG <- gold.next("Agda.Primitive", al, ral, r1)
+    r2 : D.A2bG & Bool <- gold.one("Level", al, ral, g1)
+    g2 : D.A2bG <- gold.next("Level", al, ral, r2)
+    r3 : D.A2bG & Bool <- gold.one("Function.Base", al, ral, g2)
+    g3 : D.A2bG <- gold.next("Function.Base", al, ral, r3)
+    return Unit{}
+
 def main() -> IO(Unit):
   do IO<Unit>:
     +bool : List<&2, U32> <- S.read("fixtures/agda2bend/Agda.Builtin.Bool.sexp")
@@ -291,3 +332,4 @@ def main() -> IO(Unit):
     sexp.laws(bool, unit)
     ast.laws(bool, unit)
     print.laws()
+    gold.laws()

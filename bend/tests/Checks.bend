@@ -568,8 +568,10 @@ def chk.tests() -> List<&2, ChkTest>:
    # byte for byte; every FORMAT.md keyword classified as its own constructor by its hash, no two
    # alike; both exports decoded with no raw form outside the cubical helpers, Bool a data type;
    # the printer (bend/ToBend/Print.bend) writes the spike's IsEquivalence type and projection, and
-   # terms needing parentheses, templates, equations, literals, as Bend reads them
-   ChkTest{"agda2bend.bend", False{}, ROks{19n}}]
+   # terms needing parentheses, templates, equations, literals, as Bend reads them; the whole
+   # translation (bend/Agda2Bend.bend, Cata.bend and the passes) of the committed Function.Base cone
+   # against its goldens, compiled (the interpreter's stack does not hold Level)
+   ChkTest{"agda2bend.bend", True{}, ROks{22n}}]
 
 def chk.rule(r: ChkRule, +out: List<&2, U32>) -> Bool:
   match r:

@@ -734,6 +734,31 @@ def a2b.em.tabs(+out: String, +m: List<&2, U32>, +al: Map<&2, List<&2, U32>>, +r
     case A2bTabs{tab, +unf, +dm, used, +nk}:
       a2b.em.round(out, m, al, ral, List.length(&2, A.AgDecl, ds), kept, unf, a2b.round(5n, ds, m, al, unf, dm, nk, A2bRst{tab, Nil{}, True{}}))
 
+# A module's translation without the gate, the tests' entry: its items in
+# Bend's order and the state the modules after it see (the kept names as
+# they were: only the gate adds to them).
+type A2bTr is Data:
+  A2bTr{its: List<&2, T.BItem>, g: A2bG}
+
+def a2b.mod.items.fin(+kept: Map<&2, Bool>, +unf: Map<&2, C.ActCopy>, r: A2bRound) -> A2bTr:
+  match r:
+    case A2bRound{tab, its}:
+      A2bTr{O.tor.order(a2b.finish.of(its)), A2bG{tab, unf, kept}}
+
+def a2b.mod.items.of(+m: List<&2, U32>, +al: Map<&2, List<&2, U32>>, +ds: List<&2, A.AgDecl>, +kept: Map<&2, Bool>, t: A2bTabs) -> A2bTr:
+  match t:
+    case A2bTabs{tab, +unf, +dm, used, +nk}:
+      a2b.mod.items.fin(kept, unf, a2b.round(5n, ds, m, al, unf, dm, nk, A2bRst{tab, Nil{}, True{}}))
+
+def a2b.mod.items(+m: List<&2, U32>, +al: Map<&2, List<&2, U32>>, +ds: List<&2, A.AgDecl>, g: A2bG) -> A2bTr:
+  match g:
+    case A2bG{tab, unf, +kept}:
+      a2b.mod.items.of(m, al, ds, kept, a2b.syms(ds, m, A2bTabs{tab, unf, Map.new(&2, A.AgDecl), Nil{}, Map.new(&2, String)}))
+
+# the text of a module's file before the gate (OUT/raw/<path>.bend)
+def a2b.raw.text(+m: List<&2, U32>, +al: Map<&2, List<&2, U32>>, +ral: Map<&2, List<&2, U32>>, +nd: Nat, +its: List<&2, T.BItem>) -> List<&2, U32>:
+  P.tpr.file(T.BFile{a2b.head.doc(m, nd), a2b.imports(a2b.snd(a2b.imps(a2b.fold.items(its, False{}, Nil{}), ral, (Map.new(&2, Bool), Nil{}))), m, al), its})
+
 def a2b.mod.file(m: A2bMod) -> List<&2, U32>:
   match m:
     case A2bMod{n, f, im}:
