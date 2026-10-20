@@ -803,10 +803,18 @@ def act.first(xs: List<&2, T.Bt>) -> T.Bt:
     case Nil{}:
       act.todo("suc with no argument")
 
-def act.app.con.kind(k: A.AgKw, +ref: List<&2, U32>, ms: List<&2, ActM>, args: T.Bt) -> T.Bt:
+# {==} for each of a constructor's equation fields (an indexed family's)
+def act.refls(fs: List<&2, String>) -> List<&2, T.Bt>:
+  match fs:
+    case Nil{}:
+      Nil{}
+    case h <> t:
+      T.BtRefl{} <> act.refls(t)
+
+def act.app.con.kind(k: A.AgKw, +ref: List<&2, U32>, ms: List<&2, ActM>, fs: List<&2, String>, args: T.Bt) -> T.Bt:
   match k:
     case A.AkConstructor{}:
-      T.BtCon{ref, T.tba.args(act.keep(args, ms))}
+      T.BtCon{ref, T.tba.args(List.append(&2, T.Bt, act.keep(args, ms), act.refls(fs)))}
     case _:
       T.BtTodo{List.append(&2, U32, S.b("a constructor the symbol table does not have: "), ref)}
 
@@ -826,7 +834,7 @@ def act.app.con(s: ActSym, +env: ActEnv, args: T.Bt) -> T.Bt:
     case ActSym{m, n, k, ms, ar, AbTt{}, fs, c, cp}:
       T.BtCon{S.b("Unit"), T.BtANil{}}
     case ActSym{+m, +n, k, ms, ar, b, fs, c, cp}:
-      act.app.con.kind(k, act.ref.of(act.is.here(env, m), env, m, n), ms, args)
+      act.app.con.kind(k, act.ref.of(act.is.here(env, m), env, m, n), ms, fs, args)
 
 # the context under a binder: its entry in front when it binds (abs), the
 # same context when it does not (noabs)
@@ -1088,16 +1096,67 @@ def act.con.src(d: A.AgDecl) -> Maybe<&2, A.AgQ>:
     case A.AgDecl{q, qn, md, f, l, l0, l1, k, m, fl, lang, ty, dd}:
       act.con.src.d(act.flag(A.AkCopy{}, fl), dd)
 
-def act.sym.d(d: A.AgD, cp: Bool, +mo: List<&2, U32>, +nm: List<&2, U32>, +ms: List<&2, ActM>, b: ActB) -> ActSym:
+# Indexed families: Bend has none, so an index is one more (erased) type
+# parameter and each constructor carries an equation per index, {i == t},
+# t the index its Agda type ends at (Reflects A true: {b == True{} :
+# Bool}).  A constructor applied passes {==} for each; a pattern binds them.
+# A type after its Pis.
+def act.target(t: A.Ag) -> A.Ag:
+  match t:
+    case A.AgEl{s, A.AgPi{i, x, a, d, b}}:
+      act.target(b)
+    case t:
+      t
+
+def act.es.len(es: A.Ag) -> Nat:
+  match es:
+    case A.AgEApp{i, t, rest}:
+      1n+act.es.len(rest)
+    case _:
+      0n
+
+# the arguments of a spine after its first n
+def act.es.after(n: Nat, es: A.Ag) -> A.Ag:
+  match n es:
+    case 1n+p A.AgEApp{i, t, rest}:
+      act.es.after(p, rest)
+    case _ es:
+      es
+
+def act.ixs.target(+pars: Nat, t: A.Ag) -> Nat:
+  match t:
+    case A.AgEl{s, A.AgDef{q, es}}:
+      act.es.len(act.es.after(pars, es))
+    case _:
+      0n
+
+# a constructor's index count: its type's target's arguments after the
+# data type's parameters (0 for any other definition)
+def act.ixs.of(d: A.AgD, t: A.Ag) -> Nat:
+  match d:
+    case A.AgDCon{dq, +pars, ar, ck, src}:
+      act.ixs.target(pars, act.target(t))
+    case _:
+      0n
+
+# a constructor's equation fields, by name (only their number matters)
+def act.ix.names(n: Nat) -> List<&2, String>:
+  match n:
+    case 0n:
+      Nil{}
+    case 1n+p:
+      "ix_eq" <> act.ix.names(p)
+
+def act.sym.d(d: A.AgD, cp: Bool, +mo: List<&2, U32>, +nm: List<&2, U32>, +ms: List<&2, ActM>, b: ActB, ix: Nat) -> ActSym:
   match d:
     case A.AgDFun{p, r, w, e, t, mu, cls, tree}:
       act.sym.fun(cp, p, cls, tree, mo, nm, ms, b)
     case A.AgDRec{+pars, c, named, ind, fs, tel, eta, pm, rcl}:
       ActSym{mo, nm, A.AkRecord{}, ms, pars, b, act.keys(fs), act.con.name(act.local(mo, act.qs(c))), act.copy.cl(cp, rcl)}
-    case A.AgDData{+pars, ixs, cs, s, dcl}:
-      ActSym{mo, nm, A.AkData{}, ms, pars, b, act.keys(cs), Nil{}, act.copy.cl(cp, dcl)}
+    case A.AgDData{+pars, +ixs, cs, s, dcl}:
+      ActSym{mo, nm, A.AkData{}, ms, Nat.add(pars, ixs), b, act.keys(cs), Nil{}, act.copy.cl(cp, dcl)}
     case A.AgDCon{dq, +pars, ar, ck, src}:
-      ActSym{mo, act.con.name(nm), A.AkConstructor{}, act.ms.live(act.drop.n(pars, ms)), ar, b, Nil{}, Nil{}, None{}}
+      ActSym{mo, act.con.name(nm), A.AkConstructor{}, act.ms.live(act.drop.n(pars, ms)), ar, b, act.ix.names(ix), Nil{}, None{}}
     case A.AgDPost{}:
       ActSym{mo, nm, A.AkPostulate{}, ms, 0n, b, Nil{}, Nil{}, None{}}
     case A.AgDPrim{n, cls, tree}:
@@ -1116,7 +1175,7 @@ def act.role(+qs: List<&2, U32>, lv: Bool) -> ActB:
 def act.sym.of(+mo: List<&2, U32>, +nm: List<&2, U32>, d: A.AgDecl) -> ActSym:
   match d:
     case A.AgDecl{q, qn, md, f, l, l0, l1, k, m, +fl, lang, +ty, +dd}:
-      act.sym.d(dd, Bool.or(act.flag(A.AkCopy{}, fl), act.inl.d(act.ends.sort(ty), dd)), mo, nm, act.modes(ty, act.ends.sort(ty)), act.role(act.qs(q), act.ends.level(ty)))
+      act.sym.d(dd, Bool.or(act.flag(A.AkCopy{}, fl), act.inl.d(act.ends.sort(ty), dd)), mo, nm, act.modes(ty, act.ends.sort(ty)), act.role(act.qs(q), act.ends.level(ty)), act.ixs.of(dd, ty))
 
 # a module's file under src/: its name's parts, each a plain name
 def act.path.parts(xs: List<&2, List<&2, U32>>) -> List<&2, U32>:
@@ -1266,10 +1325,26 @@ def act.pat.first(a: T.Bt) -> T.Bt:
     case _:
       act.todo("suc with no pattern")
 
-def act.pat.con.kind(k: A.AgKw, +ref: List<&2, U32>, sub: T.Bt) -> T.Bt:
+# an equation field's pattern: a placeholder the case names (act.eq.deep)
+def act.wilds(fs: List<&2, String>) -> List<&2, T.Bt>:
+  match fs:
+    case Nil{}:
+      Nil{}
+    case h <> t:
+      T.BtPv{T.BmLive{}, S.b("ix_eq")} <> act.wilds(t)
+
+# a spine with more patterns after it: one for each equation field
+def act.spine.wild(sp: T.Bt, fs: List<&2, String>) -> T.Bt:
+  match sp:
+    case T.BtArgs{a, rest}:
+      T.BtArgs{a, act.spine.wild(rest, fs)}
+    case _:
+      T.tba.args(act.wilds(fs))
+
+def act.pat.con.kind(k: A.AgKw, +ref: List<&2, U32>, fs: List<&2, String>, sub: T.Bt) -> T.Bt:
   match k:
     case A.AkConstructor{}:
-      T.BtCon{ref, sub}
+      T.BtCon{ref, act.spine.wild(sub, fs)}
     case _:
       T.BtTodo{List.append(&2, U32, S.b("a constructor pattern the symbol table does not have: "), ref)}
 
@@ -1288,7 +1363,7 @@ def act.pat.con.p(s: ActSym, +env: ActEnv, sub: T.Bt) -> T.Bt:
     case ActSym{m, n, k, ms, ar, AbRefl{}, fs, c, cp}:
       act.todo("a match on refl (an equation's rewrite is not translated yet)")
     case ActSym{+m, +n, k, ms, ar, b, fs, c, cp}:
-      act.pat.con.kind(k, act.ref.of(act.is.here(env, m), env, m, n), sub)
+      act.pat.con.kind(k, act.ref.of(act.is.here(env, m), env, m, n), fs, sub)
 
 def act.pat.con(s: ActSym, +env: ActEnv, sub: ActPat) -> ActPat:
   match sub:
@@ -1503,7 +1578,7 @@ def act.step.k(k: Nat, +t: T.Bt, +a: T.Bt, +b: T.Bt, +e: T.Bt, +goal: T.Bt) -> A
     case 1n:
       ActStep{1n, T.tba.subst(goal, act.var.name(b), T.BtWild{}), T.tba.subst(goal, act.var.name(b), a), T.BtWild{}, Nil{}}
     case 2n:
-      ActStep{2n, T.tba.subst(goal, act.var.name(a), T.BtWild{}), T.tba.subst(goal, act.var.name(a), b), T.BtApp{T.BtVar{S.b("Equal.sym")}, T.tba.args([t, a, b, e])}, List.append(&2, U32, act.var.name(e), S.b("_sym"))}
+      ActStep{2n, T.tba.subst(goal, act.var.name(a), T.BtWild{}), T.tba.subst(goal, act.var.name(a), b), T.BtApp{T.BtVar{S.b("Equal.sym")}, T.tba.args([T.BtDead{t}, T.BtDead{a}, T.BtDead{b}, e])}, List.append(&2, U32, act.var.name(e), S.b("_sym"))}
     case _:
       ActStep{0n, T.BtWild{}, goal, T.BtWild{}, Nil{}}
 
@@ -1541,6 +1616,147 @@ def act.rws(fuel: Nat, es: List<&2, T.Bt>, +ds: List<&2, List<&2, U32>>, +goal: 
     case _ _:
       body
 
+# Indexed patterns: a constructor pattern of an indexed family names its
+# equation fields after its place (x_2_eq: parameter x's pattern, its
+# second argument), and at a split parameter each becomes a rewrite like a
+# refl pattern's.  Its type is {v == t : T}: v the index the parameter's
+# type has there, t the term the clause's dot pattern gives v (Agda's
+# match made v a dot pattern), T v's type.
+type ActDot is Data:
+  ActDot{x: List<&2, U32>, t: A.Ag}
+
+# the clause's top-level dot patterns, by parameter
+def act.dots(ps: A.Ag, ents: List<&2, T.Bt>) -> List<&2, ActDot>:
+  match ps ents:
+    case A.AgPArg{i, x, A.AgPDot{t}, rest} e <> et:
+      ActDot{act.var.name(e), t} <> act.dots(rest, et)
+    case A.AgPArg{i, x, p, rest} e <> et:
+      act.dots(rest, et)
+    case _ _:
+      Nil{}
+
+def act.dot.find(ds: List<&2, ActDot>, +v: List<&2, U32>) -> Maybe<&2, A.Ag>:
+  match ds:
+    case Nil{}:
+      None{}
+    case ActDot{+x, +t} <> rest:
+      Bool.pick(Maybe<&2, A.Ag>, S.eq(x, v), Some{t}, act.dot.find(rest, v))
+
+def act.at(+pre: List<&2, U32>, +i: Nat) -> List<&2, U32>:
+  List.append(&2, U32, pre, 95 <> S.b(Nat.show(i)))
+
+# the equation placeholders of a pattern (or a spine of them, i its
+# position) named after their place under pre
+def act.eq.deep(p: T.Bt, +pre: List<&2, U32>, +i: Nat) -> T.Bt:
+  match p:
+    case T.BtArgs{a, rest}:
+      T.BtArgs{act.eq.deep(a, act.at(pre, i), 1n), act.eq.deep(rest, pre, 1n+i)}
+    case T.BtCon{c, a}:
+      T.BtCon{c, act.eq.deep(a, pre, 1n)}
+    case T.BtSucc{a}:
+      T.BtSucc{act.eq.deep(a, pre, 1n)}
+    case T.BtPv{+m, +nm}:
+      T.BtPv{m, Bool.pick(List<&2, U32>, S.eq(nm, S.b("ix_eq")), List.append(&2, U32, pre, S.b("_eq")), nm)}
+    case p:
+      p
+
+# the top patterns, each under its parameter's name
+def act.eq.spine(ps: T.Bt, xs: List<&2, T.Bt>) -> T.Bt:
+  match ps xs:
+    case T.BtArgs{p, rest} x <> xt:
+      T.BtArgs{act.eq.deep(p, act.var.name(x), 1n), act.eq.spine(rest, xt)}
+    case ps _:
+      ps
+
+def act.spine.list(a: T.Bt) -> List<&2, T.Bt>:
+  match a:
+    case T.BtArgs{h, t}:
+      h <> act.spine.list(t)
+    case _:
+      Nil{}
+
+def act.list.take(n: Nat, xs: List<&2, T.Bt>) -> List<&2, T.Bt>:
+  match n xs:
+    case 1n+p h <> t:
+      h <> act.list.take(p, t)
+    case _ xs:
+      Nil{}
+
+def act.list.last(+n: Nat, xs: List<&2, T.Bt>) -> List<&2, T.Bt>:
+  List.reverse(&2, T.Bt, act.list.take(n, List.reverse(&2, T.Bt, xs)))
+
+# the equation variables of a top constructor pattern: its arguments
+# named x_i_eq, by position
+def act.eq.vars(a: T.Bt, +x: List<&2, U32>, +i: Nat) -> List<&2, List<&2, U32>>:
+  match a:
+    case T.BtArgs{T.BtPv{m, +nm}, rest}:
+      +e = List.append(&2, U32, act.at(x, i), S.b("_eq"))
+      List.append(&2, List<&2, U32>, Bool.pick(List<&2, List<&2, U32>>, S.eq(nm, e), [e], Nil{}), act.eq.vars(rest, x, 1n+i))
+    case T.BtArgs{h, rest}:
+      act.eq.vars(rest, x, 1n+i)
+    case _:
+      Nil{}
+
+# an equation variable's parameter: {v == t : T} when the clause dots v
+def act.eq.p(m: Maybe<&2, A.Ag>, +e: List<&2, U32>, +v: T.Bt, +hps: List<&2, T.BParam>, +ctx: List<&2, T.Bt>, +env: ActEnv) -> List<&2, T.BParam>:
+  match m:
+    case Some{t}:
+      [T.BParam{T.BmLive{}, e, T.BtEq{act.param.ty(hps, act.var.name(v)), v, act.t(act.inline(100000n, t, env), ctx, env)}}]
+    case None{}:
+      Nil{}
+
+def act.eq.ps(es: List<&2, List<&2, U32>>, ixs: List<&2, T.Bt>, +hps: List<&2, T.BParam>, +dots: List<&2, ActDot>, +ctx: List<&2, T.Bt>, +env: ActEnv) -> List<&2, T.BParam>:
+  match es ixs:
+    case +e <> et +v <> vt:
+      List.append(&2, T.BParam, act.eq.p(act.dot.find(dots, act.var.name(v)), e, v, hps, ctx, env), act.eq.ps(et, vt, hps, dots, ctx, env))
+    case _ _:
+      Nil{}
+
+# a spine's terms, an erased one's mark taken off
+def act.spine.undead(a: T.Bt) -> List<&2, T.Bt>:
+  match a:
+    case T.BtArgs{h, t}:
+      act.undead(h) <> act.spine.undead(t)
+    case _:
+      Nil{}
+
+def act.ty.args(t: T.Bt) -> List<&2, T.Bt>:
+  match t:
+    case T.BtTyApp{n, a}:
+      act.spine.undead(a)
+    case _:
+      Nil{}
+
+# the equation parameters of one top pattern at parameter x
+def act.eq.top(p: T.Bt, +x: List<&2, U32>, +hps: List<&2, T.BParam>, +dots: List<&2, ActDot>, +ctx: List<&2, T.Bt>, +env: ActEnv) -> List<&2, T.BParam>:
+  match p:
+    case T.BtCon{c, a}:
+      +es = act.eq.vars(a, x, 1n)
+      act.eq.ps(es, act.list.last(List.length(&2, List<&2, U32>, es), act.ty.args(act.param.ty(hps, x))), hps, dots, ctx, env)
+    case _:
+      Nil{}
+
+def act.eq.tops(ps: T.Bt, xs: List<&2, T.Bt>, +hps: List<&2, T.BParam>, +dots: List<&2, ActDot>, +ctx: List<&2, T.Bt>, +env: ActEnv) -> List<&2, T.BParam>:
+  match ps xs:
+    case T.BtArgs{p, rest} x <> xt:
+      List.append(&2, T.BParam, act.eq.top(p, act.var.name(x), hps, dots, ctx, env), act.eq.tops(rest, xt, hps, dots, ctx, env))
+    case _ _:
+      Nil{}
+
+def act.ps.vars(ps: List<&2, T.BParam>) -> List<&2, T.Bt>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case T.BParam{m, x, ty} <> t:
+      T.BtVar{x} <> act.ps.vars(t)
+
+# a case's body: the rewrites of its refl patterns, then those of its
+# indexed patterns' equations (eqs), then the body
+def act.case.body(+eqs: List<&2, T.BParam>, rw: ActRw, +goal: T.Bt, +hps: List<&2, T.BParam>, body: T.Bt) -> T.Bt:
+  match rw:
+    case ActRw{rs, ds}:
+      act.rws(64n, List.append(&2, T.Bt, rs, act.ps.vars(eqs)), ds, goal, List.append(&2, T.BParam, hps, eqs), body)
+
 # the scrutinees: the entries of the split parameters
 def act.scr.vars(scr: List<&2, Bool>, ents: List<&2, T.Bt>) -> List<&2, T.Bt>:
   match scr ents:
@@ -1553,19 +1769,21 @@ def act.scr.vars(scr: List<&2, Bool>, ents: List<&2, T.Bt>) -> List<&2, T.Bt>:
 
 # a case: its patterns, and its body after the rewrites its refl patterns
 # need (an absurd or cubical clause is left out)
-def act.case.of(a: ActPat, +n: Nat, body: A.Ag, +env: ActEnv, rest: T.Bt, rw: ActRw, +svars: List<&2, T.Bt>, +hps: List<&2, T.BParam>, +ret: T.Bt) -> T.Bt:
-  match a rw:
-    case ActPat{p, +bs, True{}} rw:
+def act.case.of(a: ActPat, +n: Nat, body: A.Ag, +env: ActEnv, rest: T.Bt, rw: ActRw, +dots: List<&2, ActDot>, +svars: List<&2, T.Bt>, +hps: List<&2, T.BParam>, +ret: T.Bt) -> T.Bt:
+  match a:
+    case ActPat{p, +bs, True{}}:
       rest
-    case ActPat{+p, +bs, False{}} ActRw{rs, ds}:
-      T.BtCase{p, act.rws(64n, rs, ds, act.goal(svars, p, ret), hps, T.BtExpr{act.t(act.inline(100000n, body, env), act.ctx.of(n, bs), env)}), rest}
+    case ActPat{p, +bs, False{}}:
+      +q = act.eq.spine(p, svars)
+      +ctx = act.ctx.of(n, bs)
+      T.BtCase{q, act.case.body(act.eq.tops(q, svars, hps, dots, ctx, env), rw, act.goal(svars, q, ret), hps, T.BtExpr{act.t(act.inline(100000n, body, env), ctx, env)}), rest}
 
 # the cases of a match from the clauses (an absurd clause is left out)
 def act.cases(cls: A.Ag, +scr: List<&2, Bool>, +ents: List<&2, T.Bt>, +pnames: List<&2, List<&2, U32>>, +env: ActEnv, +hps: List<&2, T.BParam>, +ret: T.Bt) -> T.Bt:
   match cls:
     case A.AgCl{+tel, +ps, body, ty, ca, rest}:
       +n = act.tel.len(tel)
-      act.case.of(act.top(ps, scr, ents, n, act.tel.hints(tel), pnames, env), n, body, env, act.cases(rest, scr, ents, pnames, env, hps, ret), act.rw.scan(ps, ents, env), act.scr.vars(scr, ents), hps, ret)
+      act.case.of(act.top(ps, scr, ents, n, act.tel.hints(tel), pnames, env), n, body, env, act.cases(rest, scr, ents, pnames, env, hps, ret), act.rw.scan(ps, ents, env), act.dots(ps, ents), act.scr.vars(scr, ents), hps, ret)
     case _:
       T.BtCEnd{}
 
@@ -1941,14 +2159,32 @@ def act.cfield.put(lv: Bool, +nm: List<&2, U32>, ty: T.Bt, fs: List<&2, T.BField
     case False{}:
       T.BField{nm, ty} <> fs
 
-def act.cfields(t: A.Ag, +ctx: List<&2, T.Bt>, +seen: List<&2, List<&2, U32>>, +env: ActEnv) -> List<&2, T.BField>:
+# an indexed family's constructor's equation fields: per index parameter
+# (its name and type) and the index the constructor's type ends at, {i == t : T}
+def act.ix.eqs(ixs: List<&2, T.BParam>, es: A.Ag, +ctx: List<&2, T.Bt>, +seen: List<&2, List<&2, U32>>, +env: ActEnv) -> List<&2, T.BField>:
+  match ixs es:
+    case T.BParam{m, +x, ty} <> pt A.AgEApp{i, a, rest}:
+      +nm = act.fresh.in(S.b("ix_eq"), ctx, seen)
+      T.BField{nm, T.BtEq{ty, T.BtVar{x}, act.t(a, ctx, env)}} <> act.ix.eqs(pt, rest, ctx, nm <> seen, env)
+    case _ _:
+      Nil{}
+
+def act.ix.fields(ixs: List<&2, T.BParam>, +pars: Nat, t: A.Ag, +ctx: List<&2, T.Bt>, +seen: List<&2, List<&2, U32>>, +env: ActEnv) -> List<&2, T.BField>:
+  match t:
+    case A.AgEl{s, A.AgDef{q, es}}:
+      act.ix.eqs(ixs, act.es.after(pars, es), ctx, seen, env)
+    case _:
+      Nil{}
+
+# (the index parameters' names are in seen, so no field hides one)
+def act.cfields(t: A.Ag, +ctx: List<&2, T.Bt>, +seen: List<&2, List<&2, U32>>, +env: ActEnv, +ixs: List<&2, T.BParam>, +pars: Nat) -> List<&2, T.BField>:
   match t:
     case A.AgEl{s, A.AgPi{i, +x, +a, d, b}}:
       +lv = act.ty.level(a)
       +nm = act.fresh.in(x, ctx, seen)
-      act.cfield.put(lv, nm, act.t(a, ctx, env), act.cfields(b, act.bind(d, Bool.pick(T.Bt, lv, act.level(), T.BtVar{nm}), ctx), nm <> seen, env))
-    case _:
-      Nil{}
+      act.cfield.put(lv, nm, act.t(a, ctx, env), act.cfields(b, act.bind(d, Bool.pick(T.Bt, lv, act.level(), T.BtVar{nm}), ctx), nm <> seen, env, ixs, pars))
+    case t:
+      act.ix.fields(ixs, pars, t, ctx, seen, env)
 
 # a TYPE after its first n Pis
 def act.after(n: Nat, t: A.Ag) -> A.Ag:
@@ -1963,10 +2199,17 @@ def act.ps.ctx(r: ActPs) -> List<&2, T.Bt>:
     case ActPs{ps, ret, ctx, es, ok}:
       ctx
 
-def act.ctor.of(s: ActSym, +pars: Nat, +t: A.Ag, +env: ActEnv) -> T.BCtor:
+def act.ps.names(ps: List<&2, T.BParam>) -> List<&2, List<&2, U32>>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case T.BParam{m, x, ty} <> t:
+      x <> act.ps.names(t)
+
+def act.ctor.of(s: ActSym, +pars: Nat, +t: A.Ag, +env: ActEnv, +ixs: List<&2, T.BParam>) -> T.BCtor:
   match s:
     case ActSym{m, n, k, ms, ar, b, fs, c, cp}:
-      T.BCtor{n, act.cfields(act.after(pars, t), act.ps.ctx(act.params(64n, pars, t, act.modes(t, True{}), Nil{}, env)), Nil{}, env)}
+      T.BCtor{n, act.cfields(act.after(pars, t), act.ps.ctx(act.params(64n, pars, t, act.modes(t, True{}), Nil{}, env)), act.ps.names(ixs), env, ixs, pars)}
 
 def act.decl.got(r: Map<&2, A.AgDecl> & A.AgDecl) -> A.AgDecl:
   (m, d) = r
@@ -1975,17 +2218,17 @@ def act.decl.got(r: Map<&2, A.AgDecl> & A.AgDecl) -> A.AgDecl:
 def act.decl0() -> A.AgDecl:
   A.AgDecl{A.AgQ{Nil{}, Nil{}, Nil{}}, Nil{}, Nil{}, Nil{}, 0n, 0n, 0n, A.AkWord{}, A.aas.i.vis(), Nil{}, A.AkWord{}, A.AgNone{}, A.AgDOther{A.AxNil{}}}
 
-def act.ctor(d: A.AgDecl, +pars: Nat, +env: ActEnv) -> T.BCtor:
+def act.ctor(d: A.AgDecl, +pars: Nat, +env: ActEnv, +ixs: List<&2, T.BParam>) -> T.BCtor:
   match d:
     case A.AgDecl{q, qn, md, f, l, l0, l1, k, m, fl, lang, ty, dd}:
-      act.ctor.of(act.sym(env, q), pars, act.inline(100000n, ty, env), env)
+      act.ctor.of(act.sym(env, q), pars, act.inline(100000n, ty, env), env, ixs)
 
-def act.ctors(ks: List<&2, String>, +pars: Nat, +env: ActEnv, +decls: Map<&2, A.AgDecl>) -> List<&2, T.BCtor>:
+def act.ctors(ks: List<&2, String>, +pars: Nat, +env: ActEnv, +decls: Map<&2, A.AgDecl>, +ixs: List<&2, T.BParam>) -> List<&2, T.BCtor>:
   match ks:
     case Nil{}:
       Nil{}
     case k <> t:
-      act.ctor(act.decl.got(Map.get(A.AgDecl, act.decl0(), decls, k)), pars, env) <> act.ctors(t, pars, env, decls)
+      act.ctor(act.decl.got(Map.get(A.AgDecl, act.decl0(), decls, k)), pars, env, ixs) <> act.ctors(t, pars, env, decls, ixs)
 
 # a field type a Data value may hold: Nat, Bool, Unit, an equation, or the
 # type itself (by name, with no parameters)
@@ -2014,6 +2257,17 @@ def act.dataish.cs(+self: List<&2, U32>, cs: List<&2, T.BCtor>) -> Bool:
     case T.BCtor{c, fs} <> t:
       Bool.and(act.dataish.fs(self, fs), act.dataish.cs(self, t))
 
+def act.ps.take(n: Nat, ps: List<&2, T.BParam>) -> List<&2, T.BParam>:
+  match n ps:
+    case 1n+p h <> t:
+      h <> act.ps.take(p, t)
+    case _ ps:
+      Nil{}
+
+# the last n of a list of parameters (an indexed family's indices)
+def act.ps.last(+n: Nat, ps: List<&2, T.BParam>) -> List<&2, T.BParam>:
+  List.reverse(&2, T.BParam, act.ps.take(n, List.reverse(&2, T.BParam, ps)))
+
 def act.item.data.of(+nm: List<&2, U32>, r: ActPs, +cs: List<&2, T.BCtor>, doc: List<&2, List<&2, U32>>) -> List<&2, T.BItem>:
   match r:
     case ActPs{ps, ret, ctx, es, ok}:
@@ -2021,11 +2275,10 @@ def act.item.data.of(+nm: List<&2, U32>, r: ActPs, +cs: List<&2, T.BCtor>, doc: 
 
 def act.item.data(s: ActSym, d: A.AgD, ty: A.Ag, +env: ActEnv, +decls: Map<&2, A.AgDecl>, doc: List<&2, List<&2, U32>>) -> List<&2, T.BItem>:
   match s d:
-    case ActSym{m, +n, k, +ms, ar, b, fs, c, cp} A.AgDData{+pars, 0n, cons, sort, dcl}:
+    case ActSym{m, +n, k, +ms, ar, b, fs, c, cp} A.AgDData{+pars, +ixs, cons, sort, dcl}:
       +t = act.inline(100000n, ty, env)
-      act.item.data.of(n, act.params(64n, pars, t, ms, Nil{}, env), act.ctors(act.keys(cons), pars, env, decls), doc)
-    case ActSym{m, n, k, ms, ar, b, fs, c, cp} A.AgDData{pars, ixs, cons, sort, dcl}:
-      [T.BiComment{List.append(&2, List<&2, U32>, doc, [S.b("an indexed family: not translated yet")])}]
+      +r = act.params(64n, Nat.add(pars, ixs), t, ms, Nil{}, env)
+      act.item.data.of(n, r, act.ctors(act.keys(cons), pars, env, decls, act.ps.last(ixs, act.ps.ps(r))), doc)
     case _ _:
       Nil{}
 
