@@ -125,6 +125,9 @@ file. `X*` means zero or more, and `a|b` means one of the atoms.
   - `abstract-defn`: Agda wrapped the definition as abstract.
 - `type` is closed: no variables are in scope. It is `none` for a copy
   function written compactly (see "Copies").
+- A data type's or record's `clause` (a copy's: the original applied to
+  the module's arguments) is written in explicit form, as a function's
+  clauses are (version 2.1; before, it was stored).
 
 DETAILS is one of the forms below, by kind:
 

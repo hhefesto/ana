@@ -1349,13 +1349,16 @@ type AgD is Data:
   AgDFun{proj: AgProj, restored: Nat, with: Maybe<&2, AgQ>, extlam: Bool, term: AgKw, mutual: Ag, cls: Ag, tree: Ag}
   # a record: its parameter count, constructor, whether the user named
   # it, induction, fields, the telescope of parameters then fields,
-  # whether eta holds, and pattern or copattern matching
-  AgDRec{pars: Nat, con: AgQ, named: Bool, ind: AgKw, fields: Ag, tel: Ag, eta: Bool, pm: AgKw}
-  # a data type: parameter and index counts, constructors, sort
-  AgDData{pars: Nat, ixs: Nat, cons: Ag, sort: Ag}
+  # whether eta holds, pattern or copattern matching, and (a copy's) the
+  # clause defining it (a clause spine, AgClEnd when it has none)
+  AgDRec{pars: Nat, con: AgQ, named: Bool, ind: AgKw, fields: Ag, tel: Ag, eta: Bool, pm: AgKw, cl: Ag}
+  # a data type: parameter and index counts, constructors, sort, and (a
+  # copy's) its clause
+  AgDData{pars: Nat, ixs: Nat, cons: Ag, sort: Ag, cl: Ag}
   # a constructor: its data type or record, the parameter count, its own
-  # argument count, data or record
-  AgDCon{data: AgQ, pars: Nat, arity: Nat, ck: AgKw}
+  # argument count, data or record, and the original it copies (itself
+  # when it is no copy)
+  AgDCon{data: AgQ, pars: Nat, arity: Nat, ck: AgKw, src: AgQ}
   AgDPost{}
   AgDPrim{name: List<&2, U32>, cls: Ag, tree: Ag}
   AgDOther{x: AgX}
@@ -1462,16 +1465,24 @@ def aas.d.fun(+f: AgX) -> AgD:
     aas.q.opt(aas.fld1(f, AkWithOf{})), aas.extlam(aas.k(aas.fld1(f, AkExtlam{}))), aas.k(aas.fld1(f, AkTerminates{})),
     aas.dec(aas.fld(f, AkMutual{}), AcQs{}), aas.dec(aas.fld(f, AkClauses{}), AcClauses{}), aas.dec(aas.fld1(f, AkCompiled{}), AcTree{})}
 
+# a (clause ...) field as a one-clause spine; AgClEnd for `none`
+def aas.cl.one(x: AgX) -> Ag:
+  match x:
+    case AxCons{AxKw{AkClause{}}, r}:
+      aas.dec(AxCons{AxCons{AxKw{AkClause{}}, r}, AxNil{}}, AcClauses{})
+    case _:
+      AgClEnd{}
+
 def aas.d.rec(+r: AgX) -> AgD:
   AgDRec{aas.n(aas.fld1(r, AkPars{})), aas.q(aas.fld1(r, AkCon{})), aas.yes(aas.k(aas.fld1(r, AkNamedCon{}))),
     aas.k(aas.fld1(r, AkInduction{})), aas.dec(aas.fld(r, AkFields{}), AcQs{}), aas.dec(aas.fld(r, AkTel{}), AcTelBs{}),
-    aas.yes(aas.k(aas.second(aas.fld(r, AkEta{})))), aas.k(aas.fld1(r, AkPatternMatching{}))}
+    aas.yes(aas.k(aas.second(aas.fld(r, AkEta{})))), aas.k(aas.fld1(r, AkPatternMatching{})), aas.cl.one(aas.fld1(r, AkClause{}))}
 
 def aas.d.data(+d: AgX) -> AgD:
-  AgDData{aas.n(aas.fld1(d, AkPars{})), aas.n(aas.fld1(d, AkIxs{})), aas.dec(aas.fld(d, AkCons{}), AcQs{}), aas.dec(aas.fld1(d, AkSort{}), AcSort{})}
+  AgDData{aas.n(aas.fld1(d, AkPars{})), aas.n(aas.fld1(d, AkIxs{})), aas.dec(aas.fld(d, AkCons{}), AcQs{}), aas.dec(aas.fld1(d, AkSort{}), AcSort{}), aas.cl.one(aas.fld1(d, AkClause{}))}
 
 def aas.d.con(+c: AgX) -> AgD:
-  AgDCon{aas.q(aas.fld1(c, AkData{})), aas.n(aas.fld1(c, AkPars{})), aas.n(aas.fld1(c, AkArity{})), aas.k(aas.fld1(c, AkConKind{}))}
+  AgDCon{aas.q(aas.fld1(c, AkData{})), aas.n(aas.fld1(c, AkPars{})), aas.n(aas.fld1(c, AkArity{})), aas.k(aas.fld1(c, AkConKind{})), aas.q(aas.fld1(c, AkSrcCon{}))}
 
 def aas.d.prim(+p: AgX) -> AgD:
   AgDPrim{aas.str(aas.first(p)), aas.dec(aas.fld(p, AkClauses{}), AcClauses{}), aas.dec(aas.fld1(p, AkCompiled{}), AcTree{})}
@@ -1628,9 +1639,9 @@ def aas.d.raws(d: AgD) -> Nat:
   match d:
     case AgDFun{p, r, w, e, t, mu, cls, tree}:
       Nat.add(aas.raws(cls), aas.raws(tree))
-    case AgDRec{p, c, nm, ind, fs, tel, eta, pm}:
+    case AgDRec{p, c, nm, ind, fs, tel, eta, pm, cl}:
       aas.raws(tel)
-    case AgDData{p, ix, cs, s}:
+    case AgDData{p, ix, cs, s, cl}:
       aas.raws(s)
     case AgDPrim{nm, cls, tree}:
       Nat.add(aas.raws(cls), aas.raws(tree))

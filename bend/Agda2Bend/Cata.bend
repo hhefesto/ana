@@ -1045,15 +1045,54 @@ def act.inl.d(srt: Bool, d: A.AgD) -> Bool:
     case _ _:
       False{}
 
+def act.tel.len(t: A.Ag) -> Nat:
+  match t:
+    case A.AgTel{x, i, ty, rest}:
+      1n+act.tel.len(rest)
+    case _:
+      0n
+
+# A data type or record made by module application is the original applied
+# to the module's arguments, which its clause says (agda-export writes it
+# explicitly from format 2.1): inlined where used, as a function copy is.
+# The clause's variables are its telescope's, in order.
+def act.tel.n(t: A.Ag) -> Nat:
+  match t:
+    case A.AgStored{x}:
+      act.tel.len(x)
+    case t:
+      act.tel.len(t)
+
+def act.copy.cl(cp: Bool, cl: A.Ag) -> Maybe<&2, ActCopy>:
+  match cp cl:
+    case True{} A.AgCl{tel, ps, body, ty, ca, rest}:
+      Some{ActCopy{act.tel.n(tel), body}}
+    case _ _:
+      None{}
+
+# a constructor made by module application: the original it copies (terms
+# and patterns name the copy; Bend has only the original)
+def act.con.src.d(cp: Bool, d: A.AgD) -> Maybe<&2, A.AgQ>:
+  match cp d:
+    case True{} A.AgDCon{dq, p, ar, ck, src}:
+      Some{src}
+    case _ _:
+      None{}
+
+def act.con.src(d: A.AgDecl) -> Maybe<&2, A.AgQ>:
+  match d:
+    case A.AgDecl{q, qn, md, f, l, l0, l1, k, m, fl, lang, ty, dd}:
+      act.con.src.d(act.flag(A.AkCopy{}, fl), dd)
+
 def act.sym.d(d: A.AgD, cp: Bool, +mo: List<&2, U32>, +nm: List<&2, U32>, +ms: List<&2, ActM>, b: ActB) -> ActSym:
   match d:
     case A.AgDFun{p, r, w, e, t, mu, cls, tree}:
       act.sym.fun(cp, p, cls, tree, mo, nm, ms, b)
-    case A.AgDRec{+pars, c, named, ind, fs, tel, eta, pm}:
-      ActSym{mo, nm, A.AkRecord{}, ms, pars, b, act.keys(fs), act.con.name(act.local(mo, act.qs(c))), None{}}
-    case A.AgDData{+pars, ixs, cs, s}:
-      ActSym{mo, nm, A.AkData{}, ms, pars, b, act.keys(cs), Nil{}, None{}}
-    case A.AgDCon{dq, +pars, ar, ck}:
+    case A.AgDRec{+pars, c, named, ind, fs, tel, eta, pm, rcl}:
+      ActSym{mo, nm, A.AkRecord{}, ms, pars, b, act.keys(fs), act.con.name(act.local(mo, act.qs(c))), act.copy.cl(cp, rcl)}
+    case A.AgDData{+pars, ixs, cs, s, dcl}:
+      ActSym{mo, nm, A.AkData{}, ms, pars, b, act.keys(cs), Nil{}, act.copy.cl(cp, dcl)}
+    case A.AgDCon{dq, +pars, ar, ck, src}:
       ActSym{mo, act.con.name(nm), A.AkConstructor{}, act.ms.live(act.drop.n(pars, ms)), ar, b, Nil{}, Nil{}, None{}}
     case A.AgDPost{}:
       ActSym{mo, nm, A.AkPostulate{}, ms, 0n, b, Nil{}, Nil{}, None{}}
@@ -1314,13 +1353,6 @@ def act.ctx.of(k: Nat, +bs: List<&2, ActBind>) -> List<&2, T.Bt>:
       Nil{}
     case 1n+(+p):
       act.bind.find(p, bs) <> act.ctx.of(p, bs)
-
-def act.tel.len(t: A.Ag) -> Nat:
-  match t:
-    case A.AgTel{x, i, ty, rest}:
-      1n+act.tel.len(rest)
-    case _:
-      0n
 
 # Equations: Bend cannot match on an equation, so a clause matching refl
 # (`sym refl = refl`, `cong f refl = refl`) is translated as a rewrite of
@@ -1891,7 +1923,7 @@ def act.item.rec.of(+nm: List<&2, U32>, +c: List<&2, U32>, r: ActRt, doc: List<&
 
 def act.item.rec(s: ActSym, d: A.AgD, +env: ActEnv, doc: List<&2, List<&2, U32>>) -> List<&2, T.BItem>:
   match s d:
-    case ActSym{m, +n, k, ms, ar, b, fs, +c, cp} A.AgDRec{pars, con, named, ind, fls, tel, eta, pm}:
+    case ActSym{m, +n, k, ms, ar, b, fs, +c, cp} A.AgDRec{pars, con, named, ind, fls, tel, eta, pm, rcl}:
       act.item.rec.of(n, c, act.rtel(tel, pars, ms, Nil{}, env), doc)
     case _ _:
       Nil{}
@@ -1985,10 +2017,10 @@ def act.item.data.of(+nm: List<&2, U32>, r: ActPs, +cs: List<&2, T.BCtor>, doc: 
 
 def act.item.data(s: ActSym, d: A.AgD, ty: A.Ag, +env: ActEnv, +decls: Map<&2, A.AgDecl>, doc: List<&2, List<&2, U32>>) -> List<&2, T.BItem>:
   match s d:
-    case ActSym{m, +n, k, +ms, ar, b, fs, c, cp} A.AgDData{+pars, 0n, cons, sort}:
+    case ActSym{m, +n, k, +ms, ar, b, fs, c, cp} A.AgDData{+pars, 0n, cons, sort, dcl}:
       +t = act.inline(100000n, ty, env)
       act.item.data.of(n, act.params(64n, pars, t, ms, Nil{}, env), act.ctors(act.keys(cons), pars, env, decls), doc)
-    case ActSym{m, n, k, ms, ar, b, fs, c, cp} A.AgDData{pars, ixs, cons, sort}:
+    case ActSym{m, n, k, ms, ar, b, fs, c, cp} A.AgDData{pars, ixs, cons, sort, dcl}:
       [T.BiComment{List.append(&2, List<&2, U32>, doc, [S.b("an indexed family: not translated yet")])}]
     case _ _:
       Nil{}

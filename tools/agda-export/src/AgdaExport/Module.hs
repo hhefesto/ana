@@ -407,7 +407,12 @@ defnS env d = \case
       , L [A "inline", yesNo inl]
       , L [A "abstract", yesNo (ab == AbstractDef)]
       ])
-  Datatype{dataPars = np, dataIxs = ni, dataClause = cl, dataCons = cs, dataSort = s, dataMutual = mu, dataAbstr = ab, dataPathCons = pcs} ->
+  Datatype{dataPars = np, dataIxs = ni, dataClause = cl, dataCons = cs, dataSort = s, dataMutual = mu, dataAbstr = ab, dataPathCons = pcs} -> do
+    -- a copy's clause (a module application's data type is the original
+    -- applied to the arguments) is written explicitly, as a function's is:
+    -- a reader inlines it, and in stored form its projections lack the
+    -- record parameters Bend must be given
+    clS <- maybe (return none) (fmap fst . clauseS env) cl
     return ("data", [], L
       [ A "data"
       , L [A "pars", int np]
@@ -417,10 +422,11 @@ defnS env d = \case
       , mutualS mu
       , L [A "abstract", yesNo (ab == AbstractDef)]
       , L (A "path-cons" : map qnameS pcs)
-      , L [A "clause", maybe none storedClause cl]
+      , L [A "clause", clS]
       ])
   Record{recPars = np, recClause = cl, recConHead = ch, recNamedCon = named, recFields = fs, recTel = tel, recMutual = mu, recEtaEquality' = eta, recPatternMatching = pm, recInduction = ind, recTerminates = ter, recAbstr = ab} -> do
     telS <- attempt env "record telescope" (telS <$> explicitTel tel) (telS tel)
+    clS <- maybe (return none) (fmap fst . clauseS env) cl
     return ("record", [], L
       [ A "record"
       , L [A "pars", int np]
@@ -434,7 +440,7 @@ defnS env d = \case
       , mutualS mu
       , L [A "abstract", yesNo (ab == AbstractDef)]
       , L [A "terminates", maybeBool ter]
-      , L [A "clause", maybe none storedClause cl]
+      , L [A "clause", clS]
       ])
   def@Function{funClauses = cs, funCompiled = mcc, funSplitTree = st, funMutual = mu, funProjection = pr, funFlags = fl, funTerminates = ter, funExtLam = el, funWith = wi, funOpaque = op} -> do
     -- A projection's or projection-like function's clauses and case tree

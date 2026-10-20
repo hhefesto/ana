@@ -182,7 +182,7 @@ def ast.qs.len(a: A.Ag) -> Nat:
 
 def ast.is.bool(+nm: List<&2, U32>, d: A.AgD) -> Bool:
   match d:
-    case A.AgDData{p, ix, cs, s}:
+    case A.AgDData{p, ix, cs, s, cl}:
       Bool.and(S.eq(nm, S.b("Bool")), Nat.is_eq(ast.qs.len(cs), 2n))
     case _:
       False{}
