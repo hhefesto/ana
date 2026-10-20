@@ -984,13 +984,17 @@ def act.sym.copy(c: Maybe<&2, ActCopy>, +mo: List<&2, U32>, +nm: List<&2, U32>, 
 
 # A function's entry: a record field's projection takes the record's
 # parameters and the record (its index); a copy, its leaf's variables;
-# any other function, what its first clause matches.
+# any other function, a projection-like one included (Agda's index there
+# only says which argument determines the ones before it), what its first
+# clause matches.
 def act.sym.fun(cp: Bool, p: A.AgProj, cls: A.Ag, tree: A.Ag, +mo: List<&2, U32>, +nm: List<&2, U32>, ms: List<&2, ActM>, b: ActB) -> ActSym:
   match cp p:
     case True{} p:
       act.sym.copy(act.copy.of(tree), mo, nm, ms, b)
-    case False{} A.AgPrOf{r, o, ix}:
+    case False{} A.AgPrOf{Some{r}, o, ix}:
       ActSym{mo, nm, A.AkFunction{}, ms, ix, b, Nil{}, Nil{}, None{}}
+    case False{} A.AgPrOf{None{}, o, ix}:
+      ActSym{mo, nm, A.AkFunction{}, ms, act.cls.arity(cls), b, Nil{}, Nil{}, None{}}
     case False{} A.AgPrNone{}:
       ActSym{mo, nm, A.AkFunction{}, ms, act.cls.arity(cls), b, Nil{}, Nil{}, None{}}
 
