@@ -8,6 +8,7 @@ import ../Agda2Bend/Cata.bend as C
 import ../Agda2Bend.bend as D
 import ../ToBend/Gate.bend as G
 import ../ToBend/Copy.bend as Q
+import ../ToBend/Order.bend as O
 
 # agda2bend's laws, run from this directory on the committed exports in
 # fixtures/agda2bend (agda-export's output for small modules, so the laws
@@ -314,6 +315,21 @@ def gt.contra.want() -> String:
 def gt.use() -> T.BItem:
   T.BiDef{S.b("use"), [T.BParam{T.BmErased{}, S.b("B"), T.BtType{}}, T.BParam{T.BmLive{}, S.b("y"), v("B")}], v("B"), T.BtExpr{v("y")}, Nil{}}
 
+# def to(-x: Type) -> Type: anon.Box<x>, written above the type it names,
+# whose field binds the name to as well
+def ord.to() -> T.BItem:
+  T.BiDef{S.b("to"), [T.BParam{T.BmErased{}, S.b("x"), T.BtType{}}], T.BtType{}, T.BtExpr{T.BtTyApp{S.b("anon.Box"), T.tba.args([v("x")])}}, Nil{}}
+
+def ord.box() -> T.BItem:
+  T.BiType{S.b("anon.Box"), [T.BParam{T.BmErased{}, S.b("A"), T.BtType{}}], False{}, [T.BCtor{S.b("anon.Box"), [T.BField{S.b("to"), v("A")}, T.BField{S.b("k"), app("P", [v("to")])}]}], Nil{}}
+
+def ord.first(xs: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case h <> t:
+      h
+
 def gate.laws() -> IO(Unit):
   do IO<Unit>:
     IO.print(verdict("the carets mark a binder", S.eq(G.tgt.span(S.split.lines(S.b("Location: u\n1 | def u(-A: Type) -> A -> A:\n2>|   +x_8 => x_8\n  |   ^^^^^\n3 | "))), S.b("+x_8"))))
@@ -323,6 +339,8 @@ def gate.laws() -> IO(Unit):
     IO.print(verdict("the gate's + repair declares the type parameter Data", S.eq(gt.prm(Q.tcp.raise(gt.contra(True{}), S.b("x_5"), True{})), S.b(gt.contra.want()))))
     IO.print(verdict("a caller's type parameter is declared Data", S.eq(gt.prm(Q.tcp.data.raise(gt.use(), S.b("B"))), S.b("import Base\n\ndef use(-B: Data, y: B) -> B:\n  y\n"))))
     IO.print(verdict("only a type parameter is declared Data", S.eq(gt.prm(Q.tcp.data.raise(gt.use(), S.b("y"))), S.b("none"))))
+    IO.print(verdict("a field is no use of the def it is named like", Bool.not(G.tgt.mem(S.b("to"), T.tba.item.refs(ord.box())))))
+    IO.print(verdict("Order writes a type above the def that names it", S.eq(ord.first(O.tor.names(O.tor.order([ord.to(), ord.box()]))), S.b("anon.Box"))))
 
 # Translation --------------------------------------------------------------------
 #

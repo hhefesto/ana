@@ -22,7 +22,7 @@ def tor.name(it: T.BItem) -> List<&2, U32>:
 
 # the names an item's terms mention
 def tor.refs(it: T.BItem) -> List<&2, List<&2, U32>>:
-  T.tba.item.fold(~T.tba.refs, it, Nil{})
+  T.tba.item.refs(it)
 
 # A frame of the walk: an item to visit, or one whose uses are written.
 type TorFr is Data:

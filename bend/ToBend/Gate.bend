@@ -57,7 +57,7 @@ def tgt.gaps(it: T.BItem) -> List<&2, List<&2, U32>>:
   T.tba.item.fold(~T.tba.todos, it, Nil{})
 
 def tgt.refs(it: T.BItem) -> List<&2, List<&2, U32>>:
-  T.tba.item.fold(~T.tba.refs, it, Nil{})
+  T.tba.item.refs(it)
 
 def tgt.mem(+x: List<&2, U32>, xs: List<&2, List<&2, U32>>) -> Bool:
   match xs:

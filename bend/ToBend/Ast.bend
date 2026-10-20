@@ -237,6 +237,127 @@ def tba.item.fold(~f: Bt -> List<&2, List<&2, U32>> -> List<&2, List<&2, U32>>, 
     case BiComment{doc}:
       acc
 
+# the names a case's patterns bind
+def tba.pvars(p: Bt, acc: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match p:
+    case BtVar{x}:
+      x <> acc
+    case BtPv{m, x}:
+      x <> acc
+    case BtCon{c, a}:
+      tba.pvars(a, acc)
+    case BtArgs{a, rest}:
+      tba.pvars(a, tba.pvars(rest, acc))
+    case BtSucc{a}:
+      tba.pvars(a, acc)
+    case BtDead{a}:
+      tba.pvars(a, acc)
+    case _:
+      acc
+
+# the names a term binds (lambda, Pi and let binders, pattern variables)
+def tba.binds(t: Bt, acc: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match t:
+    case BtRw{e, p, b}:
+      tba.binds(e, tba.binds(p, tba.binds(b, acc)))
+    case BtLet{x, v, b}:
+      x <> tba.binds(v, tba.binds(b, acc))
+    case BtDead{a}:
+      tba.binds(a, acc)
+    case BtApp{f, a}:
+      tba.binds(f, tba.binds(a, acc))
+    case BtTplArg{a}:
+      tba.binds(a, acc)
+    case BtLam{m, x, b}:
+      x <> tba.binds(b, acc)
+    case BtPi{m, x, d, a, b}:
+      x <> tba.binds(a, tba.binds(b, acc))
+    case BtCon{c, a}:
+      tba.binds(a, acc)
+    case BtTyApp{n, a}:
+      tba.binds(a, acc)
+    case BtEq{ty, a, b}:
+      tba.binds(ty, tba.binds(a, tba.binds(b, acc)))
+    case BtSucc{a}:
+      tba.binds(a, acc)
+    case BtAnn{a, ty}:
+      tba.binds(a, tba.binds(ty, acc))
+    case BtMatch{xs, cs}:
+      tba.binds(cs, acc)
+    case BtExpr{e}:
+      tba.binds(e, acc)
+    case BtCase{p, b, rest}:
+      tba.pvars(p, tba.binds(b, tba.binds(rest, acc)))
+    case BtArgs{a, rest}:
+      tba.binds(a, tba.binds(rest, acc))
+    case _:
+      acc
+
+def tba.params.names(ps: List<&2, BParam>, acc: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match ps:
+    case Nil{}:
+      acc
+    case BParam{m, x, ty} <> t:
+      x <> tba.params.names(t, acc)
+
+def tba.fields.names(fs: List<&2, BField>, acc: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match fs:
+    case Nil{}:
+      acc
+    case BField{x, ty} <> t:
+      x <> tba.fields.names(t, acc)
+
+def tba.ctors.names(cs: List<&2, BCtor>, acc: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match cs:
+    case Nil{}:
+      acc
+    case BCtor{c, fs} <> t:
+      tba.fields.names(fs, tba.ctors.names(t, acc))
+
+# the names an item binds: its parameters, its constructors' fields, and
+# every binder inside its terms
+def tba.item.names(it: BItem, acc: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match it:
+    case BiDef{n, ps, ret, body, doc}:
+      tba.params.names(ps, acc)
+    case BiType{n, ps, d, cs, doc}:
+      tba.params.names(ps, tba.ctors.names(cs, acc))
+    case BiComment{doc}:
+      acc
+
+def tba.set(xs: List<&2, List<&2, U32>>, m: Map<&2, Bool>) -> Map<&2, Bool>:
+  match xs:
+    case Nil{}:
+      m
+    case x <> t:
+      tba.set(t, Map.set(&2, Bool, m, S.str(x), True{}))
+
+def tba.has.got(r: Map<&2, Bool> & Bool) -> Bool:
+  (m, b) = r
+  b
+
+def tba.keep(b: Bool, x: List<&2, U32>, rest: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match b:
+    case True{}:
+      rest
+    case False{}:
+      x <> rest
+
+def tba.minus(xs: List<&2, List<&2, U32>>, +bound: Map<&2, Bool>) -> List<&2, List<&2, U32>>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +x <> t:
+      tba.keep(tba.has.got(Map.has(&2, Bool, bound, S.str(x))), x, tba.minus(t, bound))
+
+# The names an item uses from outside itself: a binder (a record field `to`
+# named like the def `to`) is not a use, or Order would see a false cycle
+# and write the def above the type it names (Bend then refuses the dotted
+# type through an import: "a declared datatype (unknown: …)"), and the gate
+# would drop the item as a dependent of an unrelated def.
+def tba.item.refs(+it: BItem) -> List<&2, List<&2, U32>>:
+  tba.minus(tba.item.fold(~tba.refs, it, Nil{}), tba.set(tba.item.names(it, tba.item.fold(~tba.binds, it, Nil{})), Map.new(&2, Bool)))
+
 # t with the variable x replaced by v (names are unique within a def, so
 # no binder captures v)
 def tba.subst(t: Bt, +x: List<&2, U32>, +v: Bt) -> Bt:
