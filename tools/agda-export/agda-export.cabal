@@ -19,6 +19,7 @@ executable agda-export
     AgdaExport.Explicit
     AgdaExport.Encode
     AgdaExport.Module
+    AgdaExport.Erasure
   build-depends:
     , Agda         ==2.8.0
     , base         >=4.18 && <5
@@ -27,8 +28,10 @@ executable agda-export
     , deepseq
     , directory
     , filepath
+    , mtl
     , text
     , time
+    , transformers
     , unordered-containers
   default-language: Haskell2010
   default-extensions:

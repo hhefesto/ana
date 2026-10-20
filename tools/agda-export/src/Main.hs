@@ -3,7 +3,10 @@
 --   interfaces as agda does) and writes, for FILE and every module it
 --   imports (transitively, Agda.Primitive included), OUT/<Module>.sexp: the
 --   module header and one S-expression per definition (FORMAT.md), plus
---   OUT/_index.sexp with each module's counts.  Every other flag is agda's.
+--   OUT/_index.sexp with each module's counts.  With --export-erasure-only
+--   it writes instead OUT/<Module>.erasure.sexp, the parameters Agda's own
+--   compiler erases or finds unused (AgdaExport.Erasure).  Every other flag
+--   is agda's.
 module Main (main) where
 
 import Control.Monad.IO.Class (liftIO)
@@ -19,6 +22,7 @@ import Agda.Utils.GetOpt (ArgDescr (..), OptDescr (..))
 import Agda.Syntax.Common.Pretty (prettyShow)
 import qualified Data.Text as T
 
+import AgdaExport.Erasure (erasureModule)
 import AgdaExport.Module
 import AgdaExport.Sexp
 
@@ -41,26 +45,46 @@ backend = Backend'
           "keep a module whose DIR/<Module>.sexp already exists (agda-export)"
       , Option [] ["export-copy-types"] (NoArg (\o -> pure o { optCopyTypes = True }))
           "write the copies a module application makes in full, type and clauses included (agda-export)"
+      , Option [] ["export-erasure-only"] (NoArg (\o -> pure o { optErasureOnly = True }))
+          "write only DIR/<Module>.erasure.sexp: the parameters Agda's compiler erases or finds unused (agda-export)"
       ]
   , isEnabled = \o -> maybe False (const True) (optDir o)
   , preCompile = \o -> do
       liftIO $ mapM_ (createDirectoryIfMissing True) (optDir o)
       liftIO $ logLine $ "exporting to " ++ maybe "?" id (optDir o)
-          ++ (if optExplicit o then "" else " (stored terms only)")
+          ++ (if optErasureOnly o then " (erasure sidecars only)"
+              else if optExplicit o then "" else " (stored terms only)")
       return o
-  , postCompile = \o _ mods -> liftIO $ writeIndex o (Map.elems mods)
+  , postCompile = \o _ mods ->
+      liftIO $ if optErasureOnly o then logErasureTotals (Map.elems mods) else writeIndex o (Map.elems mods)
   , preModule = \o _ m _ -> case optDir o of
+      -- the erasure sidecars compile every module of the closure (a
+      -- function's answer depends on its callees'); --export-skip-existing
+      -- then only keeps an existing sidecar file
+      _ | optErasureOnly o -> return (Recompile ())
       Just dir | optSkipExisting o -> do
         there <- liftIO $ doesFileExist (moduleFile dir m)
         return $ if there then Skip (skippedStats (T.pack (prettyShow m))) else Recompile ()
       _ -> return (Recompile ())
-  , postModule = \o () _ m _ -> exportModule o m
+  , postModule = \o () _ m _ -> if optErasureOnly o then erasureModule o m else exportModule o m
   , compileDef = \_ _ _ _ -> return ()
   , scopeCheckingSuffices = False
   , mayEraseType = \_ -> return True
   , backendInteractTop = Nothing
   , backendInteractHole = Nothing
   }
+
+-- | With --export-erasure-only no index is written (the main export's
+--   _index.sexp stays as it is); the totals go to the log.
+logErasureTotals :: [ModStats] -> IO ()
+logErasureTotals ms = do
+  let written = filter (not . msSkipped) ms
+      kinds = Map.toList (Map.unionsWith (+) (map msKinds written))
+  logLine $ concat
+    [ show (length ms), " modules compiled, ", show (length written), " sidecars written, "
+    , show (sum (map msDefs written)), " entries; "
+    , unwords [T.unpack k ++ "=" ++ show n | (k, n) <- kinds]
+    ]
 
 -- | _index.sexp: one module-stats line per module, then the totals.
 writeIndex :: Opts -> [ModStats] -> IO ()

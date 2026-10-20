@@ -8,7 +8,8 @@ Agda's internal syntax leaves out are put back (see "Explicit and stored
 terms"). This file is the contract between the two programs.
 
     agda-export --export-dir=OUT [--export-pretty] [--export-stored-only]
-                [--export-skip-existing] [--export-copy-types] [agda's flags] FILE.agda
+                [--export-skip-existing] [--export-copy-types] [--export-erasure-only]
+                [agda's flags] FILE.agda
 
 Run it from the root of FILE's library (the directory that holds its
 `.agda-lib`), as agda is run. It type-checks FILE, loading interfaces that are
@@ -34,6 +35,10 @@ agda-categories 0.3.0, both with prebuilt interfaces. Flags:
   renamed, so a file that exists is complete.
 - `--export-copy-types` writes the copies a module application makes in
   full (see "Copies"); by default a copy function is written compactly.
+- `--export-erasure-only` writes only the erasure sidecars,
+  `OUT/<Top.Level.Module>.erasure.sexp` (see "The erasure sidecar"), and no
+  `.sexp` file or index. With `--export-skip-existing` it keeps a sidecar
+  that is already there.
 - `AGDA_EXPORT_DEBUG=1` logs every term left in stored form, with the
   reason.
 
@@ -394,3 +399,128 @@ constructors are written in full (they are few and small).
 - A reason prefixed `no-compilation:` comes from a cubical helper
   definition, and one prefixed `cubical clause:` from a generated cubical
   clause.
+
+## The erasure sidecar (`<Module>.erasure.sexp`)
+
+    agda-export --export-dir=OUT --export-erasure-only [--export-skip-existing] FILE.agda
+
+This writes, for FILE and every module it imports,
+`OUT/<Top.Level.Module>.erasure.sexp`: what Agda 2.8.0's own compiler finds
+about each definition's parameters. It writes no `.sexp` file and no
+`_index.sexp`. The sidecar sits beside the main export: a reader joins its
+lines with the `def`s on the name's NameId. It does not change the main
+format.
+
+    (erasure-module STRING (version 1)
+                    (sources (erased STRING) (unused STRING)) (evaluation lazy)
+                    (entries N) (args N) (erased N) (unused N) (failed N))
+    ENTRY ::= (erasure Q (args N) (erased I*) (unused I*)
+                       (pis N) (names STRING*)
+                       (kind function|constructor|postulate|primitive)
+                       (dropped K) (arity M|none) (result erasable|empty|not-erasable)
+                       (why (dropped I*) (modality I*) (forced I*) (unused I*) (type I*) (empty I*))
+                       (treeless compiled | inlined | none | not-compiled REASON | failed STRING))
+            | (erasure Q (error STRING))
+
+- The header comes first. It names the Agda function each list comes from.
+  Its counts are the number of lines and the sums of their `args`, and of
+  the lengths of their `erased` and `unused` lists. `failed` counts the
+  functions on which toTreeless threw.
+- Then comes one line for each function, constructor, postulate and
+  primitive in the module's signature, in the main export's order. Data
+  types, records and the `other` kinds get no line.
+- `Q` is written as in the main export: `(q STRING W H)`.
+- Indices count the definition's parameters from 0. These are the Pis of
+  its type as Agda's eraser sees them: `telViewPath` of the type, which
+  reduces the codomain where it must to expose a Pi. `args` is the number
+  of parameters, and `names` gives their binder names.
+- `pis` is the number of Pis the type shows without reduction, as in the
+  main export's `type`. Indices from `pis` on belong to Pis that a
+  definition in the type unfolds to, such as `Op₂ A`, `Symmetric _≈_` or
+  `REL A B ℓ`.
+- `dropped` is K, the number of leading parameters that Agda's compiled
+  code never takes:
+  - for a projection or a projection-like function, its `index`-1
+    parameters (the ones the main export's `restored-params` puts back);
+  - for a constructor, its data type's parameters (`pars`).
+
+  Indices 0 to K-1 are in both `erased` and `unused`.
+
+### `unused`: Agda.Compiler.Treeless.Unused.usedArguments
+
+- Each function is compiled with
+  `Agda.Compiler.ToTreeless.toTreeless LazyEvaluation`, as the GHC backend
+  compiles it. At the end of the pipeline, `usedArguments` records, for
+  each lambda of the treeless term, whether the final erased body uses it
+  (`getCompiledArgUse`). These are the arguments the GHC backend strips
+  from the Haskell definition.
+- `arity` is the number of those lambdas (`none`: no usage was recorded).
+  Lambda j is parameter K+j.
+- Agda takes every parameter from K+arity on as used, so `unused` never
+  names one. A definition by partial application, such as
+  `step-≈-⟩ = forward`, has a short arity, and Agda treats its remaining
+  parameters as used.
+- `unused` is the dropped parameters plus the lambdas found unused.
+- What a function uses depends on what its callees use. Where the callee's
+  argument is unused or erasable, a call passes an erased value instead.
+  So the exporter compiles as a whole-program GHC build does: every module
+  of the import closure in dependency order, each module's functions in
+  `sortDefs` order, each result kept for the functions after it.
+  `--export-skip-existing` only skips writing a sidecar that exists; the
+  module is still compiled. A result therefore does not depend on which run
+  wrote it.
+- Within a mutual block, a function compiled before its partner sees the
+  partner's arguments as used. This is Agda's own approximation.
+
+### `erased`: Agda.Compiler.Treeless.Erase.getFunInfo
+
+- getFunInfo is what the eraser (`eraseTerms`) consults at every call
+  site. Where the callee's info marks an argument erasable, it replaces
+  that argument with an erased value. Where `result` is `erasable` or
+  `empty`, it replaces the whole call.
+- getFunInfo is not exported, so the exporter carries a copy of it and of
+  getTypeInfo. The copy runs after the function is compiled, in a fresh
+  eraser state, as Agda's `isErasable` runs it.
+- A parameter i ≥ K is erasable if any of the grounds below holds. These
+  are the grounds getFunInfo's `mkR` combines, and `why` lists each one
+  separately; an index may appear under several.
+  - `modality`: the domain's modality is not usable: irrelevant,
+    shape-irrelevant or @0.
+  - `forced`: the forcing analysis marked this constructor argument
+    forced.
+  - `unused`: as above.
+  - `type`: getTypeInfo finds the domain's type erasable. Erasable types
+    are sorts (`Set a`, and `A → Set a`), Size, and a data type or record
+    with one constructor whose arguments are all erasable (`_≡_`, `⊤`).
+  - `empty`: the domain's type is empty, such as a data type with no
+    constructors (`⊥`).
+- `erased` is the union of the six `why` lists.
+- getTypeInfo looks at the head of the type after reduction. It does not
+  find erasable a type whose head is a variable or a record projection,
+  such as `Obj C`, `C [ A , B ]` or `C [ f ≈ g ]`. Nor does it find
+  `Level` erasable, because `Level` is a postulate. So level parameters
+  end up under `unused`, not under `type`.
+- The backend's `mayEraseType` allows every type. The GHC backend refuses
+  for a data type bound by a `COMPILE GHC ... = data` pragma.
+- `result` is getFunInfo's verdict on the type after the Pis. If it is
+  `erasable` or `empty`, the eraser erases every call to the definition:
+  a proof of `x ≡ y`, a type, a type family.
+
+### `treeless`
+
+- `compiled`: toTreeless made a term.
+- `inlined`: toTreeless made no term, because Agda inlines the function
+  into every caller (a with-function, or a non-recursive pattern lambda).
+  Its usage was recorded when its parent was compiled.
+- `none`: such a function whose parent never compiled it. No usage is
+  recorded.
+- `not-compiled no-compilation`: a cubical transp or hcomp helper
+  (`no-compilation`). No backend compiles these.
+- `not-compiled erased-definition`: the definition's own modality is
+  erased or irrelevant. MAlonzo does not compile it.
+- `not-compiled not-a-function`: a constructor, postulate or primitive.
+  It has no compiled body, so its `unused` is its dropped parameters and
+  its `arity` is `none`.
+- `failed STRING`: toTreeless threw. The exporter restores the state, and
+  the line carries only getFunInfo's other grounds.
+- `(erasure Q (error STRING))`: the analysis itself threw.

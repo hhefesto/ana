@@ -75,11 +75,14 @@ data Opts = Opts
   , optCopyTypes :: Bool
     -- ^ --export-copy-types: write a module application's copies in full
     --   (by default a copy function keeps only its case tree)
+  , optErasureOnly :: Bool
+    -- ^ --export-erasure-only: write only the erasure sidecars,
+    --   DIR/<Module>.erasure.sexp (AgdaExport.Erasure)
   }
   deriving (Generic, NFData)
 
 defaultOpts :: Opts
-defaultOpts = Opts Nothing False True False False
+defaultOpts = Opts Nothing False True False False False
 
 data ModStats = ModStats
   { msModule :: Text
