@@ -309,8 +309,27 @@ def gt.contra(dead: Bool) -> T.BItem:
   T.BiDef{S.b("contra"), [T.BParam{T.BmErased{}, S.b("A"), T.BtType{}}, T.BParam{T.BmLive{}, S.b("x"), T.BtPi{T.BmLive{}, S.b("_"), False{}, v("A"), T.BtPi{T.BmLive{}, S.b("_"), False{}, v("A"), v("Nat")}}}, T.BParam{T.BmLive{}, S.b("x_5"), v("A")}],
     v("Nat"), T.BtExpr{app("x", [a, a])}, Nil{}}
 
+# the same with x_5 erased (Copy saw no live use of it)
+def gt.contra.e() -> T.BItem:
+  T.BiDef{S.b("contra"), [T.BParam{T.BmErased{}, S.b("A"), T.BtType{}}, T.BParam{T.BmLive{}, S.b("x"), T.BtPi{T.BmLive{}, S.b("_"), False{}, v("A"), T.BtPi{T.BmLive{}, S.b("_"), False{}, v("A"), v("Nat")}}}, T.BParam{T.BmErased{}, S.b("x_5"), v("A")}],
+    v("Nat"), T.BtExpr{app("x", [T.BtDead{v("x_5")}, T.BtDead{v("x_5")}])}, Nil{}}
+
 def gt.contra.want() -> String:
   "import Base\n\ndef contra(-A: Data, x: A -> A -> Nat, +x_5: A) -> Nat:\n  x(x_5, x_5)\n"
+
+# def on(-A, -B, -C: Type, x: B -> B -> C, f: A -> B, a: A, b: A) -> C:
+# x(f(a), f(b)), as Cata writes a variable applied (each argument of mode
+# unknown, BtDead twice): x's and f's types are Pis of live domains, so f
+# is used twice (a template, its types with it) and a, b once each
+def gt.dd(t: T.Bt) -> T.Bt:
+  T.BtDead{T.BtDead{t}}
+
+def gt.arr(a: T.Bt, b: T.Bt) -> T.Bt:
+  T.BtPi{T.BmLive{}, S.b("_"), False{}, a, b}
+
+def gt.on() -> T.BItem:
+  T.BiDef{S.b("on"), [T.BParam{T.BmErased{}, S.b("A"), T.BtType{}}, T.BParam{T.BmErased{}, S.b("B"), T.BtType{}}, T.BParam{T.BmErased{}, S.b("C"), T.BtType{}}, T.BParam{T.BmLive{}, S.b("x"), gt.arr(v("B"), gt.arr(v("B"), v("C")))}, T.BParam{T.BmLive{}, S.b("f"), gt.arr(v("A"), v("B"))}, T.BParam{T.BmLive{}, S.b("a"), v("A")}, T.BParam{T.BmLive{}, S.b("b"), v("A")}],
+    v("C"), T.BtExpr{app("x", [gt.dd(app("f", [gt.dd(v("a"))])), gt.dd(app("f", [gt.dd(v("b"))]))])}, Nil{}}
 
 # def use(-B: Type, y: B) -> B: y
 def gt.use() -> T.BItem:
@@ -459,8 +478,10 @@ def gate.laws() -> IO(Unit):
     IO.print(verdict("the carets mark a binder", S.eq(G.tgt.span(S.split.lines(S.b("Location: u\n1 | def u(-A: Type) -> A -> A:\n2>|   +x_8 => x_8\n  |   ^^^^^\n3 | "))), S.b("+x_8"))))
     IO.print(verdict("the carets mark an argument", S.eq(G.tgt.span(S.split.lines(S.b("  12>|   u02e2(A, B, C, x, g)\n     |         ^\n  13 | "))), S.b("A"))))
     IO.print(verdict("a Type where Data is expected is repair 3", Nat.is_eq(G.tgt.repair.kind(S.b("expected : Data observed : Type ")), 3n)))
-    IO.print(verdict("a + parameter typed by a type parameter declares it Data", S.eq(gt.pr(Q.tcp.finish(gt.contra(False{}), Q.tcp.decide(gt.contra(False{}), Nil{}))), S.b(gt.contra.want()))))
+    IO.print(verdict("a + parameter typed by a type parameter declares it Data", S.eq(gt.pr(Q.tcp.finish(gt.contra(False{}), Q.tcp.decide(gt.contra(False{}), Nil{}, Q.tcp.qe0()))), S.b(gt.contra.want()))))
+    IO.print(verdict("a parameter of a function type passes its arguments live: one passed there twice is a template", S.eq(gt.pr(Q.tcp.finish(gt.on(), Q.tcp.decide(gt.on(), Nil{}, Q.tcp.qe0()))), S.b("import Base\n\ndef on(~A: Type, ~B: Type, ~f: A -> B, -C: Type, x: B -> B -> C, a: A, b: A) -> C:\n  x(f(a), f(b))\n"))))
     IO.print(verdict("the gate's + repair declares the type parameter Data", S.eq(gt.prm(Q.tcp.raise(gt.contra(True{}), S.b("x_5"), True{})), S.b(gt.contra.want()))))
+    IO.print(verdict("the gate's + repair raises an erased parameter consumed twice", S.eq(gt.prm(Q.tcp.raise(gt.contra.e(), S.b("x_5"), True{})), S.b(gt.contra.want()))))
     IO.print(verdict("a caller's type parameter is declared Data", S.eq(gt.prm(Q.tcp.data.raise(gt.use(), S.b("B"))), S.b("import Base\n\ndef use(-B: Data, y: B) -> B:\n  y\n"))))
     IO.print(verdict("only a type parameter is declared Data", S.eq(gt.prm(Q.tcp.data.raise(gt.use(), S.b("y"))), S.b("none"))))
     IO.print(verdict("a point-free def's type parameter is declared Data", S.eq(gt.prm(Q.tcp.data.raise(gt.lb(), S.b("eta1"))), S.b("import Base\n\ndef lb() -> @-A:Data -> A -> A:\n  eta1 => x => x\n"))))
@@ -510,6 +531,26 @@ def gold.next(+m: String, +al: Map<&2, List<&2, U32>>, +ral: Map<&2, List<&2, U3
     IO.print(verdict("translate " ++ m ++ " as its golden", ok))
     return g
 
+# Function.Base as its golden, and its combinators' bodies normalised:
+# `_on_` is `λ x y → f x * f y` (2026-10-22), its points used once, so its
+# A is of any kind (through `_-⟪_⟫-_`, which uses them twice, it had to be
+# Data, and Algebra.Structures' records over a carrier of kind a fell)
+def gold.fb.of(+al: Map<&2, List<&2, U32>>, +ral: Map<&2, List<&2, U32>>, +ds: List<&2, A.AgDecl>, +want: List<&2, U32>, tr: D.A2bTr) -> IO(D.A2bG):
+  match tr:
+    case D.A2bTr{its, g}:
+      +text = D.a2b.raw.text(S.b("Function.Base"), al, ral, List.length(&2, A.AgDecl, ds), its)
+      do IO<D.A2bG>:
+        IO.print(verdict("translate Function.Base as its golden", S.eq(text, want)))
+        IO.print(verdict("a combinator's body is normalised: _on_ uses its points once, its A of any kind", Bool.and(S.infix(text, S.b("~A: Kind(A_u002e_a), ~x_13: A -> B, ")), S.infix(text, S.b("\n  x(x_13(x_14), x_13(x_15))\n")))))
+        return g
+
+def gold.fb(+al: Map<&2, List<&2, U32>>, +ral: Map<&2, List<&2, U32>>, g: D.A2bG) -> IO(D.A2bG):
+  do IO<D.A2bG>:
+    +ds : List<&2, A.AgDecl> <- D.a2b.decls(S.b("fixtures/agda2bend/Function.Base.sexp"))
+    +want : List<&2, U32> <- S.read("fixtures/agda2bend/golden/Function.Base.bend")
+    r : D.A2bG <- gold.fb.of(al, ral, ds, want, D.a2b.mod.items(S.b("Function.Base"), al, ds, g))
+    return r
+
 def gold.laws() -> IO(Unit):
   +order : List<&2, List<&2, U32>> = [S.b("Agda.Primitive"), S.b("Level"), S.b("Function.Base")]
   +al : Map<&2, List<&2, U32>> = D.a2b.aliases(order)
@@ -519,8 +560,7 @@ def gold.laws() -> IO(Unit):
     g1 : D.A2bG <- gold.next("Agda.Primitive", al, ral, r1)
     r2 : D.A2bG & Bool <- gold.one("Level", al, ral, g1)
     g2 : D.A2bG <- gold.next("Level", al, ral, r2)
-    r3 : D.A2bG & Bool <- gold.one("Function.Base", al, ral, g2)
-    g3 : D.A2bG <- gold.next("Function.Base", al, ral, r3)
+    g3 : D.A2bG <- gold.fb(al, ral, g2)
     return Unit{}
 
 # fixtures/agda2bend/src/A2bFix.agda (its export A2bFix.sexp, after

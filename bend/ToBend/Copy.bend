@@ -1,6 +1,7 @@
 import Base
 import ../Sys.bend as S
 import ./Ast.bend as T
+import ./Qfix.bend as QF
 
 # Copy: the quantity pass.  Bend is affine: a live variable may be used
 # once, twice only when it is bound with + and its type is Data, and any
@@ -598,12 +599,79 @@ def tcp.ret.live(b: T.Bt, ret: T.Bt) -> T.Bt:
     case _ ret:
       ret
 
+# A parameter applied whose type is a function type (`x: B -> B -> C`):
+# its arguments at the type's live Pis are live uses.  Cata marks a
+# variable's arguments as of unknown mode (BtDead of BtDead), not knowing
+# the variable's type; the header knows a parameter's.  `_on_`, its body
+# normalised (`x(f(x_14), f(x_15))`, Cata's combinators), passes f twice
+# to x's live Pis: a template, as Bend needs.  The body so read is for
+# counting only (2026-10-22).
+def tcp.vty(ps: List<&2, T.BParam>, +h: List<&2, U32>) -> T.Bt:
+  match ps:
+    case Nil{}:
+      T.BtWild{}
+    case T.BParam{m, +x, ty} <> t:
+      Bool.pick(T.Bt, S.eq(x, h), ty, tcp.vty(t, h))
+
+# a type with the type-valued defs at its head opened (Qfix's whnf over the
+# signatures of the modules before this one: `RightIdentity(A, eq, e, op)`
+# opens to its Pi `(x: A) -> ...`), so a parameter typed by such a def
+# passes its arguments live too (2026-10-22)
+def tcp.open(t: T.Bt, +qe: QF.TqEnv) -> T.Bt:
+  QF.tqf.whnf(16n, t, qe)
+
+# no signatures: types read as written (the tests' entry)
+def tcp.qe0() -> QF.TqEnv:
+  QF.TqEnv{Map.new(&2, QF.TqSig), Nil{}}
+
+# t read with the arguments of each parameter applied at its type's live
+# Pis as live (ty: the type an argument spine t is applied at, BtWild for
+# none or not known; qe: the signatures that open a type-valued def)
+def tcp.vres(+ps: List<&2, T.BParam>, t: T.Bt, ty: T.Bt, +qe: QF.TqEnv) -> T.Bt:
+  match t ty:
+    case T.BtApp{T.BtVar{+h}, args} _:
+      T.BtApp{T.BtVar{h}, tcp.vres(ps, args, tcp.open(tcp.vty(ps, h), qe), qe)}
+    case T.BtArgs{T.BtDead{T.BtDead{a}}, rest} T.BtPi{T.BmLive{}, y, d, dom, cod}:
+      T.BtArgs{tcp.vres(ps, a, T.BtWild{}, qe), tcp.vres(ps, rest, tcp.open(cod, qe), qe)}
+    case T.BtArgs{T.BtDead{T.BtDead{a}}, rest} T.BtPi{T.BmCopy{}, y, d, dom, cod}:
+      T.BtArgs{tcp.vres(ps, a, T.BtWild{}, qe), tcp.vres(ps, rest, tcp.open(cod, qe), qe)}
+    case T.BtArgs{a, rest} T.BtPi{m, y, d, dom, cod}:
+      T.BtArgs{tcp.vres(ps, a, T.BtWild{}, qe), tcp.vres(ps, rest, tcp.open(cod, qe), qe)}
+    case T.BtArgs{a, rest} _:
+      T.BtArgs{tcp.vres(ps, a, T.BtWild{}, qe), tcp.vres(ps, rest, T.BtWild{}, qe)}
+    case T.BtApp{f, a} _:
+      T.BtApp{tcp.vres(ps, f, T.BtWild{}, qe), tcp.vres(ps, a, T.BtWild{}, qe)}
+    case T.BtDead{a} _:
+      T.BtDead{tcp.vres(ps, a, T.BtWild{}, qe)}
+    case T.BtTplArg{a} _:
+      T.BtTplArg{tcp.vres(ps, a, T.BtWild{}, qe)}
+    case T.BtLam{m, y, b} _:
+      T.BtLam{m, y, tcp.vres(ps, b, T.BtWild{}, qe)}
+    case T.BtExpr{e} _:
+      T.BtExpr{tcp.vres(ps, e, T.BtWild{}, qe)}
+    case T.BtMatch{xs, cs} _:
+      T.BtMatch{tcp.vres(ps, xs, T.BtWild{}, qe), tcp.vres(ps, cs, T.BtWild{}, qe)}
+    case T.BtCase{p, b, rest} _:
+      T.BtCase{p, tcp.vres(ps, b, T.BtWild{}, qe), tcp.vres(ps, rest, T.BtWild{}, qe)}
+    case T.BtRw{e, p, b} _:
+      T.BtRw{e, p, tcp.vres(ps, b, T.BtWild{}, qe)}
+    case T.BtLet{y, v, b} _:
+      T.BtLet{y, tcp.vres(ps, v, T.BtWild{}, qe), tcp.vres(ps, b, T.BtWild{}, qe)}
+    case T.BtCon{c, a} _:
+      T.BtCon{c, tcp.vres(ps, a, T.BtWild{}, qe)}
+    case T.BtSucc{a} _:
+      T.BtSucc{tcp.vres(ps, a, T.BtWild{}, qe)}
+    case T.BtAnn{a, aty} _:
+      T.BtAnn{tcp.vres(ps, a, T.BtWild{}, qe), aty}
+    case t2 _:
+      t2
+
 # a def's parameters' modes as its body needs them, in header order (the
 # empty list for any other item), then its return type's Pis its head lambdas bind
-def tcp.decide(it: T.BItem, +datas: List<&2, List<&2, U32>>) -> List<&2, T.BMode>:
+def tcp.decide(it: T.BItem, +datas: List<&2, List<&2, U32>>, +qe: QF.TqEnv) -> List<&2, T.BMode>:
   match it:
     case T.BiDef{n, +ps, +ret, +body, doc}:
-      List.append(&2, T.BMode, tcp.close(List.length(&2, T.BParam, ps), ps, tcp.params(ps, body, List.append(&2, List<&2, U32>, tcp.ty.params(ps), datas))), tcp.ret.ms(body, ret))
+      List.append(&2, T.BMode, tcp.close(List.length(&2, T.BParam, ps), ps, tcp.params(ps, tcp.vres(ps, body, T.BtWild{}, qe), List.append(&2, List<&2, U32>, tcp.ty.params(ps), datas))), tcp.ret.ms(body, ret))
     case _:
       Nil{}
 
@@ -1084,9 +1152,15 @@ def tcp.p.put(p: T.BParam, r: TcpP, ch: Bool) -> TcpP:
     case TcpP{ps, c}:
       TcpP{p <> ps, Bool.or(c, ch)}
 
+# (an erased parameter consumed more than once goes to + at once: Copy
+# counts no use at a variable's arguments, so `star(x_22, n0_hash)` over a
+# live `star: Op₂ A` left x_22 erased once its other uses went dead,
+# 2026-10-22, Algebra.Consequences.Setoid)
 def tcp.p.raise(hit: Bool, copy: Bool, p: T.BParam) -> T.BParam & Bool:
   match hit copy p:
     case True{} True{} T.BParam{T.BmLive{}, x, ty}:
+      (T.BParam{T.BmCopy{}, x, ty}, True{})
+    case True{} True{} T.BParam{T.BmErased{}, x, ty}:
       (T.BParam{T.BmCopy{}, x, ty}, True{})
     case True{} False{} T.BParam{T.BmErased{}, x, ty}:
       (T.BParam{T.BmLive{}, x, ty}, True{})

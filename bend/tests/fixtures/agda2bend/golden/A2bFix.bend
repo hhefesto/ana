@@ -70,5 +70,5 @@ def of(-A: Type, b: Bool, x: Ite(b, A, A -> Bot())) -> Refl<A, b>:
 
 # Agda: A2bFix.twice
 # A2bFix.agda, line 40
-def twice(-A: Type, x: A -> A -> A, x_3: A) -> A:
+def twice(-A: Data, x: A -> A -> A, +x_3: A) -> A:
   x(x_3, x_3)

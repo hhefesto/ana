@@ -45,12 +45,12 @@ def bar_gt(-a: Quant, -b: Quant, -A: Kind(a), -B: A -> Kind(b), a_8: A, x: @a_5:
 
 # Agda: Function.Base._ˢ_
 # Base.agda, line 93
-def u02e2(-a: Quant, -b: Quant, -c: Quant, -A: Kind(a), -B: A -> Kind(b), -C: @x:A -> B(x) -> Kind(c), x: @x:A -> @y:B(x) -> C(x, y), g: @x:A -> B(x), x_15: A) -> C(x_15, g(x_15)):
+def u02e2(-a: Quant, -b: Quant, -c: Quant, -A: Data, -B: A -> Kind(b), -C: @x:A -> B(x) -> Kind(c), x: @x:A -> @y:B(x) -> C(x, y), g: @x:A -> B(x), +x_15: A) -> C(x_15, g(x_15)):
   x(x_15, g(x_15))
 
 # Agda: Function.Base._$-
 # Base.agda, line 102
-def dollar_2(-a: Quant, -b: Quant, -A: Kind(a), -B: A -> Kind(b), x: @x:A -> B(x), -x_9: A) -> B(x_9):
+def dollar_2(-a: Quant, -b: Quant, -A: Kind(a), -B: A -> Kind(b), x: @x:A -> B(x), x_9: A) -> B(x_9):
   x(x_9)
 
 # Agda: Function.Base.λ-
@@ -71,7 +71,7 @@ def comp_p(-B_u002e_b: Quant, -B: Kind(B_u002e_b), -C_u002e_c: Quant, -C: Kind(C
 # Agda: Function.Base._∘₂′_
 # Base.agda, line 137
 def comp_2_p(-C_u002e_c: Quant, -C: Kind(C_u002e_c), -D_u002e_d: Quant, -D: Kind(D_u002e_d), -A_u002e_a: Quant, -A: Kind(A_u002e_a), -B_u002e_b: Quant, -B: Kind(B_u002e_b), x: C -> D, x_17: A -> B -> C, x_18: A, x_19: B) -> D:
-  comp_2(A_u002e_a, B_u002e_b, C_u002e_c, D_u002e_d, A, x_10 => B, x_10 => x_11 => C, x_10 => y => x_12 => D, x_10 => y => x, x_17, x_18, x_19)
+  x(x_17(x_18, x_19))
 
 # Agda: Function.Base.flip′
 # Base.agda, line 142
@@ -110,53 +110,53 @@ def it(-a: Quant, -A: Kind(a), x: A) -> A:
 
 # Agda: Function.Base._-⟪_⟫-_
 # Base.agda, line 200
-def u27ea_u27eb(-A_u002e_a: Quant, -A: Kind(A_u002e_a), -B_u002e_b: Quant, -B: Kind(B_u002e_b), -C_u002e_c: Quant, -C: Kind(C_u002e_c), -D_u002e_d: Quant, -D: Kind(D_u002e_d), -E_u002e_e: Quant, -E: Kind(E_u002e_e), x: A -> B -> C, x_21: C -> D -> E, x_22: A -> B -> D, x_23: A, x_24: B) -> E:
+def u27ea_u27eb(-A_u002e_a: Quant, -A: Data, -B_u002e_b: Quant, -B: Data, -C_u002e_c: Quant, -C: Kind(C_u002e_c), -D_u002e_d: Quant, -D: Kind(D_u002e_d), -E_u002e_e: Quant, -E: Kind(E_u002e_e), x: A -> B -> C, x_21: C -> D -> E, x_22: A -> B -> D, +x_23: A, +x_24: B) -> E:
   x_21(x(x_23, x_24), x_22(x_23, x_24))
 
 # Agda: Function.Base._-⟪_∣
 # Base.agda, line 205
-def u27ea_div(-A_u002e_a: Quant, -A: Kind(A_u002e_a), -B_u002e_b: Quant, -B: Kind(B_u002e_b), -C_u002e_c: Quant, -C: Kind(C_u002e_c), -D_u002e_d: Quant, -D: Kind(D_u002e_d), x: A -> B -> C, x_17: C -> B -> D, x_18: A, x_19: B) -> D:
-  u27ea_u27eb(A_u002e_a, A, B_u002e_b, B, C_u002e_c, C, B_u002e_b, B, D_u002e_d, D, x, x_17, eta1 => eta2 => const_u1d63(A_u002e_a, A, B_u002e_b, B, eta1, eta2), x_18, x_19)
+def u27ea_div(-A_u002e_a: Quant, -A: Kind(A_u002e_a), -B_u002e_b: Quant, -B: Data, -C_u002e_c: Quant, -C: Kind(C_u002e_c), -D_u002e_d: Quant, -D: Kind(D_u002e_d), x: A -> B -> C, x_17: C -> B -> D, x_18: A, +x_19: B) -> D:
+  x_17(x(x_18, x_19), x_19)
 
 # Agda: Function.Base.∣_⟫-_
 # Base.agda, line 210
-def div_u27eb(-A_u002e_a: Quant, -A: Kind(A_u002e_a), -C_u002e_c: Quant, -C: Kind(C_u002e_c), -D_u002e_d: Quant, -D: Kind(D_u002e_d), -B_u002e_b: Quant, -B: Kind(B_u002e_b), x: A -> C -> D, x_17: A -> B -> C, x_18: A, x_19: B) -> D:
-  u27ea_u27eb(A_u002e_a, A, B_u002e_b, B, A_u002e_a, A, C_u002e_c, C, D_u002e_d, D, eta1 => eta2 => const(A_u002e_a, A, B_u002e_b, B, eta1, eta2), x, x_17, x_18, x_19)
+def div_u27eb(-A_u002e_a: Quant, -A: Data, -C_u002e_c: Quant, -C: Kind(C_u002e_c), -D_u002e_d: Quant, -D: Kind(D_u002e_d), -B_u002e_b: Quant, -B: Kind(B_u002e_b), x: A -> C -> D, x_17: A -> B -> C, +x_18: A, x_19: B) -> D:
+  x(x_18, x_17(x_18, x_19))
 
 # Agda: Function.Base._-⟨_∣
 # Base.agda, line 215
 def la_div(-A_u002e_a: Quant, -A: Kind(A_u002e_a), -C_u002e_c: Quant, -C: Kind(C_u002e_c), -B_u002e_b: Quant, -B: Kind(B_u002e_b), -D_u002e_d: Quant, -D: Kind(D_u002e_d), x: A -> C, x_17: C -> B -> D, x_18: A, x_19: B) -> D:
-  u27ea_div(A_u002e_a, A, B_u002e_b, B, C_u002e_c, C, D_u002e_d, D, eta1 => eta2 => comp_2(A_u002e_a, B_u002e_b, A_u002e_a, C_u002e_c, A, v => B, x_10 => x_11 => A, x_10 => y => x_12 => C, x_10 => y => x, eta1 => eta2 => const(A_u002e_a, A, B_u002e_b, B, eta1, eta2), eta1, eta2), x_17, x_18, x_19)
+  x_17(x(x_18), x_19)
 
 # Agda: Function.Base.∣_⟩-_
 # Base.agda, line 220
 def div_ra(-A_u002e_a: Quant, -A: Kind(A_u002e_a), -C_u002e_c: Quant, -C: Kind(C_u002e_c), -D_u002e_d: Quant, -D: Kind(D_u002e_d), -B_u002e_b: Quant, -B: Kind(B_u002e_b), x: A -> C -> D, x_17: B -> C, x_18: A, x_19: B) -> D:
-  div_u27eb(A_u002e_a, A, C_u002e_c, C, D_u002e_d, D, B_u002e_b, B, x, eta1 => eta2 => comp_2(A_u002e_a, B_u002e_b, B_u002e_b, C_u002e_c, A, v => B, x_10 => x_11 => B, x_10 => y => x_12 => C, x_10 => y => x_17, eta1 => eta2 => const_u1d63(A_u002e_a, A, B_u002e_b, B, eta1, eta2), eta1, eta2), x_18, x_19)
+  x(x_18, x_17(x_19))
 
 # Agda: Function.Base._-⟪_⟩-_
 # Base.agda, line 225
-def u27ea_ra(-A_u002e_a: Quant, -A: Kind(A_u002e_a), -B_u002e_b: Quant, -B: Kind(B_u002e_b), -C_u002e_c: Quant, -C: Kind(C_u002e_c), -D_u002e_d: Quant, -D: Kind(D_u002e_d), -E_u002e_e: Quant, -E: Kind(E_u002e_e), x: A -> B -> C, x_21: C -> D -> E, x_22: B -> D, x_23: A, x_24: B) -> E:
-  u27ea_u27eb(A_u002e_a, A, B_u002e_b, B, C_u002e_c, C, D_u002e_d, D, E_u002e_e, E, x, x_21, eta1 => eta2 => div_ra(A_u002e_a, A, D_u002e_d, D, D_u002e_d, D, B_u002e_b, B, eta1 => eta2 => const_u1d63(A_u002e_a, A, D_u002e_d, D, eta1, eta2), x_22, eta1, eta2), x_23, x_24)
+def u27ea_ra(-A_u002e_a: Quant, -A: Kind(A_u002e_a), -B_u002e_b: Quant, -B: Data, -C_u002e_c: Quant, -C: Kind(C_u002e_c), -D_u002e_d: Quant, -D: Kind(D_u002e_d), -E_u002e_e: Quant, -E: Kind(E_u002e_e), x: A -> B -> C, x_21: C -> D -> E, x_22: B -> D, x_23: A, +x_24: B) -> E:
+  x_21(x(x_23, x_24), x_22(x_24))
 
 # Agda: Function.Base._-⟨_⟫-_
 # Base.agda, line 230
-def la_u27eb(-A_u002e_a: Quant, -A: Kind(A_u002e_a), -C_u002e_c: Quant, -C: Kind(C_u002e_c), -D_u002e_d: Quant, -D: Kind(D_u002e_d), -E_u002e_e: Quant, -E: Kind(E_u002e_e), -B_u002e_b: Quant, -B: Kind(B_u002e_b), x: A -> C, x_21: C -> D -> E, x_22: A -> B -> D, x_23: A, x_24: B) -> E:
-  u27ea_u27eb(A_u002e_a, A, B_u002e_b, B, C_u002e_c, C, D_u002e_d, D, E_u002e_e, E, eta1 => eta2 => la_div(A_u002e_a, A, C_u002e_c, C, B_u002e_b, B, C_u002e_c, C, x, eta1 => eta2 => const(C_u002e_c, C, B_u002e_b, B, eta1, eta2), eta1, eta2), x_21, x_22, x_23, x_24)
+def la_u27eb(-A_u002e_a: Quant, -A: Data, -C_u002e_c: Quant, -C: Kind(C_u002e_c), -D_u002e_d: Quant, -D: Kind(D_u002e_d), -E_u002e_e: Quant, -E: Kind(E_u002e_e), -B_u002e_b: Quant, -B: Kind(B_u002e_b), x: A -> C, x_21: C -> D -> E, x_22: A -> B -> D, +x_23: A, x_24: B) -> E:
+  x_21(x(x_23), x_22(x_23, x_24))
 
 # Agda: Function.Base._-⟨_⟩-_
 # Base.agda, line 235
 def la_ra_2(-A_u002e_a: Quant, -A: Kind(A_u002e_a), -C_u002e_c: Quant, -C: Kind(C_u002e_c), -D_u002e_d: Quant, -D: Kind(D_u002e_d), -E_u002e_e: Quant, -E: Kind(E_u002e_e), -B_u002e_b: Quant, -B: Kind(B_u002e_b), x: A -> C, x_21: C -> D -> E, x_22: B -> D, x_23: A, x_24: B) -> E:
-  u27ea_u27eb(A_u002e_a, A, B_u002e_b, B, C_u002e_c, C, D_u002e_d, D, E_u002e_e, E, eta1 => eta2 => la_div(A_u002e_a, A, C_u002e_c, C, B_u002e_b, B, C_u002e_c, C, x, eta1 => eta2 => const(C_u002e_c, C, B_u002e_b, B, eta1, eta2), eta1, eta2), x_21, eta1 => eta2 => div_ra(A_u002e_a, A, D_u002e_d, D, D_u002e_d, D, B_u002e_b, B, eta1 => eta2 => const_u1d63(A_u002e_a, A, D_u002e_d, D, eta1, eta2), x_22, eta1, eta2), x_23, x_24)
+  x_21(x(x_23), x_22(x_24))
 
 # Agda: Function.Base._on₂_
 # Base.agda, line 240
-def on_2(~C_u002e_c: Quant, ~C: Kind(C_u002e_c), ~A_u002e_a: Quant, ~A: Kind(A_u002e_a), ~B_u002e_b: Quant, ~B: Kind(B_u002e_b), ~x_17: A -> B -> C, -D_u002e_d: Quant, -D: Kind(D_u002e_d), x: C -> C -> D, x_18: A, x_19: B) -> D:
-  u27ea_u27eb(A_u002e_a, A, B_u002e_b, B, C_u002e_c, C, C_u002e_c, C, D_u002e_d, D, x_17, x, x_17, x_18, x_19)
+def on_2(~C_u002e_c: Quant, ~C: Kind(C_u002e_c), ~A_u002e_a: Quant, ~A: Data, ~B_u002e_b: Quant, ~B: Data, ~x_17: A -> B -> C, -D_u002e_d: Quant, -D: Kind(D_u002e_d), x: C -> C -> D, +x_18: A, +x_19: B) -> D:
+  x(x_17(x_18, x_19), x_17(x_18, x_19))
 
 # Agda: Function.Base._on_
 # Base.agda, line 245
 def on(~B_u002e_b: Quant, ~B: Kind(B_u002e_b), ~A_u002e_a: Quant, ~A: Kind(A_u002e_a), ~x_13: A -> B, -C_u002e_c: Quant, -C: Kind(C_u002e_c), x: B -> B -> C, x_14: A, x_15: A) -> C:
-  la_ra_2(A_u002e_a, A, B_u002e_b, B, B_u002e_b, B, C_u002e_c, C, A_u002e_a, A, x_13, x, x_13, x_14, x_15)
+  x(x_13(x_14), x_13(x_15))
 
 # Agda: Function.Base._-[_]-_
 # Base.agda, line 257

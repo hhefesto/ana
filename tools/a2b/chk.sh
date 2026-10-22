@@ -4,4 +4,4 @@ R=$(cd "$(dirname "$0")/../.." && pwd)
 . "$R/tools/a2b/env.sh"
 f=$(realpath "$1")
 cd "$R"
-flock "$A2B_LOCK" systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=2G run/gcroot-bend/bin/bend "$f" --check-only 2>&1 | head -${2:-16}
+flock "$A2B_LOCK" systemd-run --user --scope -q -p MemoryMax=16G -p MemorySwapMax=2G "$A2B_BEND" "$f" --check-only 2>&1 | head -${2:-16}

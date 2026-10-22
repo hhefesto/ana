@@ -905,6 +905,74 @@ def act.etu.try(t: A.Ag, +q: A.AgQ, +es: A.Ag, at: Bool, +env: ActEnv) -> A.Ag:
     case t:
       t
 
+# Combinators (2026-10-22) ------------------------------------------------------
+#
+# A combinator is a function whose case tree is one leaf (no split), outside
+# any mutual block (so not recursive), neither a projection, a copy, a with
+# function nor an extended lambda, not type-valued, whose leaf is headed
+# (under its lambdas) by a variable applied, or by an earlier combinator,
+# and made of variables, constructors and earlier combinators only:
+# Function.Base's `_-⟪_⟫-_` (`λ x y → f x y * g x y`), and through it
+# `_-⟪_∣`, `_-⟨_⟩-_` and `_on_`.  A combinator's own body is translated with
+# the saturated calls of combinators in it unfolded and beta-reduced, as
+# Agda reduces them: `_*_ on f` is then `λ x y → f x * f y`, which uses x and
+# y once, where through `_-⟪_⟫-_` (which uses them twice, so its A and B are
+# Data) its A had to be Data, and a record whose field type says
+# `_≈_ on f` over a Kind(a) carrier (Algebra.Structures' `IsGroup`,
+# `Congruent₁`) had no Data to pass.  Only combinators' bodies are
+# normalised: a lemma's body keeps its calls as Agda wrote them.  The
+# leaves sit in the unfoldings under "cmb:" KEY; while a combinator's body
+# is translated, the unfoldings carry "cmb!" (act.cmb.env), which
+# act.inline reads.  Which definitions are combinators: act.cmb.of, after
+# the type-valued openings (it needs act.ends.sort.u).
+
+def act.cmb.key(q: A.AgQ) -> String:
+  "cmb:" ++ act.key(q)
+
+# the environment a definition's body is translated in: marked "cmb!" when
+# the definition (by key) is a combinator
+def act.cmb.mark(on: Bool, unf: Map<&2, ActCopy>) -> Map<&2, ActCopy>:
+  match on:
+    case True{}:
+      Map.set(&2, ActCopy, unf, "cmb!", ActCopy{0n, A.AgNone{}})
+    case False{}:
+      unf
+
+def act.cmb.env(+key: String, env: ActEnv) -> ActEnv:
+  match env:
+    case ActEnv{mod, tab, al, +unf}:
+      ActEnv{mod, tab, al, act.cmb.mark(act.unf.has.got(Map.has(&2, ActCopy, unf, "cmb:" ++ key)), unf)}
+
+def act.cmb.when(on: Bool, c: ActCopy, +es: A.Ag) -> A.Ag:
+  match on:
+    case True{}:
+      act.unfold.of(c, es)
+    case False{}:
+      A.AgNone{}
+
+# q applied to es unfolded as a combinator, inside a combinator's body
+# (AgNone elsewhere, for no combinator, or a call not saturated)
+def act.cmb.at(+env: ActEnv, +q: A.AgQ, +es: A.Ag) -> A.Ag:
+  match env:
+    case ActEnv{mod, tab, al, +unf}:
+      act.cmb.when(act.unf.has.got(Map.has(&2, ActCopy, unf, "cmb!")), act.unf.got(Map.get(ActCopy, ActCopy{0n, A.AgNone{}}, unf, act.cmb.key(q))), es)
+
+def act.cmb.pick(u: A.Ag, d: A.Ag) -> A.Ag:
+  match u:
+    case A.AgNone{}:
+      d
+    case u:
+      u
+
+# a call act.inline resolved as no copy (AgDefX), unfolded when it is a
+# combinator's inside a combinator's body
+def act.cmb.try(t: A.Ag, +q: A.AgQ, +es: A.Ag, +env: ActEnv) -> A.Ag:
+  match t:
+    case A.AgDefX{q2, es2}:
+      act.cmb.pick(act.cmb.at(env, q, es), A.AgDefX{q2, es2})
+    case t:
+      t
+
 # Copattern reductions --------------------------------------------------------
 #
 # A field projected out of a definition made by copatterns reduces here to
@@ -982,7 +1050,7 @@ def act.inline.go(+fuel: Nat, a: A.Ag, +at: Bool, +env: ActEnv) -> A.Ag:
     case f A.AgBeta{g, A.AgENil{}}:
       act.inline.go(f, g, at, env)
     case 1n+p A.AgDef{+q, +es}:
-      act.inline.go(p, act.etu.try(act.expand(act.sym(env, q), q, es), q, es, at, env), False{}, env)
+      act.inline.go(p, act.cmb.try(act.etu.try(act.expand(act.sym(env, q), q, es), q, es, at, env), q, es, env), False{}, env)
     case 1n+p A.AgDefX{+q, es}:
       +es2 = act.inline.go(p, es, False{}, env)
       +r = act.cop.at(env, q, es2)
@@ -2909,7 +2977,7 @@ def act.fun.item(+nm: List<&2, U32>, +ms: List<&2, ActM>, +cls: A.Ag, body: T.Bt
       [T.BiDef{nm, act.live.ps(ps, act.or.lists(act.scr(cls, env), act.abs.pos(cls)), ms), ret, body, doc}]
 
 def act.fun.with(+nm: List<&2, U32>, +ms: List<&2, ActM>, +ar: Nat, p: A.AgProj, +cls: A.Ag, +key: String, +t: A.Ag, +env: ActEnv, doc: List<&2, List<&2, U32>>, +r: ActPs) -> List<&2, T.BItem>:
-  act.fun.item(nm, ms, cls, act.fun.body(p, cls, key, ar, t, act.ps.ents(r), env, act.copat.is(cls), r, ms), r, doc, env)
+  act.fun.item(nm, ms, cls, act.fun.body(p, cls, key, ar, t, act.ps.ents(r), act.cmb.env(key, env), act.copat.is(cls), r, ms), r, doc, env)
 
 # Sorts by place (with quantities on): Kind(q) is a requirement in Bend (every
 # value copyable at q), where Agda's Set ℓ is only a bound, so a definition
@@ -3375,6 +3443,77 @@ def act.unf.of(d: A.AgDecl, +unf: Map<&2, ActCopy>) -> Maybe<&2, ActCopy>:
   match d:
     case A.AgDecl{q, qn, md, f, l, l0, l1, k, m, fl, lang, +ty, dd}:
       act.unf.d(act.flag(A.AkCopy{}, fl), act.ends.sort.u(8n, ty, unf), dd)
+
+# Combinators (see act.cmb.key): which definitions are ones.
+
+# whether a leaf is headed by a variable applied (no projection) or by a
+# combinator's call, under its lambdas
+def act.cmb.head(t: A.Ag, +unf: Map<&2, ActCopy>) -> Bool:
+  match t:
+    case A.AgLam{i, x, d, b}:
+      act.cmb.head(b, unf)
+    case A.AgVar{i, x, es}:
+      act.es.plain(es)
+    case A.AgDef{+q, es}:
+      act.unf.has.got(Map.has(&2, ActCopy, unf, act.cmb.key(q)))
+    case _:
+      False{}
+
+# whether a leaf is made of variables, constructors and combinators' calls
+# only (under lambdas; a type, sort or level in it is dead): a lemma's
+# proof calls other definitions (projections, `start`), and its body is
+# not normalised.  yoneda20's first try, with the head alone, unfolded
+# Algebra.Consequences.Setoid's reasoning chains (headed by `begin_`) and
+# lost two lemmas there (2026-10-22).
+def act.cmb.pure(t: A.Ag, +unf: Map<&2, ActCopy>) -> Bool:
+  match t:
+    case A.AgLam{i, x, d, b}:
+      act.cmb.pure(b, unf)
+    case A.AgVar{i, x, es}:
+      act.cmb.pure(es, unf)
+    case A.AgDef{+q, es}:
+      Bool.and(act.unf.has.got(Map.has(&2, ActCopy, unf, act.cmb.key(q))), act.cmb.pure(es, unf))
+    case A.AgCon{q, o, es}:
+      act.cmb.pure(es, unf)
+    case A.AgEApp{i, a, rest}:
+      Bool.and(act.cmb.pure(a, unf), act.cmb.pure(rest, unf))
+    case A.AgENil{}:
+      True{}
+    case A.AgPi{i, x, a, d, b}:
+      True{}
+    case A.AgSort{s}:
+      True{}
+    case A.AgEl{s, x}:
+      True{}
+    case A.AgLevel{l}:
+      True{}
+    case A.AgLit{l}:
+      True{}
+    case A.AgDontCare{x}:
+      True{}
+    case _:
+      False{}
+
+def act.cmb.leaf(hd: Bool, +n: Nat, body: A.Ag) -> Maybe<&2, ActCopy>:
+  match hd:
+    case True{}:
+      Some{ActCopy{n, body}}
+    case False{}:
+      None{}
+
+# cp: a copy or no-compilation; srt: type-valued
+def act.cmb.d(cp: Bool, srt: Bool, d: A.AgD, +unf: Map<&2, ActCopy>) -> Maybe<&2, ActCopy>:
+  match cp srt d:
+    case False{} False{} A.AgDFun{A.AgPrNone{}, r, None{}, False{}, t, A.AgQEnd{}, cls, A.AgDone{+xs, +body}}:
+      act.cmb.leaf(Bool.and(act.cmb.head(body, unf), act.cmb.pure(body, unf)), act.vars.len(xs), body)
+    case _ _ _:
+      None{}
+
+# a definition's leaf, when it is a combinator (unf: the earlier ones)
+def act.cmb.of(d: A.AgDecl, +unf: Map<&2, ActCopy>) -> Maybe<&2, ActCopy>:
+  match d:
+    case A.AgDecl{q, qn, md, f, l, l0, l1, k, m, +fl, lang, +ty, dd}:
+      act.cmb.d(Bool.or(act.flag(A.AkCopy{}, fl), act.flag(A.AkNoCompilation{}, fl)), act.ends.sort.u(8n, ty, unf), dd, unf)
 
 # A definition's eta unfolding (see act.etu.key): its case tree walked with
 # the terms its leaf's variables stand for, over its n parameters; a split
