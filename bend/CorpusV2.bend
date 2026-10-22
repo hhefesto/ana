@@ -22,6 +22,8 @@ import ./CorpusV2/Unused.bend as Un
 import ./CorpusV2/Mutate.bend as Mu
 import ./CorpusV2/Decl.bend as Dc
 import ./CorpusV2/Port.bend as Pt
+import ./CorpusV2/Ratio.bend as Rt
+import ./CorpusV2/Intake.bend as It
 
 # bend-corpus-v2: corpus v2's tools (docs/CORPUS-V2.md), one subcommand each,
 # ported from the Python they replaced, each byte-identical to it on the
@@ -69,6 +71,15 @@ import ./CorpusV2/Port.bend as Pt
 #                                   them (PortOps.bend: own, alias, binder, seg), kept on a pass or the
 #                                   author's own failures, repair transcripts, an inbox for the rest:
 #                                   plan check refs seed keep out | all   (CorpusV2/Port.bend)
+#   repair-mix OUT WORD...          the user's ratio rule on a run's transcripts: every unit kept with at
+#                                   least RATIO first-time transcripts a repair (copies when short), at most
+#                                   CAP repairs a unit, held-out units out, in key order; in=, free=, held=,
+#                                   ratio=, cap=, share=, salt=, fill=, derive=, dry   (CorpusV2/Ratio.bend)
+#   files-jsonl PREFIX DIR OUT      a directory's .bend files as JSON lines, ids PREFIX/PATH
+#   raw-drop OUT IN.jsonl... drop=FILE...   JSON lines less the files a drop list or decl-new's
+#                                   held-out units name
+#   port-fix INBOX FIXED OUT        the port inbox's fixed files (FIXED/REPO/FIXED.tsv): their JSON
+#                                   lines and whole-file repair transcripts   (CorpusV2/Intake.bend)
 #
 # The run recipes (2026-10-15, the plan "all logic in Bend", Phase 4: the
 # tools/corpus-v2 scripts they replace in brackets):
@@ -280,6 +291,14 @@ def c2.args(xs: List<String>) -> IO(Unit):
       Pt.pt.main(more)
     case "decl-new" <> more:
       Dc.dcl.main(more)
+    case "repair-mix" <> more:
+      Rt.rto.main(more)
+    case "files-jsonl" <> more:
+      It.itk.main.files(more)
+    case "raw-drop" <> more:
+      It.itk.main.drop(more)
+    case "port-fix" <> more:
+      It.itk.main.fix(more)
     case +c <> more:
       c2.run(c2.code(c), c, more)
     case _:

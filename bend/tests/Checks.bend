@@ -543,6 +543,15 @@ def chk.tests() -> List<&2, ChkTest>:
    # held declaration, a seen one, a duplicate): OUT exactly the kept pairs, OUT.dropped, the stats; a
    # cap=PREFIX:N (every stride-th unit of a capped file, the first N), cap words, sel's spread
    ChkTest{"decl.bend", False{}, ROks{20n}},
+   # bend-corpus-v2 repair-mix (bend/CorpusV2/Ratio.bend, 2026-10-22, the user's rule: four times the
+   # program correct from the start for each repair) and run 5's intake (bend/CorpusV2/Intake.bend):
+   # units, tags and classes by the trainer's reader, a repair less its attempt is the direct
+   # transcript, the budget slot (sha256sum's); the tool on real transcripts (fixtures/ratio): every
+   # unit's first-time count >= ratio * its repairs and repairs <= cap, the least key kept, the drops
+   # by reason, held-out units gone, copies and derived transcripts, key order, a second run the same
+   # bytes, dry; cap=2, ratio=2, share=50, fill=repair; files-jsonl, raw-drop and port-fix (`bend` on
+   # the PATH, weights/code32k.bpe); compiled (the interpreter's stack does not hold the reader)
+   ChkTest{"ratio.bend", True{}, ROks{50n}},
    # bend-corpus-v2 port's renames (bend/CorpusV2/PortOps.bend, 2026-10-16): declarations and the
    # header as the loader reads them, import paths through a sibling link, fresh names; the own,
    # alias and binder renames on modules written here (strings and comments untouched, an importer
