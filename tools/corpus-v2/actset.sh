@@ -17,7 +17,7 @@ exit 2
 # evalset there. The prompts must hold no held-out unit: the run dies if any
 # unit of OUT/prompts.nul is in a LANG.holdout.nul or an E5 prompt set.
 set -euo pipefail
-cd /home/hhefesto/src/formalTransformer
+cd /home/hhefesto/src/ana
 out=${1:-run/v2/act}
 D=${DEPLOY:-nix run .#deploy --}
 log() { echo "[$(TZ=Etc/GMT+6 date '+%Y-%m-%d %H:%M:%S') UTC-6] actset: $*"; }

@@ -74,7 +74,7 @@ def sdr.old.copy(+src: String, +dst: String, rs: List<&2, SdrRep>) -> IO(Bool):
     sdr.old.put(m, dst, rs)
 
 def sdr.home() -> String:
-  "/home/hhefesto/src/formalTransformer"
+  "/home/hhefesto/src/ana"
 
 def sdr.reps.s2(+d: String) -> List<&2, SdrRep>:
   [SdrRep{"cd " ++ sdr.home() ++ "\n", "cd " ++ d ++ "\n"}, SdrRep{"WS=" ++ sdr.home() ++ " ", "WS=" ++ d ++ "/box/ws "},

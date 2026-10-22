@@ -20,7 +20,7 @@ exit 2
 # vault, so no file is trained twice. The other chain languages' filler is empty.
 #   run/v3/tx/{LANG,LANG-chain}, run/v3/T/shard-K-fp100m.corpus, run/v3/T/plan-fp100m-b16-windows.tsv
 set -euo pipefail
-cd /home/hhefesto/src/formalTransformer
+cd /home/hhefesto/src/ana
 log() { echo "[$(TZ=Etc/GMT+6 date '+%Y-%m-%d %H:%M:%S') UTC-6] windows3: $*"; }
 nv=run/v2/transcripts-nv tx=run/v3/tx ch=run/v3/chains every=${CHAIN_EVERY:-1}
 [ -s run/v3/R/mix.jsonl ] || { log "no run/v3/R/mix.jsonl: run raw3.sh first"; exit 1; }

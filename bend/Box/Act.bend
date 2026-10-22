@@ -37,7 +37,7 @@ import ../CorpusV2/AgentAct.bend as Aa
 #                                       OUT/trees.txt, nothing sent
 #   bend-ops act procs NPROC [CPU_MAX]  start's PROCS for a box's `nproc` and cgroup cpu.max
 #
-# The workspace is ACT_WS (/home/hhefesto/src/formalTransformer) on both sides,
+# The workspace is ACT_WS (/home/hhefesto/src/ana) on both sides,
 # and HOME on the box is ACT_HOME ($HOME here): the Agda library file, the
 # checkers' caches, elan's toolchains and the scripts name them.  The box's
 # nix lives in ACT_BOX_BIN (/usr/local/bin), first on the PATH of every
@@ -485,7 +485,7 @@ def acb.or(+name: String, +d: String) -> IO(String):
 def acb.cx() -> IO(AcbCx):
   do IO<AcbCx>:
     +h : String <- S.env("HOME", "")
-    +w : String <- acb.or("ACT_WS", "/home/hhefesto/src/formalTransformer")
+    +w : String <- acb.or("ACT_WS", "/home/hhefesto/src/ana")
     +hm : String <- acb.or("ACT_HOME", h)
     +b : String <- acb.or("ACT_BOX_BIN", "/usr/local/bin")
     +d : String <- acb.or("ACT_DEPLOY", "run/v2/gcroot-deploy-agent/bin/deploy")

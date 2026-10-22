@@ -38,7 +38,7 @@ set -euo pipefail
 cmd=${1:?usage: act-box.sh setup|ckpt|check|act|pull HOST PORT ...}
 host=${2:?usage: act-box.sh $cmd HOST PORT ...}
 port=${3:?usage: act-box.sh $cmd HOST PORT ...}
-cd /home/hhefesto/src/formalTransformer
+cd /home/hhefesto/src/ana
 ws=$PWD bh=$HOME
 log() { echo "[$(TZ=Etc/GMT+6 date '+%Y-%m-%d %H:%M:%S') UTC-6] act-box: $*"; }
 r() { ssh -p "$port" -o ServerAliveInterval=30 -o StrictHostKeyChecking=accept-new "$host" "$@"; }

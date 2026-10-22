@@ -28,7 +28,7 @@ exit 2
 #     bash -c "tools/corpus-v2/agent-act.sh CKPT DIR > DIR.log 2>&1"
 set -euo pipefail
 ckpt=${1:?usage: agent-act.sh CKPT DIR [K]}; dir=${2:?}; k=${3:-0}
-cd /home/hhefesto/src/formalTransformer
+cd /home/hhefesto/src/ana
 D=${DEPLOY_BIN:-run/v2/gcroot-deploy-agent/bin/deploy}
 EP=${EPISODE_BIN:-run/agent/gcroot-bend-episode/bin/bend-episode}
 log() { echo "[$(TZ=Etc/GMT+6 date '+%Y-%m-%d %H:%M:%S') UTC-6] agent-act: $*"; }

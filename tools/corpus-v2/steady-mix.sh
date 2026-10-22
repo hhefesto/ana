@@ -28,7 +28,7 @@ exit 2
 #     run/v2/raw/lean.jsonl:all run/v2/raw/agda.jsonl:all ...
 set -euo pipefail
 out=${1:?usage: steady-mix.sh OUT.jsonl SRC.jsonl:BYTES ...}; shift
-cd /home/hhefesto/src/formalTransformer
+cd /home/hhefesto/src/ana
 log() { echo "[$(TZ=Etc/GMT+6 date '+%Y-%m-%d %H:%M:%S') UTC-6] steady-mix: $*"; }
 tmp=$(dirname "$out")/steady-tmp; mkdir -p "$tmp"
 declare -a src take

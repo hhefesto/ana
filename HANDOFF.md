@@ -60,7 +60,7 @@ export PATH=$PWD/run/gcroot-bend-ops/bin:$PWD/run/v2/gcroot-bend-corpus-v2/bin:$
    bend-ops act pull root@IP PORT run/v4/act/r1
    ```
    `bend-ops act ensure root@IP PORT CKPT DIR [RESUME]` covers a new box or a restart. It retries setup and ckpt, then starts a round only when none is running.
-5. **Build S2** (bend/CorpusV2/S2.bend) when S1's log says `done at step BOUNDARY`. Work on the box (`ssh -p PORT root@IP`) in the act workspace, `cd /home/hhefesto/src/formalTransformer` (ACT_WS). If the act round still runs, stop it first and cut its files to whole records:
+5. **Build S2** (bend/CorpusV2/S2.bend) when S1's log says `done at step BOUNDARY`. Work on the box (`ssh -p PORT root@IP`) in the act workspace, `cd /home/hhefesto/src/ana` (ACT_WS). If the act round still runs, stop it first and cut its files to whole records:
    - `~/formalTransformer/bend-box act-stop`;
    - `~/formalTransformer/bend-box cut-frames run/v3/act/r1/episodes.eplog` (bend/Box/ActBox.bend);
    - agent-act's last two steps, `bend-episode accept` and `fixed`, whose lines are in bend/CorpusV2/AgentAct.bend's header.
@@ -304,7 +304,7 @@ The user (2026-10-19): "I want something that takes in agda code and spits out b
 - **On the box, in order** (from the repository root here; `root@IP PORT` the box):
   1. `BOX_ENV=bend/gpu/v4-box.env BEND=$PWD/run/gcroot-bend/bin/bend bend-ops stage box root@IP PORT` (the locked compiler: the `bend` on PATH here is not it), and beside it `bend-ops act ckpt root@IP PORT run/v3/run3/out/s2-step56725.checkpoint` (C1's TRAIN_INIT is that same file, outside out/, so the chain never prunes it).
   2. On the box: `cd formalTransformer && ./bend-box gate`, then `PLAN=run/v4/R4/plan-fp100m-b16-windows.tsv RUN=run/v4/R4 ./bend-box time`. bend-box's first real GPU run; fp.sh is the fallback.
-  3. C1: `TRAIN_STEPS=11044 NLR=1e-4 NWARM=300 ./bend-box again /home/hhefesto/src/formalTransformer/run/v3/run3/out/s2-step56725.checkpoint run/v4/R4/plan-fp100m-b16-windows.tsv run/v4/R4 fp100m c1` (TRAIN_STEPS, not STEPS: `again` does not set it, and the trainer counts it from the checkpoint's step). Its log c1.log must show lr warming toward 1e-4 from global step 56725.
+  3. C1: `TRAIN_STEPS=11044 NLR=1e-4 NWARM=300 ./bend-box again /home/hhefesto/src/ana/run/v3/run3/out/s2-step56725.checkpoint run/v4/R4/plan-fp100m-b16-windows.tsv run/v4/R4 fp100m c1` (TRAIN_STEPS, not STEPS: `again` does not set it, and the trainer counts it from the checkpoint's step). Its log c1.log must show lr warming toward 1e-4 from global step 56725.
   4. Here: `bend-ops act setup`, then `act check` (all five languages answer), then `act start ... run/v4/act/r1` (or let the hand-over's act ensure start it).
   5. STAGES run/v4/run4.stages is `c1 traind-next 5000`; fill host, port and instance into tools/runs/run4.cfg, then `bend-ops guard tools/runs/run4.cfg install` and `bend-ops guard tools/runs/run4.cfg` (chain with LOG0=c1.log, watch at $1, hand-over). Watch the credit and `journalctl --user -u ft-credit-watch-v4` by hand for the first hour.
   6. At B the hand-over stops the round, cuts and accepts it, builds C2 and CTL on the box and appends both lines; the chain runs c2, then ctl from out/c1-step67769.checkpoint, scores, pulls, verifies box ⊆ local and destroys.

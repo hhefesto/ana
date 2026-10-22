@@ -16,7 +16,7 @@ exit 2
 # (run/v3/Rsrc), so the smallest (Bend, 1,751 documents) sets the rounds and the
 # others lose at most a round's grain to the floor in PER = take / rounds.
 set -euo pipefail
-cd /home/hhefesto/src/formalTransformer
+cd /home/hhefesto/src/ana
 log() { echo "[$(TZ=Etc/GMT+6 date '+%Y-%m-%d %H:%M:%S') UTC-6] raw3: $*"; }
 src=run/v3/Rsrc R=run/v3/R; mkdir -p "$src" "$R"
 cat run/v2/raw/nix.jsonl run/v2/raw-stack/nix.jsonl > "$src/nix.jsonl"

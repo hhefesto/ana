@@ -189,7 +189,7 @@ def hov.ctl.every(+c: HovCx) -> String:
 
 # the act workspace on the box and here, as bend/Box/Act.bend's environment names it
 def hov.ac.of(+kvs: List<&2, Ev.EvKv>, +home: String) -> Ac.AcbCx:
-  Ac.AcbCx{Rc.rcf.get(kvs, "act-ws", "/home/hhefesto/src/formalTransformer"), Rc.rcf.get(kvs, "act-home", home),
+  Ac.AcbCx{Rc.rcf.get(kvs, "act-ws", "/home/hhefesto/src/ana"), Rc.rcf.get(kvs, "act-home", home),
     Rc.rcf.get(kvs, "act-box-bin", "/usr/local/bin"), Rc.rcf.get(kvs, "act-deploy", "run/v2/gcroot-deploy-agent/bin/deploy"),
     Rc.rcf.get(kvs, "act-episode", "run/agent/gcroot-bend-episode/bin/bend-episode")}
 

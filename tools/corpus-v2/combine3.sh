@@ -8,7 +8,7 @@ exit 2
 # S1's boundary: the segment start nearest FRACTION (0.65) of the plan's steps, in
 # run/v3/S1/BOUNDARY (S1 runs with STEPS=BOUNDARY; tools/corpus-v2/s2.sh builds S2 from it).
 set -euo pipefail
-cd /home/hhefesto/src/formalTransformer
+cd /home/hhefesto/src/ana
 log() { echo "[$(TZ=Etc/GMT+6 date '+%Y-%m-%d %H:%M:%S') UTC-6] combine3: $*"; }
 tp=run/v3/T/plan-fp100m-b16-windows.tsv
 [ -s "$tp" ] || { log "no $tp"; exit 1; }

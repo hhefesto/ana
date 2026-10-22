@@ -877,7 +877,7 @@ def sst.s.feed(+t: SstT, +base: String) -> IO(List<&2, Sc.ScnRes>):
 # The act round (f) -----------------------------------------------------------------------------
 #
 # act-box.sh names the workspace by its absolute path (it cd's to
-# /home/hhefesto/src/formalTransformer, here and on the box), and bend-ops act by ACT_WS (the same
+# /home/hhefesto/src/ana, here and on the box), and bend-ops act by ACT_WS (the same
 # path by default) on both sides.  In the sandbox the workspace here is D/repo (ACT_WS for the new
 # side; the old scripts' copies cd to their own repository, `cd "$(dirname "$0")/../.."`, in
 # place of that path, the one line changed), and the box's path map (box/.sim-map) puts D/repo,
@@ -892,7 +892,7 @@ def sst.s.feed(+t: SstT, +base: String) -> IO(List<&2, Sc.ScnRes>):
 # checker caches and Mathlib are a few small files each, in the shapes setup selects.
 
 def sst.real.repo() -> String:
-  "/home/hhefesto/src/formalTransformer"
+  "/home/hhefesto/src/ana"
 
 def sst.cd.own() -> String:
   "cd \"$(dirname \"$0\")/../..\""

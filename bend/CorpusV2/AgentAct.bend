@@ -33,7 +33,7 @@ import ../Box/Local.bend as Lc
 # the script's were.
 #
 # What differs from agent-act.sh, on purpose: the script cd'd to
-# /home/hhefesto/src/formalTransformer; this runs where it is started, as
+# /home/hhefesto/src/ana; this runs where it is started, as
 # every bend-corpus-v2 subcommand does (the repository root; `bend-ops act
 # start` and `check` start it in the box's workspace).  Arguments past K are
 # refused (the script ignored them).  Every name starts with `aac.`; the
