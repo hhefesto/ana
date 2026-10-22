@@ -563,10 +563,33 @@ def gold.laws() -> IO(Unit):
     g3 : D.A2bG <- gold.fb(al, ral, g2)
     return Unit{}
 
+# A2bFix as its golden, and its record with eta (2026-10-22: Bend, as
+# upstream's, has no record eta, so a match on a variable stays stuck):
+# Both, type-valued, is written with Pair's projections, not a match, and
+# applied's header has apply's call unfolded (`Q (apply x)` is
+# `Q (fst x (snd x))`, what its body's type says)
+def gold.fix.of(+al: Map<&2, List<&2, U32>>, +ral: Map<&2, List<&2, U32>>, +ds: List<&2, A.AgDecl>, +want: List<&2, U32>, tr: D.A2bTr) -> IO(D.A2bG):
+  match tr:
+    case D.A2bTr{its, g}:
+      +text = D.a2b.raw.text(S.b("A2bFix"), al, ral, List.length(&2, A.AgDecl, ds), its)
+      do IO<D.A2bG>:
+        IO.print(verdict("translate A2bFix as its golden", S.eq(text, want)))
+        IO.print(verdict("a type-valued function's match on an eta record is its projections", S.infix(text, S.b("-x_6: Pair_<A, B>) -> Type:\n  Pair_<x(Pair_.fst(A, B, x_6)), x_5(Pair_.snd(A, B, x_6))>\n"))))
+        IO.print(verdict("a header unfolds a call of a function that matches an eta record", S.infix(text, S.b(") -> Q(Pair_.fst(A -> B, A, x)(Pair_.snd(A -> B, A, x))):\n"))))
+        return g
+
+def gold.fix(+al: Map<&2, List<&2, U32>>, +ral: Map<&2, List<&2, U32>>, g: D.A2bG) -> IO(D.A2bG):
+  do IO<D.A2bG>:
+    +ds : List<&2, A.AgDecl> <- D.a2b.decls(S.b("fixtures/agda2bend/A2bFix.sexp"))
+    +want : List<&2, U32> <- S.read("fixtures/agda2bend/golden/A2bFix.bend")
+    r : D.A2bG <- gold.fix.of(al, ral, ds, want, D.a2b.mod.items(S.b("A2bFix"), al, ds, g))
+    return r
+
 # fixtures/agda2bend/src/A2bFix.agda (its export A2bFix.sexp, after
 # Agda.Primitive and Agda.Builtin.Bool): an indexed family (equation fields,
-# rewrites at the dot patterns), an absurd clause through a one-field record
-# and a type parameter's value used twice; the gate kept all 10 items
+# rewrites at the dot patterns), an absurd clause through a one-field record,
+# a type parameter's value used twice and a record with eta (Pair, matched
+# by Both, apply and applied); the gate keeps all 16 items
 # (golden/A2bFix.checked.bend).
 def gold.fix.laws() -> IO(Unit):
   +order : List<&2, List<&2, U32>> = [S.b("Agda.Primitive"), S.b("Agda.Builtin.Bool"), S.b("A2bFix")]
@@ -577,8 +600,7 @@ def gold.fix.laws() -> IO(Unit):
     g1 : D.A2bG <- gold.next("Agda.Primitive", al, ral, r1)
     r2 : D.A2bG & Bool <- gold.one("Agda.Builtin.Bool", al, ral, g1)
     g2 : D.A2bG <- gold.next("Agda.Builtin.Bool", al, ral, r2)
-    r3 : D.A2bG & Bool <- gold.one("A2bFix", al, ral, g2)
-    g3 : D.A2bG <- gold.next("A2bFix", al, ral, r3)
+    g3 : D.A2bG <- gold.fix(al, ral, g2)
     return Unit{}
 
 def main() -> IO(Unit):

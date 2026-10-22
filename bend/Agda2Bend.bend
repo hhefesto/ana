@@ -480,7 +480,7 @@ def a2b.items(ds: List<&2, A.AgDecl>, +env: C.ActEnv, +dm: Map<&2, A.AgDecl>) ->
     case Nil{}:
       Nil{}
     case d <> t:
-      List.append(&2, T.BItem, C.act.items(d, env, dm), a2b.items(t, env, dm))
+      List.append(&2, T.BItem, C.act.items(C.act.prj.decl(d, env), env, dm), a2b.items(t, env, dm))
 
 def a2b.fold.items(its: List<&2, T.BItem>, todo: Bool, acc: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
   match its todo:

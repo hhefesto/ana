@@ -897,11 +897,26 @@ def act.etu.pick(+u: A.Ag, d: A.Ag, part: Bool, +env: ActEnv) -> A.Ag:
 # constructor's argument, under its lambdas (2026-10-21: only there, as
 # Product's fields are; `map₁ f = map f id` unfolded used its pair twice
 # and needed Data, where the call checks)
-def act.etu.try(t: A.Ag, +q: A.AgQ, +es: A.Ag, at: Bool, +env: ActEnv) -> A.Ag:
+def act.etu.none(t: A.Ag) -> Bool:
+  match t:
+    case A.AgNone{}:
+      True{}
+    case _:
+      False{}
+
+# in a header (ty), any call that has an unfolding takes it
+def act.etu.hpick(ty: Bool, +u: A.Ag, d: A.Ag, part: Bool, +env: ActEnv) -> A.Ag:
+  match ty:
+    case True{}:
+      Bool.pick(A.Ag, act.etu.none(u), d, u)
+    case False{}:
+      act.etu.pick(u, d, part, env)
+
+def act.etu.try(t: A.Ag, +q: A.AgQ, +es: A.Ag, at: Bool, ty: Bool, +env: ActEnv) -> A.Ag:
   match t:
     case A.AgDefX{q2, es2}:
       +c = act.etu.get(env, q)
-      act.etu.pick(act.etu.at(c, es), A.AgDefX{q2, es2}, Bool.and(at, Nat.is_lt(act.es.apps(es), act.etu.n(c))), env)
+      act.etu.hpick(ty, act.etu.at(c, es), A.AgDefX{q2, es2}, Bool.and(at, Nat.is_lt(act.es.apps(es), act.etu.n(c))), env)
     case t:
       t
 
@@ -1043,39 +1058,47 @@ def act.cop.at(+env: ActEnv, +q: A.AgQ, +es: A.Ag) -> A.Ag:
 # reduction spends one unit of fuel (a resolved definition too), and the
 # fuel bounds the nesting: what is left when it runs out stays as it is
 # and fails at the translation as an unknown copy.
-def act.inline.go(+fuel: Nat, a: A.Ag, +at: Bool, +env: ActEnv) -> A.Ag:
+def act.inline.go(+fuel: Nat, a: A.Ag, +at: Bool, +ty: Bool, +env: ActEnv) -> A.Ag:
   match fuel a:
     case 1n+p A.AgBeta{A.AgLam{i, x, d, b}, A.AgEApp{i2, v, rest}}:
-      act.inline.go(p, asb.push(act.beta1(d, b, v), rest), False{}, env)
+      act.inline.go(p, asb.push(act.beta1(d, b, v), rest), False{}, ty, env)
     case f A.AgBeta{g, A.AgENil{}}:
-      act.inline.go(f, g, at, env)
+      act.inline.go(f, g, at, ty, env)
     case 1n+p A.AgDef{+q, +es}:
-      act.inline.go(p, act.cmb.try(act.etu.try(act.expand(act.sym(env, q), q, es), q, es, at, env), q, es, env), False{}, env)
+      act.inline.go(p, act.cmb.try(act.etu.try(act.expand(act.sym(env, q), q, es), q, es, at, ty, env), q, es, env), False{}, ty, env)
     case 1n+p A.AgDefX{+q, es}:
-      +es2 = act.inline.go(p, es, False{}, env)
+      +es2 = act.inline.go(p, es, False{}, ty, env)
       +r = act.cop.at(env, q, es2)
-      Bool.pick(A.Ag, act.ag.none(r), A.AgDef{q, es2}, act.inline.go(p, r, False{}, env))
+      Bool.pick(A.Ag, act.ag.none(r), A.AgDef{q, es2}, act.inline.go(p, r, False{}, ty, env))
     case f A.AgVar{i, x, es}:
-      A.AgVar{i, x, act.inline.go(f, es, False{}, env)}
+      A.AgVar{i, x, act.inline.go(f, es, False{}, ty, env)}
     case f A.AgCon{q, o, es}:
-      A.AgCon{q, o, act.inline.go(f, es, True{}, env)}
+      A.AgCon{q, o, act.inline.go(f, es, True{}, ty, env)}
     case f A.AgLam{i, x, d, b}:
-      A.AgLam{i, x, d, act.inline.go(f, b, at, env)}
+      A.AgLam{i, x, d, act.inline.go(f, b, at, ty, env)}
     case f A.AgPi{i, x, a2, d, b}:
-      A.AgPi{i, x, act.inline.go(f, a2, False{}, env), d, act.inline.go(f, b, False{}, env)}
+      A.AgPi{i, x, act.inline.go(f, a2, False{}, ty, env), d, act.inline.go(f, b, False{}, ty, env)}
     case f A.AgEl{s, t}:
-      A.AgEl{s, act.inline.go(f, t, False{}, env)}
+      A.AgEl{s, act.inline.go(f, t, False{}, ty, env)}
     case f A.AgDontCare{t}:
-      A.AgDontCare{act.inline.go(f, t, False{}, env)}
+      A.AgDontCare{act.inline.go(f, t, False{}, ty, env)}
     case f A.AgEApp{i, t, rest}:
-      A.AgEApp{i, act.inline.go(f, t, at, env), act.inline.go(f, rest, at, env)}
+      A.AgEApp{i, act.inline.go(f, t, at, ty, env), act.inline.go(f, rest, at, ty, env)}
     case f A.AgEProj{q, rest}:
-      A.AgEProj{q, act.inline.go(f, rest, False{}, env)}
+      A.AgEProj{q, act.inline.go(f, rest, False{}, ty, env)}
     case f a2:
       a2
 
 def act.inline(+fuel: Nat, a: A.Ag, +env: ActEnv) -> A.Ag:
-  act.inline.go(fuel, a, False{}, env)
+  act.inline.go(fuel, a, False{}, False{}, env)
+
+# A header's type inlined: every place in it is dead, so a call of a
+# function with an eta unfolding is unfolded there (2026-10-22, upstream
+# Bend has no record eta: la_cdot_ra's `(Q ∘ uncurry _|>_) x` is stuck on
+# uncurry's match of x, where its body's type has `Q (proj₂ x (proj₁ x))`;
+# Product's `map f g X` likewise).
+def act.inline.hdr(+fuel: Nat, a: A.Ag, +env: ActEnv) -> A.Ag:
+  act.inline.go(fuel, a, False{}, True{}, env)
 
 # Applications ----------------------------------------------------------------
 
@@ -3152,7 +3175,7 @@ def act.tylevel.env(p: A.AgProj, +ty: A.Ag, +env: ActEnv) -> Bool:
 def act.item.fun(s: ActSym, d: A.AgD, +key: String, +ty: A.Ag, +env: ActEnv, doc: List<&2, List<&2, U32>>) -> List<&2, T.BItem>:
   match s d:
     case ActSym{m, +n, k, +ms, +ar, b, fs, c, cp} A.AgDFun{+p, r, w, e, te, mu, +cls, tree}:
-      +t = act.proj.sorts(act.quant.on(), p, act.inline(100000n, ty, env), env)
+      +t = act.proj.sorts(act.quant.on(), p, act.inline.hdr(100000n, ty, env), env)
       act.unkind.when(act.quant.on(), p, act.tylevel.env(p, ty, env), act.fun.with(n, ms, ar, p, cls, key, t, env, doc, act.params(64n, ar, t, ms, Nil{}, env)))
     case _ _:
       Nil{}
@@ -3690,6 +3713,84 @@ def act.etu.of(d: A.AgDecl, +unf: Map<&2, ActCopy>, +tab: Map<&2, ActSym>) -> Ma
       act.etu.go(Bool.or(act.flag(A.AkCopy{}, fl), act.ends.sort(ty)), act.cls.arity(cls), ty, tree, unf, tab)
     case _:
       None{}
+
+# Projection form (2026-10-22) -------------------------------------------------
+#
+# Upstream Bend has no record eta: a match on a variable stays stuck.
+# Relation.Unary's `(P ⟨×⟩ Q) (x , y) = P x × Q y`, written as a match on
+# its pair, left `(P ⟨×⟩ Q) x` stuck where x is a variable (`_⟨·⟩_`'s
+# argument: "expected: a datatype", and with it 72 of yoneda19's 121
+# files).  Agda reads a record pattern as the record's projections; a
+# type-valued function whose case tree splits only records with eta before
+# its one leaf is written so: one clause of variables, its leaf with each
+# split field the projection of its parameter (`P (proj₁ x) × Q (proj₂ x)`),
+# its parameters erased as a type-valued definition's are.  A function with
+# a value keeps its match: its projections would use the record twice, and
+# its type would need eta to meet the body's (uncurry's `C p` against
+# `C (proj₁ p , proj₂ p)`); headers unfold its calls instead
+# (act.inline.hdr).
+
+# each Pi's domain in the scope of all n parameters (as act.etu.doms), the
+# type-valued definitions the type ends in opened (`Pred (A × B) ℓ` is
+# `A × B → Set ℓ`)
+def act.prj.doms(fuel: Nat, t: A.Ag, +j: Nat, +n: Nat, +deps: List<&2, Nat>, +unf: Map<&2, ActCopy>) -> List<&2, A.Ag>:
+  match fuel t:
+    case f A.AgEl{s, x}:
+      act.prj.doms(f, x, j, n, deps, unf)
+    case f A.AgStored{x}:
+      act.prj.doms(f, x, j, n, deps, unf)
+    case f A.AgPi{i, x, a, +d, b}:
+      asb.subst(a, 0n, act.etu.vs(deps, n), List.length(&2, Nat, deps)) <> act.prj.doms(f, b, 1n+j, n, act.etu.dep(d, j, deps), unf)
+    case 1n+f A.AgDef{+q, +es}:
+      act.prj.doms(f, act.unfold.of(act.unf.got(Map.get(ActCopy, ActCopy{0n, A.AgNone{}}, unf, act.key(q))), es), j, n, deps, unf)
+    case _ _:
+      Nil{}
+
+# the leaf with the split fields as projections (None: not only eta splits)
+def act.prj.of(+n: Nat, +ty: A.Ag, tree: A.Ag, +env: ActEnv) -> Maybe<&2, ActCopy>:
+  match env:
+    case ActEnv{mod, tab, al, +unf}:
+      act.etu.tree(64n, tree, act.etu.init(n), act.prj.doms(8n, ty, 0n, n, Nil{}, unf), n, False{}, unf, tab)
+
+# the clause's telescope and patterns: a variable for each parameter
+def act.prj.tel(ps: A.Ag) -> A.Ag:
+  match ps:
+    case A.AgPArg{i, x, p, rest}:
+      A.AgTel{x, i, A.AgNone{}, act.prj.tel(rest)}
+    case _:
+      A.AgTEnd{}
+
+def act.prj.ps(ps: A.Ag, +k: Nat, +n: Nat) -> A.Ag:
+  match ps:
+    case A.AgPArg{i, +x, p, rest}:
+      A.AgPArg{i, x, A.AgPVar{x, Nat.sub(Nat.sub(n, 1n), k), A.AkWord{}}, act.prj.ps(rest, 1n+k, n)}
+    case _:
+      A.AgPEnd{}
+
+def act.prj.cl(c: Maybe<&2, ActCopy>, cls: A.Ag) -> A.Ag:
+  match c cls:
+    case Some{ActCopy{n, body}} A.AgCl{tel, +ps, b, ty, ca, rest}:
+      A.AgCl{act.prj.tel(ps), act.prj.ps(ps, 0n, act.pats.len(ps)), body, A.AgNone{}, False{}, A.AgClEnd{}}
+    case _ cls:
+      cls
+
+# the clauses a function is written from: a type-valued one's (tyv)
+# projection form when it has one, else its own
+def act.prj.cls(p: A.AgProj, tyv: Bool, +cls: A.Ag, tree: A.Ag, +ty: A.Ag, +env: ActEnv) -> A.Ag:
+  match p tyv:
+    case A.AgPrNone{} True{}:
+      act.prj.cl(act.prj.of(act.cls.arity(cls), ty, tree, env), cls)
+    case _ _:
+      cls
+
+# a declaration as its items are written from it: a function's clauses in
+# projection form when it has one (the symbol table keeps the original)
+def act.prj.decl(d: A.AgDecl, +env: ActEnv) -> A.AgDecl:
+  match d:
+    case A.AgDecl{q, qn, md, f, l, l0, l1, k, m, fl, lang, +ty, A.AgDFun{+p, r, w, e, t, mu, +cls, +tree}}:
+      A.AgDecl{q, qn, md, f, l, l0, l1, k, m, fl, lang, ty, A.AgDFun{p, r, w, e, t, mu, act.prj.cls(p, act.tylevel.env(p, ty, env), cls, tree, ty, env), tree}}
+    case d:
+      d
 
 # a copattern definition's field clauses into the unfoldings (see
 # act.cop.key): a tree that splits its result by copatterns first, each

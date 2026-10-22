@@ -1,7 +1,8 @@
 # Shared settings of the tools/a2b scripts (sourced, not run; R is the repo).
-# A2B_BEND: the bend that checks: the flake's (hhefesto/bend2, with record eta), GC-rooted
-#           at run/a2b/gcroot-bend (`nix build .#bend -o run/a2b/gcroot-bend`; made here
-#           when missing).  run/gcroot-bend is older (no eta) and fails gated modules.
+# A2B_BEND: the bend that checks: the flake's (hhefesto/bend2 ft-kernels; its bend.ts is
+#           upstream's, with no record eta, since 2026-10-22), GC-rooted at
+#           run/a2b/gcroot-bend (`nix build .#bend -o run/a2b/gcroot-bend`; made here when
+#           missing).
 # A2B_LOCK: the lock that serialises heavy Bend compiles between agents.
 # A2B_TMP:  scratch (logs, stub projects) outside the repo.
 # A2B_CC:   the C compiler for the dev builds.

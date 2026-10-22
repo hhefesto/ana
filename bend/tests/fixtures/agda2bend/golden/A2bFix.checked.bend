@@ -1,5 +1,5 @@
 # Bend 2 translation of the Agda module A2bFix
-# by agda2bend (bend/Agda2Bend.bend) from agda-export's elaboration; 15 Agda definitions
+# by agda2bend (bend/Agda2Bend.bend) from agda-export's elaboration; 22 Agda definitions
 # 
 import Base
 
@@ -72,3 +72,41 @@ def of(-A: Type, b: Bool, x: Ite(b, A, A -> Bot())) -> Refl<A, b>:
 # A2bFix.agda, line 40
 def twice(-A: Data, x: A -> A -> A, +x_3: A) -> A:
   x(x_3, x_3)
+
+# Agda: A2bFix.Pair
+# A2bFix.agda, line 46
+type Pair_<-A: Type, -B: Type> is Type:
+  comma{fst: A, snd: B}
+
+# Agda: A2bFix.Pair.fst
+# A2bFix.agda, line 49
+def Pair_.fst(-A: Type, -B: Type, r: Pair_<A, B>) -> A:
+  match r:
+    case comma{f_fst, f_snd}:
+      f_fst
+
+# Agda: A2bFix.Pair.snd
+# A2bFix.agda, line 50
+def Pair_.snd(-A: Type, -B: Type, r: Pair_<A, B>) -> B:
+  match r:
+    case comma{f_fst, f_snd}:
+      f_snd
+
+# Agda: A2bFix.Both
+# A2bFix.agda, line 53
+def Both(-A: Type, -B: Type, -x: A -> Type, -x_5: B -> Type, -x_6: Pair_<A, B>) -> Type:
+  Pair_<x(Pair_.fst(A, B, x_6)), x_5(Pair_.snd(A, B, x_6))>
+
+# Agda: A2bFix.apply
+# A2bFix.agda, line 56
+def apply(-A: Type, -B: Type, x: Pair_<(A -> B), A>) -> B:
+  match x:
+    case comma{f, a}:
+      f(a)
+
+# Agda: A2bFix.applied
+# A2bFix.agda, line 59
+def applied(-A: Type, -B: Type, -P: A -> Type, -Q: B -> Type, x: Pair_<(A -> B), A>, x_10: Both(A -> B, A, f => @a:A -> P(a) -> Q(f(a)), P, x)) -> Q(Pair_.fst(A -> B, A, x)(Pair_.snd(A -> B, A, x))):
+  match x_10:
+    case comma{k, p}:
+      k(Pair_.snd(A -> B, A, x), p)
