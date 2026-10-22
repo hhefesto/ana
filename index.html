@@ -59,6 +59,16 @@
   figcaption { color: var(--dim); font-size: 14.5px; margin-top: 8px; }
   @media (max-width: 760px) { .two, .stats { grid-template-columns: 1fr 1fr; } h1 { font-size: 48px; } .tag { font-size: 20px; } }
   @media (max-width: 480px) { .two, .stats { grid-template-columns: 1fr; } }
+  .wallets { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 14px 0 6px; }
+  .wallet { display: flex; gap: 14px; align-items: flex-start; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; min-width: 0; }
+  .wallet img { flex: none; background: #fff; border-radius: 6px; }
+  .wallet > div { min-width: 0; }
+  .wallet h3 { margin: 0 0 6px; font-size: 17px; }
+  .wallet h3 .c { font-weight: 400; font-size: 14px; }
+  .wallet code.addr { display: block; word-break: break-all; font-size: 12.5px; line-height: 1.45; padding: 4px 6px; background: var(--bg); }
+  .wbtn { display: flex; gap: 12px; align-items: center; margin-top: 8px; font-size: 14px; }
+  .wbtn button { font: 600 13px var(--mono); color: var(--accent); background: none; border: 1px solid var(--accent); border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+  @media (max-width: 760px) { .wallets { grid-template-columns: 1fr; } }
   footer { margin-top: 64px; color: var(--dim); font-size: 14px; border-top: 1px solid var(--line); padding-top: 14px; }
 </style>
 </head>
@@ -95,10 +105,11 @@ Haskell, Agda, Lean, Bend and Nix on a few rented consumer GPUs.</p>
   <a href="#different">What's different</a>
   <a href="#bend">Why Bend</a>
   <a href="#try">Try it</a>
+  <a href="#donate">Donate</a>
 </div>
 
 <nav>
-  <a href="#different">different</a><a href="#promise">promise</a><a href="#bend">Bend</a><a href="#elliott">Elliott</a><a href="#bradley">Bradley</a><a href="#model">model</a><a href="#trainer">trainer &amp; cost</a><a href="#data">data</a><a href="#translate">more Bend</a><a href="#results">results</a><a href="#open">open</a><a href="#try">try it</a>
+  <a href="#different">different</a><a href="#promise">promise</a><a href="#bend">Bend</a><a href="#elliott">Elliott</a><a href="#bradley">Bradley</a><a href="#model">model</a><a href="#trainer">trainer &amp; cost</a><a href="#data">data</a><a href="#translate">more Bend</a><a href="#results">results</a><a href="#open">open</a><a href="#try">try it</a><a href="#donate">donate</a>
 </nav>
 
 <h2 id="different">What makes ana different</h2>
@@ -408,6 +419,56 @@ nix run .#ana -- --checkpoint PATH "quicksort"   <span class="c"># generate from
   <li>The weights on Hugging Face, and instruction tuning, so it can be talked to.</li>
 </ul>
 
+<h2 id="donate">Support ana</h2>
+<p>ana is one person's project: no lab, no grant, no sponsor. Every GPU hour is rented and paid out of pocket.
+Since July 2026, every run, the Haskell era and the false starts included, has cost about <b>$150</b> on vast.ai,
+and the best model so far took $24 of it. Donations go straight into compute: about $25 pays for another run like
+run 3, on more and better Bend data.</p>
+<div class="wallets">
+  <div class="wallet">
+    <img src="donate/bitcoin.svg" alt="Bitcoin address QR code" width="132" height="132">
+    <div>
+      <h3>Bitcoin <span class="c">BTC</span></h3>
+      <code class="addr">bc1qhf0ym26ag4l2nusgn74p8kg3y9dtgp5q8c6x7s</code>
+      <div class="wbtn"><button type="button" data-addr="bc1qhf0ym26ag4l2nusgn74p8kg3y9dtgp5q8c6x7s">copy</button><a href="bitcoin:bc1qhf0ym26ag4l2nusgn74p8kg3y9dtgp5q8c6x7s">open in wallet</a></div>
+    </div>
+  </div>
+  <div class="wallet">
+    <img src="donate/ethereum.svg" alt="Ethereum address QR code" width="132" height="132">
+    <div>
+      <h3>Ethereum <span class="c">ETH, USDC (ERC-20)</span></h3>
+      <code class="addr">0xbd5fbdcc07cfce2a543013b14e2f873ab5a8bd4c</code>
+      <div class="wbtn"><button type="button" data-addr="0xbd5fbdcc07cfce2a543013b14e2f873ab5a8bd4c">copy</button><a href="ethereum:0xbd5fbdcc07cfce2a543013b14e2f873ab5a8bd4c">open in wallet</a></div>
+    </div>
+  </div>
+  <div class="wallet">
+    <img src="donate/cardano.svg" alt="Cardano address QR code" width="132" height="132">
+    <div>
+      <h3>Cardano <span class="c">ADA, USDC</span></h3>
+      <code class="addr">addr1qyxkhv78u0j2fu4s5yzkmzgnn9pgm45el0dcxep0250enj289f3v39r6e7g92d5cng6jvfkstkg77u3s9wgswq38qr4quhycct</code>
+      <div class="wbtn"><button type="button" data-addr="addr1qyxkhv78u0j2fu4s5yzkmzgnn9pgm45el0dcxep0250enj289f3v39r6e7g92d5cng6jvfkstkg77u3s9wgswq38qr4quhycct">copy</button></div>
+    </div>
+  </div>
+  <div class="wallet">
+    <img src="donate/solana.svg" alt="Solana address QR code" width="132" height="132">
+    <div>
+      <h3>Solana <span class="c">SOL, USDC (SPL)</span></h3>
+      <code class="addr">jYUi7o3HrBz4AzxiPC8uSsLb7d3FRrjhr16BnRiLG4x</code>
+      <div class="wbtn"><button type="button" data-addr="jYUi7o3HrBz4AzxiPC8uSsLb7d3FRrjhr16BnRiLG4x">copy</button><a href="solana:jYUi7o3HrBz4AzxiPC8uSsLb7d3FRrjhr16BnRiLG4x">open in wallet</a></div>
+    </div>
+  </div>
+  <div class="wallet">
+    <img src="donate/midnight.svg" alt="Midnight address QR code" width="132" height="132">
+    <div>
+      <h3>Midnight <span class="c">shielded</span></h3>
+      <code class="addr">mn_shield-addr1q4575djmzxneljkvzh3acwj6dh6usk6t8kr8vev9efc0lm9h6g6srraf2y328v4wmygh5mzdwvg90lt6wh3kasr8elq52jkpjnadvnsql89fs</code>
+      <div class="wbtn"><button type="button" data-addr="mn_shield-addr1q4575djmzxneljkvzh3acwj6dh6usk6t8kr8vev9efc0lm9h6g6srraf2y328v4wmygh5mzdwvg90lt6wh3kasr8elq52jkpjnadvnsql89fs">copy</button></div>
+    </div>
+  </div>
+</div>
+<p class="c">Send each chain's own coins to its address: USDC on Ethereum as ERC-20, on Solana as SPL, on Cardano
+as native USDC. The QR codes encode the addresses exactly as written. Thank you.</p>
+
 <h2>Thanks</h2>
 <p><a href="https://x.com/VictorTaelin">Victor Taelin</a> and <a href="https://x.com/higherordercomp">HigherOrderCO</a> for
 Bend; <a href="http://conal.net">Conal Elliott</a> for denotational design and the essence of AD; <a href="https://www.math3ma.com">Tai-Danae
@@ -415,5 +476,15 @@ Bradley</a>, John Terilla, Yiannis Vlassopoulos and Juan Pablo Vigneaux for the 
 
 <footer>ana · by <a href="https://github.com/hhefesto">hhefesto</a> · MIT · <a href="https://github.com/hhefesto/ana">source</a></footer>
 </main>
+<script>
+document.querySelectorAll('.wbtn button').forEach(function (b) {
+  b.addEventListener('click', function () {
+    navigator.clipboard.writeText(b.dataset.addr).then(function () {
+      b.textContent = 'copied';
+      setTimeout(function () { b.textContent = 'copy'; }, 1500);
+    });
+  });
+});
+</script>
 </body>
 </html>
