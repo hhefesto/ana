@@ -25,7 +25,7 @@ import ../Agent/Episode.bend as E
 #   agent-eval CKPT DIR FORMAT [K]
 #       Each prompt of EVALSET (run/v2/evalset/prompts.nul; FORMAT 1 asks
 #       repairs with prompt1, as `gen`) as an episode: `ana --agent`
-#       (run/gcroot-bend-generate-agent's bend-generate, --threads THREADS
+#       (run/gcroot-bend-generate-agent's bend-generate, +RTS --threads THREADS -RTS
 #       (5)) with CKPT, TEMPERATURE=0, TOKENS (160) a stretch, AGENT_CALLS (4)
 #       and agent-tool on the prompt's task (run as AGENT_DEPLOY, default
 #       `nix run .#deploy --`, then `corpus-v2 agent-tool TASK`: a built
@@ -174,7 +174,7 @@ def ea.prep.one(+i: Nat, +fmt1: Bool, +dir: String, +recs: List<&2, Ev.EvKv>, +r
         return C.CbJob{i, List.append(&2, String, env0, {["AGENT_TOOL=" ++ dep ++ " corpus-v2 agent-tool " ++ task, "CHECK_TAG=" ++ Nat.show(Nat.add(tag, i)),
           "SAMPLE_SEED=" ++ Nat.show(Nat.mod(i, Nat.max(seeds, 1n))),
           "AGENT_LOG=" ++ dir ++ "/ep." ++ Nat.show(i) ++ ".log", "AGENT_META=n=" ++ Nat.show(i) ++ "\nlang=" ++ S.str(l) ++ "\nunit=" ++ S.str(u) ++ "\n"] : List<&2, String>}), ea.bin(),
-          {["--threads", threads, "--agent", "--prompt-file", pf] : List<&2, String>}}
+          {["+RTS", "--threads", threads, "-RTS", "--agent", "--prompt-file", pf] : List<&2, String>}}
 
 def ea.has(xs: List<&2, Nat>, +i: Nat) -> Bool:
   match xs:

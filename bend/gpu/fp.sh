@@ -70,7 +70,7 @@ case "${1:-}" in
   gate)
     build
     echo "== G2: the dense program on the GPU against the tree trainer on the CPU (every gradient within 1e-5 relative)"
-    BEND_PROFILE=1 ./dense --gpu $MEM 2>&1 | tee gate.log | tail -12
+    BEND_PROFILE=1 ./dense +RTS --gpu $MEM -RTS 2>&1 | tee gate.log | tail -12
     awk '/gradient max/ { r = $(NF); gsub(/[()]/, "", r); k++; if (r + 0 > 1e-5) { print "gradient differs: " $0; bad = 1 } }
          END { if (k != 4) { print "expected 4 gradient checks (3 plain, 1 masked), got " k; bad = 1 } exit bad }' gate.log && echo "G2: PASS" || echo "G2: MISS" ;;
   time)
@@ -80,7 +80,7 @@ case "${1:-}" in
     nvidia-smi dmon -s pucm -d 2 > dmon.txt 2>&1 &
     DM=$!
     env $common $setting TRAIN_STEPS=$STEPS EVAL_WINDOWS=0 SAVE_EVERY=0 OUT=out/timing \
-      stdbuf -oL ./traind --gpu $MEM 2>&1 | tee time.log | grep -v "^bend profile"
+      stdbuf -oL ./traind +RTS --gpu $MEM -RTS 2>&1 | tee time.log | grep -v "^bend profile"
     kill $DM
     awk '/ step=[0-9]+\/.* ms=/ { for (i = 1; i <= NF; i++) if ($i ~ /^ms=/) { split($i, a, "="); s = a[2] + 0 }
            n++; if (n > 2) { k++; ms += s } }
@@ -92,7 +92,7 @@ case "${1:-}" in
     mkdir -p out
     nohup nvidia-smi dmon -s pucm -d 30 > dmon.txt 2>&1 &
     env $common $setting TRAIN_STEPS=${STEPS:-8803} EVAL_EVERY=${EVAL:-250} EVAL_WINDOWS=${EVALW:-128} SAVE_EVERY=${SAVE:-500} OUT=out/$NAME \
-      nohup stdbuf -oL ./traind --gpu $MEM > train.log 2>&1 &
+      nohup stdbuf -oL ./traind +RTS --gpu $MEM -RTS > train.log 2>&1 &
     echo "trainer pid $!; tail -f train.log" ;;
   next|again)
     # again CKPT PLAN RUN_DIR SHARD_SIZE NAME: continue CKPT's run on PLAN (TRAIN_NEXT),
@@ -113,7 +113,7 @@ case "${1:-}" in
       TOKENIZER_FILE=$TOK TRAIN_BATCH=16 TRAIN_MICRO=${MICRO:-4} TRAIN_CHUNK=16 BEND_GEMM_NUMERICS=tf32 \
       TRAIN_LR=${NLR:-1e-4} TRAIN_WARMUP=$NWARM EVAL_EVERY=${EVAL:-250} EVAL_WINDOWS=${EVALW:-128} \
       SAVE_EVERY=${SAVE:-500} OUT=out/$name \
-      nohup stdbuf -oL ./traind-next --gpu $MEM > $name.log 2>&1 &
+      nohup stdbuf -oL ./traind-next +RTS --gpu $MEM -RTS > $name.log 2>&1 &
     echo "trainer pid $!; tail -f $name.log" ;;
   resume)
     # resume CKPT PLAN RUN_DIR SHARD_SIZE NAME STEPS: a save of NAME's continuation, on
@@ -127,7 +127,7 @@ case "${1:-}" in
       TRAIN_MASK=${MASK-kinds} \
       TOKENIZER_FILE=$TOK TRAIN_BATCH=16 TRAIN_MICRO=${MICRO:-4} TRAIN_CHUNK=16 BEND_GEMM_NUMERICS=tf32 \
       EVAL_EVERY=${EVAL:-250} EVAL_WINDOWS=${EVALW:-128} SAVE_EVERY=${SAVE:-500} OUT=out/$name \
-      nohup stdbuf -oL ./traind-next --gpu $MEM >> $name.log 2>&1 &
+      nohup stdbuf -oL ./traind-next +RTS --gpu $MEM -RTS >> $name.log 2>&1 &
     echo "trainer pid $!; tail -f $name.log" ;;
   eval)
     build
@@ -135,7 +135,7 @@ case "${1:-}" in
     for c in ${@:-out/*.checkpoint}; do
       echo "== $c"
       TRAIN_INIT=$c EVAL_CORPUS=${ECORPUS:-run/eval/transcript-fp.corpus} EVAL_MASK=${EMASK-} TOKENIZER_FILE=$TOK TRAIN_MICRO=${MICRO:-4} TRAIN_CHUNK=16 \
-        BEND_GEMM_NUMERICS=tf32 ./traind --gpu $MEM 2>&1 | grep -v "^bend profile" | tail -3
+        BEND_GEMM_NUMERICS=tf32 ./traind +RTS --gpu $MEM -RTS 2>&1 | grep -v "^bend profile" | tail -3
     done ;;
   *) sed -n 2,30p "$0"; exit 2 ;;
 esac

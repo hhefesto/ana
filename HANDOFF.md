@@ -542,7 +542,7 @@ The user (2026-10-19): "I want something that takes in agda code and spits out b
 
 ### The run, as approved (setting below unless the user changes it)
 
-- **Box:** one RTX 3090 or better on vast.ai, ≥ 64 GB RAM, `--gpu 48GB`; test the link first (`bend-push link`, done by `fp-stage.sh`, unwired 2026-10-15 for `bend-ops stage box`).
+- **Box:** one RTX 3090 or better on vast.ai, ≥ 64 GB RAM, `+RTS --gpu 48GB -RTS`; test the link first (`bend-push link`, done by `fp-stage.sh`, unwired 2026-10-15 for `bend-ops stage box`).
 - **Setting** (`fp.sh`, overridable): `PRESET=fp100m` (115M, ctx 2048), the plan's batch 16 in micro-batches of 4 (the store is 1.77e9 floats; 8 does not fit one array), Muon at lr 3e-4, warmup 300 of 8,803 steps, weight decay 0.01, clip 1.0, tf32 (master's v3 manifest had lr 3e-4, Muon 0.95, wd 0.01, clip 1.0, tf32, warmup 100 of 358k). A save every 500 steps (18 files of 1.85 GB), validation every 250 steps on 128 shard windows.
 - **Cost:** `fp.sh time` measures it; at the hot start's 7,155 tok/s (ctx 256) the 288M tokens are 11 h; ctx 2048 at micro 4 will be slower per token (attention is quadratic and the micro-batch small), so plan on 12–20 h, a few dollars at 3090 prices, plus an hour of gates.
 - **Ranking checkpoints:** `fp.sh eval` gives bits per byte on `run/eval/transcript-fp.corpus` (5.6 MB of held-out transcripts); the repair-accuracy driver (200 held-out prefixes sampled and re-checked) is still unwritten and ranks them properly.
@@ -685,7 +685,7 @@ Later, not v1:
   - DESTROY a box, never stop it; `vastai` lives in `~/.local/share/vastai-venv`.
   - Run long jobs under `nohup` and `stdbuf -oL`, because the Bend runtime's print does not flush.
   - Check `nvidia-smi -q -d PERFORMANCE` for thermal slowdown.
-  - A CUDA-built Bend program uses the GPU by default, so a CPU baseline needs `--gpu off --threads N`.
+  - A CUDA-built Bend program uses the GPU by default, so a CPU baseline needs `+RTS --gpu off --threads N -RTS`.
 - **Git:**
   - Commits carry no Co-Authored-By. Nothing is pushed without asking.
   - `private/*` branches push only to the `private` remote. Never push to `origin` in `~/src/bend2`.

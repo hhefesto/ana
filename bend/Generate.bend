@@ -153,8 +153,8 @@ def agent(+path: String, +prompt: String, +tokens: String, +pinned: String, +t0:
 # a default: the newest local checkpoint (below), the tokenizer the
 # checkpoint names, 128 tokens, and one line read from standard input.
 # Trailing words are the prompt, joined by spaces.  The runtime takes
-# `--threads N` (default: every core) and the first `--` itself; a later
-# `--` ends the flags.  A checkpoint named by a flag, a WIKI_ variable or
+# `+RTS --threads N -RTS` (default: every core) itself; `--` ends the
+# flags.  A checkpoint named by a flag, a WIKI_ variable or
 # discovery is announced (`ana: PATH` on stderr); CKPT is used as given, so
 # the harness's output is what it was.
 #
@@ -192,7 +192,7 @@ def cli.usage() -> String:
     "  --agent                  stop at each tool call ana writes (## ghc, ## lean,",
     "                           ## agda, ## bend, ## nix), run the real tool and",
     "                           go on from its answer (AGENT_TOOL, AGENT_CALLS)",
-    "  --threads N              decoder threads (default: all cores)",
+    "  +RTS --threads N -RTS    decoder threads (default: all cores)",
     "  -h, --help               this message",
     "",
     "Newest means the latest write time among the checkpoints up to four",

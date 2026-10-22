@@ -431,7 +431,7 @@ def cb.jobs(+out: String, ks: List<&2, CbK>) -> List<&2, CbJob>:
     case Nil{}:
       Nil{}
     case CbK{+k, off, s} <> more:
-      CbJob{k, Nil{}, cb.ps(), ["--threads", "1", cb.dst(out, k), Nat.show(off), "16", "fp100m"]} <> cb.jobs(out, more)
+      CbJob{k, Nil{}, cb.ps(), ["+RTS", "--threads", "1", "-RTS", cb.dst(out, k), Nat.show(off), "16", "fp100m"]} <> cb.jobs(out, more)
 
 def cb.res.ok(+rs: List<&2, CbRes>) -> Bool:
   match rs:

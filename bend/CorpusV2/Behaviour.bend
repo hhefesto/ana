@@ -1182,7 +1182,7 @@ def bhv.cf.libs(+c: BhCf) -> String:
 def bhv.cf.ana(+c: BhCf, +prompt: String) -> String & List<String>:
   match c:
     case BhCf{q, ft, tag, ckpt, gen, ref, reuse, keep, tokens, ana, threads, tool, env, secs, libs}:
-      (ana, ["--checkpoint", ckpt, "--tokens", tokens, "--threads", threads, "--prompt-file", prompt])
+      (ana, ["--checkpoint", ckpt, "--tokens", tokens, "+RTS", "--threads", threads, "-RTS", "--prompt-file", prompt])
 
 def bhv.cf.with(+c: BhCf, +tool: String, +env: List<&2, String>, +secs: Nat, +libs: String) -> BhCf:
   match c:

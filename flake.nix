@@ -382,7 +382,7 @@
             cp -r ${bendSrc}/bend src
             chmod -R u+w src
             bend src/tests/dense.bend -o dense
-            ./dense --threads 4
+            ./dense +RTS --threads 4 -RTS
             cat src/*.bend src/Spec/*.bend > corpus.txt
             bend src/tests/Checks.bend dense-run ${self.packages.${system}.bend-train-dense}/bin/bend-train-dense corpus.txt \
               ${./docs/haskell-era/RUN-2026-07-25-WIKI-FULL.md} ${./bend/tests/dense-identity.sha256}
@@ -398,7 +398,7 @@
             cp -r ${bendSrc}/bend src
             chmod -R u+w src
             bend src/tests/decode-dense.bend -o dd
-            ./dd --threads 4
+            ./dd +RTS --threads 4 -RTS
             touch $out
           '';
           # ana's chunked prefill (bend/Dense/Decode.bend dd.feeds: chunks of
@@ -415,7 +415,7 @@
             cp -r ${bendSrc}/bend src
             chmod -R u+w src
             bend src/tests/prefill-dense.bend -o pd
-            ./pd --threads 4
+            ./pd +RTS --threads 4 -RTS
             touch $out
           '';
           # CPU bulk ops refine the Base definitions without changing F32

@@ -39,9 +39,10 @@ import ./Combine.bend as C
 #
 #   gen CKPT DIR FORMAT [K]
 #       Each prompt of EVALSET (run/v2/evalset/prompts.nul) answered greedily
-#       on the CPU: run/gcroot-bend-generate/bin/bend-generate --threads
-#       THREADS (5) with CKPT, PROMPT, TOKENS (100), TEMPERATURE=0 and
-#       TOKENIZER_FILE=weights/code32k.bpe, PROCS (3) at a time; FORMAT 1 asks
+#       on the CPU: run/gcroot-bend-generate/bin/bend-generate +RTS
+#       --threads THREADS (5) -RTS with CKPT, PROMPT, TOKENS (100),
+#       TEMPERATURE=0 and TOKENIZER_FILE=weights/code32k.bpe, PROCS (3) at a
+#       time; FORMAT 1 asks
 #       repairs with prompt1 (run 1), 2 with prompt; K: only the first K
 #       prompts of each language and shape. The term is the output after the
 #       prompt up to the first ``` (all of it when there is none: not closed;
@@ -950,7 +951,7 @@ def ev.jobs(qs: List<&2, EvQ>, +i: Nat, +fmt1: Bool, +ckpt: String, +tokens: Str
       Nil{}
     case +q <> more:
       +env = {["CKPT=" ++ ckpt, "PROMPT=" ++ S.str(ev.asked(fmt1, q)), "TOKENS=" ++ ev.tokens.of(q, tokens, ev.langs(), per), "TEMPERATURE=0", "TOKENIZER_FILE=weights/code32k.bpe"] : List<&2, String>}
-      C.CbJob{i, env, ev.gen.bin(), {["--threads", threads] : List<&2, String>}} <> ev.jobs(more, 1n+i, fmt1, ckpt, tokens, per, threads)
+      C.CbJob{i, env, ev.gen.bin(), {["+RTS", "--threads", threads, "-RTS"] : List<&2, String>}} <> ev.jobs(more, 1n+i, fmt1, ckpt, tokens, per, threads)
 
 # tenths of a second, rounded
 def ev.secs(+ms: Nat) -> String:

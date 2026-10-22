@@ -4,7 +4,7 @@ import ./Config.bend as C
 import ./Model.bend as Md
 # Decode-step throughput at a preset's shapes with synthetic weights: the
 # per-token cost without the checkpoint read.  PRESET=tiny|small4|bpe10m|bpe100m,
-# STEPS=n; run the built binary with --threads N.
+# STEPS=n; run the built binary with +RTS --threads N -RTS.
 def hashf(+s: U32) -> F32:
   +a = U32.mul(U32.xor(s, U32.shrn(s, 15n)), 2654435761)
   F32.mul(F32.sub(F32.div(U32.to_f32(U32.and(a, 65535)), 65536.0), 0.5), 0.1)

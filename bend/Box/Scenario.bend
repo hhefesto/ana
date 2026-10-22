@@ -370,7 +370,7 @@ def scn.setup(+c: ScnCx, s: Scn) -> IO(Unit):
 def scn.stage1(+c: ScnCx, +simenv: List<&2, String>) -> IO(Unit):
   do IO<Unit>:
     pid : String <- S.background.setsid(scn.ft(c), scn.l1(List.append(&2, String, ["SIM_BOX=" ++ scn.box(c), "PLAN=run/sim/S1/plan-sim.tsv",
-      "OUT=out/s1", "SAVE_EVERY=5"], scn.simenv(c, simenv))), "train.log", False{}, "./traind", ["--gpu", "48GB"])
+      "OUT=out/s1", "SAVE_EVERY=5"], scn.simenv(c, simenv))), "train.log", False{}, "./traind", ["+RTS", "--gpu", "48GB", "-RTS"])
     scn.say(c, "stage s1's trainer started (pid " ++ pid ++ ")")
 
 def scn.chain.argv(+c: ScnCx) -> List<&2, String>:

@@ -31,7 +31,7 @@ tokenizer identity and the documents).
   back to `small4-v3` for the trainers.
 - **`prepare` prints `ordinary tokens: N`**, which the code-evals driver used
   to get from `inspect-corpus`.
-- **One process per shard, `--threads 1`.** Measured on a 16-core machine on
+- **One process per shard, `+RTS --threads 1 -RTS`.** Measured on a 16-core machine on
   a 4,000-document code shard (23 MB): 41 s and 1.2 GB for `prepare`, 3.9 s
   and 1.7 GB for `pack`, 0.6 s for `plan-segment`. Splitting a shard's
   documents across the runtime's lanes gave 23 s wall for 41 s of CPU: this

@@ -484,9 +484,9 @@ def cmds(+c: Cf, +k: Nat) -> List<List<String>>:
       +p = d ++ "/parts/part-" ++ pad6(k)
       +f = d ++ "/parts/fill-" ++ pad6(k)
       +out = Cf.shard(Cf{d, z, t, cap, prep, win}, k)
-      [[prep, "--threads", "1", t, p ++ ".nul", p ++ ".corpus"],
+      [[prep, "+RTS", "--threads", "1", "-RTS", t, p ++ ".nul", p ++ ".corpus"],
        [win, "lengths", p ++ ".corpus"],
-       [prep, "--threads", "1", t, f ++ ".nul", f ++ ".corpus"],
+       [prep, "+RTS", "--threads", "1", "-RTS", t, f ++ ".nul", f ++ ".corpus"],
        [win, "lengths", f ++ ".corpus"],
        [win, "plan", p ++ ".corpus.lengths", f ++ ".corpus.lengths", cap, p ++ ".plan"],
        [win, "build", p ++ ".corpus", f ++ ".corpus", p ++ ".plan", out ++ ".tmp", cap, "w" ++ pad6(k)],
@@ -621,7 +621,7 @@ def seg.step(+c: Cf, +ps: String, +batch: String, p: Pl) -> IO(Pl):
   match p:
     case Pl{+k, +off, +cum, segs}:
       do IO<Pl>:
-        o : S.Out <- S.run(".", [], forever(), ps, ["--threads", "1", Cf.shard(c, k), Nat.show(off), batch, Cf.size(c)], Nil{})
+        o : S.Out <- S.run(".", [], forever(), ps, ["+RTS", "--threads", "1", "-RTS", Cf.shard(c, k), Nat.show(off), batch, Cf.size(c)], Nil{})
         seg.out(k, off, cum, segs, o)
 
 def seg.go(n: Nat, +c: Cf, +ps: String, +batch: String, p: Pl) -> IO(Pl):

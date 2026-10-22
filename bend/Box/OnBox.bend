@@ -759,9 +759,9 @@ def obx.strs(xs: List<&2, List<&2, U32>>) -> List<&2, String>:
     case +x <> t:
       S.str(x) <> obx.strs(t)
 
-# `--gpu $MEM`, unquoted: MEM's words
+# `+RTS --gpu $MEM -RTS` (the runtime's options), unquoted: MEM's words
 def obx.gpu(+mem: String) -> List<&2, String>:
-  "--gpu" <> obx.strs(obx.words(S.b(mem)))
+  "+RTS" <> "--gpu" <> List.append(&2, String, obx.strs(obx.words(S.b(mem))), ["-RTS"])
 
 # Building ---------------------------------------------------------------------------------------
 

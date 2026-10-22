@@ -24,7 +24,7 @@ nix build .#checks.x86_64-linux.{bend-spec,bend-tests,bend-train}
 ```
 
 A local build needs `unset CC`, because `CC=gcc` breaks Bend's clang step.
-Run with `bend f.bend -o out && ./out --threads 16`.
+Run with `bend f.bend -o out && ./out +RTS --threads 16 -RTS`.
 
 ## Results against master
 

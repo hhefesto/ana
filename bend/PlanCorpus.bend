@@ -381,7 +381,7 @@ def prep.prepared(ok: Bool, +c: Pc, +k: Nat, +nul: String) -> IO(Bool):
 def prep.prepare(+c: Pc, +k: Nat, +nul: String) -> IO(Bool):
   +corpus = corpus.of(c, k)
   do IO<Bool>:
-    +st : U32 <- S.run.log(".", [], forever(), Pc.br(c), ["--threads", "1", Pc.tok(c), nul, corpus ++ ".tmp"], corpus ++ ".log")
+    +st : U32 <- S.run.log(".", [], forever(), Pc.br(c), ["+RTS", "--threads", "1", "-RTS", Pc.tok(c), nul, corpus ++ ".tmp"], corpus ++ ".log")
     prep.prepared(U32.is_eq(st, 0), c, k, nul)
 
 # `sed -n 's/^pack-stdin: \([0-9]*\) documents in, \([0-9]*\) packed.*/\1 \2/p'`
@@ -445,7 +445,7 @@ def prep.pack(packing: Bool, +c: Pc, +k: Nat, +nul: String) -> IO(Bool):
       # and must stay globally distinct.
       do IO<Bool>:
         +st : U32 <- S.run.log(".", [], forever(), Pc.bp(c),
-          List.append(&1, String, ["--threads", "1", nul, part.of(c, k) ++ ".packed.nul", "--target", Pc.pack(c), "--prefix", "pack" ++ Nat.show(k)],
+          List.append(&1, String, ["+RTS", "--threads", "1", "-RTS", nul, part.of(c, k) ++ ".packed.nul", "--target", Pc.pack(c), "--prefix", "pack" ++ Nat.show(k)],
             List.append(&1, String, group.flag(Pc.group(c)), ["--stats"])),
           corpus.of(c, k) ++ ".pack.log")
         prep.packed(U32.is_eq(st, 0), c, k, nul)
@@ -615,7 +615,7 @@ def seg.out(+c: Pc, +shards: Nat, +k: Nat, +cum: Nat, segs: List<&2, List<&2, U3
 
 def seg.run(+c: Pc, +shards: Nat, +k: Nat, +cum: Nat, segs: List<&2, List<&2, U32>>, +pin: List<&2, U32>, +pout: List<&2, U32>) -> IO(Pl):
   do IO<Pl>:
-    o : S.Out <- S.run(".", [], forever(), Pc.bs(c), ["--threads", "1", corpus.of(c, k), Nat.show(Nat.mul(k, Pc.pern(c))), Pc.batch(c), Pc.size(c)], Nil{})
+    o : S.Out <- S.run(".", [], forever(), Pc.bs(c), ["+RTS", "--threads", "1", "-RTS", corpus.of(c, k), Nat.show(Nat.mul(k, Pc.pern(c))), Pc.batch(c), Pc.size(c)], Nil{})
     seg.out(c, shards, k, cum, segs, o, pin, pout)
 
 def seg.sidecar(have: Bool, +c: Pc, +shards: Nat, +k: Nat, +cum: Nat, segs: List<&2, List<&2, U32>>) -> IO(Pl):

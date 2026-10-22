@@ -161,7 +161,7 @@ def sdr.extra(+c: Sc.ScnCx, +steps: String, +cfg: String) -> IO(Unit):
 def sdr.s1(+c: Sc.ScnCx, +simenv: List<&2, String>) -> IO(Unit):
   do IO<Unit>:
     pid : String <- S.background.setsid(Sc.scn.ft(c), Sc.scn.l1(List.append(&2, String, ["SIM_BOX=" ++ Sc.scn.box(c), "PLAN=run/v3/S1/plan-fp100m-b16-windows.tsv",
-      "OUT=out/s1"], Sc.scn.simenv(c, simenv))), "train.log", False{}, "./traind", ["--gpu", "48GB"])
+      "OUT=out/s1"], Sc.scn.simenv(c, simenv))), "train.log", False{}, "./traind", ["+RTS", "--gpu", "48GB", "-RTS"])
     Sc.scn.say(c, "S1's trainer started (pid " ++ pid ++ ")")
 
 # the act round in a session of its own, as `bend-ops act start` leaves it

@@ -672,7 +672,7 @@ def chk.train.verdict(+out: String, +h: List<&2, U32>) -> IO(Unit):
 def chk.train.run.go(+trainer: String, +corpus: String) -> IO(Unit):
   do IO<Unit>:
     +r : ChkRun <- chk.run("bend-train", ["CORPUS=" ++ corpus, "PRESET=tiny-v3", "TRAIN_STEPS=30", "TRAIN_BATCH=8", "TRAIN_LR=3e-3",
-      "TRAIN_WARMUP=5", "OUT=tiny.btc"], trainer, ["--threads", "4"])
+      "TRAIN_WARMUP=5", "OUT=tiny.btc"], trainer, ["+RTS", "--threads", "4", "-RTS"])
     chk.show(r)
     chk.must("bend-train", r)
     h : List<&2, U32> <- chk.head("tiny.btc")
@@ -694,7 +694,7 @@ def chk.dense.vals(+r: ChkRun) -> List<&2, List<&2, U32>>:
 def chk.ident(+trainer: String, +frozen: String, +opt: String) -> IO(Unit):
   do IO<Unit>:
     +r : ChkRun <- chk.run("bend-train-dense " ++ opt, ["CORPUS=" ++ frozen, "PRESET=small4-v3", "TRAIN_STEPS=6", "TRAIN_BATCH=8", "TRAIN_MICRO=4",
-      "TRAIN_LR=3e-3", "TRAIN_WARMUP=2", "TRAIN_OPT=" ++ opt, "EVAL_EVERY=3", "OUT=" ++ opt ++ ".btc"], trainer, ["--gpu", "off", "--threads", "4"])
+      "TRAIN_LR=3e-3", "TRAIN_WARMUP=2", "TRAIN_OPT=" ++ opt, "EVAL_EVERY=3", "OUT=" ++ opt ++ ".btc"], trainer, ["+RTS", "--gpu", "off", "--threads", "4", "-RTS"])
     chk.show(r)
     chk.must("bend-train-dense " ++ opt, r)
 
@@ -714,7 +714,7 @@ def chk.dense.verdict(+r: ChkRun, +h: List<&2, U32>, +q: ChkRun, +sums: List<&2,
 def chk.dense.run.go(+trainer: String, +corpus: String, +frozen: String, +goldens: String) -> IO(Unit):
   do IO<Unit>:
     +r : ChkRun <- chk.run("bend-train-dense", ["CORPUS=" ++ corpus, "PRESET=tiny-v3", "TRAIN_STEPS=30", "TRAIN_BATCH=8", "TRAIN_LR=3e-3",
-      "TRAIN_WARMUP=5", "OUT=tiny.btc"], trainer, ["--threads", "4"])
+      "TRAIN_WARMUP=5", "OUT=tiny.btc"], trainer, ["+RTS", "--threads", "4", "-RTS"])
     chk.show(r)
     chk.must("bend-train-dense", r)
     h : List<&2, U32> <- chk.head("tiny.btc")
@@ -722,7 +722,7 @@ def chk.dense.run.go(+trainer: String, +corpus: String, +frozen: String, +golden
     # step 32,250: a shard's 3 windows at micro 4 logged loss 0, and
     # best_validation_loss stayed 0 for the rest of the run)
     +q : ChkRun <- chk.run("bend-train-dense (3 validation windows)", ["CORPUS=" ++ corpus, "PRESET=tiny-v3", "TRAIN_STEPS=2", "TRAIN_BATCH=8",
-      "TRAIN_MICRO=4", "TRAIN_LR=3e-3", "TRAIN_WARMUP=1", "EVAL_EVERY=1", "EVAL_WINDOWS=3", "OUT=short.btc"], trainer, ["--gpu", "off", "--threads", "4"])
+      "TRAIN_MICRO=4", "TRAIN_LR=3e-3", "TRAIN_WARMUP=1", "EVAL_EVERY=1", "EVAL_WINDOWS=3", "OUT=short.btc"], trainer, ["+RTS", "--gpu", "off", "--threads", "4", "-RTS"])
     chk.show(q)
     chk.must("bend-train-dense (3 validation windows)", q)
     # the trajectory itself, byte for byte: six steps of small4-v3, batch 8
@@ -766,15 +766,15 @@ def chk.conf(+src: String, +name: String) -> IO(List<&2, ChkLaw>):
   do IO<List<&2, ChkLaw>>:
     chk.to("bend " ++ file, name ++ ".js", [], "bend", [file])
     chk.build(file, exe)
-    chk.to(name ++ " BEND_FT=loop", name ++ ".loop", ["BEND_FT=loop"], exe, ["--gpu", "off", "--threads", "1"])
+    chk.to(name ++ " BEND_FT=loop", name ++ ".loop", ["BEND_FT=loop"], exe, ["+RTS", "--gpu", "off", "--threads", "1", "-RTS"])
     a : ChkLaw <- chk.same(name ++ ".js", name ++ ".loop")
-    chk.to(name ++ " on 8 threads", name ++ ".fast", [], exe, ["--gpu", "off", "--threads", "8"])
+    chk.to(name ++ " on 8 threads", name ++ ".fast", [], exe, ["+RTS", "--gpu", "off", "--threads", "8", "-RTS"])
     b : ChkLaw <- chk.same(name ++ ".loop", name ++ ".fast")
     return [a, b]
 
 def chk.bulk.threads(+exe: String, +t: String) -> IO(ChkLaw):
   do IO<ChkLaw>:
-    chk.to("bulk-cpu on " ++ t ++ " threads", "actual." ++ t, [], exe, ["--gpu", "off", "--threads", t])
+    chk.to("bulk-cpu on " ++ t ++ " threads", "actual." ++ t, [], exe, ["+RTS", "--gpu", "off", "--threads", t, "-RTS"])
     chk.same("reference", "actual." ++ t)
 
 # the seeded and adversarial cases: the reference loops against the C
@@ -783,8 +783,8 @@ def chk.bulk(+src: String) -> IO(List<&2, ChkLaw>):
   +exe = {"./bulk-cpu.bin" : String}
   do IO<List<&2, ChkLaw>>:
     chk.build(src ++ "/tests/bulk-cpu.bend", exe)
-    chk.to("bulk-cpu BEND_FT=loop", "reference", ["BEND_FT=loop"], exe, ["--gpu", "off", "--threads", "1"])
-    chk.to("bulk-cpu BEND_FT=c", "actual.c", ["BEND_FT=c"], exe, ["--gpu", "off", "--threads", "8"])
+    chk.to("bulk-cpu BEND_FT=loop", "reference", ["BEND_FT=loop"], exe, ["+RTS", "--gpu", "off", "--threads", "1", "-RTS"])
+    chk.to("bulk-cpu BEND_FT=c", "actual.c", ["BEND_FT=c"], exe, ["+RTS", "--gpu", "off", "--threads", "8", "-RTS"])
     c : ChkLaw <- chk.same("reference", "actual.c")
     t1 : ChkLaw <- chk.bulk.threads(exe, "1")
     t8 : ChkLaw <- chk.bulk.threads(exe, "8")

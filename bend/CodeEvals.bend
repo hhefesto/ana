@@ -268,7 +268,7 @@ def packed(+name: String, +n: Nat, +dir: String, +tok: String, +prep: String, o:
         do IO<Unit>:
           said(t)
           S.rm(nul)
-          +p : S.Out <- S.run(".", [], 2000000, prep, ["--threads", "1", tok, pk, corpus ++ ".tmp"], Nil{})
+          +p : S.Out <- S.run(".", [], 2000000, prep, ["+RTS", "--threads", "1", "-RTS", tok, pk, corpus ++ ".tmp"], Nil{})
           prepared(name, n, corpus, pk, p),
         do IO<Unit>:
           said(t)
@@ -283,7 +283,7 @@ def lang.run(+k: Nat, n: Nat, +dir: String, +tok: String, +pack: String, +prep: 
     case 1n+m:
       +name = name.of(k)
       do IO<Unit>:
-        +o : S.Out <- S.run(".", [], 2000000, pack, ["--threads", "1", dir ++ "/." ++ name ++ ".nul", dir ++ "/." ++ name ++ ".packed.nul", "--target", target, "--prefix", "eval-" ++ name, "--group"], Nil{})
+        +o : S.Out <- S.run(".", [], 2000000, pack, ["+RTS", "--threads", "1", "-RTS", dir ++ "/." ++ name ++ ".nul", dir ++ "/." ++ name ++ ".packed.nul", "--target", target, "--prefix", "eval-" ++ name, "--group"], Nil{})
         packed(name, 1n+m, dir, tok, prep, o)
 
 def langs.go(k: Nat, +cn: Cn, +dir: String, +tok: String, +pack: String, +prep: String, +target: String) -> IO(Unit):

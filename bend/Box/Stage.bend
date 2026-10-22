@@ -498,7 +498,7 @@ def stg.trainer.got(m: Maybe<&2, String>) -> IO(String):
 def stg.ident.one(+out: String, +corpus: String, +tr: String, +opt: String) -> IO(Unit):
   do IO<Unit>:
     +st : U32 <- S.run.log(out, ["CORPUS=" ++ corpus, "PRESET=small4-v3", "TRAIN_STEPS=6", "TRAIN_BATCH=8", "TRAIN_MICRO=4", "TRAIN_LR=3e-3",
-      "TRAIN_WARMUP=2", "TRAIN_OPT=" ++ opt, "EVAL_EVERY=3", "OUT=" ++ opt ++ ".btc"], 86400, tr, ["--gpu", "off", "--threads", "4"], opt ++ ".raw.log")
+      "TRAIN_WARMUP=2", "TRAIN_OPT=" ++ opt, "EVAL_EVERY=3", "OUT=" ++ opt ++ ".btc"], 86400, tr, ["+RTS", "--gpu", "off", "--threads", "4", "-RTS"], opt ++ ".raw.log")
     stg.ok(U32.is_eq(st, 0), "bend-train-dense " ++ opt ++ " (exit " ++ U32.show(st) ++ ")")
     +raw : List<&2, U32> <- S.read(out ++ "/" ++ opt ++ ".raw.log")
     S.write(out ++ "/" ++ opt ++ ".log", stg.norm(raw))
