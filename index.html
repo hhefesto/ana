@@ -111,8 +111,9 @@ Haskell, Agda, Lean, Bend and Nix on a few rented consumer GPUs.</p>
     <i>means</i> (a weighted language, unfolded token by token), proves the laws on that meaning, and makes the fast
     code a refinement: chunked attention is proven equal to the recurrent one, the derived backprop obeys the
     transpose law, and the executable attention step is proven to compute the spec's formula.</li>
-  <li><b>Its probabilities have a proven structure.</b> Tai-Danae Bradley's enriched category of texts is a theorem
-    about ana's own model: prefixes and their extensions form a category whose composition is the chain rule.</li>
+  <li><b>Its probabilities have a proven structure.</b> Tai-Danae Bradley's category of texts is stated and proven
+    in ana's spec, for every autoregressive model of its kind: prefixes and their extensions form a category, and
+    its composition is the chain rule.</li>
   <li><b>It acts; the tools answer.</b> ana is trained as an agent that writes code and calls the real compiler.
     Every compiler message in its data came from the compiler. It never learns to write a tool's answer itself.</li>
   <li><b>Small, cheap and reproducible.</b> Every GPU hour since the project began in July 2026, all runs and
@@ -235,22 +236,41 @@ tested to proven.</p>
 
 <h2 id="bradley">Tai-Danae Bradley's category of texts in ana</h2>
 <p>In <a href="https://arxiv.org/abs/2106.07890">An enriched category theory of language: from syntax to
-semantics</a>, Bradley, Terilla and Vlassopoulos turn a language model's probabilities into a category: the
-objects are texts, there is an arrow from one text to another when the second extends the first, and the arrow
+semantics</a> (<i>La Matematica</i>, 2022), Bradley, Terilla and Vlassopoulos turn a language model's probabilities into a category: the
+objects are texts, there is an arrow from one text to another when the second contains the first, and the arrow
 carries the probability of that extension. It is a category enriched over the unit interval, and it holds both
 what goes with what (syntax) and, through the Yoneda embedding, what a text means (semantics: a text is known by
 the extensions it has).</p>
-<p>In ana this is a theorem about the model, not an analogy. <code>bend/Spec/Bradley.bend</code> builds the
-category from ana's own state algebra: objects are token prefixes within a cutoff (recording whether they end), a
-morphism from <code>xs</code> to <code>ys</code> is the evidence that <code>xs</code> is a prefix of <code>ys</code>,
-and its hom-weight is the model's path weight of the extension. It proves that identities weigh one and that
-composing two extensions multiplies their weights, which is exactly the factorization law of
-<code>Autoregressive.bend</code>: the chain rule of probability, as the composition of a category. The weights live
-in an ordered multiplicative monoid (<code>bend/Spec/Algebra.bend</code>), the cost structure Bradley's
-enrichment needs. Because ana is autoregressive, it learns the right-extension half of that category, as the
-paper's published version notes for one-directional models.</p>
-<p>The semantic half goes through the Yoneda lemma, and the Yoneda lemma's dependency cone in Agda's category
-theory library is exactly what agda2bend is translating into Bend right now (<a href="#translate">below</a>).</p>
+<p>A model like ana only extends text to the right, so it sees the prefix part of that category, as the published
+version notes for one-directional models. Bradley and Vigneaux make that version precise in
+<a href="https://arxiv.org/abs/2501.06662">The magnitude of categories of texts enriched by language models</a>:
+the objects are prefixes up to a cutoff, unfinished or finished; the hom from <code>x</code> to <code>y</code> is
+the product of the next-token probabilities along the extension; and every autoregressive model gives such a
+[0,1]-category.</p>
+<p>That is the version ana states. <code>bend/Spec/Bradley.bend</code> (ported from the project's earlier Agda) builds
+the category on top of ana's spec: a morphism from <code>xs</code> to <code>ys</code> is the evidence that
+<code>xs</code> is a prefix of <code>ys</code>, prefix morphisms compose, and the hom-weight of a morphism is the
+model's path weight of the extension. It proves that identities weigh one and that composing two extensions
+multiplies their weights, and that proof <i>is</i> the factorization law of <code>Autoregressive.bend</code>: the chain
+rule of probability, read as composition in a category. The theorems are stated for every state algebra, so for
+every autoregressive model of this kind, ana's included. Bend checks them, and runs them on small concrete
+machines.</p>
+<p class="note">What it isn't yet: the laws haven't been applied to a trained checkpoint, the object type with
+its finished flag is declared but not used, and Bend's stricter <code>--verdict</code> kernel can't model these
+template theorems yet (its ordinary checker passes them).</p>
+<h3>What's next from Bradley</h3>
+<ul>
+  <li>Run the hom on the real decoder: on a checkpoint, check that identities weigh one and that weights compose
+    along prefix chains, within floating-point tolerance.</li>
+  <li>Prove that the probabilities of everything a prefix can become sum to one (the magnitude paper's Prop. 2.9),
+    using the finished flag that is already declared.</li>
+  <li>Take <code>&minus;ln</code> of the homs and the category becomes a metric whose distance from the empty text to
+    a window is exactly the window's total training loss. Prove that link in the trainer's spec.</li>
+  <li>Magnitude as an eval: a sum of Tsallis entropies of the next-token distributions, estimated on a fixed set
+    of prompts.</li>
+  <li>Meaning through Yoneda: prove that two prefixes with the same trie of continuations have the same homs to
+    every extension, which links <code>AutoregressiveTrie.bend</code> to <code>Bradley.bend</code>.</li>
+</ul>
 
 <h2 id="model">The model: GPT-2 small's shape</h2>
 <div class="two">
@@ -396,7 +416,7 @@ nix run .#ana -- --checkpoint PATH "quicksort"   <span class="c"># generate from
 <h2>Thanks</h2>
 <p><a href="https://x.com/VictorTaelin">Victor Taelin</a> and <a href="https://x.com/higherordercomp">HigherOrderCO</a> for
 Bend; <a href="http://conal.net">Conal Elliott</a> for denotational design and the essence of AD; <a href="https://www.math3ma.com">Tai-Danae
-Bradley</a>, John Terilla and Yiannis Vlassopoulos for the category theory of language.</p>
+Bradley</a>, John Terilla, Yiannis Vlassopoulos and Juan Pablo Vigneaux for the category theory of language.</p>
 
 <footer>ana · by <a href="https://github.com/hhefesto">hhefesto</a> · MIT · <a href="https://github.com/hhefesto/ana">source</a></footer>
 </main>
