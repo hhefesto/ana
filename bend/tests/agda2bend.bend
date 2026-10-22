@@ -9,6 +9,7 @@ import ../Agda2Bend.bend as D
 import ../ToBend/Gate.bend as G
 import ../ToBend/Copy.bend as Q
 import ../ToBend/Order.bend as O
+import ../ToBend/Qfix.bend as QF
 
 # agda2bend's laws, run from this directory on the committed exports in
 # fixtures/agda2bend (agda-export's output for small modules, so the laws
@@ -344,6 +345,115 @@ def ds.f(twice: Bool) -> T.BItem:
   +b = Bool.pick(String, twice, "M.R.a", "M.R.b")
   T.BiDef{S.b("f"), [T.BParam{T.BmLive{}, S.b("r"), T.BtTyApp{S.b("M.R"), T.BtANil{}}}], v("T"), T.BtExpr{app("g", [app("M.R.a", [v("r")]), app(b, [v("r")])])}, Nil{}}
 
+# Quantity solving: id takes a quantity and a type of that kind; a record
+# Cat<o, l> with Obj: Kind(o), Arr: Obj -> Obj -> Kind(l)
+def qf.q(+n: String) -> T.BParam:
+  T.BParam{T.BmErased{}, S.b(n), v("Quant")}
+
+def qf.kind(+q: String) -> T.Bt:
+  app("Kind", [v(q)])
+
+def qf.env() -> QF.TqEnv:
+  +id : QF.TqSig = QF.TqDef{[qf.q("a"), T.BParam{T.BmErased{}, S.b("A"), qf.kind("a")}, T.BParam{T.BmLive{}, S.b("x"), v("A")}], v("A"), T.BtExpr{v("x")}}
+  +cat : QF.TqSig = QF.TqType{[qf.q("o"), qf.q("l")], T.BtType{}, [T.BCtor{S.b("Cat"), [T.BField{S.b("Obj"), qf.kind("o")}, T.BField{S.b("Arr"), T.BtPi{T.BmLive{}, S.b("_"), False{}, v("Obj"), T.BtPi{T.BmLive{}, S.b("_"), False{}, v("Obj"), qf.kind("l")}}}]}]}
+  QF.TqEnv{Map.set(&2, QF.TqSig, Map.set(&2, QF.TqSig, Map.new(&2, QF.TqSig), "id", id), "Cat", cat), S.b("N.")}
+
+# def f(g: Nat -> Nat) -> Nat: id(q, Nat -> Nat, g)(id(q, Nat, 3n))
+def qf.f() -> T.BItem:
+  +fn : T.Bt = T.BtPi{T.BmLive{}, S.b("_"), False{}, v("Nat"), v("Nat")}
+  T.BiDef{S.b("f"), [T.BParam{T.BmLive{}, S.b("g"), fn}], v("Nat"), T.BtExpr{T.BtApp{app("id", [T.BtDead{v("q")}, T.BtDead{fn}, v("g")]), T.tba.args([app("id", [T.BtDead{v("q")}, T.BtDead{v("Nat")}, T.BtNat{S.b("3")}])])}}, Nil{}}
+
+# def s() -> Cat<qo, ql>: Cat{Nat, x => y => (Nat -> Nat)}
+def qf.s() -> T.BItem:
+  T.BiDef{S.b("s"), Nil{}, T.BtTyApp{S.b("Cat"), T.tba.args([T.BtDead{v("qo")}, T.BtDead{v("ql")}])}, T.BtExpr{T.BtCon{S.b("Cat"), T.tba.args([v("Nat"), T.BtLam{T.BmLive{}, S.b("x"), T.BtLam{T.BmLive{}, S.b("y"), T.BtPi{T.BmLive{}, S.b("_"), False{}, v("Nat"), v("Nat")}}}])}}, Nil{}}
+
+# Rel(a, A, l) = A -> A -> Kind(l); IsE<a, l, A: Kind(a), eq: A -> A ->
+# Kind(l)>; Pr<a, b, A: Kind(a), B: Kind(b)> is Kind((a <&> b))
+def qf.pi(+a: T.Bt, b: T.Bt) -> T.Bt:
+  T.BtPi{T.BmLive{}, S.b("_"), False{}, a, b}
+
+def qf.dead(+xs: List<&2, String>) -> T.Bt:
+  match xs:
+    case Nil{}:
+      T.BtANil{}
+    case +x <> t:
+      T.BtArgs{T.BtDead{v(x)}, qf.dead(t)}
+
+def qf.env2() -> QF.TqEnv:
+  +rel : QF.TqSig = QF.TqDef{[qf.q("a"), T.BParam{T.BmErased{}, S.b("A"), qf.kind("a")}, qf.q("l")], T.BtType{}, T.BtExpr{qf.pi(v("A"), qf.pi(v("A"), qf.kind("l")))}}
+  +ise : QF.TqSig = QF.TqType{[qf.q("a"), qf.q("l"), T.BParam{T.BmErased{}, S.b("A"), qf.kind("a")}, T.BParam{T.BmErased{}, S.b("eq"), qf.pi(v("A"), qf.pi(v("A"), qf.kind("l")))}], T.BtType{}, Nil{}}
+  +pr : QF.TqSig = QF.TqType{[qf.q("a"), qf.q("b"), T.BParam{T.BmErased{}, S.b("A"), qf.kind("a")}, T.BParam{T.BmErased{}, S.b("B"), qf.kind("b")}], qf.kind("(a <&> b)"), Nil{}}
+  +mk : QF.TqSig = QF.TqDef{[qf.q("a")], T.BtTyApp{S.b("Pr"), qf.dead(["a", "&2", "Nat", "Nat"])}, T.BtExpr{v("x")}}
+  +ex : QF.TqSig = QF.TqDef{[qf.q("a"), qf.q("b"), T.BParam{T.BmErased{}, S.b("A"), qf.kind("a")}], T.BtPi{T.BmErased{}, S.b("x"), True{}, qf.pi(v("A"), qf.kind("b")), qf.kind("(a <&> b)")}, T.BtExpr{v("x")}}
+  QF.TqEnv{Map.set(&2, QF.TqSig, Map.set(&2, QF.TqSig, Map.set(&2, QF.TqSig, Map.set(&2, QF.TqSig, Map.set(&2, QF.TqSig, Map.new(&2, QF.TqSig), "Rel", rel), "IsE", ise), "Pr", pr), "mk", mk), "ex", ex), S.b("N.")}
+
+# type C<o, l>: C{Obj: Kind(o), Arr: Obj -> Obj -> Kind(l), eqv: @-x:Obj -> Pr<qa, qb, Obj, Arr(x, x)>}
+def qf.c() -> T.BItem:
+  +eqv : T.Bt = T.BtPi{T.BmErased{}, S.b("x"), True{}, v("Obj"), T.BtTyApp{S.b("Pr"), T.BtArgs{T.BtDead{v("qa")}, T.BtArgs{T.BtDead{v("qb")}, T.BtArgs{T.BtDead{v("Obj")}, T.BtArgs{T.BtDead{app("Arr", [v("x"), v("x")])}, T.BtANil{}}}}}}}
+  T.BiType{S.b("C"), [qf.q("o"), qf.q("l")], T.BtType{}, [T.BCtor{S.b("C"), [T.BField{S.b("Obj"), qf.kind("o")}, T.BField{S.b("Arr"), qf.pi(v("Obj"), qf.pi(v("Obj"), qf.kind("l")))}, T.BField{S.b("eqv"), eqv}]}], Nil{}}
+
+# def p(-a, -l, -A: Kind(a), -eq: Rel(a, A, l), r: IsE<a, q, A, eq>) -> Nat: 0n
+def qf.p() -> T.BItem:
+  T.BiDef{S.b("p"), [qf.q("a"), qf.q("l"), T.BParam{T.BmErased{}, S.b("A"), qf.kind("a")}, T.BParam{T.BmErased{}, S.b("eq"), app("Rel", [v("a"), v("A"), v("l")])}, T.BParam{T.BmLive{}, S.b("r"), T.BtTyApp{S.b("IsE"), qf.dead(["a", "q", "A", "eq"])}}], v("Nat"), T.BtExpr{T.BtNat{S.b("0")}}, Nil{}}
+
+# def inter(-a, -b, -A: Kind(a), -B: Kind(b)) -> Kind((a <&> b)): Pr<a, b, A, B>
+# and def neg(-a, -A: Kind(a)) -> Kind(a): A -> Nat
+def qf.inter() -> T.BItem:
+  T.BiDef{S.b("inter"), [qf.q("a"), qf.q("b"), T.BParam{T.BmErased{}, S.b("A"), qf.kind("a")}, T.BParam{T.BmErased{}, S.b("B"), qf.kind("b")}], qf.kind("(a <&> b)"), T.BtExpr{T.BtTyApp{S.b("Pr"), qf.dead(["a", "b", "A", "B"])}}, Nil{}}
+
+def qf.neg() -> T.BItem:
+  T.BiDef{S.b("neg"), [qf.q("a"), T.BParam{T.BmErased{}, S.b("A"), qf.kind("a")}], qf.kind("a"), T.BtExpr{qf.pi(v("A"), v("Nat"))}, Nil{}}
+
+# module M: REL(a, b, x, y, l) = x -> y -> Kind(l); Rel(a, x, l) = REL(a, a,
+# x, x, l); IsE as in qf.env2; its signatures as M exports them
+def qf.m.rel() -> T.BItem:
+  T.BiDef{S.b("Rel"), [qf.q("a"), T.BParam{T.BmErased{}, S.b("x"), qf.kind("a")}, qf.q("l")], T.BtType{}, T.BtExpr{app("REL", [v("a"), v("a"), v("x"), v("x"), v("l")])}, Nil{}}
+
+def qf.m.rel2() -> T.BItem:
+  T.BiDef{S.b("REL"), [qf.q("a"), qf.q("b"), T.BParam{T.BmErased{}, S.b("x"), qf.kind("a")}, T.BParam{T.BmErased{}, S.b("y"), qf.kind("b")}, qf.q("l")], T.BtType{}, T.BtExpr{qf.pi(v("x"), qf.pi(v("y"), qf.kind("l")))}, Nil{}}
+
+def qf.m.ise() -> T.BItem:
+  T.BiType{S.b("IsE"), [qf.q("a"), qf.q("l"), T.BParam{T.BmErased{}, S.b("A"), qf.kind("a")}, T.BParam{T.BmErased{}, S.b("eq"), app("Rel", [v("a"), v("A"), v("l")])}], T.BtType{}, Nil{}, Nil{}}
+
+def qf.env3() -> QF.TqEnv:
+  +names : Map<&2, Bool> = Map.set(&2, Bool, Map.set(&2, Bool, Map.set(&2, Bool, Map.new(&2, Bool), "Rel", True{}), "REL", True{}), "IsE", True{})
+  QF.TqEnv{Map.set(&2, QF.TqSig, Map.set(&2, QF.TqSig, Map.set(&2, QF.TqSig, Map.new(&2, QF.TqSig), "M.Rel", QF.tqf.sig.home(qf.m.rel(), names, S.b("M."))), "M.REL", QF.tqf.sig.home(qf.m.rel2(), names, S.b("M."))), "M.IsE", QF.tqf.sig.home(qf.m.ise(), names, S.b("M."))), S.b("N.")}
+
+# in module N: def p(-a, -l, -A: Kind(a), -eq: M.Rel(a, A, l), r: M.IsE<a, q, A, eq>) -> Nat: 0n
+def qf.np() -> T.BItem:
+  T.BiDef{S.b("p"), [qf.q("a"), qf.q("l"), T.BParam{T.BmErased{}, S.b("A"), qf.kind("a")}, T.BParam{T.BmErased{}, S.b("eq"), app("M.Rel", [v("a"), v("A"), v("l")])}, T.BParam{T.BmLive{}, S.b("r"), T.BtTyApp{S.b("M.IsE"), qf.dead(["a", "q", "A", "eq"])}}], v("Nat"), T.BtExpr{T.BtNat{S.b("0")}}, Nil{}}
+
+# def k(-b, -c, -X: Kind(b), -Y: Kind(c)) -> Kind((b <&> c)): Pr<b, c, X, Y>
+# (Pr's kind (a <&> b) at a := b, b := c is (b <&> c), all at once)
+def qf.k() -> T.BItem:
+  T.BiDef{S.b("k"), [qf.q("b"), qf.q("c"), T.BParam{T.BmErased{}, S.b("X"), qf.kind("b")}, T.BParam{T.BmErased{}, S.b("Y"), qf.kind("c")}], qf.kind("(b <&> c)"), T.BtExpr{T.BtTyApp{S.b("Pr"), qf.dead(["b", "c", "X", "Y"])}}, Nil{}}
+
+# def w(-a, -A: Kind(a), b: Bool) -> Type: ite(&1, Kind(a), b, A, A -> Nat)
+def qf.w() -> T.BItem:
+  T.BiDef{S.b("w"), [qf.q("a"), T.BParam{T.BmErased{}, S.b("A"), qf.kind("a")}, T.BParam{T.BmLive{}, S.b("b"), v("Bool")}], T.BtType{}, T.BtExpr{app("ite", [v("&1"), qf.kind("a"), v("b"), v("A"), qf.pi(v("A"), v("Nat"))])}, Nil{}}
+
+# def sx(-a, -b) -> @-A:Kind(a) -> @-B:Kind(b) -> Kind((a <&> b)): A => B => Pr<p, q, A, B>
+def qf.sx() -> T.BItem:
+  +ret : T.Bt = T.BtPi{T.BmErased{}, S.b("A"), True{}, qf.kind("a"), T.BtPi{T.BmErased{}, S.b("B"), True{}, qf.kind("b"), qf.kind("(a <&> b)")}}
+  T.BiDef{S.b("sx"), [qf.q("a"), qf.q("b")], ret, T.BtExpr{T.BtLam{T.BmLive{}, S.b("x"), T.BtLam{T.BmLive{}, S.b("y"), T.BtTyApp{S.b("Pr"), qf.dead(["p", "q", "x", "y"])}}}}, Nil{}}
+
+# def u(-a) -> Pr<a, a, Nat, Nat>: mk(a), mk returning Pr<a, &2, Nat, Nat>
+def qf.u() -> T.BItem:
+  T.BiDef{S.b("u"), [qf.q("a")], T.BtTyApp{S.b("Pr"), qf.dead(["a", "a", "Nat", "Nat"])}, T.BtExpr{app("mk", [T.BtDead{v("a")}])}, Nil{}}
+
+# def sj(-a, -A: Kind(a)) -> Type: ex(a, q, A)(x => A -> Nat), ex(a, b, A) -> @-x:(A -> Kind(b)) -> …
+def qf.sj() -> T.BItem:
+  T.BiDef{S.b("sj"), [qf.q("a"), T.BParam{T.BmErased{}, S.b("A"), qf.kind("a")}], T.BtType{}, T.BtExpr{T.BtApp{app("ex", [T.BtDead{v("a")}, T.BtDead{v("q")}, T.BtDead{v("A")}]), T.tba.args([T.BtLam{T.BmLive{}, S.b("x"), qf.pi(v("A"), v("Nat"))}])}}, Nil{}}
+
+# def top(-a: Quant) -> Kind(a): Nat
+def qf.top() -> T.BItem:
+  T.BiDef{S.b("top"), [qf.q("a")], qf.kind("a"), T.BtExpr{v("Nat")}, Nil{}}
+
+# def nrel(-a, -A: Kind(a)) -> Rel(a, A, a): x => y => x -> Nat (a Type),
+# and def erel(…) -> Rel(a, A, &2): x => y => Nat (Data, as declared)
+def qf.rel.ret(+n: String, +l: String, body: T.Bt) -> T.BItem:
+  T.BiDef{S.b(n), [qf.q("a"), T.BParam{T.BmErased{}, S.b("A"), qf.kind("a")}], app("Rel", [v("a"), v("A"), v(l)]), T.BtExpr{T.BtLam{T.BmLive{}, S.b("x"), T.BtLam{T.BmLive{}, S.b("y"), body}}}, Nil{}}
+
 def gate.laws() -> IO(Unit):
   do IO<Unit>:
     IO.print(verdict("the carets mark a binder", S.eq(G.tgt.span(S.split.lines(S.b("Location: u\n1 | def u(-A: Type) -> A -> A:\n2>|   +x_8 => x_8\n  |   ^^^^^\n3 | "))), S.b("+x_8"))))
@@ -356,6 +466,21 @@ def gate.laws() -> IO(Unit):
     IO.print(verdict("a point-free def's type parameter is declared Data", S.eq(gt.prm(Q.tcp.data.raise(gt.lb(), S.b("eta1"))), S.b("import Base\n\ndef lb() -> @-A:Data -> A -> A:\n  eta1 => x => x\n"))))
     IO.print(verdict("a field is no use of the def it is named like", Bool.not(G.tgt.mem(S.b("to"), T.tba.item.refs(ord.box())))))
     IO.print(verdict("Order writes a type above the def that names it", S.eq(ord.first(O.tor.names(O.tor.order([ord.to(), ord.box()]))), S.b("anon.Box"))))
+    IO.print(verdict("a quantity argument is its type's kind: a function type &1, Nat &2", S.eq(gt.pr(QF.tqf.item(qf.f(), qf.env())), S.b("import Base\n\ndef f(g: Nat -> Nat) -> Nat:\n  id(&1, Nat -> Nat, g)(id(&2, Nat, 3n))\n"))))
+    IO.print(verdict("a record value's type takes its quantities from its fields", S.eq(gt.pr(QF.tqf.item(qf.s(), qf.env())), S.b("import Base\n\ndef s() -> Cat<&2, &1>:\n  Cat{Nat, x => y => Nat -> Nat}\n"))))
+    IO.print(verdict("a field applied in a declaration is typed by the field before it", S.eq(gt.pr(QF.tqf.item(qf.c(), qf.env2())), S.b("import Base\n\ntype C<-o: Quant, -l: Quant> is Type:\n  C{Obj: Kind(o), Arr: Obj -> Obj -> Kind(l), eqv: @-x:Obj -> Pr<o, l, Obj, Arr(x, x)>}\n"))))
+    IO.print(verdict("a parameter typed by a type-valued def has the kind of its opened body", S.eq(gt.pr(QF.tqf.item(qf.p(), qf.env2())), S.b("import Base\n\ndef p(-a: Quant, -l: Quant, -A: Kind(a), -eq: Rel(a, A, l), r: IsE<a, l, A, eq>) -> Nat:\n  0n\n"))))
+    IO.print(verdict("a type-valued def keeps its kind when its body is of it", S.eq(gt.pr(QF.tqf.item(qf.inter(), qf.env2())), S.b("import Base\n\ndef inter(-a: Quant, -b: Quant, -A: Kind(a), -B: Kind(b)) -> Kind((a <&> b)):\n  Pr<a, b, A, B>\n"))))
+    IO.print(verdict("a type-valued def whose body is a function type is Type", S.eq(gt.pr(QF.tqf.item(qf.neg(), qf.env2())), S.b("import Base\n\ndef neg(-a: Quant, -A: Kind(a)) -> Type:\n  A -> Nat\n"))))
+    IO.print(verdict("another module's type-valued def opens with its own module's names", S.eq(gt.pr(QF.tqf.item(qf.np(), qf.env3())), S.b("import Base\n\ndef p(-a: Quant, -l: Quant, -A: Kind(a), -eq: M.Rel(a, A, l), r: M.IsE<a, l, A, eq>) -> Nat:\n  0n\n"))))
+    IO.print(verdict("a declared kind is instantiated all at once", S.eq(gt.pr(QF.tqf.item(qf.k(), qf.env2())), S.b("import Base\n\ndef k(-b: Quant, -c: Quant, -X: Kind(b), -Y: Kind(c)) -> Kind((b <&> c)):\n  Pr<b, c, X, Y>\n"))))
+    IO.print(verdict("a sort passed as an argument is Type", S.eq(gt.pr(QF.tqf.item(qf.w(), qf.env2())), S.b("import Base\n\ndef w(-a: Quant, -A: Kind(a), b: Bool) -> Type:\n  ite(&1, Type, b, A, A -> Nat)\n"))))
+    IO.print(verdict("a def's leading lambdas are typed by its return type", S.eq(gt.pr(QF.tqf.item(qf.sx(), qf.env2())), S.b("import Base\n\ndef sx(-a: Quant, -b: Quant) -> @-A:Kind(a) -> @-B:Kind(b) -> Kind((a <&> b)):\n  x => y => Pr<a, b, x, y>\n"))))
+    IO.print(verdict("a def returning a call takes its quantities from the call's type", S.eq(gt.pr(QF.tqf.item(qf.u(), qf.env2())), S.b("import Base\n\ndef u(-a: Quant) -> Pr<a, &2, Nat, Nat>:\n  mk(a)\n"))))
+    IO.print(verdict("a curried call's quantity is solved from its later argument", S.eq(gt.pr(QF.tqf.item(qf.sj(), qf.env2())), S.b("import Base\n\ndef sj(-a: Quant, -A: Kind(a)) -> Type:\n  ex(a, &1, A)(x => A -> Nat)\n"))))
+    IO.print(verdict("a type-valued def whose body is Data is Data", S.eq(gt.pr(QF.tqf.item(qf.top(), qf.env2())), S.b("import Base\n\ndef top(-a: Quant) -> Data:\n  Nat\n"))))
+    IO.print(verdict("a def returning a type-valued call whose body is a Type returns the call opened, Type", S.eq(gt.pr(QF.tqf.item(qf.rel.ret("nrel", "a", qf.pi(v("x"), v("Nat"))), qf.env2())), S.b("import Base\n\ndef nrel(-a: Quant, -A: Kind(a)) -> A -> A -> Type:\n  x => y => x -> Nat\n"))))
+    IO.print(verdict("a def returning a type-valued call keeps it when its body is of its kind", S.eq(gt.pr(QF.tqf.item(qf.rel.ret("erel", "&2", v("Nat")), qf.env2())), S.b("import Base\n\ndef erel(-a: Quant, -A: Kind(a)) -> Rel(a, A, &2):\n  x => y => Nat\n"))))
     IO.print(verdict("a record used through two fields is matched once", S.eq(gt.pr(Q.tcp.destr(ds.f(False{}), ds.env())), S.b("import Base\n\ndef f(r: M.R) -> T:\n  match r:\n    case M.R{r_f0, r_f1}:\n      g(r_f0, r_f1)\n"))))
     IO.print(verdict("a field used twice keeps the record whole", S.eq(gt.pr(Q.tcp.destr(ds.f(True{}), ds.env())), gt.pr(ds.f(True{})))))
 
@@ -390,7 +515,7 @@ def gold.laws() -> IO(Unit):
   +al : Map<&2, List<&2, U32>> = D.a2b.aliases(order)
   +ral : Map<&2, List<&2, U32>> = D.a2b.ral(order, al, Map.new(&2, List<&2, U32>))
   do IO<Unit>:
-    r1 : D.A2bG & Bool <- gold.one("Agda.Primitive", al, ral, D.A2bG{Map.new(&2, C.ActSym), Map.new(&2, C.ActCopy), Map.new(&2, Bool), Map.new(&2, Q.TcpProj)})
+    r1 : D.A2bG & Bool <- gold.one("Agda.Primitive", al, ral, D.A2bG{Map.new(&2, C.ActSym), Map.new(&2, C.ActCopy), Map.new(&2, Bool), Map.new(&2, Q.TcpProj), Map.new(&2, QF.TqSig)})
     g1 : D.A2bG <- gold.next("Agda.Primitive", al, ral, r1)
     r2 : D.A2bG & Bool <- gold.one("Level", al, ral, g1)
     g2 : D.A2bG <- gold.next("Level", al, ral, r2)
@@ -408,7 +533,7 @@ def gold.fix.laws() -> IO(Unit):
   +al : Map<&2, List<&2, U32>> = D.a2b.aliases(order)
   +ral : Map<&2, List<&2, U32>> = D.a2b.ral(order, al, Map.new(&2, List<&2, U32>))
   do IO<Unit>:
-    r1 : D.A2bG & Bool <- gold.one("Agda.Primitive", al, ral, D.A2bG{Map.new(&2, C.ActSym), Map.new(&2, C.ActCopy), Map.new(&2, Bool), Map.new(&2, Q.TcpProj)})
+    r1 : D.A2bG & Bool <- gold.one("Agda.Primitive", al, ral, D.A2bG{Map.new(&2, C.ActSym), Map.new(&2, C.ActCopy), Map.new(&2, Bool), Map.new(&2, Q.TcpProj), Map.new(&2, QF.TqSig)})
     g1 : D.A2bG <- gold.next("Agda.Primitive", al, ral, r1)
     r2 : D.A2bG & Bool <- gold.one("Agda.Builtin.Bool", al, ral, g1)
     g2 : D.A2bG <- gold.next("Agda.Builtin.Bool", al, ral, r2)

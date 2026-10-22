@@ -6,3 +6,5 @@ result-*
 /data/
 /run/
 run/code-sources/
+# Agda interface files (the fixtures are checked from their .agda)
+*.agdai

@@ -5,12 +5,12 @@ import Base
 
 # Agda: Level.Lift
 # Level.agda, line 19
-type Lift<-A: Type> is Type:
+type Lift<-a: Quant, -l: Quant, -A: Kind(a)> is Kind(a):
   lift{lower: A}
 
 # Agda: Level.Lift.lower
 # Level.agda, line 21
-def Lift.lower(-A: Type, r: Lift<A>) -> A:
+def Lift.lower(-a: Quant, -l: Quant, -A: Kind(a), r: Lift<a, l, A>) -> A:
   match r:
     case lift{f_lower}:
       f_lower

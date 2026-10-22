@@ -39,14 +39,16 @@ import ./Ast.bend as A
 # has to be the kind of the type it governs, which needs kind inference;
 # until then levels are dropped as before.
 def act.quant.on() -> Bool:
-  False{}
+  True{}
 
 # Substitution -----------------------------------------------------------------
 #
 # A copy's leaf is a term in the scope of its own variables; inlining it
 # substitutes the use site's arguments for them, shifting each argument's
-# free variables over the binders it is put under.  Only terms are walked:
-# sorts and levels are left as they are, since the translation drops them.
+# free variables over the binders it is put under.  Sorts and levels are
+# walked too: with levels as quantities (2026-10-20) a level variable left
+# unshifted named the wrong binder (`Rel Carrier ℓ` opened to `Carrier ->
+# Carrier -> Kind(Carrier)`).
 
 # the elimination spine es, then more
 def asb.elims.cat(es: A.Ag, more: A.Ag) -> A.Ag:
@@ -98,6 +100,18 @@ def asb.under(dep: Bool, +c: Nat) -> Nat:
 # variables at or above c shifted up by d
 def asb.shift(t: A.Ag, +d: Nat, +c: Nat) -> A.Ag:
   match t:
+    case A.AgSort{s}:
+      A.AgSort{asb.shift(s, d, c)}
+    case A.AgSSet{l}:
+      A.AgSSet{asb.shift(l, d, c)}
+    case A.AgSProp{l}:
+      A.AgSProp{asb.shift(l, d, c)}
+    case A.AgLevel{l}:
+      A.AgLevel{asb.shift(l, d, c)}
+    case A.AgLMax{n, ps}:
+      A.AgLMax{n, asb.shift(ps, d, c)}
+    case A.AgLPlus{k, x, rest}:
+      A.AgLPlus{k, asb.shift(x, d, c), asb.shift(rest, d, c)}
     case A.AgBeta{f, es}:
       A.AgBeta{asb.shift(f, d, c), asb.shift(es, d, c)}
     case A.AgVar{+i, x, es}:
@@ -111,7 +125,7 @@ def asb.shift(t: A.Ag, +d: Nat, +c: Nat) -> A.Ag:
     case A.AgPi{i, x, a, +dep, b}:
       A.AgPi{i, x, asb.shift(a, d, c), dep, asb.shift(b, d, asb.under(dep, c))}
     case A.AgEl{s, a}:
-      A.AgEl{s, asb.shift(a, d, c)}
+      A.AgEl{asb.shift(s, d, c), asb.shift(a, d, c)}
     case A.AgDontCare{a}:
       A.AgDontCare{asb.shift(a, d, c)}
     case A.AgMeta{es}:
@@ -156,6 +170,18 @@ def asb.subst.var(bound: Bool, +i: Nat, +depth: Nat, +vs: List<&2, A.Ag>, +n: Na
 # last variable) up
 def asb.subst(t: A.Ag, +depth: Nat, +vs: List<&2, A.Ag>, +n: Nat) -> A.Ag:
   match t:
+    case A.AgSort{s}:
+      A.AgSort{asb.subst(s, depth, vs, n)}
+    case A.AgSSet{l}:
+      A.AgSSet{asb.subst(l, depth, vs, n)}
+    case A.AgSProp{l}:
+      A.AgSProp{asb.subst(l, depth, vs, n)}
+    case A.AgLevel{l}:
+      A.AgLevel{asb.subst(l, depth, vs, n)}
+    case A.AgLMax{n2, ps}:
+      A.AgLMax{n2, asb.subst(ps, depth, vs, n)}
+    case A.AgLPlus{k, x, rest}:
+      A.AgLPlus{k, asb.subst(x, depth, vs, n), asb.subst(rest, depth, vs, n)}
     case A.AgBeta{f, es}:
       A.AgBeta{asb.subst(f, depth, vs, n), asb.subst(es, depth, vs, n)}
     case A.AgVar{+i, x, es}:
@@ -169,7 +195,7 @@ def asb.subst(t: A.Ag, +depth: Nat, +vs: List<&2, A.Ag>, +n: Nat) -> A.Ag:
     case A.AgPi{i, x, a, +dep, b}:
       A.AgPi{i, x, asb.subst(a, depth, vs, n), dep, asb.subst(b, asb.under(dep, depth), vs, n)}
     case A.AgEl{s, a}:
-      A.AgEl{s, asb.subst(a, depth, vs, n)}
+      A.AgEl{asb.subst(s, depth, vs, n), asb.subst(a, depth, vs, n)}
     case A.AgDontCare{a}:
       A.AgDontCare{asb.subst(a, depth, vs, n)}
     case A.AgMeta{es}:
@@ -867,12 +893,15 @@ def act.etu.pick(+u: A.Ag, d: A.Ag, part: Bool, +env: ActEnv) -> A.Ag:
 # has an eta unfolding and its value there is a type, or it is partial and
 # builds a pair (Product's `_∘_ = zip C._∘_ D._∘_`: by projections its laws
 # reduce on morphism variables; a pair used twice then needs Data homs,
-# which the quantity repairs specialise it to)
-def act.etu.try(t: A.Ag, +q: A.AgQ, +es: A.Ag, +env: ActEnv) -> A.Ag:
+# which the quantity repairs specialise it to).  at: the call is a record
+# constructor's argument, under its lambdas (2026-10-21: only there, as
+# Product's fields are; `map₁ f = map f id` unfolded used its pair twice
+# and needed Data, where the call checks)
+def act.etu.try(t: A.Ag, +q: A.AgQ, +es: A.Ag, at: Bool, +env: ActEnv) -> A.Ag:
   match t:
     case A.AgDefX{q2, es2}:
       +c = act.etu.get(env, q)
-      act.etu.pick(act.etu.at(c, es), A.AgDefX{q2, es2}, Nat.is_lt(act.es.apps(es), act.etu.n(c)), env)
+      act.etu.pick(act.etu.at(c, es), A.AgDefX{q2, es2}, Bool.and(at, Nat.is_lt(act.es.apps(es), act.etu.n(c))), env)
     case t:
       t
 
@@ -946,36 +975,39 @@ def act.cop.at(+env: ActEnv, +q: A.AgQ, +es: A.Ag) -> A.Ag:
 # reduction spends one unit of fuel (a resolved definition too), and the
 # fuel bounds the nesting: what is left when it runs out stays as it is
 # and fails at the translation as an unknown copy.
-def act.inline(+fuel: Nat, a: A.Ag, +env: ActEnv) -> A.Ag:
+def act.inline.go(+fuel: Nat, a: A.Ag, +at: Bool, +env: ActEnv) -> A.Ag:
   match fuel a:
     case 1n+p A.AgBeta{A.AgLam{i, x, d, b}, A.AgEApp{i2, v, rest}}:
-      act.inline(p, asb.push(act.beta1(d, b, v), rest), env)
+      act.inline.go(p, asb.push(act.beta1(d, b, v), rest), False{}, env)
     case f A.AgBeta{g, A.AgENil{}}:
-      act.inline(f, g, env)
+      act.inline.go(f, g, at, env)
     case 1n+p A.AgDef{+q, +es}:
-      act.inline(p, act.etu.try(act.expand(act.sym(env, q), q, es), q, es, env), env)
+      act.inline.go(p, act.etu.try(act.expand(act.sym(env, q), q, es), q, es, at, env), False{}, env)
     case 1n+p A.AgDefX{+q, es}:
-      +es2 = act.inline(p, es, env)
+      +es2 = act.inline.go(p, es, False{}, env)
       +r = act.cop.at(env, q, es2)
-      Bool.pick(A.Ag, act.ag.none(r), A.AgDef{q, es2}, act.inline(p, r, env))
+      Bool.pick(A.Ag, act.ag.none(r), A.AgDef{q, es2}, act.inline.go(p, r, False{}, env))
     case f A.AgVar{i, x, es}:
-      A.AgVar{i, x, act.inline(f, es, env)}
+      A.AgVar{i, x, act.inline.go(f, es, False{}, env)}
     case f A.AgCon{q, o, es}:
-      A.AgCon{q, o, act.inline(f, es, env)}
+      A.AgCon{q, o, act.inline.go(f, es, True{}, env)}
     case f A.AgLam{i, x, d, b}:
-      A.AgLam{i, x, d, act.inline(f, b, env)}
+      A.AgLam{i, x, d, act.inline.go(f, b, at, env)}
     case f A.AgPi{i, x, a2, d, b}:
-      A.AgPi{i, x, act.inline(f, a2, env), d, act.inline(f, b, env)}
+      A.AgPi{i, x, act.inline.go(f, a2, False{}, env), d, act.inline.go(f, b, False{}, env)}
     case f A.AgEl{s, t}:
-      A.AgEl{s, act.inline(f, t, env)}
+      A.AgEl{s, act.inline.go(f, t, False{}, env)}
     case f A.AgDontCare{t}:
-      A.AgDontCare{act.inline(f, t, env)}
+      A.AgDontCare{act.inline.go(f, t, False{}, env)}
     case f A.AgEApp{i, t, rest}:
-      A.AgEApp{i, act.inline(f, t, env), act.inline(f, rest, env)}
+      A.AgEApp{i, act.inline.go(f, t, at, env), act.inline.go(f, rest, at, env)}
     case f A.AgEProj{q, rest}:
-      A.AgEProj{q, act.inline(f, rest, env)}
+      A.AgEProj{q, act.inline.go(f, rest, False{}, env)}
     case f a2:
       a2
+
+def act.inline(+fuel: Nat, a: A.Ag, +env: ActEnv) -> A.Ag:
+  act.inline.go(fuel, a, False{}, env)
 
 # Applications ----------------------------------------------------------------
 
@@ -1190,6 +1222,14 @@ def act.undead(t: T.Bt) -> T.Bt:
     case t:
       t
 
+# ≡'s level argument, a quantity once levels are, is no part of the equation
+def act.eq.noq(on: Bool, xs: List<&2, T.Bt>) -> List<&2, T.Bt>:
+  match on xs:
+    case True{} h <> t:
+      t
+    case _ xs:
+      xs
+
 def act.eq(xs: List<&2, T.Bt>) -> T.Bt:
   match xs:
     case ty <> a <> b <> Nil{}:
@@ -1253,7 +1293,7 @@ def act.app.def(s: ActSym, +env: ActEnv, args: T.Bt) -> T.Bt:
     case ActSym{m, n, k, ms, ar, AbUnit{}, fs, c, cp}:
       T.BtVar{S.b("Unit")}
     case ActSym{m, n, k, ms, ar, AbEq{}, fs, c, cp}:
-      act.eq(act.keep(args, ms))
+      act.eq(act.eq.noq(act.quant.on(), act.keep(args, ms)))
     case ActSym{+m, +n, k, ms, ar, b, fs, c, cp}:
       act.app.def.kind(k, act.copy.is(cp), act.ref.of(act.is.here(env, m), env, m, n), ms, ar, args)
 
@@ -2871,11 +2911,181 @@ def act.fun.item(+nm: List<&2, U32>, +ms: List<&2, ActM>, +cls: A.Ag, body: T.Bt
 def act.fun.with(+nm: List<&2, U32>, +ms: List<&2, ActM>, +ar: Nat, p: A.AgProj, +cls: A.Ag, +key: String, +t: A.Ag, +env: ActEnv, doc: List<&2, List<&2, U32>>, +r: ActPs) -> List<&2, T.BItem>:
   act.fun.item(nm, ms, cls, act.fun.body(p, cls, key, ar, t, act.ps.ents(r), env, act.copat.is(cls), r, ms), r, doc, env)
 
-def act.item.fun(s: ActSym, d: A.AgD, +key: String, ty: A.Ag, +env: ActEnv, doc: List<&2, List<&2, U32>>) -> List<&2, T.BItem>:
+# Sorts by place (with quantities on): Kind(q) is a requirement in Bend (every
+# value copyable at q), where Agda's Set ℓ is only a bound, so a definition
+# keeps Type (`¬ A = A → ⊥` is a function type at any level). Kind(q) stays
+# where kinds are declared: data and record parameters, field types (with
+# type-valued definitions opened, so that Category's `_⇒_ : Rel Obj ℓ` shows
+# Kind(l)) and the projections that read them.
+def act.unkind(t: T.Bt) -> T.Bt:
+  match t:
+    case T.BtApp{T.BtVar{+k}, +a}:
+      Bool.pick(T.Bt, S.eq(k, S.b("Kind")), T.BtType{}, T.BtApp{T.BtVar{k}, act.unkind(a)})
+    case T.BtApp{f, a}:
+      T.BtApp{act.unkind(f), act.unkind(a)}
+    case T.BtArgs{a, rest}:
+      T.BtArgs{act.unkind(a), act.unkind(rest)}
+    case T.BtTplArg{a}:
+      T.BtTplArg{act.unkind(a)}
+    case T.BtLam{m, y, b}:
+      T.BtLam{m, y, act.unkind(b)}
+    case T.BtPi{m, y, d, a, b}:
+      T.BtPi{m, y, d, act.unkind(a), act.unkind(b)}
+    case T.BtCon{c, a}:
+      T.BtCon{c, act.unkind(a)}
+    case T.BtTyApp{c, a}:
+      T.BtTyApp{c, act.unkind(a)}
+    case T.BtEq{ty, a, b}:
+      T.BtEq{act.unkind(ty), act.unkind(a), act.unkind(b)}
+    case T.BtSucc{a}:
+      T.BtSucc{act.unkind(a)}
+    case T.BtAnn{a, ty}:
+      T.BtAnn{act.unkind(a), act.unkind(ty)}
+    case T.BtDead{a}:
+      T.BtDead{act.unkind(a)}
+    case T.BtMatch{xs, cs}:
+      T.BtMatch{act.unkind(xs), act.unkind(cs)}
+    case T.BtCase{p, b, rest}:
+      T.BtCase{p, act.unkind(b), act.unkind(rest)}
+    case T.BtExpr{e}:
+      T.BtExpr{act.unkind(e)}
+    case T.BtRw{e, p, b}:
+      T.BtRw{act.unkind(e), act.unkind(p), act.unkind(b)}
+    case T.BtLet{y, v, b}:
+      T.BtLet{y, act.unkind(v), act.unkind(b)}
+    case t:
+      t
+
+def act.unkind.ps(ps: List<&2, T.BParam>) -> List<&2, T.BParam>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case T.BParam{m, x, ty} <> t:
+      T.BParam{m, x, act.unkind(ty)} <> act.unkind.ps(t)
+
+def act.unkind.its(its: List<&2, T.BItem>) -> List<&2, T.BItem>:
+  match its:
+    case Nil{}:
+      Nil{}
+    case T.BiDef{n, ps, ret, body, doc} <> t:
+      T.BiDef{n, act.unkind.ps(ps), act.unkind(ret), act.unkind(body), doc} <> act.unkind.its(t)
+    case it <> t:
+      it <> act.unkind.its(t)
+
+# a type's end (past its Pis) as Type when it is a kind
+def act.unkind.end(t: T.Bt) -> T.Bt:
+  match t:
+    case T.BtPi{m, y, d, a, b}:
+      T.BtPi{m, y, d, a, act.unkind.end(b)}
+    case T.BtApp{T.BtVar{+k}, +a}:
+      Bool.pick(T.Bt, S.eq(k, S.b("Kind")), T.BtType{}, T.BtApp{T.BtVar{k}, a})
+    case t:
+      t
+
+# a type-valued definition (`_×_`, Rel, `¬_`) keeps its parameters' and body's
+# kinds, so `A × B` is as copyable as Σ A B, and only its own sort is Type
+# (2026-10-21: one with an expression body keeps its sort, and Qfix's
+# tqf.ret.kind keeps it when the body is of that kind)
+def act.unkind.ret(its: List<&2, T.BItem>) -> List<&2, T.BItem>:
+  match its:
+    case Nil{}:
+      Nil{}
+    case T.BiDef{n, ps, ret, T.BtExpr{b}, doc} <> t:
+      T.BiDef{n, ps, ret, T.BtExpr{b}, doc} <> act.unkind.ret(t)
+    case T.BiDef{n, ps, ret, body, doc} <> t:
+      T.BiDef{n, ps, act.unkind.end(ret), body, doc} <> act.unkind.ret(t)
+    case it <> t:
+      it <> act.unkind.ret(t)
+
+# a proper projection keeps its kinds; any other function has Type
+def act.unkind.if(p: A.AgProj, its: List<&2, T.BItem>) -> List<&2, T.BItem>:
+  match p:
+    case A.AgPrOf{Some{r}, o, ix}:
+      its
+    case _:
+      act.unkind.its(its)
+
+# a field's or a projection's type with the type-valued definitions it ends
+# in opened (Rel Obj ℓ is Obj → Obj → Set ℓ)
+# (only with quantities on; tl: the definition is type-valued)
+# (2026-10-20: a proper projection keeps its kinds even when it is
+# type-valued: `Setoid.Carrier` is a Kind(c), the field's own kind, so the
+# quantity of `IsEquivalence Carrier _≈_` is c, not the &1 of a Type)
+# (2026-10-21: whether a value definition's kinds become Type.  They did
+# so that a caller could pass a function type for `A : Set a`, before Qfix
+# solved each call's quantities; with it on, `isYes : Dec<&1, A>` met
+# `True_`'s `Dec<a, A>`)
+def act.unkind.vals() -> Bool:
+  False{}
+
+def act.unkind.val(on: Bool, its: List<&2, T.BItem>) -> List<&2, T.BItem>:
+  match on:
+    case True{}:
+      act.unkind.its(its)
+    case False{}:
+      its
+
+def act.unkind.np(tl: Bool, its: List<&2, T.BItem>) -> List<&2, T.BItem>:
+  match tl:
+    case True{}:
+      act.unkind.ret(its)
+    case False{}:
+      act.unkind.val(act.unkind.vals(), its)
+
+def act.unkind.when(on: Bool, p: A.AgProj, tl: Bool, its: List<&2, T.BItem>) -> List<&2, T.BItem>:
+  match on p:
+    case True{} A.AgPrOf{Some{r}, o, ix}:
+      its
+    case True{} _:
+      act.unkind.np(tl, its)
+    case False{} _:
+      its
+
+def act.unfold.wrap(+s: A.Ag, u: A.Ag, +t: A.Ag, +env: ActEnv) -> A.Ag:
+  match u:
+    case A.AgNone{}:
+      t
+    case u:
+      A.AgEl{s, act.inline(1024n, u, env)}
+
+def act.unfold.sorts(fuel: Nat, t: A.Ag, +env: ActEnv) -> A.Ag:
+  match fuel t:
+    case 1n+f A.AgEl{+s, A.AgDef{+q, +es}}:
+      act.unfold.sorts(f, act.unfold.wrap(s, act.unfold(env, q, es), A.AgEl{s, A.AgDef{q, es}}, env), env)
+    case 1n+f A.AgEl{+s, A.AgDefX{+q, +es}}:
+      act.unfold.sorts(f, act.unfold.wrap(s, act.unfold(env, q, es), A.AgEl{s, A.AgDefX{q, es}}, env), env)
+    case 1n+f A.AgEl{s, A.AgPi{i, x, a, d, b}}:
+      A.AgEl{s, A.AgPi{i, x, a, d, act.unfold.sorts(f, b, env)}}
+    case f t:
+      t
+def act.field.sorts(on: Bool, t: A.Ag, +env: ActEnv) -> A.Ag:
+  match on:
+    case True{}:
+      act.unfold.sorts(8n, t, env)
+    case False{}:
+      t
+
+def act.proj.sorts(on: Bool, p: A.AgProj, t: A.Ag, +env: ActEnv) -> A.Ag:
+  match on p:
+    case True{} A.AgPrOf{Some{r}, o, ix}:
+      act.unfold.sorts(8n, t, env)
+    case _ _:
+      t
+
+# type-valuedness inside an item: a projection's by its own type, another
+# function's once its type-valued ends are opened (as act.tylevel)
+def act.tylevel.env(p: A.AgProj, +ty: A.Ag, +env: ActEnv) -> Bool:
+  match p env:
+    case A.AgPrOf{Some{r}, o, ix} e:
+      act.ends.sort(ty)
+    case _ ActEnv{mod, tab, al, +unf}:
+      act.ends.sort.u(8n, ty, unf)
+
+def act.item.fun(s: ActSym, d: A.AgD, +key: String, +ty: A.Ag, +env: ActEnv, doc: List<&2, List<&2, U32>>) -> List<&2, T.BItem>:
   match s d:
-    case ActSym{m, +n, k, +ms, +ar, b, fs, c, cp} A.AgDFun{p, r, w, e, te, mu, +cls, tree}:
-      +t = act.inline(100000n, ty, env)
-      act.fun.with(n, ms, ar, p, cls, key, t, env, doc, act.params(64n, ar, t, ms, Nil{}, env))
+    case ActSym{m, +n, k, +ms, +ar, b, fs, c, cp} A.AgDFun{+p, r, w, e, te, mu, +cls, tree}:
+      +t = act.proj.sorts(act.quant.on(), p, act.inline(100000n, ty, env), env)
+      act.unkind.when(act.quant.on(), p, act.tylevel.env(p, ty, env), act.fun.with(n, ms, ar, p, cls, key, t, env, doc, act.params(64n, ar, t, ms, Nil{}, env)))
     case _ _:
       Nil{}
 
@@ -2901,13 +3111,13 @@ def act.rtel(tel: A.Ag, np: Nat, ms: List<&2, ActM>, +ctx: List<&2, T.Bt>, +env:
   match tel np ms:
     case A.AgTel{+x, i, ty, rest} 1n+p +m <> mt:
       +nm = act.fresh(x, ctx)
-      act.rt.param(m, nm, act.t(act.inline(100000n, ty, env), ctx, env), act.rtel(rest, p, mt, act.entry(m, nm) <> ctx, env))
+      act.rt.param(m, nm, act.t(act.field.sorts(act.quant.on(), act.inline(100000n, ty, env), env), ctx, env), act.rtel(rest, p, mt, act.entry(m, nm) <> ctx, env))
     case A.AgTel{+x, i, ty, rest} 1n+p Nil{}:
       +nm = act.fresh(x, ctx)
-      act.rt.param(AmErased{}, nm, act.t(act.inline(100000n, ty, env), ctx, env), act.rtel(rest, p, Nil{}, T.BtVar{nm} <> ctx, env))
+      act.rt.param(AmErased{}, nm, act.t(act.field.sorts(act.quant.on(), act.inline(100000n, ty, env), env), ctx, env), act.rtel(rest, p, Nil{}, T.BtVar{nm} <> ctx, env))
     case A.AgTel{+x, i, ty, rest} 0n ms:
       +nm = act.fresh(x, ctx)
-      act.rt.field(nm, act.t(act.inline(100000n, ty, env), ctx, env), act.rtel(rest, 0n, ms, T.BtVar{nm} <> ctx, env))
+      act.rt.field(nm, act.t(act.field.sorts(act.quant.on(), act.inline(100000n, ty, env), env), ctx, env), act.rtel(rest, 0n, ms, T.BtVar{nm} <> ctx, env))
     case _ _ _:
       ActRt{Nil{}, Nil{}}
 
@@ -3179,13 +3389,24 @@ type ActRec is Data:
 
 # (the record by its symbol: the module's own declarations are all the
 # decl map has, and Σ is Agda.Builtin.Sigma's; a split's eta branch already
-# says the record has eta)
+# says the record has eta).  A record a module application copied is not
+# taken: its fields are copies Bend has no names for (Core's `open import
+# Categories.Morphism.IsoEquiv 𝒞` copies `_≃_`, 2026-10-21); the copy's
+# clause leads to the original instead (act.etu.leaf)
 def act.etu.rec.fs(s: ActSym, es: A.Ag) -> ActRec:
   match s:
-    case ActSym{m, n, A.AkRecord{}, ms, ar, b, fs, c, cp}:
+    case ActSym{m, n, A.AkRecord{}, ms, ar, b, fs, c, None{}}:
       ActRec{fs, es, True{}}
     case _:
       ActRec{Nil{}, A.AgENil{}, False{}}
+
+# what a name unfolds to: a copy's clause, else its leaf in the unfoldings
+def act.etu.leaf(s: ActSym, +unf: Map<&2, ActCopy>, +q: A.AgQ) -> ActCopy:
+  match s:
+    case ActSym{m, n, k, ms, ar, b, fs, c, Some{cp}}:
+      cp
+    case _:
+      act.unf.got(Map.get(ActCopy, ActCopy{0n, A.AgNone{}}, unf, act.key(q)))
 
 def act.etu.rec.pick(a: ActRec, b: ActRec) -> ActRec:
   match a:
@@ -3199,7 +3420,7 @@ def act.etu.rec(fuel: Nat, t: A.Ag, +tab: Map<&2, ActSym>, +unf: Map<&2, ActCopy
     case f A.AgEl{s, x}:
       act.etu.rec(f, x, tab, unf)
     case 1n+f A.AgDef{+q, +es}:
-      act.etu.rec.pick(act.etu.rec.fs(act.sym.got(Map.get(ActSym, act.sym0(), tab, act.key(q))), es), act.etu.rec(f, act.unfold.of(act.unf.got(Map.get(ActCopy, ActCopy{0n, A.AgNone{}}, unf, act.key(q))), es), tab, unf))
+      act.etu.rec.pick(act.etu.rec.fs(act.sym.got(Map.get(ActSym, act.sym0(), tab, act.key(q))), es), act.etu.rec(f, act.unfold.of(act.etu.leaf(act.sym.got(Map.get(ActSym, act.sym0(), tab, act.key(q))), unf, q), es), tab, unf))
     case _ _:
       ActRec{Nil{}, A.AgENil{}, False{}}
 

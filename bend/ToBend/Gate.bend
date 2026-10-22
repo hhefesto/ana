@@ -3,6 +3,7 @@ import ../Sys.bend as S
 import ./Ast.bend as T
 import ./Print.bend as P
 import ./Copy.bend as Q
+import ./Qfix.bend as QF
 
 # Gate: only Bend that checks is kept (the user, 2026-10-18: "only fully
 # proven").  A module's file is written and checked with the locked
@@ -411,7 +412,7 @@ def tgt.var.of(+w: List<&2, U32>) -> List<&2, U32>:
 # 1: a use twice, 2: an erased binder used live, 3: a Type where Data is
 # expected (the marked span a type parameter), 0: none of these
 def tgt.repair.kind(+w: List<&2, U32>) -> Nat:
-  Bool.pick(Nat, S.infix(w, S.b("(consumed more than once)")), 1n, Bool.pick(Nat, Bool.and(S.prefix(w, S.b("expected : -")), S.infix(w, S.b("observed : "))), 2n, Bool.pick(Nat, Bool.and(S.prefix(w, S.b("expected : Data")), Bool.or(S.infix(w, S.b("observed : Type")), S.infix(w, S.b("observed : Kind(")))), 3n, Bool.pick(Nat, Bool.and(S.prefix(w, S.b("expected : ")), S.infix(w, S.b("&2"))), 4n, 0n))))
+  Bool.pick(Nat, S.infix(w, S.b("(consumed more than once)")), 1n, Bool.pick(Nat, Bool.and(S.prefix(w, S.b("expected : -")), S.infix(w, S.b("observed : "))), 2n, Bool.pick(Nat, Bool.and(S.prefix(w, S.b("expected : Data")), Bool.or(S.infix(w, S.b("observed : Type")), S.infix(w, S.b("observed : Kind(")))), 3n, Bool.pick(Nat, Bool.and(S.prefix(w, S.b("expected : Kind(")), S.infix(w, S.b("observed : Type"))), 5n, Bool.pick(Nat, Bool.and(S.prefix(w, S.b("expected : ")), S.infix(w, S.b("&2"))), 4n, 0n)))))
 
 def tgt.find(its: List<&2, T.BItem>, +n: List<&2, U32>) -> Maybe<&2, T.BItem>:
   match its:
@@ -441,6 +442,14 @@ def tgt.data.of(m: Maybe<&2, T.BItem>, +v: List<&2, U32>, +why: List<&2, U32>) -
     case None{}:
       None{}
 
+# a Type where a Kind(q) is expected: q specialised to &1
+def tgt.q1.of(m: Maybe<&2, T.BItem>, +why: List<&2, U32>) -> Maybe<&2, T.BItem>:
+  match m:
+    case Some{+it}:
+      Q.tcp.q.spec1(it, why)
+    case None{}:
+      None{}
+
 # a caller passing its own quantity where &2 is expected: specialised too
 def tgt.q.of(m: Maybe<&2, T.BItem>, +why: List<&2, U32>) -> Maybe<&2, T.BItem>:
   match m:
@@ -449,26 +458,28 @@ def tgt.q.of(m: Maybe<&2, T.BItem>, +why: List<&2, U32>) -> Maybe<&2, T.BItem>:
     case None{}:
       None{}
 
-def tgt.repaired(r: Maybe<&2, T.BItem>, +blame: List<&2, U32>, +why: List<&2, U32>, +its: List<&2, T.BItem>, ds: List<&2, TgtDrop>) -> TgtSt:
+def tgt.repaired(r: Maybe<&2, T.BItem>, +blame: List<&2, U32>, +why: List<&2, U32>, +its: List<&2, T.BItem>, ds: List<&2, TgtDrop>, +qe: QF.TqEnv) -> TgtSt:
   match r:
     case Some{new}:
-      TgtSt{tgt.replace(its, blame, new), ds}
+      TgtSt{tgt.replace(its, blame, QF.tqf.item(new, qe)), ds}
     case None{}:
       tgt.after.fail(blame, why, TgtSt{its, ds})
 
 # a failure: repaired when its message names a binder the blamed def can
 # raise (or its carets mark a type parameter to declare Data), else the def
 # and its dependents dropped
-def tgt.on.fail(+k: Nat, +blame: List<&2, U32>, +why: List<&2, U32>, +sp: List<&2, U32>, +its: List<&2, T.BItem>, ds: List<&2, TgtDrop>) -> TgtSt:
+def tgt.on.fail(+k: Nat, +blame: List<&2, U32>, +why: List<&2, U32>, +sp: List<&2, U32>, +its: List<&2, T.BItem>, ds: List<&2, TgtDrop>, +qe: QF.TqEnv) -> TgtSt:
   match k:
     case 0n:
       tgt.after.fail(blame, why, TgtSt{its, ds})
     case 3n:
-      tgt.repaired(tgt.data.of(tgt.find(its, blame), S.strip(S.strip(sp, S.b("~")), S.b("-")), why), blame, why, its, ds)
+      tgt.repaired(tgt.data.of(tgt.find(its, blame), S.strip(S.strip(sp, S.b("~")), S.b("-")), why), blame, why, its, ds, qe)
     case 4n:
-      tgt.repaired(tgt.q.of(tgt.find(its, blame), why), blame, why, its, ds)
+      tgt.repaired(tgt.q.of(tgt.find(its, blame), why), blame, why, its, ds, qe)
+    case 5n:
+      tgt.repaired(tgt.q1.of(tgt.find(its, blame), why), blame, why, its, ds, qe)
     case 1n+p:
-      tgt.repaired(tgt.raise.of(tgt.find(its, blame), tgt.var.of(why), Nat.is_eq(k, 1n)), blame, why, its, ds)
+      tgt.repaired(tgt.raise.of(tgt.find(its, blame), tgt.var.of(why), Nat.is_eq(k, 1n)), blame, why, its, ds, qe)
 
 type TgtRun is Data:
   TgtRun{st: TgtSt, done: Bool, checks: Nat}
@@ -480,26 +491,38 @@ def tgt.empty(st: TgtSt) -> Bool:
     case _:
       False{}
 
-def tgt.round.of(v: TgtV, +head: List<&2, List<&2, U32>>, +ims: List<&2, T.BImport>, +checks: Nat, st: TgtSt) -> TgtRun:
+def tgt.round.of(v: TgtV, +head: List<&2, List<&2, U32>>, +ims: List<&2, T.BImport>, +checks: Nat, st: TgtSt, +qe: QF.TqEnv) -> TgtRun:
   match v st:
     case TgPass{} st:
       TgtRun{st, True{}, checks}
     case TgFail{+n, +l, +w, sp} TgtSt{+its, ds}:
-      TgtRun{tgt.on.fail(tgt.repair.kind(w), tgt.blame(n, its, tgt.start(head, ims), l), w, sp, its, ds), False{}, checks}
+      TgtRun{tgt.on.fail(tgt.repair.kind(w), tgt.blame(n, its, tgt.start(head, ims), l), w, sp, its, ds, qe), False{}, checks}
 
 # one check: the file written, bend run on it, its verdict applied
-def tgt.round(+bend: String, +secs: U32, +path: String, +head: List<&2, List<&2, U32>>, +ims: List<&2, T.BImport>, +checks: Nat, st: TgtSt) -> IO(TgtRun):
+# with A2B_GATE_ROUNDS set, each round's file and bend's answer are kept
+# beside the module's (path.N.bend), to see what the repairs did
+def tgt.keep(on: Bool, +path: String, +n: Nat, +text: List<&2, U32>, +out: List<&2, U32>) -> IO(Unit):
+  match on:
+    case True{}:
+      S.write(path ++ "." ++ Nat.show(n) ++ ".bend", List.append(&2, U32, text, List.append(&2, U32, S.b("\n# bend:\n# "), out)))
+    case False{}:
+      IO.pure(Unit, Unit{})
+
+def tgt.round(+bend: String, +secs: U32, +path: String, +head: List<&2, List<&2, U32>>, +ims: List<&2, T.BImport>, +checks: Nat, st: TgtSt, +qe: QF.TqEnv) -> IO(TgtRun):
   match st:
     case TgtSt{+its, ds}:
+      +text = tgt.file(head, ims, its)
       do IO<TgtRun>:
-        S.write(path, tgt.file(head, ims, its))
+        S.write(path, text)
         +o : S.Out <- S.run(S.parent(path), Nil{}, secs, bend, [S.base(path), "--check-only"], Nil{})
-        return tgt.round.of(tgt.verdict(S.Out.text(o)), head, ims, 1n+checks, TgtSt{its, ds})
+        +keep : String <- S.env("A2B_GATE_ROUNDS", "")
+        tgt.keep(Bool.not(S.eq(S.b(keep), Nil{})), path, checks, text, List.take(&2, U32, S.Out.text(o), 600n))
+        return tgt.round.of(tgt.verdict(S.Out.text(o)), head, ims, 1n+checks, TgtSt{its, ds}, qe)
 
-def tgt.loop(fuel: Nat, +bend: String, +secs: U32, +path: String, +head: List<&2, List<&2, U32>>, +ims: List<&2, T.BImport>, r: TgtRun) -> IO(TgtRun):
+def tgt.loop(fuel: Nat, +bend: String, +secs: U32, +path: String, +head: List<&2, List<&2, U32>>, +ims: List<&2, T.BImport>, +qe: QF.TqEnv, r: TgtRun) -> IO(TgtRun):
   match fuel r:
     case 1n+p TgtRun{st, False{}, +checks}:
-      IO.bind(TgtRun, TgtRun, tgt.round(bend, secs, path, head, ims, checks, st), tgt.loop(p, bend, secs, path, head, ims))
+      IO.bind(TgtRun, TgtRun, tgt.round(bend, secs, path, head, ims, checks, st, qe), tgt.loop(p, bend, secs, path, head, ims, qe))
     case _ r:
       IO.pure(TgtRun, r)
 
@@ -576,9 +599,9 @@ def tgt.merge(a: TgtSt, ds: List<&2, TgtDrop>) -> TgtSt:
     case TgtSt{its, d0}:
       TgtSt{its, List.append(&2, TgtDrop, d0, ds)}
 
-def tgt.gate.go(+bend: String, +secs: U32, +path: String, +head: List<&2, List<&2, U32>>, +ims: List<&2, T.BImport>, +its: List<&2, T.BItem>, +st: TgtSt) -> IO(TgtRun):
+def tgt.gate.go(+bend: String, +secs: U32, +path: String, +head: List<&2, List<&2, U32>>, +ims: List<&2, T.BImport>, +its: List<&2, T.BItem>, +st: TgtSt, +qe: QF.TqEnv) -> IO(TgtRun):
   do IO<TgtRun>:
-    r : TgtRun <- tgt.loop(Nat.add(8n, Nat.mul(4n, List.length(&2, T.BItem, its))), bend, secs, path, head, ims, TgtRun{st, tgt.empty(st), 0n})
+    r : TgtRun <- tgt.loop(Nat.add(8n, Nat.mul(4n, List.length(&2, T.BItem, its))), bend, secs, path, head, ims, qe, TgtRun{st, tgt.empty(st), 0n})
     tgt.final(path, head, ims, r)
 
 
@@ -586,7 +609,7 @@ def tgt.gate.go(+bend: String, +secs: U32, +path: String, +head: List<&2, List<&
 # check (with the header and imports given); the answer has the kept
 # items, the drops and the number of checks run.  pre: the items left
 # after tgt.ext, and its drops.
-def tgt.gate(+bend: String, +secs: U32, +path: String, +head: List<&2, List<&2, U32>>, +ims: List<&2, T.BImport>, pre: TgtSt) -> IO(TgtRun):
+def tgt.gate(+bend: String, +secs: U32, +path: String, +head: List<&2, List<&2, U32>>, +ims: List<&2, T.BImport>, pre: TgtSt, +qe: QF.TqEnv) -> IO(TgtRun):
   match pre:
     case TgtSt{+its, d0}:
-      tgt.gate.go(bend, secs, path, head, ims, its, tgt.deps(S.b("uses a dropped item"), tgt.merge(tgt.gapless(its), d0)))
+      tgt.gate.go(bend, secs, path, head, ims, its, tgt.deps(S.b("uses a dropped item"), tgt.merge(tgt.gapless(its), d0)), qe)
