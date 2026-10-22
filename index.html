@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ana: a language model written in Bend</title>
+<meta name="description" content="ana is a 115M-parameter language model written end to end in Bend: a proven specification, a GPU trainer, a tokenizer, a decoder and the data pipeline. Open source, MIT.">
+<meta property="og:title" content="ana: a language model written in Bend">
+<meta property="og:description" content="115M parameters, GPT-2 small's shape. Spec and proofs, GPU trainer, tokenizer, decoder and data pipeline, all in Bend. Open source.">
+<meta property="og:image" content="https://ana.hhefesto.dev/quicksort.png">
+<meta property="og:url" content="https://ana.hhefesto.dev/">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://ana.hhefesto.dev/quicksort.png">
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b36; --fg: #e6e6e6; --dim: #9aa3b2;
+    --accent: #f0b35a; --green: #7ee08a; --blue: #7cb7ff; --mono: ui-monospace, "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 17px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 0 22px 80px; }
+  a { color: var(--blue); }
+  h1 { font: 700 64px/1 var(--mono); margin: 64px 0 8px; color: var(--accent); letter-spacing: -1px; }
+  h2 { margin: 56px 0 12px; font-size: 26px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+  h3 { margin: 28px 0 8px; font-size: 19px; }
+  .tag { font-size: 22px; margin: 0 0 18px; color: var(--fg); }
+  .lead { color: var(--dim); }
+  .links { display: flex; flex-wrap: wrap; gap: 10px; margin: 22px 0 8px; }
+  .links a { text-decoration: none; padding: 8px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--fg); }
+  .links a.main { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .open { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 0; padding: 0; list-style: none; }
+  .open li { font: 600 13px var(--mono); padding: 4px 10px; border-radius: 999px; background: #1f2a1f; color: var(--green); border: 1px solid #2f4a2f; }
+  nav { margin: 30px 0 0; font-size: 15px; color: var(--dim); }
+  nav a { color: var(--dim); margin-right: 14px; }
+  pre, code { font-family: var(--mono); }
+  code { background: var(--panel); padding: 1px 5px; border-radius: 4px; font-size: 0.92em; }
+  pre { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; overflow-x: auto; font-size: 14.5px; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  .turn { color: var(--accent); }
+  .ok { color: var(--green); }
+  .c { color: var(--dim); }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0 6px; font-size: 15.5px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--dim); font-weight: 600; }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+  .note { border-left: 3px solid var(--accent); padding: 4px 14px; color: var(--dim); margin: 16px 0; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 700px) { .two { grid-template-columns: 1fr; } h1 { font-size: 48px; } }
+  footer { margin-top: 64px; color: var(--dim); font-size: 14px; border-top: 1px solid var(--line); padding-top: 14px; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>ana</h1>
+<p class="tag">A language model written end to end in <a href="https://github.com/bendlang/bend">Bend</a>.</p>
+<p class="lead">The specification and its proofs, the model, the GPU trainer, the tokenizer, the decoder, the evals
+and the tools that build the training data: all Bend. 115M parameters, GPT-2 small's shape, trained on a
+corpus where it writes code in Haskell, Agda, Lean, Bend and Nix, and the real compiler answers.</p>
+
+<ul class="open">
+  <li>open source · MIT</li>
+  <li>open spec, proven</li>
+  <li>open trainer</li>
+  <li>open data pipeline</li>
+  <li>open weights · coming to Hugging Face</li>
+</ul>
+
+<div class="links">
+  <a class="main" href="https://github.com/hhefesto/ana">github.com/hhefesto/ana</a>
+  <a href="#quicksort">The quicksort</a>
+  <a href="#try">Try it</a>
+</div>
+
+<nav>
+  <a href="#quicksort">quicksort</a><a href="#bend">all Bend</a><a href="#spec">spec</a><a href="#model">model</a><a href="#trainer">trainer</a><a href="#data">data</a><a href="#results">results</a><a href="#open">what's open</a><a href="#try">try it</a><a href="#next">next</a>
+</nav>
+
+<h2 id="quicksort">It writes a correct quicksort</h2>
+<p>This is a prompt from ana's probes: the task, the types it may use, and the type to inhabit. Everything after
+<code>## Term</code> is ana's, from the checkpoint <code>s2-step56725</code>, first try, unedited. The
+<code>## ghc</code> turn is the real GHC.</p>
+<pre><code><span class="turn">## User</span>
+
+Define `quicksort`.
+
+<span class="turn">## Context</span>
+
+filter :: (a -&gt; Bool) -&gt; [a] -&gt; [a]
+(++) :: [a] -&gt; [a] -&gt; [a]
+
+<span class="turn">## Type</span>
+
+quicksort :: Ord a =&gt; [a] -&gt; [a]
+
+<span class="turn">## Term</span>                                     <span class="c">-- ana writes from here</span>
+
+quicksort [] = []
+quicksort (x:xs) =
+  let smallerSorted = quicksort [a | a &lt;- xs, a &lt;= x]
+      biggerSorted = quicksort [a | a &lt;- xs, a &gt; x]
+  in smallerSorted ++ [x] ++ biggerSorted
+
+<span class="turn">## ghc</span>
+
+[1 of 1] Compiling Unit             ( Unit.hs, nothing )
+<span class="ok">[exit 0]</span></code></pre>
+<p>GHC accepting it only says it type-checks, so I tested it: on 2,000 random lists with duplicates it agrees
+with <code>Data.List.sort</code> on every one.</p>
+<p class="note">Honest note: this is the textbook quicksort, word for word the one in <i>Learn You a Haskell</i>, so
+ana has most likely seen it. Other checkpoints sometimes write a version that drops duplicates. It's a
+demonstration of what a 115M model trained this way already does, not of reasoning.</p>
+
+<h2 id="bend">Everything is Bend</h2>
+<p>About 97,000 lines of Bend in 210 files. Bend checks the proofs, and its compiler runs the trainer on the GPU.</p>
+<table>
+  <tr><th>part</th><th>where</th></tr>
+  <tr><td>The specification: every law about the model, proven</td><td><code>bend/Spec/</code></td></tr>
+  <tr><td>The model; the tree trainer (the reference); the dense GPU trainer, whose reverse mode is derived as a program transformation over bulk ops</td><td><code>bend/Model.bend</code>, <code>bend/Train*.bend</code>, <code>bend/Dense/</code></td></tr>
+  <tr><td>The decoder and the bits-per-byte scorer</td><td><code>bend/Generate.bend</code>, <code>bend/Evaluate.bend</code></td></tr>
+  <tr><td>Byte-level BPE: encode, decode and their identity</td><td><code>bend/Tokenizer.bend</code></td></tr>
+  <tr><td>The corpus tools: extraction, packing, planning, mixing, the real checkers, transcripts</td><td><code>bend/Extract.bend</code>, <code>Pack</code>, <code>PlanCorpus</code>, <code>Mix</code>, <code>Check/</code>, <code>Transcripts</code></td></tr>
+  <tr><td>Running a training run: staging data on a rented GPU box, the chain of stages, watching, evals</td><td><code>bend/Box/</code></td></tr>
+</table>
+<p>The few things that aren't Bend are the ones that can't be: the Agda exporter is an Agda backend (Haskell), the
+Lean checker's driver is Lean, and two tiny C files (a clock and a cuBLAS call).</p>
+
+<h2 id="spec">The meaning first</h2>
+<p>ana is short for <b>anamorphism</b>, an unfold. A fold consumes a structure down to a value; an unfold grows one
+from a seed for as long as you keep asking. That is autoregressive generation: from a state, emit a token and
+a next state. <code>bend/Spec/Autoregressive.bend</code> states the model as that coalgebra, and sampling is its
+unfold into the trie of continuations (<code>bend/Spec/Trie.bend</code>).</p>
+<p>The design follows Conal Elliott's denotational design: say what the model <i>means</i>, prove the laws on the
+meaning, and make the fast code a refinement of it. The spec covers the semiring algebra, weighted languages,
+the trie, decoding and speculative decoding, the residual stream, linear attention, the tied head, attention
+sinks, reverse mode, and Tai-Danae Bradley's enriched-category reading of language. It was first written in Agda
+and is now Bend:</p>
+<pre><code>$ nix run .#bend -- bend/Everything.bend
+<span class="ok">ALL PROOFS CHECK</span></code></pre>
+
+<h2 id="model">The model: GPT-2 small's shape</h2>
+<div class="two">
+<table>
+  <tr><th></th><th class="n">ana</th><th class="n">GPT-2 small</th></tr>
+  <tr><td>parameters</td><td class="n">115.4M</td><td class="n">124M</td></tr>
+  <tr><td>layers</td><td class="n">12</td><td class="n">12</td></tr>
+  <tr><td>width</td><td class="n">768</td><td class="n">768</td></tr>
+  <tr><td>heads</td><td class="n">12</td><td class="n">12</td></tr>
+  <tr><td>context</td><td class="n">2,048</td><td class="n">1,024</td></tr>
+  <tr><td>vocabulary</td><td class="n">32,768</td><td class="n">50,257</td></tr>
+</table>
+<div>
+<p style="margin-top:6px">A hybrid stack: three gated linear-attention layers for every softmax layer, with RG-LRU
+gates, qk-norm, attention sinks and a tied head. The tokenizer, <code>code32k</code>, is a byte-level BPE
+trained for code.</p>
+</div>
+</div>
+
+<h2 id="trainer">The trainer</h2>
+<p>The dense trainer is Bend compiled to CUDA. Before it was trusted, it had to agree with the slow tree trainer:
+its gradients match the CPU's to within 4.5e-7 relative, on an RTX 3090 and on an RTX 5090. When the project moved
+from its earlier Haskell trainer to Bend, the Bend run continued the Haskell one step for step (loss within
+~5e-6), and greedy decoding was byte-identical.</p>
+<table>
+  <tr><th>measured</th><th class="n"></th></tr>
+  <tr><td>RTX 5090, batch 16 × 2,048 tokens</td><td class="n">1.95 s/step, 16,781 tok/s</td></tr>
+  <tr><td>RTX 3090, same batch</td><td class="n">5.18 s/step, 6,317 tok/s</td></tr>
+  <tr><td>a whole run (run 2: 53,880 steps, ~28 h on a rented 5090)</td><td class="n">about $16</td></tr>
+</table>
+<p>The GPUs are rented by the hour on vast.ai, from about $0.50/h, and the Bend tools in <code>bend/Box/</code> stage the
+data, run the chain of stages, pull and verify checkpoints, and destroy the box when it ends.</p>
+
+<h2 id="data">The data: ana acts, the compiler answers</h2>
+<p>ana is trained as a coding agent for functional languages. Its episodes are transcripts: a task, ana's
+<code>## Term</code>, then the real tool's answer (<code>ghc</code>, <code>agda</code>, <code>lean</code>,
+<code>bend</code>, <code>nix</code>) and ana again, up to four turns. Every compiler message it reads was produced by
+the compiler. It never writes a tool's answer itself: the tool's turns are context, not training targets.</p>
+<ul>
+  <li>Raw code in its five languages: 232,923 Haskell, 23,608 Nix, 16,007 Lean, 8,112 Agda and 1,667 Bend files.</li>
+  <li>Transcripts built from that code by the real checkers: direct tasks (write it) and repairs (fix a wrong attempt).</li>
+  <li>On-policy rounds: ana's own episodes, run on the box against the real compilers, become new training data:
+    its successes, and its rejected terms followed by the known fix.</li>
+</ul>
+
+<h2 id="results">Results, honestly</h2>
+<p>99 held-out tasks across the five languages. <b>E1</b>: ana's first answer is accepted by the real checker.
+<b>E5</b>: accepted within four calls, reading the checker's answers in between.</p>
+<table>
+  <tr><th>checkpoint</th><th class="n">E1</th><th class="n">E5</th></tr>
+  <tr><td>run 3, <code>s2-step56725</code> (the one that wrote the quicksort)</td><td class="n">32/99</td><td class="n">37/99</td></tr>
+  <tr><td>run 2, <code>v2-step53880</code></td><td class="n">19/99</td><td class="n">25/99</td></tr>
+</table>
+<p>Run 3 against run 2: p = 0.00 on E1 and 0.01 on E5 (paired, exact McNemar). E1 by language at run 3's end:
+Haskell 15/31, Bend 4/6, Agda 3/7, Lean 9/46, Nix 1/9.</p>
+<p class="note">What these numbers don't say: "accepted" means it type-checks, not that it's right. When a call
+fails, ana still resubmits nearly the same term most of the time, so it has barely learnt to read errors yet.
+Run 4, a first real on-policy round, didn't move the agent measures. There is no instruction tuning.
+This is a small model, early, and every number here can be reproduced from the repo.</p>
+<p>Earlier versions were trained on English: v1 (10.6M parameters) reached 1.21 bits per byte on held-out
+Wikipedia; the 115M v2 reached 1.37 bpb on enwik8.</p>
+
+<h2 id="open">What's open</h2>
+<ul>
+  <li><b>Source</b>: all of it, MIT. The spec, the model, the trainer, the decoder, the evals, the corpus tools and
+    the run tools.</li>
+  <li><b>Proofs</b>: <code>bend bend/Everything.bend</code> checks them on your machine.</li>
+  <li><b>Data</b>: the tools and recipes that build every corpus, and the two tokenizers in <code>weights/</code>.</li>
+  <li><b>Weights</b>: the 115M checkpoints go on Hugging Face (link here when they're up). The 10.6M v1 checkpoint is
+    in git at the tag <code>haskell-final</code>.</li>
+  <li><b>Records</b>: <code>HANDOFF.md</code> and <code>docs/</code> log every run, decision, failure and eval.</li>
+</ul>
+
+<h2 id="try">Try it</h2>
+<pre><code>git clone https://github.com/hhefesto/ana &amp;&amp; cd ana
+nix run .#bend -- bend/Everything.bend    <span class="c"># check the spec: ALL PROOFS CHECK</span>
+nix flake check                           <span class="c"># spec, unit tests, trainer and dense-trainer checks</span>
+nix develop                               <span class="c"># bend, ghc, agda, lean</span>
+nix run .#ana -- --checkpoint PATH "quicksort"   <span class="c"># generate from a checkpoint</span></code></pre>
+<p><code>TEMPERATURE</code>, <code>TOP_K</code>, <code>TOP_P</code> and <code>SAMPLE_SEED</code> control sampling.</p>
+
+<h2 id="next">Next</h2>
+<ul>
+  <li><b>agda2bend</b>: translating Agda libraries into checked Bend 2, for more Bend to learn from. The category
+    theory library's <code>Categories.Category.Core</code> translates completely; on the Yoneda lemma's dependency
+    cone, 1,923 of 2,527 items check.</li>
+  <li>Teaching ana to read the compiler's answer instead of resubmitting, with more on-policy data.</li>
+  <li>Instruction tuning, so it can be talked to.</li>
+</ul>
+
+<h2>Thanks</h2>
+<p><a href="https://x.com/VictorTaelin">Victor Taelin</a> and <a href="https://x.com/higherordercomp">HigherOrderCO</a> for
+Bend; <a href="http://conal.net">Conal Elliott</a> for denotational design; <a href="https://www.math3ma.com">Tai-Danae
+Bradley</a> for the category theory of language.</p>
+
+<footer>ana · by <a href="https://github.com/hhefesto">hhefesto</a> · MIT · <a href="https://github.com/hhefesto/ana">source</a></footer>
+</main>
+</body>
+</html>
