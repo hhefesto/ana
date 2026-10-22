@@ -109,7 +109,7 @@ Haskell, Agda, Lean, Bend and Nix on a few rented consumer GPUs.</p>
 </div>
 
 <nav>
-  <a href="#different">different</a><a href="#promise">promise</a><a href="#bend">Bend</a><a href="#elliott">Elliott</a><a href="#bradley">Bradley</a><a href="#model">model</a><a href="#trainer">trainer &amp; cost</a><a href="#data">data</a><a href="#translate">more Bend</a><a href="#results">results</a><a href="#open">open</a><a href="#try">try it</a><a href="#donate">donate</a>
+  <a href="#different">different</a><a href="#promise">promise</a><a href="#bend">Bend</a><a href="#port">before Bend</a><a href="#elliott">Elliott</a><a href="#bradley">Bradley</a><a href="#model">model</a><a href="#trainer">trainer &amp; cost</a><a href="#data">data</a><a href="#translate">more Bend</a><a href="#results">results</a><a href="#open">open</a><a href="#try">try it</a><a href="#donate">donate</a>
 </nav>
 
 <h2 id="different">What makes ana different</h2>
@@ -190,6 +190,56 @@ that forks must be balanced; ana's trees are balanced by construction. (See the
 products and an <code>einsum</code> over up to six loop indices. On a CUDA build the products go to cuBLAS and each
 <code>einsum</code> expression becomes a kernel, compiled at run time and cached. A training step is a list of ops,
 just data, and its backward pass is computed from that list by a program transformation (Elliott's, below).</p>
+
+<h2 id="port">Before Bend: from Agda, Haskell and Futhark to one language</h2>
+<p>ana didn't start in Bend. From its first commit on 11 July 2026 it was three languages: the specification in
+Agda (19 modules, checked under <code>--safe --without-K</code>), a Haskell reference and command line (tokenizer,
+data, optimizer, training loop), and Futhark kernels compiled to CUDA and multicore C, beside a cuBLAS trainer.
+That stack trained the first two models: v1 (10.6M parameters, all of English Wikipedia in one pass, 1.21 bits per
+byte held out) and v2 (115M, Wikipedia and FineWeb-Edu, stopped at 94.1%). Between 23 and 25 September 2026 all of
+it was ported to Bend 2, and the old code left the repo; the last commit that has it is
+<a href="https://github.com/hhefesto/ana/tree/0908864"><code>0908864</code></a> (tag <code>haskell-final</code>).</p>
+<table>
+  <tr><th></th><th>Agda + Haskell + Futhark</th><th>Bend</th></tr>
+  <tr><td>the spec</td><td>Agda, 19 modules: laws about the model's math, in a different language from the code</td><td>Bend, 22 modules, 127 laws, checked by the same toolchain that compiles the trainer</td></tr>
+  <tr><td>spec to code</td><td>tested: a conformance oracle compared the Haskell <code>Double</code> reference, the Futhark backends and <code>Numeric.AD</code> within tolerances</td><td>theorems stated over the running code (<code>Spec/Refinement.bend</code>): change the attention step or the prefill wrongly and the proof gate fails</td></tr>
+  <tr><td>backprop</td><td>hand-written pullbacks in Futhark</td><td>derived from the forward step by a program transformation; its transpose law is proven</td></tr>
+  <tr><td>training, 115M, RTX 3090</td><td>4,110 ms/step, 3,985 tok/s</td><td>1,702 ms/step, 9,626 tok/s (2.4&times;)</td></tr>
+  <tr><td>decoding, 115M, CPU</td><td>~150 ms/token</td><td>~21 ms/token; the prompt at 1.5 ms/token</td></tr>
+  <tr><td>to build</td><td>GHC, Agda, Futhark and a CUDA shim; <code>flake.nix</code> 1,530 lines</td><td>Bend 2 (a fork that adds bulk ops); <code>flake.nix</code> 275 lines</td></tr>
+</table>
+<p class="note">The training figures are each stack's own runs on different rented 3090s, not a same-box test; on
+the card the Bend run continued on, Bend was 1.8&times; faster. The old decoder's figure is one core; the Bend
+decoder's kernels use a few threads.</p>
+<p><b>Nothing was lost in the move, and we checked.</b> On the v3 checkpoint, Bend's greedy decoding printed byte
+for byte what the Haskell decoder printed on five prompts. The per-step probabilities agreed to ~1e-6, and the
+held-out loss to 1e-4 nats (the two sum attention in different orders, which <code>Spec/Linear.bend</code> proves
+equal). Then the Bend trainer picked up the Haskell run at its step-8,000 checkpoint and matched the 19 steps
+Haskell itself had run after it to ~5e-6 in the loss. It carried the run on to step 28,000 in 12.7 hours (enwik8
+from 1.4903 to a best of 1.4462 bits per byte). The corpus tools were ported too, and <code>cmp</code> found their
+output byte-identical to the Haskell tools'.</p>
+<p><b>What it improved.</b></p>
+<ul>
+  <li><b>One codebase to trust.</b> The proofs, the trainer and the decoder are read by one compiler, so a code
+    change that breaks a refinement theorem fails the build. Before, the spec sat in another language and could
+    drift from the code.</li>
+  <li><b>Backprop by construction.</b> The backward pass is no longer written by hand next to the forward one; it is
+    computed from the forward step, following Elliott (<a href="#elliott">below</a>).</li>
+  <li><b>Faster training, and every run since.</b> Every run on the coding corpus was trained by the Bend trainer, including
+    the best model so far, for $24.</li>
+  <li><b>Evaluations in minutes.</b> With the dense decoder, the 99 first-try tasks (E1) went from 3 h 24 min to
+    4 min 5 s, and the 99 agent episodes (E5) from ~9 h to 12 min 43 s, fast enough to evaluate every
+    checkpoint.</li>
+  <li><b>ana is now written in the language it learns.</b> Its spec, trainer, decoder, corpus tools, checkers and
+    GPU-box operations are about 97,000 lines of Bend.</li>
+</ul>
+<p><b>What it cost.</b> The first Bend decoder, on trees, was 2&ndash;3&times; slower than the old one (0.34&ndash;0.47 s
+per token on 16 threads) until the dense decoder arrived in early October. Floats are assumed, not proven: Bend's F32
+has no algebraic laws, so the semiring laws at F32 and the derivatives of exp and rsqrt are named assumptions, as they
+were in Agda, and the gradients are tested against finite differences, not proven. Agda's coinductive tries became
+depth-indexed ones. Multi-GPU training (DiLoCo) and the Haskell diagnostics were not ported. And ana's Bend is a
+fork, <a href="https://github.com/hhefesto/bend2/tree/ft-kernels">hhefesto/bend2</a>, that adds the bulk ops
+(<code>gemm</code>, <code>einsum</code>) and their CPU and CUDA kernels.</p>
 
 <h2 id="elliott">The meaning first: Conal Elliott's work in ana</h2>
 <h3>Denotational design</h3>
@@ -301,7 +351,7 @@ trained for code.</p>
 <p>The dense trainer is Bend compiled to CUDA. Before it was trusted, it had to agree with the slow tree trainer:
 its gradients match the CPU's to within 4.5e-7 relative, on an RTX 3090 and on an RTX 5090. When the project moved
 from its earlier Haskell trainer to Bend, the Bend run continued the Haskell one step for step (loss within
-~5e-6), and greedy decoding was byte-identical.</p>
+~5e-6), and greedy decoding was byte-identical (<a href="#port">Before Bend</a>).</p>
 <table>
   <tr><th>measured</th><th class="n"></th></tr>
   <tr><td>RTX 5090, batch 16 &times; 2,048 tokens</td><td class="n">1.95 s/step, 16,781 tok/s</td></tr>
@@ -473,6 +523,7 @@ as native USDC. The QR codes encode the addresses exactly as written. Thank you.
 <p><a href="https://x.com/VictorTaelin">Victor Taelin</a> and <a href="https://x.com/higherordercomp">HigherOrderCO</a> for
 Bend; <a href="http://conal.net">Conal Elliott</a> for denotational design and the essence of AD; <a href="https://www.math3ma.com">Tai-Danae
 Bradley</a>, John Terilla, Yiannis Vlassopoulos and Juan Pablo Vigneaux for the category theory of language.</p>
+<p>All errors are my own.</p>
 
 <footer>ana · by <a href="https://github.com/hhefesto">hhefesto</a> · MIT · <a href="https://github.com/hhefesto/ana">source</a></footer>
 </main>
