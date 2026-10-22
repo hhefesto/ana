@@ -224,7 +224,7 @@ type RmtSums is Data:
 def rmt.sums.of(+o: Lc.LclOut) -> RmtSums:
   RmtSums{U32.is_ne(Lc.lcl.status(o), 255), Lc.lcl.sha.parse(Lc.lcl.out(o))}
 
-# `sha256sum GLOB` on the box (GLOB e.g. formalTransformer/out/*.checkpoint):
+# `sha256sum GLOB` on the box (GLOB e.g. ana/out/*.checkpoint):
 # whether the box answered, and each file's sha256 by its name
 def rmt.sums(+b: RmtBox, +glob: String) -> IO(RmtSums):
   do IO<RmtSums>:

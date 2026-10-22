@@ -38,7 +38,7 @@ alert() {
 box_safe() {
   local remote h f bad=""
   [ "$($SSH 'pgrep -x traind; pgrep -x traind-next; echo end' 2>/dev/null)" = end ] || { why="a trainer runs on the box, or it did not answer"; return 1; }
-  remote=$($SSH 'cd formalTransformer/out && sha256sum *.checkpoint' 2>/dev/null)
+  remote=$($SSH 'cd ana/out && sha256sum *.checkpoint' 2>/dev/null)
   [ -n "$remote" ] || { why="the box gave no sha256"; return 1; }
   while read -r h f; do
     [ "$(sha256sum < "$dest/out/$f" 2>/dev/null | cut -d' ' -f1)" = "$h" ] || bad="$bad $f"
@@ -52,7 +52,7 @@ destroy() {
   [ -f "$dest/CONTINUED" ] && { why="DEST/CONTINUED: someone took the box over"; return 1; }
   if [ -f "$dest/HOLD" ] && [ "$(date +%s)" -lt "$(cat "$dest/HOLD" 2>/dev/null || echo 0)" ]; then why="DEST/HOLD's deadline is ahead"; return 1; fi
   box_safe || return 1
-  rsync -a -e "ssh -o StrictHostKeyChecking=no -p $port" --include='*.log*' --include='*.txt' --exclude='*' "$host:formalTransformer/" "$dest/" >/dev/null 2>&1
+  rsync -a -e "ssh -o StrictHostKeyChecking=no -p $port" --include='*.log*' --include='*.txt' --exclude='*' "$host:ana/" "$dest/" >/dev/null 2>&1
   log "$why: destroy instance $inst"
   $V destroy instance "$inst" -y 2>&1 | tee -a "$dest/chain.log"
   sleep 10

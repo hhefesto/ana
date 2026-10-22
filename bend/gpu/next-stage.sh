@@ -72,19 +72,19 @@ build() {
 push() {
   host="${1:?usage: next-stage.sh push HOST PORT}"; port="${2:?}"
   ssh="ssh -o StrictHostKeyChecking=no -p $port $host"
-  $ssh "mkdir -p formalTransformer/run/$NAME formalTransformer/run/eval"
-  rsync -a --partial -e "ssh -o StrictHostKeyChecking=no -p $port" "$EVALC" "$host:formalTransformer/run/eval/"
+  $ssh "mkdir -p ana/run/$NAME ana/run/eval"
+  rsync -a --partial -e "ssh -o StrictHostKeyChecking=no -p $port" "$EVALC" "$host:ana/run/eval/"
   for k in $(awk '$1 == "segment" { print $2 }' "$RUN/plan-fp100m-b16-windows.tsv"); do
-    rsync -a --partial -e "ssh -o StrictHostKeyChecking=no -p $port" "$RUN/shard-$k-fp100m.corpus" "$host:formalTransformer/run/$NAME/shard-$k-$NAME.corpus"
+    rsync -a --partial -e "ssh -o StrictHostKeyChecking=no -p $port" "$RUN/shard-$k-fp100m.corpus" "$host:ana/run/$NAME/shard-$k-$NAME.corpus"
     echo "shard $k landed"
   done
-  rsync -a -e "ssh -o StrictHostKeyChecking=no -p $port" "$RUN/plan-fp100m-b16-windows.tsv" "$host:formalTransformer/run/$NAME/plan-$NAME-b16-windows.tsv.tmp"
+  rsync -a -e "ssh -o StrictHostKeyChecking=no -p $port" "$RUN/plan-fp100m-b16-windows.tsv" "$host:ana/run/$NAME/plan-$NAME-b16-windows.tsv.tmp"
   # every byte checked before the marker
   local_sums=$(cd "$RUN" && for k in $(awk '$1 == "segment" { print $2 }' plan-fp100m-b16-windows.tsv); do echo "$(sha256sum < shard-$k-fp100m.corpus | cut -d' ' -f1) shard-$k-$NAME.corpus"; done)
-  box_sums=$($ssh "cd formalTransformer/run/$NAME && for f in shard-*-$NAME.corpus; do echo \"\$(sha256sum < \$f | cut -d' ' -f1) \$f\"; done")
+  box_sums=$($ssh "cd ana/run/$NAME && for f in shard-*-$NAME.corpus; do echo \"\$(sha256sum < \$f | cut -d' ' -f1) \$f\"; done")
   if [ "$(echo "$local_sums" | sort)" = "$(echo "$box_sums" | sort)" ]; then
     # the plan appears last, so a chain waiting for it starts on whole shards
-    $ssh "cd formalTransformer/run/$NAME && mv plan-$NAME-b16-windows.tsv.tmp plan-$NAME-b16-windows.tsv && touch STAGED"; echo "STAGED: every shard matches"
+    $ssh "cd ana/run/$NAME && mv plan-$NAME-b16-windows.tsv.tmp plan-$NAME-b16-windows.tsv && touch STAGED"; echo "STAGED: every shard matches"
   else
     echo "shard sums differ; not staged"; exit 1
   fi

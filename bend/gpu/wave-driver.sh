@@ -23,6 +23,6 @@ line="$name traind-next 1000 run/$name/plan-$name-b16-windows.tsv run/$name $nam
 ssh="ssh -n -o StrictHostKeyChecking=no -p $port $host"
 # the stage the chain last reported starting may not have its log yet: never insert before it
 started=$(grep -o 'stage [a-z0-9]*:' "${CHAINLOG:-run/pulled-vast-53909778/chain.log}" 2>/dev/null | tail -1 | sed 's/stage \(.*\):/\1/')
-at=$(grep -n '^raw[0-9]* ' "$stages" | while IFS=: read -r n rest; do s=${rest%% *}; [ "$s" = "$started" ] && continue; [ "$($ssh "[ -f formalTransformer/$s.log ] && echo y" 2>/dev/null)" = y ] || { echo "$n"; break; }; done)
+at=$(grep -n '^raw[0-9]* ' "$stages" | while IFS=: read -r n rest; do s=${rest%% *}; [ "$s" = "$started" ] && continue; [ "$($ssh "[ -f ana/$s.log ] && echo y" 2>/dev/null)" = y ] || { echo "$n"; break; }; done)
 if [ -n "$at" ]; then sed -i "${at}i $line" "$stages"; log "inserted before line $at"; else echo "$line" >> "$stages"; log "appended"; fi
 log "staged: $(head -1 run/$name/plan-fp100m-b16-windows.tsv | awk '{ print $3 }') steps"

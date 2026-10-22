@@ -13,7 +13,7 @@ exit 2
 #   bend/gpu/fp-stage.sh [user@]host port
 # BOX_ENV names bend-push's settings (default bend/gpu/fp100m-box.env, run 1;
 # bend/gpu/v2-box.env is run 2).
-# The box's working directory is ~/formalTransformer (bend-push's REMOTE_DIR).
+# The box's working directory is ~/ana (bend-push's REMOTE_DIR).
 set -euo pipefail
 host="${1:?usage: fp-stage.sh [user@]host port}"
 port="${2:?usage: fp-stage.sh [user@]host port}"
@@ -24,12 +24,12 @@ ls -la "$S"
 echo "== link check"
 TRAIN_ENV_FILE=${BOX_ENV:-bend/gpu/fp100m-box.env} nix run .#deploy -- push link "$host" "$port"
 echo "== scp"
-ssh -p "$port" "$host" "mkdir -p formalTransformer/weights formalTransformer/run/eval formalTransformer/run/fp100m formalTransformer/out"
+ssh -p "$port" "$host" "mkdir -p ana/weights ana/run/eval ana/run/fp100m ana/out"
 cp "$S/traind.c" "$S/traind-next.c"
-scp -P "$port" "$S/traind.c" "$S/traind-next.c" "$S/dense.c" bend/gpu/fp.sh "$host:formalTransformer/"
-scp -P "$port" weights/code32k.bpe "$host:formalTransformer/weights/"
-scp -P "$port" run/eval/transcript-fp.corpus run/eval/transcript-next.corpus run/eval/v2-*.corpus "$host:formalTransformer/run/eval/"
+scp -P "$port" "$S/traind.c" "$S/traind-next.c" "$S/dense.c" bend/gpu/fp.sh "$host:ana/"
+scp -P "$port" weights/code32k.bpe "$host:ana/weights/"
+scp -P "$port" run/eval/transcript-fp.corpus run/eval/transcript-next.corpus run/eval/v2-*.corpus "$host:ana/run/eval/"
 echo "== the corpus, in plan order"
 TRAIN_ENV_FILE=${BOX_ENV:-bend/gpu/fp100m-box.env} SKIP_LINK_CHECK=1 nix run .#deploy -- push "$host" "$port"
-echo "staged; on the box: cd formalTransformer && ./fp.sh gate && ./fp.sh time && ./fp.sh run"
+echo "staged; on the box: cd ana && ./fp.sh gate && ./fp.sh time && ./fp.sh run"
 rm -rf "$S"

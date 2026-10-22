@@ -76,9 +76,12 @@ def sdr.old.copy(+src: String, +dst: String, rs: List<&2, SdrRep>) -> IO(Bool):
 def sdr.home() -> String:
   "/home/hhefesto/src/ana"
 
+# run 3's old drivers name the box's trainer directory formalTransformer (its boxes had
+# that name); the sandbox's box has ana/, as a new box does since 2026-10-22, so each old
+# driver's copy is pointed there, like its other paths
 def sdr.reps.s2(+d: String) -> List<&2, SdrRep>:
   [SdrRep{"cd " ++ sdr.home() ++ "\n", "cd " ++ d ++ "\n"}, SdrRep{"WS=" ++ sdr.home() ++ " ", "WS=" ++ d ++ "/box/ws "},
-   SdrRep{"TD=/root/formalTransformer ", "TD=" ++ d ++ "/box/formalTransformer "}, SdrRep{"dest=run/v3/run3; stages=run/v3/run3.stages", "dest=dest; stages=stages"},
+   SdrRep{"TD=/root/formalTransformer ", "TD=" ++ d ++ "/box/ana "}, SdrRep{"dest=run/v3/run3; stages=run/v3/run3.stages", "dest=dest; stages=stages"},
    SdrRep{"sleep 120", "sleep 1"}, SdrRep{"sleep 30", "sleep 1"}, SdrRep{"sleep 15", "sleep 1"},
    SdrRep{"bash tools/corpus-v2/s2.sh", "run/v2/gcroot-deploy-agent/bin/deploy corpus-v2 s2"}]
 
@@ -90,7 +93,8 @@ def sdr.reps.guard(+d: String) -> List<&2, SdrRep>:
 def sdr.reps.move(+d: String) -> List<&2, SdrRep>:
   [SdrRep{"cd " ++ sdr.home() ++ "\n", "cd " ++ d ++ "\n"}, SdrRep{"WS=" ++ sdr.home() ++ "\n", "WS=" ++ d ++ "/box/ws\n"},
    SdrRep{"dest=run/v3/run3;", "dest=dest;"}, SdrRep{"S=4000; B=36696", "S=20; B=60"}, SdrRep{"sleep 15", "sleep 1"}, SdrRep{"sleep 5;", "sleep 1;"},
-   SdrRep{"shard-70-fp100m.corpus", "shard-1-fp100m.corpus"}, SdrRep{"push-corpus: shard 71 ", "push-corpus: shard 2 "}]
+   SdrRep{"shard-70-fp100m.corpus", "shard-1-fp100m.corpus"}, SdrRep{"push-corpus: shard 71 ", "push-corpus: shard 2 "},
+   SdrRep{"formalTransformer", "ana"}]
 
 # old lines as the new tools say the same (form only)
 def sdr.reps.lines() -> List<&2, SdrRep>:
@@ -318,7 +322,7 @@ def sdr.cmp.same(+what: String, +rel: String, +cn: Sc.ScnCx, +co: Sc.ScnCx) -> I
 
 def sdr.cfg.hand(+d: String, +tag: String) -> String:
   sdr.lines(["# the hand-over in a sandbox (bend/Box/ScnDrive.bend)", "host root@sim-" ++ tag, "port 2222", "instance 4242", "dest dest", "stages stages",
-    "trainer-dir " ++ d ++ "/box/formalTransformer", "trainer-log train.log", "box-driver ./bend-box", "boundary 30", "handover-poll 1",
+    "trainer-dir " ++ d ++ "/box/ana", "trainer-log train.log", "box-driver ./bend-box", "boundary 30", "handover-poll 1",
     "act-ws " ++ d ++ "/box/ws", "act-box-bin " ++ d ++ "/box/bin", "act-dir run/v3/act/r1", "act-stop-wait 1",
     "s2-from run/v3/S1", "s2-out run/v3/S2", "s2-log run/v3/s2.log", "s2-every 5000", "s2-stage s2"])
 
@@ -380,7 +384,7 @@ def sdr.accepted(ks: List<&2, String>) -> List<&2, String>:
 
 def sdr.box.files() -> List<&2, String>:
   List.append(&2, String, ["box/ws/run/v3/act/r1/episodes.eplog", "box/ws/run/v3/act/r1/episodes.eplog.whole-before-cut", "box/ws/run/v3/act/r1.accept.log",
-    "box/formalTransformer/run/v3/S2/plan-fp100m-b16-windows.tsv", "box/formalTransformer/run/v3/S2/stage.env"], sdr.accepted(sdr.kinds()))
+    "box/ana/run/v3/S2/plan-fp100m-b16-windows.tsv", "box/ana/run/v3/S2/stage.env"], sdr.accepted(sdr.kinds()))
 
 def sdr.events.write(+c: Sc.ScnCx, +xs: List<&2, String>, +ys: List<&2, String>) -> IO(Unit):
   S.write(Sc.scn.d(c) ++ "/events.txt", S.b(sdr.lines(xs) ++ "-- output --\n" ++ sdr.lines(ys)))
@@ -589,14 +593,14 @@ def sdr.d5(+t: Sc.ScnTools, +base: String, +olds: String) -> IO(List<&2, Sc.ScnR
 def sdr.cfg.move(+d: String, +tag: String, +self: String) -> String:
   sdr.lines(["# the move in a sandbox (bend/Box/ScnDrive.bend): the old box D/box, the new D/newbox", "host root@sim-" ++ tag ++ "-new", "port 2222", "instance 4343",
     "old-host root@sim-" ++ tag ++ "-old", "old-port 2222", "old-instance 4242", "dest dest", "stages stages", "ops " ++ self,
-    "trainer-dir formalTransformer", "trainer-log train.log", "box-driver ./bend-box", "act-ws " ++ d ++ "/box/ws", "act-dir run/v3/act/r1", "act-stop-wait 1",
+    "trainer-dir ana", "trainer-log train.log", "box-driver ./bend-box", "act-ws " ++ d ++ "/box/ws", "act-dir run/v3/act/r1", "act-stop-wait 1",
     "move-name s1", "move-step 20", "move-to 60", "move-plan run/v3/S1/plan-fp100m-b16-windows.tsv", "move-run run/v3/S1", "move-shard fp100m",
     "move-need run/v3/S1/plan-fp100m-b16-windows.tsv run/v3/S1/shard-1-fp100m.corpus", "move-pushed dest/stage2.log 2", "move-gate gate.out",
     "move-save 1000", "move-trainers traind", "unit chain ft-fp-chain-v3 2G", "unit watch ft-credit-watch-v3 2G", "stop-units ft-v3-act1", "env POLL=1"])
 
 def sdr.newbox(+c: Sc.ScnCx) -> IO(Unit):
   +nb = Sc.scn.d(c) ++ "/newbox"
-  +ft = nb ++ "/formalTransformer"
+  +ft = nb ++ "/ana"
   +sim = Sc.scn.sim(c)
   do IO<Unit>:
     S.mkdir(nb ++ "/bin")
@@ -663,8 +667,8 @@ def sdr.move.one(+c: Sc.ScnCx, +old: Bool, +olds: String) -> IO(List<&2, String>
     +b2 : String <- sdr.listing(Sc.scn.dest(c) ++ "/oldbox")
     +b3 : String <- sdr.listing(Sc.scn.dest(c) ++ "/rescue/act/r1")
     +r : String <- sdr.move.step(c, old, "resume", nb)
-    +done : Bool <- sdr.wait.text(nb ++ "/formalTransformer/train.log", "done at step 60", 120n)
-    +r1 : String <- sdr.listing(nb ++ "/formalTransformer/out")
+    +done : Bool <- sdr.wait.text(nb ++ "/ana/train.log", "done at step 60", 120n)
+    +r1 : String <- sdr.listing(nb ++ "/ana/out")
     +w : String <- sdr.move.step(c, old, "watch", d)
     +w1 : String <- sdr.state(c, "ft-fp-chain-v3")
     +w2 : String <- sdr.state(c, "ft-credit-watch-v3")
@@ -678,7 +682,7 @@ def sdr.move.one(+c: Sc.ScnCx, +old: Bool, +olds: String) -> IO(List<&2, String>
       w, "  units: " ++ w1 ++ ", " ++ w2, k]
 
 def sdr.move.files() -> List<&2, String>:
-  ["dest/out/s1-step20.checkpoint", "dest/oldbox/train.log", "newbox/formalTransformer/out/s1-step60.checkpoint"]
+  ["dest/out/s1-step20.checkpoint", "dest/oldbox/train.log", "newbox/ana/out/s1-step60.checkpoint"]
 
 # move.sh's old-pull dies (SIGPIPE, 141) in cut_frames before any cut, so the old run's rescued files
 # are as pulled: each is the new run's copy kept before its cut (FILE.whole-before-cut)
@@ -746,7 +750,7 @@ def sdr.d6(+t: Sc.ScnTools, +base: String, +olds: String) -> IO(List<&2, Sc.ScnR
 
 def sdr.cfg.run4(+d: String, +tag: String, +every2: String) -> String:
   sdr.lines(["# run 4's hand-over in a sandbox (bend/Box/ScnDrive.bend)", "host root@sim-" ++ tag, "port 2222", "instance 4242", "dest dest", "stages stages",
-    "trainer-dir " ++ d ++ "/box/formalTransformer", "trainer-log c1.log", "box-driver ./bend-box", "boundary 30", "plan-base 100", "handover-poll 1",
+    "trainer-dir " ++ d ++ "/box/ana", "trainer-log c1.log", "box-driver ./bend-box", "boundary 30", "plan-base 100", "handover-poll 1",
     "act-ws " ++ d ++ "/box/ws", "act-box-bin " ++ d ++ "/box/bin", "act-dir run/v3/act/r1", "act-stop-wait 1",
     "s2-from run/v3/S1", "s2-out run/v3/S2", "s2-log run/v3/s2.log", "s2-every " ++ every2, "s2-stage c2", "s2-env REST_STEPS=20 LR=1e-4", "s2-env WARM=300",
     "ctl-stage ctl", "ctl-out run/v3/CTL", "ctl-every 10"])
@@ -799,12 +803,12 @@ def sdr.ctl.line() -> String:
 # plan's step 30 with REST_STEPS and the control's plan, both lines appended, both stages started
 def sdr.r4.exps(+every2: String) -> List<&2, Sc.ScnExp>:
   [Sc.ExRc{"0"}, Sc.ExMark{"DESTROYED", True{}}, Sc.ExMark{"DIED", False{}}, Sc.ExMark{"REFUSED", False{}}, Sc.ExStarts{3n},
-   Sc.ExLog{"/box/formalTransformer/c1.log (plan-base 100 + boundary 30)\n", True{}},
+   Sc.ExLog{"/box/ana/c1.log (plan-base 100 + boundary 30)\n", True{}},
    Sc.ExLog{"] handover: waiting for S1's 'done at step 130' in ", True{}},
    Sc.ExLog{"] handover: S1 is done at step 130 (plan-base 100 + boundary 30)\n", True{}},
-   Sc.ExLog{"] handover: s2: ", True{}}, Sc.ExLog{"/box/formalTransformer/run/v3/S1 30 -> ", True{}},
-   Sc.ExLog{"] s2: REST_STEPS 20 (bend-sim)\n", True{}}, Sc.ExLog{"/box/formalTransformer/run/v3/S1 at step 30: 30 steps in ", True{}},
-   Sc.ExLog{"/box/formalTransformer/run/v3/CTL (bend-sim)\n", True{}},
+   Sc.ExLog{"] handover: s2: ", True{}}, Sc.ExLog{"/box/ana/run/v3/S1 30 -> ", True{}},
+   Sc.ExLog{"] s2: REST_STEPS 20 (bend-sim)\n", True{}}, Sc.ExLog{"/box/ana/run/v3/S1 at step 30: 30 steps in ", True{}},
+   Sc.ExLog{"/box/ana/run/v3/CTL (bend-sim)\n", True{}},
    Sc.ExLog{"] handover: control stage.env: NLR=1e-4 NWARM=10 ; ctl starts from out/c1-step130.checkpoint\n", True{}},
    Sc.ExLog{"] handover: appended to stages: " ++ sdr.c2.line(every2) ++ "\n", True{}},
    Sc.ExLog{"] handover: appended to stages: " ++ sdr.ctl.line() ++ "\n", True{}},
@@ -814,11 +818,11 @@ def sdr.r4.exps(+every2: String) -> List<&2, Sc.ScnExp>:
 
 def sdr.r4.dexps(+every2: String) -> List<&2, SdrExp>:
   [DxRc{"driver", "0"}, DxIn{"stages", "c1 traind-next", True{}}, DxIn{"stages", "\n" ++ sdr.c2.line(every2) ++ "\n" ++ sdr.ctl.line() ++ "\n", True{}},
-   DxIn{"c1-start.out", "trainer pid ", True{}}, DxIn{"box/formalTransformer/c1.log", "] loaded run/base/base-step100.checkpoint (1 ms)\n", True{}},
-   DxIn{"box/formalTransformer/c1.log", "] done at step 130\n", True{}},
-   DxIn{"box/formalTransformer/c2.log", "] loaded out/c1-step130.checkpoint (1 ms)\n", True{}},
-   DxIn{"box/formalTransformer/ctl.log", "] loaded out/c1-step130.checkpoint (1 ms)\n", True{}},
-   DxIn{"box/formalTransformer/ctl.log", "] done at step 150\n", True{}},
+   DxIn{"c1-start.out", "trainer pid ", True{}}, DxIn{"box/ana/c1.log", "] loaded run/base/base-step100.checkpoint (1 ms)\n", True{}},
+   DxIn{"box/ana/c1.log", "] done at step 130\n", True{}},
+   DxIn{"box/ana/c2.log", "] loaded out/c1-step130.checkpoint (1 ms)\n", True{}},
+   DxIn{"box/ana/ctl.log", "] loaded out/c1-step130.checkpoint (1 ms)\n", True{}},
+   DxIn{"box/ana/ctl.log", "] done at step 150\n", True{}},
    DxIn{"box/.sim-starts", "start out/c1 from 100\n", True{}}, DxIn{"box/.sim-starts", "start out/ctl from 130\n", True{}}]
 
 # d8: run 4's own EVERYs (c1 and c2 pulled every 10): the boundary save is a pull and a last

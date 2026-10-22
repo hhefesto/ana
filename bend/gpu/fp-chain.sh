@@ -68,14 +68,14 @@ alert() {
 }
 
 # the saved checkpoints of a log, oldest first, as "STEP FILE"
-saved() { $SSH "cd formalTransformer && grep -o 'saved out/[^ ]*\\.checkpoint' $1 2>/dev/null" 2>/dev/null | sed -n 's#^saved out/\(.*-step\([0-9]*\)\.checkpoint\)$#\2 \1#p' | sort -n; }
+saved() { $SSH "cd ana && grep -o 'saved out/[^ ]*\\.checkpoint' $1 2>/dev/null" 2>/dev/null | sed -n 's#^saved out/\(.*-step\([0-9]*\)\.checkpoint\)$#\2 \1#p' | sort -n; }
 # a pull the link drops resumes (--partial-dir), up to 10 times 60 s apart (2026-10-04: one
 # failed attempt lost run 1's last checkpoint, since nothing checked it had arrived); more
 # arguments go to rsync (--checksum re-pulls a copy here that differs)
 pull_one() {
   local f=$1 t; shift
   for t in 1 2 3 4 5 6 7 8 9 10; do
-    rsync -a "$@" --partial-dir=.partial -e "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -p $port" "$host:formalTransformer/out/$f" "$dest/out/" >/dev/null 2>&1 && { log "pulled $f"; return 0; }
+    rsync -a "$@" --partial-dir=.partial -e "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -p $port" "$host:ana/out/$f" "$dest/out/" >/dev/null 2>&1 && { log "pulled $f"; return 0; }
     sleep ${PULL_WAIT:-60}
   done
   log "could not pull $f"; return 1
@@ -84,16 +84,16 @@ have() { [ -f "$dest/out/$1" ] && [ ! -f "$dest/out/.partial/$1" ]; }
 # EVERY 0: a stage whose checkpoints are never pulled (raw code): only its
 # newest stays on the box, and that one goes once the next stage has loaded it
 pull_new() { [ "$2" = 0 ] && return 0; for f in $(saved "$1" | awk -v e="$2" '$1 % e == 0 { print $2 }'); do have "$f" || pull_one "$f"; done; }
-prune() { for f in $(saved "$1" | head -n -1 | awk -v e="$2" 'e == 0 || $1 % e != 0 { print $2 }'); do $SSH "rm -f formalTransformer/out/$f" 2>/dev/null; done; }
+prune() { for f in $(saved "$1" | head -n -1 | awk -v e="$2" 'e == 0 || $1 % e != 0 { print $2 }'); do $SSH "rm -f ana/out/$f" 2>/dev/null; done; }
 last_of() { saved "$1" | tail -1 | cut -d' ' -f2; }
-on_box() { [ "$($SSH "[ -f formalTransformer/$1 ] && echo yes" 2>/dev/null)" = yes ]; }
+on_box() { [ "$($SSH "[ -f ana/$1 ] && echo yes" 2>/dev/null)" = yes ]; }
 
 # follow one stage until its log says done (returns 0) or it died (1)
 follow() {
   local lg=$1 bin=$2 every=$3 last_size=0 quiet=0 state=running r size procs tail
   while [ $state = running ]; do
     sleep ${POLL:-120}
-    r=$($SSH "cd formalTransformer && stat -c %s $lg 2>/dev/null; pgrep -c -x '$bin'; tail -c 200 $lg 2>/dev/null | tr '\n' ' '" 2>/dev/null) || { log "ssh failed; retrying"; continue; }
+    r=$($SSH "cd ana && stat -c %s $lg 2>/dev/null; pgrep -c -x '$bin'; tail -c 200 $lg 2>/dev/null | tr '\n' ' '" 2>/dev/null) || { log "ssh failed; retrying"; continue; }
     size=$(echo "$r" | sed -n 1p); procs=$(echo "$r" | sed -n 2p); tail=$(echo "$r" | sed -n 3p)
     if echo "$tail" | grep -q "done at step"; then state=done
     elif [ "${procs:-0}" = 0 ]; then
@@ -118,7 +118,7 @@ has_stage() { [ -n "$(stage_at "$1")" ]; }
 start_stage() {
   local i
   for i in 1 2 3 4 5; do
-    $SSH1 "cd formalTransformer && ./fp.sh again out/$1 $2 $3 $4 $5" 2>&1 | tail -1 | tee -a "$dest/chain.log"
+    $SSH1 "cd ana && ./fp.sh again out/$1 $2 $3 $4 $5" 2>&1 | tail -1 | tee -a "$dest/chain.log"
     sleep 20
     on_box "$5.log" && return 0
     log "stage $5: no log on the box after the start; trying again"
@@ -148,7 +148,7 @@ while [ $ok = 1 ]; do
     sleep 40
     # a raw stage's last save has been loaded by now: it can go (only ever the
     # stage before's own save)
-    case "$prev" in "$prev_name"-step*) [ "$prev_every" = 0 ] && $SSH "rm -f formalTransformer/out/$prev" 2>/dev/null && log "deleted out/$prev on the box (a raw stage's, loaded by $name)";; esac
+    case "$prev" in "$prev_name"-step*) [ "$prev_every" = 0 ] && $SSH "rm -f ana/out/$prev" 2>/dev/null && log "deleted out/$prev on the box (a raw stage's, loaded by $name)";; esac
   fi
   logs="$logs $lg:$every"
   follow "$lg" "$bin" "$every" || { echo "$lg: the trainer died" >> "$dest/DIED"; ok=0; }
@@ -170,7 +170,7 @@ for l in $lasts; do case " $evals " in *" out/$l "*) ;; *) evals="$evals out/$l"
 # stages' put there from a previous box, so one table covers the whole run
 evals="${EXTRA_EVAL:+$EXTRA_EVAL }$evals"
 log "eval:$evals"
-$SSH "cd formalTransformer && ./fp.sh eval $evals > eval.log 2>&1; [ -f run/eval/transcript-next.corpus ] && ECORPUS=run/eval/transcript-next.corpus ./fp.sh eval $evals > eval-next.log 2>&1; grep -E '^==|bits_per_byte' eval.log; echo next:; grep -E '^==|bits_per_byte' eval-next.log 2>/dev/null" | tee -a "$dest/chain.log"
+$SSH "cd ana && ./fp.sh eval $evals > eval.log 2>&1; [ -f run/eval/transcript-next.corpus ] && ECORPUS=run/eval/transcript-next.corpus ./fp.sh eval $evals > eval-next.log 2>&1; grep -E '^==|bits_per_byte' eval.log; echo next:; grep -E '^==|bits_per_byte' eval-next.log 2>/dev/null" | tee -a "$dest/chain.log"
 
 # pull, verify, destroy
 for le in $logs; do pull_new "${le%%:*}" "${le##*:}"; done
@@ -185,8 +185,8 @@ want="$want $lasts"
 # and then pruned on the box as run 2's v2-step21000 was, has nothing to match), and every wanted
 # one must be here (missing)
 verify() {
-  rsync -a -e "ssh -o StrictHostKeyChecking=no -p $port" --include='*.log*' --include='*.txt' --exclude='*' "$host:formalTransformer/" "$dest/" >/dev/null 2>&1
-  remote=$($SSH 'cd formalTransformer/out && sha256sum *.checkpoint' 2>/dev/null)
+  rsync -a -e "ssh -o StrictHostKeyChecking=no -p $port" --include='*.log*' --include='*.txt' --exclude='*' "$host:ana/" "$dest/" >/dev/null 2>&1
+  remote=$($SSH 'cd ana/out && sha256sum *.checkpoint' 2>/dev/null)
   echo "$remote" > "$dest/sha256.box.txt"
   (cd "$dest/out" && sha256sum *.checkpoint) > "$dest/sha256.txt" 2>/dev/null
   unmatched=$(echo "$remote" | grep -vxF -f "$dest/sha256.txt" | awk 'NF { printf " %s", $2 }')

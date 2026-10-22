@@ -22,15 +22,15 @@ log() { echo "[$(TZ=Etc/GMT+6 date '+%Y-%m-%d %H:%M:%S') UTC-6] $*"; }
 S=$(mktemp -d)
 (cd bend && nix run ..#bend -- TrainDense.bend -o "$S/traind.c" && nix run ..#bend -- tests/dense.bend -o "$S/dense.c")
 cp "$S/traind.c" "$S/traind-next.c"
-$ssh "mkdir -p formalTransformer/weights formalTransformer/run/eval formalTransformer/out"
-eval "$rs" "$S/traind.c" "$S/traind-next.c" "$S/dense.c" bend/gpu/fp.sh "$host:formalTransformer/"
-eval "$rs" weights/code32k.bpe "$host:formalTransformer/weights/"
-eval "$rs" run/eval/transcript-fp.corpus run/eval/transcript-next.corpus "$host:formalTransformer/run/eval/"
+$ssh "mkdir -p ana/weights ana/run/eval ana/out"
+eval "$rs" "$S/traind.c" "$S/traind-next.c" "$S/dense.c" bend/gpu/fp.sh "$host:ana/"
+eval "$rs" weights/code32k.bpe "$host:ana/weights/"
+eval "$rs" run/eval/transcript-fp.corpus run/eval/transcript-next.corpus "$host:ana/run/eval/"
 rm -rf "$S"
 log "C, fp.sh, tokenizer, eval corpora landed"
-eval "$rs" "$ckpt" "$host:formalTransformer/out/"
+eval "$rs" "$ckpt" "$host:ana/out/"
 c=$(basename "$ckpt")
-if [ "$(sha256sum < "$ckpt" | cut -d' ' -f1)" = "$($ssh "sha256sum < formalTransformer/out/$c" | cut -d' ' -f1)" ]; then log "out/$c landed, sha256 matches"
+if [ "$(sha256sum < "$ckpt" | cut -d' ' -f1)" = "$($ssh "sha256sum < ana/out/$c" | cut -d' ' -f1)" ]; then log "out/$c landed, sha256 matches"
 else log "out/$c differs from $ckpt"; exit 1; fi
 for s in "$@"; do
   case "$s" in

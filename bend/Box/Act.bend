@@ -47,7 +47,7 @@ import ../CorpusV2/AgentAct.bend as Aa
 # deploy) and its bend-episode ACT_EPISODE (run/agent/gcroot-bend-episode/
 # bin/bend-episode): both must be built from a tree with `corpus-v2
 # agent-act` and `bend-episode langs` (this one).  The trainer's
-# ~/formalTransformer is not touched, and nothing here stops the trainer: a
+# ~/ana is not touched, and nothing here stops the trainer: a
 # failure only delays a round.
 #
 # The box is reached as Remote.bend reaches it (SSH_OPTS, SSH_TRIES,

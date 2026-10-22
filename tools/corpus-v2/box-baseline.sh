@@ -17,7 +17,7 @@ echo "$cap" > "$dest/HOLD"
 log "holding the destroy until $(TZ=Etc/GMT+6 date -d @"$cap" '+%H:%M') at the latest"
 C="run/eval/v2-tr-haskell.corpus run/eval/v2-tr-agda.corpus run/eval/v2-tr-lean.corpus run/eval/v2-tr-nix.corpus run/eval/v2-tr-bend.corpus run/eval/v2-vault-haskell.corpus run/eval/v2-vault-agda.corpus run/eval/v2-vault-lean.corpus"
 for t in 1 2 3 4 5 6; do
-  rsync -a --partial -e "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -p $port" $C "$host:formalTransformer/run/eval/" && break
+  rsync -a --partial -e "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -p $port" $C "$host:ana/run/eval/" && break
   sleep 60
 done || true
 until grep -q 'pulled: ' "$dest/chain.log" 2>/dev/null; do
@@ -27,14 +27,14 @@ until grep -q 'pulled: ' "$dest/chain.log" 2>/dev/null; do
 done
 log "the chain pulled; scoring run 1 on corpus v2's eval corpora"
 # on the box, under nohup (the link drops): every corpus over the four checkpoints, then DONE
-$SSH "cd formalTransformer && rm -f v2eval.DONE && nohup bash -c 'last=\$(ls -t out/*.checkpoint | head -1); for c in $C; do n=\$(basename \$c .corpus); ECORPUS=\$c ./fp.sh eval out/fp100m-step8803.checkpoint out/w1-step19080.checkpoint out/w3-step40731.checkpoint \$last > v2eval-\$n.log 2>&1; done; touch v2eval.DONE' > /dev/null 2>&1 &" || true
+$SSH "cd ana && rm -f v2eval.DONE && nohup bash -c 'last=\$(ls -t out/*.checkpoint | head -1); for c in $C; do n=\$(basename \$c .corpus); ECORPUS=\$c ./fp.sh eval out/fp100m-step8803.checkpoint out/w1-step19080.checkpoint out/w3-step40731.checkpoint \$last > v2eval-\$n.log 2>&1; done; touch v2eval.DONE' > /dev/null 2>&1 &" || true
 while [ "$(date +%s)" -lt "$cap" ]; do
-  $SSH 'test -f formalTransformer/v2eval.DONE' 2>/dev/null && break
+  $SSH 'test -f ana/v2eval.DONE' 2>/dev/null && break
   sleep 60
 done
 mkdir -p "$dest/v2eval"
 for t in 1 2 3 4 5; do
-  rsync -a -e "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -p $port" "$host:formalTransformer/v2eval-*.log" "$dest/v2eval/" && break
+  rsync -a -e "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -p $port" "$host:ana/v2eval-*.log" "$dest/v2eval/" && break
   sleep 30
 done
 for f in "$dest"/v2eval/v2eval-*.log; do

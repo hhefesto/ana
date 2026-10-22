@@ -40,11 +40,11 @@ mkdir -p "$dest/out"
 log() { echo "[$(TZ=Etc/GMT+6 date '+%Y-%m-%d %H:%M:%S') UTC-6] $*" | tee -a "$dest/relay.log"; }
 
 # the saved checkpoints of a log, oldest first, as "STEP FILE"
-saved() { $SSH "cd formalTransformer && grep -o 'saved out/[^ ]*\\.checkpoint' $1 2>/dev/null" 2>/dev/null | sed -n 's#^saved out/\(.*-step\([0-9]*\)\.checkpoint\)$#\2 \1#p' | sort -n; }
-pull_one() { rsync -a --partial-dir=.partial -e "ssh -o StrictHostKeyChecking=no -p $port" "$host:formalTransformer/out/$1" "$dest/out/" >/dev/null 2>&1 && log "pulled $1"; }
+saved() { $SSH "cd ana && grep -o 'saved out/[^ ]*\\.checkpoint' $1 2>/dev/null" 2>/dev/null | sed -n 's#^saved out/\(.*-step\([0-9]*\)\.checkpoint\)$#\2 \1#p' | sort -n; }
+pull_one() { rsync -a --partial-dir=.partial -e "ssh -o StrictHostKeyChecking=no -p $port" "$host:ana/out/$1" "$dest/out/" >/dev/null 2>&1 && log "pulled $1"; }
 have() { [ -f "$dest/out/$1" ] && [ ! -f "$dest/out/.partial/$1" ]; }
 pull_new() { for f in $(saved "$1" | awk -v e="$EVERY" '$1 % e == 0 { print $2 }'); do have "$f" || pull_one "$f"; done; }
-prune() { for f in $(saved "$1" | head -n -1 | awk -v e="$EVERY" '$1 % e != 0 { print $2 }'); do $SSH "rm -f formalTransformer/out/$f" 2>/dev/null; done; }
+prune() { for f in $(saved "$1" | head -n -1 | awk -v e="$EVERY" '$1 % e != 0 { print $2 }'); do $SSH "rm -f ana/out/$f" 2>/dev/null; done; }
 last_of() { saved "$1" | tail -1 | cut -d' ' -f2; }
 
 # watch one run until its log says done (or it died)
@@ -52,7 +52,7 @@ follow() {
   local lg=$1 name=$2 last_size=0 quiet=0 state=running r size procs tail
   while [ $state = running ]; do
     sleep 300
-    r=$($SSH "cd formalTransformer && stat -c %s $lg 2>/dev/null; pgrep -c -x '$name'; tail -c 200 $lg 2>/dev/null | tr '\n' ' '" 2>/dev/null) || { log "ssh failed; retrying"; continue; }
+    r=$($SSH "cd ana && stat -c %s $lg 2>/dev/null; pgrep -c -x '$name'; tail -c 200 $lg 2>/dev/null | tr '\n' ' '" 2>/dev/null) || { log "ssh failed; retrying"; continue; }
     size=$(echo "$r" | sed -n 1p); procs=$(echo "$r" | sed -n 2p); tail=$(echo "$r" | sed -n 3p)
     if echo "$tail" | grep -q "done at step"; then state=done
     elif [ "${procs:-0}" = 0 ]; then
@@ -70,7 +70,7 @@ follow() {
 # 1. fp100m
 follow train.log traind
 fp_last=$(last_of train.log)
-is_staged() { $SSH 'cd formalTransformer && p=run/next/plan-next-b16-windows.tsv; [ -f $p ] && [ -f traind-next.c ] && [ -f run/next/STAGED ] || exit 1; for k in $(awk "\$1 == \"segment\" { print \$2 }" $p); do [ -f run/next/shard-$k-next.corpus ] || exit 1; done; echo yes' 2>/dev/null; }
+is_staged() { $SSH 'cd ana && p=run/next/plan-next-b16-windows.tsv; [ -f $p ] && [ -f traind-next.c ] && [ -f run/next/STAGED ] || exit 1; for k in $(awk "\$1 == \"segment\" { print \$2 }" $p); do [ -f run/next/shard-$k-next.corpus ] || exit 1; done; echo yes' 2>/dev/null; }
 # the next plan may still be on its way: wait up to GRACE seconds (1800) for it
 until_t=$(( $(date +%s) + ${GRACE:-1800} ))
 staged=$(is_staged)
@@ -80,7 +80,7 @@ while [ "$staged" != yes ] && [ "$(date +%s)" -lt $until_t ]; do
 done
 if [ "$staged" = yes ] && [ -n "$fp_last" ]; then
   log "continuation: from out/$fp_last"
-  $SSH "cd formalTransformer && ./fp.sh next out/$fp_last" 2>&1 | tail -1 | tee -a "$dest/relay.log"
+  $SSH "cd ana && ./fp.sh next out/$fp_last" 2>&1 | tail -1 | tee -a "$dest/relay.log"
   have "$fp_last" || pull_one "$fp_last"
   pull_new train.log
   # 2. the continuation
@@ -94,13 +94,13 @@ fi
 # 3. scores
 evals="$( (saved train.log; saved next.log) | awk -v e="$EVERY" '$1 % e == 0 { print "out/" $2 }' | tr '\n' ' ') ${fp_last:+out/$fp_last} ${next_last:+out/$next_last}"
 log "eval: $evals"
-$SSH "cd formalTransformer && ./fp.sh eval $evals > eval.log 2>&1; [ -f run/eval/transcript-next.corpus ] && ECORPUS=run/eval/transcript-next.corpus ./fp.sh eval $evals > eval-next.log 2>&1; tail -40 eval.log; tail -40 eval-next.log 2>/dev/null" | tee -a "$dest/relay.log"
+$SSH "cd ana && ./fp.sh eval $evals > eval.log 2>&1; [ -f run/eval/transcript-next.corpus ] && ECORPUS=run/eval/transcript-next.corpus ./fp.sh eval $evals > eval-next.log 2>&1; tail -40 eval.log; tail -40 eval-next.log 2>/dev/null" | tee -a "$dest/relay.log"
 
 # 4. pull, verify, destroy
 pull_new train.log; pull_new next.log
 for f in $fp_last $next_last; do have "$f" || pull_one "$f"; done
-rsync -a -e "ssh -o StrictHostKeyChecking=no -p $port" --include='*.log*' --include='*.txt' --exclude='*' "$host:formalTransformer/" "$dest/" >/dev/null 2>&1
-remote=$($SSH 'cd formalTransformer/out && sha256sum *.checkpoint' 2>/dev/null)
+rsync -a -e "ssh -o StrictHostKeyChecking=no -p $port" --include='*.log*' --include='*.txt' --exclude='*' "$host:ana/" "$dest/" >/dev/null 2>&1
+remote=$($SSH 'cd ana/out && sha256sum *.checkpoint' 2>/dev/null)
 echo "$remote" > "$dest/sha256.box.txt"
 (cd "$dest/out" && sha256sum *.checkpoint) > "$dest/sha256.txt" 2>/dev/null
 if [ -n "$remote" ] && [ -s "$dest/sha256.txt" ] && [ -z "$(grep -vxF -f <(echo "$remote") "$dest/sha256.txt")" ]; then

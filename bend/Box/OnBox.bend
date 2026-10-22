@@ -29,8 +29,8 @@ import ./ActBox.bend as Ab
 #   bend-box act-stop | cut-frames EPLOG | cut-pairs NULFILE
 #                                  an act round stopped, its files cut to whole records (bend/Box/ActBox.bend)
 #
-# A box's shell runs it in that directory (`cd formalTransformer && ./bend-box
-# gate`, or `env -C formalTransformer ./bend-box gate` as one command line
+# A box's shell runs it in that directory (`cd ana && ./bend-box
+# gate`, or `env -C ana ./bend-box gate` as one command line
 # without control flow).  `time` shows the trainer's lines as they come
 # (every two seconds, as fp.sh's tee | grep -v did); the other modes print a
 # program's output when it ends, as fp.sh's tail and grep pipelines did.

@@ -412,7 +412,7 @@ def drv.cur.of(m: Maybe<&2, List<&2, U32>>, +b: Rm.RmtBox, +dir: String) -> IO(M
 
 def drv.cur.box(+b: Rm.RmtBox) -> IO(Maybe<&2, String>):
   do IO<Maybe<&2, String>>:
-    +dir : String <- S.env("BOX_DIR", "formalTransformer")
+    +dir : String <- S.env("BOX_DIR", "ana")
     +o : Lc.LclOut <- Rm.rmt.ssh(b, 120, "ls -t " ++ Rm.rmt.q(dir))
     drv.cur.of(Bool.pick(Maybe<&2, List<&2, U32>>, Lc.lcl.ok(o), drv.newest(S.split.lines(Lc.lcl.out(o))), None{}), b, dir)
 

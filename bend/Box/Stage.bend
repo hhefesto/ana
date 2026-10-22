@@ -40,7 +40,7 @@ import ../Push.bend as Pu
 # The box is reached as Remote.bend reaches it (SSH_OPTS, SSH_TRIES, RSYNC_TRIES, ...): every
 # command sent is a fixed command line without control flow, and every copy is rsync with a
 # partial directory and retries (the scripts used scp and `rsync --partial`).  BOX_DIR is the
-# box's working directory (stage box: the env file's REMOTE_DIR; else formalTransformer).
+# box's working directory (stage box: the env file's REMOTE_DIR; else ana).
 # Every name starts with `stg.`; the pure parts are tested in bend/tests/box.bend.
 #
 # 2026-10-15 (Phase 1c): fp-stage.sh, next-stage.sh, fp-restage.sh and dense-identity.sh are
@@ -245,7 +245,7 @@ def stg.box(+host: String, +port: String) -> IO(Unit):
   do IO<Unit>:
     +envf : String <- S.env("BOX_ENV", "bend/gpu/fp100m-box.env")
     +ef : List<&2, U32> <- S.read(envf)
-    +rd : String <- Pu.setting(Pu.env.kvs(S.split.lines(ef), Nil{}), "REMOTE_DIR", "formalTransformer")
+    +rd : String <- Pu.setting(Pu.env.kvs(S.split.lines(ef), Nil{}), "REMOTE_DIR", "ana")
     +dir : String <- stg.dir(rd)
     +b : Rm.RmtBox <- Rm.rmt.box(host, port)
     +tmp : String <- S.mktemp()
@@ -331,7 +331,7 @@ def stg.sums.answered(+r: Rm.RmtSums) -> Bool:
 def stg.push(+name: String, +run: String, +host: String, +port: String) -> IO(Unit):
   +plan = run ++ "/plan-fp100m-b16-windows.tsv"
   do IO<Unit>:
-    +dir : String <- stg.dir("formalTransformer")
+    +dir : String <- stg.dir("ana")
     +evalc : String <- S.env("EVALC", "run/eval/transcript-" ++ name ++ ".corpus")
     m : Maybe<&2, List<&2, U32>> <- S.slurp(plan)
     +pl : List<&2, U32> <- stg.plan.got(m, plan)
@@ -388,7 +388,7 @@ def stg.stages(ss: List<&2, String>, +host: String, +port: String) -> IO(Unit):
 
 def stg.restage(+host: String, +port: String, +ckpt: String, +ss: List<&2, String>) -> IO(Unit):
   do IO<Unit>:
-    +dir : String <- stg.dir("formalTransformer")
+    +dir : String <- stg.dir("ana")
     +b : Rm.RmtBox <- Rm.rmt.box(host, port)
     +tmp : String <- S.mktemp()
     stg.emit(tmp)

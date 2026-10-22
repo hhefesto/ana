@@ -16,7 +16,7 @@ for k in 1 2 3 4 5; do
 done
 for k in $(seq 1 $built); do
   for t in 1 2 3 4 5 6; do
-    ssh -n -o StrictHostKeyChecking=no -o ConnectTimeout=30 -p $PT $H "rm -rf formalTransformer/run/ns$k" && P=ns bend/gpu/raw-stage.sh push $k $H $PT > run/ns-repush$k.log 2>&1 && { log "ns$k re-pushed"; break; }
+    ssh -n -o StrictHostKeyChecking=no -o ConnectTimeout=30 -p $PT $H "rm -rf ana/run/ns$k" && P=ns bend/gpu/raw-stage.sh push $k $H $PT > run/ns-repush$k.log 2>&1 && { log "ns$k re-pushed"; break; }
     log "ns$k push try $t failed"; sleep 60
   done
 done

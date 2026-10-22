@@ -25,7 +25,7 @@ import ../Box/Local.bend as Lc
 #   deploy          corpus-v2 s2 S1 BOUNDARY OUT ACT..: OUT/plan-fp100m-b16-windows.tsv (`plan sim
 #                   SIM_S2_STEPS`, 30) and OUT/stage.env (NLR, NWARM=10), the episodes counted
 #                   on stderr, the stage line on stdout (`s2 traind-next EVERY REL/plan... REL
-#                   fp100m`, REL OUT under TRAINER_DIR, else $HOME/formalTransformer); with
+#                   fp100m`, REL OUT under TRAINER_DIR, else $HOME/ana); with
 #                   SIM_S2_FAIL set, run 3's bend-windows refusal and exit 1; a BOUNDARY past
 #                   S1's plan (`plan sim N`) refused as s2 refuses a step that starts no
 #                   segment; REST_STEPS logged, and CTL_OUT (2026-10-15, run 4) built as
@@ -333,7 +333,7 @@ def sdf.s2.build(+s1: String, +b: String, +out: String, +acts: List<&2, String>)
     +steps : Nat <- S.env.nat("SIM_S2_STEPS", 30n)
     +every : String <- S.env("EVERY", "5000")
     +home : String <- S.env("HOME", "")
-    +tdir : String <- S.env("TRAINER_DIR", home ++ "/formalTransformer")
+    +tdir : String <- S.env("TRAINER_DIR", home ++ "/ana")
     +rest : String <- S.env("REST_STEPS", "")
     +ctl : String <- S.env("CTL_OUT", "")
     S.rm(out)

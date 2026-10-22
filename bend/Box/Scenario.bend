@@ -21,7 +21,7 @@ import ./Local.bend as Lc
 #
 # A run's directory D holds: bin/ (ssh, rsync, notify-send, vastai: bend-sim,
 # first on the chain's PATH), box/ (the box's home: bin/ with its nvidia-smi,
-# pgrep and pkill; formalTransformer/ with traind, traind-next and dense linked
+# pgrep and pkill; ana/ with traind, traind-next and dense linked
 # to bend-sim, bend-box linked to the real one, a copy of fp.sh, run/sim/S1..S3's
 # plans, run/eval's corpora, out/), vast/ (the vastai stub's state: instance
 # 4242), stages, dest/ (the chain's DEST), home/, alerts (notify-send's), and
@@ -256,7 +256,7 @@ def scn.box(+c: ScnCx) -> String:
   scn.d(c) ++ "/box"
 
 def scn.ft(+c: ScnCx) -> String:
-  scn.d(c) ++ "/box/formalTransformer"
+  scn.d(c) ++ "/box/ana"
 
 def scn.dest(+c: ScnCx) -> String:
   scn.d(c) ++ "/dest"
@@ -807,7 +807,7 @@ def scn.cx(+t: ScnTools, +d: String, +tag: String, +old: Bool, +drv: String, +ex
       ScnCx{d, tag, old, self, sim, repo,
         List.append(&2, String, ["PATH=" ++ d ++ "/bin:" ++ path, "HOME=" ++ d ++ "/home", "SIM_BOX_HOME=" ++ d ++ "/box", "SIM_BOX_PATH=" ++ path,
           "SIM_RSYNC=" ++ rsync, "SIM_VAST_DIR=" ++ d ++ "/vast", "SIM_ALERTS=" ++ d ++ "/alerts", "V=" ++ d ++ "/bin/vastai", "CV2=" ++ cv2,
-          "ALERT_CMD=", "BOX_DRIVER=" ++ drv, "BOX_DIR=formalTransformer", "LOG0=train.log", "EXTRA_EVAL=", "POLL=1", "WAIT=8", "WAIT_POLL=1",
+          "ALERT_CMD=", "BOX_DRIVER=" ++ drv, "BOX_DIR=ana", "LOG0=train.log", "EXTRA_EVAL=", "POLL=1", "WAIT=8", "WAIT_POLL=1",
           "START_SETTLE=1", "SETTLE=1", "PULL_WAIT=1", "VERIFY_WAIT=2", "SSH_TRIES=10", "SSH_RETRY_SLEEP=1", "RSYNC_TRIES=10", "DESTROY_WAIT=1",
           "LIST_TRIES=3", "LIST_WAIT=1", "HOLD_POLL=1", "DEAD_QUIET=6", "EVAL_QUIET=30", "WATCH_POLL=1", "GRACE=3600", "LOW_WAIT=3600",
           "SILENT=36000", "SSH_OPTS="], extra), "root@sim-" ++ tag, bbox}

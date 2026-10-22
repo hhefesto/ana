@@ -43,7 +43,7 @@ import ./Keyed.bend as K
 # of S1's plan.  Settings (run 3's): DEPLOY (run/v2/gcroot-deploy-agent/bin/deploy:
 # bend-plan-windows), FILLER (run/v3/s2fill), TRANSCRIPTS (run/v2/transcripts:
 # the held-out files each episode language links), LR (3e-4), WARM (300),
-# EVERY (5000), SHARD (250), JOBS (8), TRAINER_DIR ($HOME/formalTransformer),
+# EVERY (5000), SHARD (250), JOBS (8), TRAINER_DIR ($HOME/ana),
 # S1_LOG.  Run from the act workspace (the repository).  Logs go to stderr,
 # stamped UTC-6.  Every def is prefixed `s2s.`.
 #
@@ -285,7 +285,7 @@ def s2s.cfg() -> IO(S2Cfg):
     +shard : String <- S.env("SHARD", "250")
     +jobs : String <- S.env("JOBS", "8")
     +home : String <- S.env("HOME", "")
-    +tdir : String <- S.env("TRAINER_DIR", home ++ "/formalTransformer")
+    +tdir : String <- S.env("TRAINER_DIR", home ++ "/ana")
     +s1log : String <- S.env("S1_LOG", "")
     +pwd : String <- K.kor.pwd()
     return S2Cfg{d, filler, tx, lr, warm, every, shard, jobs, tdir, s1log, pwd}

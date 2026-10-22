@@ -19,7 +19,7 @@ export PATH=$PWD/run/gcroot-bend-ops/bin:$PWD/run/v2/gcroot-bend-corpus-v2/bin:$
    ```sh
    BOX_ENV=bend/gpu/v3-box.env bend-ops stage box root@IP PORT
    ```
-   BOX_ENV names the run's bend-push settings (run 3's here). This sends the trainer, the gate and bend-box as C, builds bend-box on the box with its clang, then pushes the plan's shards in plan order. It ends by printing what to run on the box: `cd formalTransformer && ./bend-box gate && ./bend-box time && ./bend-box run`. The run takes fp.sh's environment (bend/Box/OnBox.bend), for example run 3's S1: `PLAN=run/v3/S1/plan-fp100m-b16-windows.tsv RUN=run/v3/S1 NAME=s1 STEPS=36696 ./bend-box run`.
+   BOX_ENV names the run's bend-push settings (run 3's here). This sends the trainer, the gate and bend-box as C, builds bend-box on the box with its clang, then pushes the plan's shards in plan order. It ends by printing what to run on the box: `cd ana && ./bend-box gate && ./bend-box time && ./bend-box run` (boxes before 2026-10-22: `cd formalTransformer`). The run takes fp.sh's environment (bend/Box/OnBox.bend), for example run 3's S1: `PLAN=run/v3/S1/plan-fp100m-b16-windows.tsv RUN=run/v3/S1 NAME=s1 STEPS=36696 ./bend-box run`.
 
    Later stages are built here and pushed:
    ```sh
@@ -132,7 +132,7 @@ bend-ops guard tools/runs/run4.cfg              # starts chain, watch and handov
 
 ## ▶ CONTINUE HERE (2026-10-22, 07:30 UTC-6): Bend has record eta; yoneda19 checks 1986 of 2527
 
-- **The workspace is ~/src/ana** (it was ~/src/formalTransformer). Local paths in the tree moved with it (514b09f). So did the systemd user units (codex-bend-gen2, codex-hs2bend, ft-run2/3/4-guard), the scripts under run/, the GC roots and the Codex trust entry. On a box, the trainer directory is still ~/formalTransformer (BOX_DIR).
+- **The workspace is ~/src/ana** (it was ~/src/formalTransformer). Local paths in the tree moved with it (514b09f). So did the systemd user units (codex-bend-gen2, codex-hs2bend, ft-run2/3/4-guard), the scripts under run/, the GC roots and the Codex trust entry. On a new box the trainer directory is ~/ana too (2026-10-22): BOX_DIR, REMOTE_DIR, TRAINER_DIR, the bend/gpu box env files and scripts, bend-push's default and tools/runs/TEMPLATE.cfg's trainer-dir. Runs 3 and 4 used ~/formalTransformer, so their recorded logs and the test fixtures taken from them keep that name.
 - **Record eta in Bend:** hhefesto/bend2 ft-kernels 2b33b4f1, which flake.lock now pins. It works in checking only, by two rules:
   - A match on a neutral record goes on with the record's projections.
   - A constructor equals a neutral value when they agree field by field.
@@ -154,6 +154,10 @@ bend-ops guard tools/runs/run4.cfg              # starts chain, watch and handov
   - An erased binder used live: 51 blocked, 15 roots.
   - `Category<C.o, &2, &2>` vs `Category`: 23 blocked, 2 roots (Dinatural).
   - Product's own: `_※ⁿ_`, `πʳ`, `Swap`.
+- **The sandboxes pass on the rename (2026-10-22 13:30):** `sim all` 209 ok, `sim stage all` 316 ok, `sim drive all` 284 ok, 0 FAIL. Two causes had failed them (drive 62-93, stage 22-29):
+  - The fake box made its trainer directory ana/ while ScnDrive still pointed the hand-over at box/formalTransformer, and run 3's old drivers (s2-driver.sh's `TD=/root/formalTransformer`, move.sh's `cd formalTransformer`) were not mapped onto the sandbox: both hand-overs waited for a train.log that was never there. ScnDrive now uses ana/ and maps the old drivers' name onto it, like their other paths.
+  - `sim stage` ran a bend-episode built at 07:07 from an older tree (run/gcroot-bend-episode), without the `langs` command act-check reads. Build SIM_EPISODE from the tree: `nix build .#bend-episode -o run/gcroot-bend-episode`.
+  - The Box suites run locally as before: box 21, drive 66, ops 70, recipes 57, chain 59 ok.
 - **bend-tests in the nix sandbox:** 7 of 29 suites fail (ops, box, recipes, chain, act, drive, agda2bend) on missing fixture files. They fail the same way at 20c3d74 with the old Bend, so this isn't a regression. ops.bend and agda2bend.bend pass when run locally; the sandbox's fixture copy is still to fix.
 
 ## CONTINUE HERE (2026-10-20, 08:00 UTC-6): agda2bend on the Yoneda cone, 1923 of 2527 items check; Product and Setoids hit Bend's missing record eta

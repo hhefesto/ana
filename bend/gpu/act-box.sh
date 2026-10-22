@@ -30,7 +30,7 @@ exit 2
 #
 # The workspace is this repository's own path (WS) on the box, and HOME is its
 # HOME: the Agda library file, the checkers' caches, elan's toolchains and the
-# scripts name them. The trainer's ~/formalTransformer (fp-stage.sh) is not
+# scripts name them. The trainer's ~/ana (fp-stage.sh) is not
 # touched, and nothing here stops the trainer: a failure only delays a round.
 # PROCS x THREADS (default: (nproc - 4) / 2 processes of 2 threads) leave the
 # trainer 4 cores; a Lean check takes about 3 GB.

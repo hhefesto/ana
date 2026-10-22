@@ -79,7 +79,7 @@ import ../Clock.bend as Ck
 #
 # Environment: V (vastai), ALERT_CMD, POLL, WAIT, WAIT_POLL, LOG0, PULL_WAIT,
 # VERIFY_WAIT, EXTRA_EVAL, BOX_DRIVER (./bend-box; ./fp.sh), BOX_DIR
-# (formalTransformer: the trainer's directory, relative to the box's home or
+# (ana: the trainer's directory, relative to the box's home or
 # absolute), DEAD_QUIET, EVAL_QUIET; START_SETTLE (20 s after a start before
 # its log is looked for), SETTLE (40 s after a start), HOLD_POLL (30),
 # DESTROY_WAIT (10), LIST_TRIES (6), LIST_WAIT (30); Remote's SSH_OPTS,
@@ -1656,7 +1656,7 @@ def chn.run(+host: String, +port: String, +inst: String, +dest: String, +stages:
   do IO<Unit>:
     b : Rm.RmtBox <- Rm.rmt.box(host, port)
     v : String <- Vs.vst.bin()
-    dir : String <- S.env("BOX_DIR", "formalTransformer")
+    dir : String <- S.env("BOX_DIR", "ana")
     +drv : String <- S.env("BOX_DRIVER", "./bend-box")
     log0 : String <- S.env("LOG0", "train.log")
     extra : String <- S.env("EXTRA_EVAL", "")

@@ -29,7 +29,7 @@ import ./Scenario.bend as Sc
 # A run's directory D holds bin/ (bend-sim as ssh, scp, rsync, nix, bend, bend-push, sleep,
 # systemctl, notify-send and vastai, and the real bend-corpus-v2: first on PATH), box/ (the
 # box's home: bin/ with its clang-19, nvidia-smi, pgrep, pkill, elan, lake, bend-corpus-v2 and
-# bend-episode; formalTransformer/; for act, ws/, home/, usr/local/bin/ and etc/nix/, which
+# bend-episode; ana/; for act, ws/, home/, usr/local/bin/ and etc/nix/, which
 # box/.sim-map puts in place of the absolute paths), repo/ (the repository the command runs in:
 # fixtures, and the old scripts as they ran before they were unwired, Sc.scn.copy.live), home/,
 # vast/ (the vastai stub's state), tmp/ (TMPDIR), calls (the stubs' recorded calls here),
@@ -137,7 +137,7 @@ def sst.box(+c: SstC) -> String:
   sst.d(c) ++ "/box"
 
 def sst.ft(+c: SstC) -> String:
-  sst.d(c) ++ "/box/formalTransformer"
+  sst.d(c) ++ "/box/ana"
 
 def sst.rp(+c: SstC) -> String:
   sst.d(c) ++ "/repo"
@@ -597,7 +597,7 @@ def sst.fx.stage(+c: SstC, +boxenv: List<&2, String>) -> IO(Unit):
     sst.put(r ++ "/bend/TrainDense.bend", "sim\n")
     sst.put(r ++ "/bend/tests/dense.bend", "sim\n")
     sst.put(r ++ "/bend/Box/BoxMain.bend", "sim\n")
-    sst.put(r ++ "/bend/gpu/fp100m-box.env", "RUN_DIR=run/fp100m\nSIZE=fp100m\nTRAIN_BATCH=16\nPLAN=run/fp100m/plan-fp100m-b16-windows.tsv\nTOKENIZER_FILE=weights/code32k.bpe\nREMOTE_DIR=formalTransformer\n")
+    sst.put(r ++ "/bend/gpu/fp100m-box.env", "RUN_DIR=run/fp100m\nSIZE=fp100m\nTRAIN_BATCH=16\nPLAN=run/fp100m/plan-fp100m-b16-windows.tsv\nTOKENIZER_FILE=weights/code32k.bpe\nREMOTE_DIR=ana\n")
     sst.put(r ++ "/weights/code32k.bpe", sst.blob("tokenizer", 2000n))
     sst.put(r ++ "/run/eval/transcript-fp.corpus", sst.blob("transcript-fp", 1500n))
     sst.put(r ++ "/run/eval/transcript-next.corpus", sst.blob("transcript-next", 1600n))
@@ -699,8 +699,8 @@ def sst.fin(+c: SstC, +id: String, +ds: List<&2, SstDf>, +xs: List<&2, SstX>, r:
   sst.fin.by(sst.only(sst.t(c)), id, ds, xs, r)
 
 def sst.ds.box() -> List<&2, SstDf>:
-  [sst.dnew("box", "formalTransformer/box.c  ", "deliberate: the plan's Phase 1b, `stage box` emits bend-box as C (box.c) for the box"),
-   sst.dnew("box", "formalTransformer/bend-box  ", "deliberate: bend-box, built there with the box's newest clang (clang-19 down to 14), replaces fp.sh"),
+  [sst.dnew("box", "ana/box.c  ", "deliberate: the plan's Phase 1b, `stage box` emits bend-box as C (box.c) for the box"),
+   sst.dnew("box", "ana/bend-box  ", "deliberate: bend-box, built there with the box's newest clang (clang-19 down to 14), replaces fp.sh"),
    sst.dnew("lines", "bend-box built on the box with clang-19", "deliberate: bend-box built on the box (Phase 1b)")]
 
 # (a) bend-ops stage box against fp-stage.sh
@@ -711,15 +711,15 @@ def sst.s.box(+t: SstT, +base: String) -> IO(List<&2, Sc.ScnRes>):
   +co = sst.cx(t, base, id, True{})
   +ds = List.append(&2, SstDf, sst.ds.box(),
     [sst.dold("lines", "== scp", "form: the step's header (the copies are rsync with a partial directory and retries, not scp)"),
-     sst.dnew("lines", "== to the box (formalTransformer)", "form: the same step's header"),
+     sst.dnew("lines", "== to the box (ana)", "form: the same step's header"),
      sst.dold("lines", "./fp.sh gate && ./fp.sh time && ./fp.sh run", "deliberate: the next steps name bend-box, the driver that replaces fp.sh (Phase 1b)"),
      sst.dnew("lines", "./bend-box gate && ./bend-box time && ./bend-box run", "deliberate: the same")])
   do IO<List<&2, Sc.ScnRes>>:
     sst.fx.stage(cn, Nil{})
     sst.fx.stage(co, Nil{})
     r : SstR & SstR <- sst.both(cn, co, Nil{}, [sst.self(t), "stage", "box", h, "2222"], Nil{}, ["bash", "bend/gpu/fp-stage.sh", h, "2222"], sst.noise(), 900)
-    return sst.fin(cn, id, ds, [SxRc{True{}, "exit 0"}, SxBox{True{}, "formalTransformer/run/fp100m/shard-2-fp100m.corpus  ", True{}},
-      SxBox{True{}, "formalTransformer/run/fp100m/plan-fp100m-b16-windows.tsv  ", True{}}, SxBox{True{}, "formalTransformer/bend-box  ", True{}}], r)
+    return sst.fin(cn, id, ds, [SxRc{True{}, "exit 0"}, SxBox{True{}, "ana/run/fp100m/shard-2-fp100m.corpus  ", True{}},
+      SxBox{True{}, "ana/run/fp100m/plan-fp100m-b16-windows.tsv  ", True{}}, SxBox{True{}, "ana/bend-box  ", True{}}], r)
 
 def sst.fx.push(+c: SstC, +boxenv: List<&2, String>) -> IO(Unit):
   do IO<Unit>:
@@ -743,9 +743,9 @@ def sst.s.push(+t: SstT, +base: String) -> IO(List<&2, Sc.ScnRes>):
     sst.fx.push(cn, Nil{})
     sst.fx.push(co, Nil{})
     r : SstR & SstR <- sst.both(cn, co, Nil{}, sst.push.new(cn, h), ["NAME=s9", "RUN=run/s9"], sst.push.old(h), sst.noise(), 600)
-    return sst.fin(cn, id, Nil{}, [SxRc{True{}, "exit 0"}, SxBox{True{}, "formalTransformer/run/s9/STAGED  ", True{}},
-      SxBox{True{}, "formalTransformer/run/s9/plan-s9-b16-windows.tsv  ", True{}}, SxBox{True{}, "formalTransformer/run/s9/shard-2-s9.corpus  ", True{}},
-      SxBox{True{}, "formalTransformer/run/eval/transcript-s9.corpus  ", True{}}, SxOut{True{}, "STAGED: every shard matches", True{}}], r)
+    return sst.fin(cn, id, Nil{}, [SxRc{True{}, "exit 0"}, SxBox{True{}, "ana/run/s9/STAGED  ", True{}},
+      SxBox{True{}, "ana/run/s9/plan-s9-b16-windows.tsv  ", True{}}, SxBox{True{}, "ana/run/s9/shard-2-s9.corpus  ", True{}},
+      SxBox{True{}, "ana/run/eval/transcript-s9.corpus  ", True{}}, SxOut{True{}, "STAGED: every shard matches", True{}}], r)
 
 # (b) the link drops in the middle of the push: the copy of shard 1 (rsync's third call) fails
 def sst.s.push.drop(+t: SstT, +base: String) -> IO(List<&2, Sc.ScnRes>):
@@ -754,7 +754,7 @@ def sst.s.push.drop(+t: SstT, +base: String) -> IO(List<&2, Sc.ScnRes>):
   +cn = sst.cx(t, base, id, False{})
   +co = sst.cx(t, base, id, True{})
   +fix = {"fix: a copy the link drops is tried again (RSYNC_TRIES, a partial directory), where next-stage.sh push stopped at the first failed rsync (set -e) and left the stage unstaged" : String}
-  +ds = sst.dl([sst.dnew("status", "exit 0", fix), sst.dold("status", "exit 255", fix), sst.dnew("box", "formalTransformer/run/s9/", fix),
+  +ds = sst.dl([sst.dnew("status", "exit 0", fix), sst.dold("status", "exit 255", fix), sst.dnew("box", "ana/run/s9/", fix),
     sst.dnew("lines", " landed", fix), sst.dnew("lines", "STAGED: every shard matches", fix), sst.dold("lines", ".rsync-fail", fix), sst.dold("lines", "rsync error", fix)])
   do IO<List<&2, Sc.ScnRes>>:
     sst.fx.push(cn, Nil{})
@@ -762,8 +762,8 @@ def sst.s.push.drop(+t: SstT, +base: String) -> IO(List<&2, Sc.ScnRes>):
     S.write(sst.box(cn) ++ "/.rsync-fail", S.b("3\n"))
     S.write(sst.box(co) ++ "/.rsync-fail", S.b("3\n"))
     r : SstR & SstR <- sst.both(cn, co, Nil{}, sst.push.new(cn, h), ["NAME=s9", "RUN=run/s9"], sst.push.old(h), sst.noise(), 600)
-    return sst.fin(cn, id, ds, [SxRc{True{}, "exit 0"}, SxBox{True{}, "formalTransformer/run/s9/STAGED  ", True{}},
-      SxBox{True{}, "formalTransformer/run/s9/shard-2-s9.corpus  ", True{}}, SxBox{False{}, "formalTransformer/run/s9/STAGED  ", False{}}], r)
+    return sst.fin(cn, id, ds, [SxRc{True{}, "exit 0"}, SxBox{True{}, "ana/run/s9/STAGED  ", True{}},
+      SxBox{True{}, "ana/run/s9/shard-2-s9.corpus  ", True{}}, SxBox{False{}, "ana/run/s9/STAGED  ", False{}}], r)
 
 # a shard on the box that is not the local one but looks it (same size and mtime: rsync -a's
 # quick check passes it over), so only the sha256 gate can see it
@@ -812,7 +812,7 @@ def sst.s.restage(+t: SstT, +base: String) -> IO(List<&2, Sc.ScnRes>):
     sst.put(sst.rp(co) ++ "/" ++ ck, sst.blob("checkpoint", 5000n))
     r : SstR & SstR <- sst.both(cn, co, Nil{}, [sst.self(t), "stage", "restage", h, "2222", ck, "s9", "raw3"], Nil{},
       ["bash", "bend/gpu/fp-restage.sh", h, "2222", ck, "s9", "raw3"], sst.noise(), 900)
-    return sst.fin(cn, id, ds, [SxRc{True{}, "exit 0"}, SxBox{True{}, "formalTransformer/out/s1-step30.checkpoint  ", True{}},
+    return sst.fin(cn, id, ds, [SxRc{True{}, "exit 0"}, SxBox{True{}, "ana/out/s1-step30.checkpoint  ", True{}},
       SxBox{True{}, "run/s9/STAGED  ", True{}}, SxBox{True{}, "run/raw3/STAGED  ", True{}}, SxOut{True{}, "restaged", True{}}], r)
 
 # (d) bend-ops stage raw push against raw-stage.sh push
@@ -828,8 +828,8 @@ def sst.s.rawpush(+t: SstT, +base: String) -> IO(List<&2, Sc.ScnRes>):
     sst.fx.run(co, "run/raw3", 2n, 20n)
     r : SstR & SstR <- sst.both(cn, co, Nil{}, [sst.self(t), "stage", "raw", "push", "3", h, "2222"], Nil{}, ["bash", "bend/gpu/raw-stage.sh", "push", "3", h, "2222"],
       sst.noise(), 600)
-    return sst.fin(cn, id, Nil{}, [SxRc{True{}, "exit 0"}, SxBox{True{}, "formalTransformer/run/raw3/STAGED  ", True{}},
-      SxBox{True{}, "formalTransformer/run/eval/transcript-next.corpus  ", True{}}], r)
+    return sst.fin(cn, id, Nil{}, [SxRc{True{}, "exit 0"}, SxBox{True{}, "ana/run/raw3/STAGED  ", True{}},
+      SxBox{True{}, "ana/run/eval/transcript-next.corpus  ", True{}}], r)
 
 # The feed --------------------------------------------------------------------------------------
 

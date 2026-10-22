@@ -417,7 +417,7 @@ def cwt.run(+host: String, +port: String, +dest: String, +min: String) -> IO(Uni
   do IO<Unit>:
     b : Rm.RmtBox <- Rm.rmt.box(host, port)
     v : String <- Vs.vst.bin()
-    dir : String <- S.env("BOX_DIR", "formalTransformer")
+    dir : String <- S.env("BOX_DIR", "ana")
     ts : List<&2, Nat> <- cwt.envs(cwt.t.names(), cwt.t.defaults())
     cwt.go(U32.to_nat(4000000000), CwtCfg{b, dest, min, dir, v, ts}, CwtS{0n, True{}})
 

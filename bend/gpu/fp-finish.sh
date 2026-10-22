@@ -36,16 +36,16 @@ EVERY=${EVERY:-1000}
 # the checkpoints whose step is a multiple of EVERY and whose save the log
 # reports finished (a save writes in place: a file is whole only once the
 # trainer says `saved`), oldest first
-wanted() { $SSH 'cd formalTransformer && grep -o "saved out/[^ ]*\.checkpoint" train.log 2>/dev/null' 2>/dev/null | sed -n 's#^saved out/\(.*-step\([0-9]*\)\.checkpoint\)$#\2 \1#p' | sort -n | awk -v e="$EVERY" '$1 % e == 0 { print $2 }'; }
-pull_one() { rsync -a --partial-dir=.partial -e "ssh -o StrictHostKeyChecking=no -p $port" "$host:formalTransformer/out/$1" "$dest/out/" >/dev/null 2>&1 && log "pulled $1"; }
+wanted() { $SSH 'cd ana && grep -o "saved out/[^ ]*\.checkpoint" train.log 2>/dev/null' 2>/dev/null | sed -n 's#^saved out/\(.*-step\([0-9]*\)\.checkpoint\)$#\2 \1#p' | sort -n | awk -v e="$EVERY" '$1 % e == 0 { print $2 }'; }
+pull_one() { rsync -a --partial-dir=.partial -e "ssh -o StrictHostKeyChecking=no -p $port" "$host:ana/out/$1" "$dest/out/" >/dev/null 2>&1 && log "pulled $1"; }
 pull_new() { mkdir -p "$dest/out"; for f in $(wanted); do [ -f "$dest/out/$f" ] && [ ! -f "$dest/out/.partial/$f" ] || pull_one "$f"; done; }
 # on the box: delete saved checkpoints that are neither a multiple of EVERY
 # nor the newest saved one
-prune() { $SSH "cd formalTransformer && grep -o 'saved out/[^ ]*\\.checkpoint' train.log | sed -n 's#^saved out/\\(.*-step\\([0-9]*\\)\\.checkpoint\\)\$#\\2 \\1#p' | sort -n | head -n -1 | awk -v e=$EVERY '\$1 % e != 0 { print \"out/\" \$2 }' | xargs -r rm -f" 2>/dev/null; }
+prune() { $SSH "cd ana && grep -o 'saved out/[^ ]*\\.checkpoint' train.log | sed -n 's#^saved out/\\(.*-step\\([0-9]*\\)\\.checkpoint\\)\$#\\2 \\1#p' | sort -n | head -n -1 | awk -v e=$EVERY '\$1 % e != 0 { print \"out/\" \$2 }' | xargs -r rm -f" 2>/dev/null; }
 last_size=0; quiet=0; state=running
 while [ $state = running ]; do
   sleep 300
-  r=$($SSH 'cd formalTransformer && stat -c %s train.log 2>/dev/null; pgrep -c -x traind; tail -c 200 train.log 2>/dev/null | tr "\n" " "' 2>/dev/null) || { log "ssh failed; retrying"; continue; }
+  r=$($SSH 'cd ana && stat -c %s train.log 2>/dev/null; pgrep -c -x traind; tail -c 200 train.log 2>/dev/null | tr "\n" " "' 2>/dev/null) || { log "ssh failed; retrying"; continue; }
   size=$(echo "$r" | sed -n 1p); procs=$(echo "$r" | sed -n 2p); tail=$(echo "$r" | sed -n 3p)
   if echo "$tail" | grep -q "done at step"; then state=done
   elif [ "${procs:-0}" = 0 ]; then
@@ -59,15 +59,15 @@ while [ $state = running ]; do
 done
 log "trainer $state"
 [ $state = died ] && echo "the trainer died; see train.log" > "$dest/DIED"
-last=$($SSH 'cd formalTransformer && grep -o "saved out/[^ ]*\.checkpoint" train.log' 2>/dev/null | sed -n 's#^saved out/\(.*-step\([0-9]*\)\.checkpoint\)$#\2 \1#p' | sort -n | tail -1 | cut -d" " -f2)
+last=$($SSH 'cd ana && grep -o "saved out/[^ ]*\.checkpoint" train.log' 2>/dev/null | sed -n 's#^saved out/\(.*-step\([0-9]*\)\.checkpoint\)$#\2 \1#p' | sort -n | tail -1 | cut -d" " -f2)
 evals="$(wanted | sed 's#^#out/#' | tr '\n' ' ') ${last:+out/$last}"
 log "eval: $evals"
-$SSH "cd formalTransformer && ./fp.sh eval $evals > eval.log 2>&1; tail -60 eval.log" | tee -a "$dest/finish.log"
+$SSH "cd ana && ./fp.sh eval $evals > eval.log 2>&1; tail -60 eval.log" | tee -a "$dest/finish.log"
 log "pull the rest: the multiples of $EVERY not yet here and the last checkpoint ($last)"
 pull_new
 [ -n "$last" ] && [ ! -f "$dest/out/$last" ] && pull_one "$last"
-rsync -a -e "ssh -o StrictHostKeyChecking=no -p $port" --include='*.log*' --include='*.txt' --exclude='*' "$host:formalTransformer/" "$dest/" 2>&1 | tail -2 | tee -a "$dest/finish.log"
-remote=$($SSH 'cd formalTransformer/out && sha256sum *.checkpoint' 2>/dev/null)
+rsync -a -e "ssh -o StrictHostKeyChecking=no -p $port" --include='*.log*' --include='*.txt' --exclude='*' "$host:ana/" "$dest/" 2>&1 | tail -2 | tee -a "$dest/finish.log"
+remote=$($SSH 'cd ana/out && sha256sum *.checkpoint' 2>/dev/null)
 echo "$remote" > "$dest/sha256.box.txt"
 (cd "$dest/out" && sha256sum *.checkpoint) > "$dest/sha256.txt" 2>/dev/null
 if [ -n "$remote" ] && [ -s "$dest/sha256.txt" ] && [ -z "$(grep -vxF -f <(echo "$remote") "$dest/sha256.txt")" ]; then

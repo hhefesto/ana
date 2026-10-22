@@ -17,10 +17,10 @@ exit 2
 #   from fp.sh's LR (3e-4) and WARM (300) and the plan's total T;
 # - NWARM is 10.
 # BOUNDARY must start a segment (S1 runs with STEPS=BOUNDARY, and the trainer saves at its
-# last step). Run from the act workspace (the repository); S1_LOG (~/formalTransformer/
+# last step). Run from the act workspace (the repository); S1_LOG (~/ana/
 # train.log) is checked against NLR. Then append to the chain's STAGES:
 #   s2 traind-next 5000 run/v3/S2/plan-fp100m-b16-windows.tsv run/v3/S2 fp100m
-# (paths relative to the trainer's directory, TRAINER_DIR, ~/formalTransformer: the chain
+# (paths relative to the trainer's directory, TRAINER_DIR, ~/ana: the chain
 # looks for a stage's plan there)
 set -euo pipefail
 s1=${1:?usage: s2.sh S1_DIR BOUNDARY OUT ACT_DIR...} b=${2:?} out=${3:?}; shift 3
@@ -76,9 +76,9 @@ total=$(head -1 "$p" | awk '{ print $3 }')
 nlr=$(awk -v lr="${LR:-3e-4}" -v w="${WARM:-300}" -v t="$total" -v b="$b" \
   'BEGIN { printf "%.6e", 0.5 * lr * (1 + cos(3.141592653589793 * (b - w) / (t - w))) }')
 printf 'NLR=%s\nNWARM=10\n' "$nlr" > "$out/stage.env"
-seen=$(grep -o 'lr=[0-9.e-]*' "${S1_LOG:-$HOME/formalTransformer/train.log}" 2>/dev/null | tail -1 | cut -d= -f2 || true)
+seen=$(grep -o 'lr=[0-9.e-]*' "${S1_LOG:-$HOME/ana/train.log}" 2>/dev/null | tail -1 | cut -d= -f2 || true)
 log "stage.env: NLR $nlr (S1's log last shows lr ${seen:-none}), NWARM 10"
 log "S2: $(head -1 "$out/plan-fp100m-b16-windows.tsv" | awk '{ print $3 }') steps in $out; append to STAGES:"
-# relative to the trainer's directory: fp-chain.sh looks for a stage's plan under ~/formalTransformer/
-rel=${out#${TRAINER_DIR:-$HOME/formalTransformer}/}
+# relative to the trainer's directory: fp-chain.sh looks for a stage's plan under ~/ana/
+rel=${out#${TRAINER_DIR:-$HOME/ana}/}
 echo "s2 traind-next ${EVERY:-5000} $rel/plan-fp100m-b16-windows.tsv $rel fp100m"

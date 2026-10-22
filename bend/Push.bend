@@ -21,7 +21,7 @@ import ./Clock.bend as Ck
 #   RUN_DIR SIZE TRAIN_BATCH SHARD_ARTICLES PLAN TOKENIZER_FILE
 #                    the corpus (PLAN defaults to
 #                    RUN_DIR/plan-SIZE-bTRAIN_BATCH-sSHARD_ARTICLES.tsv)
-#   REMOTE_DIR       remote repo path      (default formalTransformer)
+#   REMOTE_DIR       remote repo path      (default ana)
 #   MAX_SHARDS       0 = all; N = send only the first N shards still missing
 #   COMPRESS         1 = rsync -z --compress-level=1  (default 0: on a link
 #                    faster than one core's gzip the CPU is the bottleneck;
@@ -954,7 +954,7 @@ def push(+host: String, +port: String) -> IO(Unit):
     +sa : String <- setting(kvs, "SHARD_ARTICLES", "32000")
     +plan : String <- setting(kvs, "PLAN", rd ++ "/plan-" ++ size ++ "-b" ++ batch ++ "-s" ++ sa ++ ".tsv")
     +tok : String <- setting(kvs, "TOKENIZER_FILE", "run/enwiki-fineweb-32k.bpe")
-    +remote : String <- setting(kvs, "REMOTE_DIR", "formalTransformer")
+    +remote : String <- setting(kvs, "REMOTE_DIR", "ana")
     +mx : String <- setting(kvs, "MAX_SHARDS", "0")
     +comp : String <- setting(kvs, "COMPRESS", "0")
     +skip : String <- setting(kvs, "SKIP_LINK_CHECK", "0")

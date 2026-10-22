@@ -26,7 +26,7 @@ log() { echo "[$(TZ=Etc/GMT+6 date '+%Y-%m-%d %H:%M:%S') UTC-6] raw-driver: $*";
 credit_ok() {
   local credit cur
   credit=$($V show user --raw 2>/dev/null | $CV2 credit) || return 1
-  cur=$(ssh -n -o StrictHostKeyChecking=no -o ConnectTimeout=30 -p "$port" "$host" 'cd formalTransformer && l=$(ls -t *.log | grep -v "^eval" | head -1) && echo "${l%.log} $(grep -o "step=[0-9]*/[0-9]*" $l | tail -1)"' 2>/dev/null) || return 1
+  cur=$(ssh -n -o StrictHostKeyChecking=no -o ConnectTimeout=30 -p "$port" "$host" 'cd ana && l=$(ls -t *.log | grep -v "^eval" | head -1) && echo "${l%.log} $(grep -o "step=[0-9]*/[0-9]*" $l | tail -1)"' 2>/dev/null) || return 1
   # the message on stderr; 0 when the credit covers it
   $CV2 credit-ok "$stages" "$credit" "$cur" "$1"
 }
