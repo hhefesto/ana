@@ -170,15 +170,12 @@ thread and at sixteen, with htop above:</p>
 on a flat store with Bend's bulk ops (threaded CPU kernels, or cuBLAS and generated CUDA kernels on a GPU) and
 does about 21 ms per token on the same machine. Pure matrix-vector passes stop scaling at about 2.5&times;
 here: they wait on memory bandwidth, not on cores.</p>
-<p><b>Interaction nets, and what Bend 2 kept from them.</b> Bend comes from interaction nets. HVM, the runtime of
-Bend 1, evaluates Lafont's interaction combinators: a program is a graph, every rewrite is local, and so every
-redex can fire in parallel without locks. That is exactly the shape of this work: a neural network is a big
-dataflow graph of local, independent pieces of arithmetic, and a proof-heavy codebase wants a runtime with no
-hidden shared state. Bend 2, which ana uses, keeps those goals and drops the graph. Its runtime, BendRT, gets the same
-locality from the type system: values are affine, so each has one owner, a forked task owns its arguments, and
-nothing is shared unless the compiler placed the share. The price is that forks must be balanced; ana's trees are
-balanced by construction. (See the <a href="https://github.com/bendlang/bend/blob/main/paper/BendRT.pdf">BendRT paper</a>,
-whose related-work section says this.)</p>
+<p><b>How Bend 2 runs it in parallel.</b> A neural network is a big dataflow graph of local, independent pieces
+of arithmetic, and a proof-heavy codebase wants a runtime with no hidden shared state. Bend 2's runtime, BendRT,
+gets both from the type system: values are affine, so each has one owner, a forked task owns its arguments, and
+nothing is shared unless the compiler placed the share. There are no locks and no shared work queue. The price is
+that forks must be balanced; ana's trees are balanced by construction. (See the
+<a href="https://github.com/bendlang/bend/blob/main/paper/BendRT.pdf">BendRT paper</a>.)</p>
 <p><b>The GPU without writing kernels.</b> The dense trainer is a Bend program over three bulk ops, matrix
 products and an <code>einsum</code> over up to six loop indices. On a CUDA build the products go to cuBLAS and each
 <code>einsum</code> expression becomes a kernel, compiled at run time and cached. A training step is a list of ops,
