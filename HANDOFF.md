@@ -130,7 +130,33 @@ bend-ops guard tools/runs/run4.cfg              # starts chain, watch and handov
   - resume rewrites the stage's STAGES line and keeps the old one as STAGES.OLD_INSTANCE.
 - `bend-ops sim drive all run/sim-drive` runs 7 scenarios against run 3's boot-guard.sh, s2-driver.sh and move.sh. Not yet shown: act-ensure, act-pull, `move restage` and `move act`, which need real nix on a box, and `guard install` against real systemd.
 
-## ▶ CONTINUE HERE (2026-10-20, 08:00 UTC-6): agda2bend on the Yoneda cone, 1923 of 2527 items check; Product and Setoids hit Bend's missing record eta
+## ▶ CONTINUE HERE (2026-10-22, 07:30 UTC-6): Bend has record eta; yoneda19 checks 1986 of 2527
+
+- **The workspace is ~/src/ana** (it was ~/src/formalTransformer). Local paths in the tree moved with it (514b09f). So did the systemd user units (codex-bend-gen2, codex-hs2bend, ft-run2/3/4-guard), the scripts under run/, the GC roots and the Codex trust entry. On a box, the trainer directory is still ~/formalTransformer (BOX_DIR).
+- **Record eta in Bend:** hhefesto/bend2 ft-kernels 2b33b4f1, which flake.lock now pins. It works in checking only, by two rules:
+  - A match on a neutral record goes on with the record's projections.
+  - A constructor equals a neutral value when they agree field by field.
+  - A record means one constructor, with no field that reaches the datatype, either by its own name or through a type-level def. Base's `Word.Con` reaches it through `tail: Word(p)`. Missing that case hung everything that imports Base.
+  - Bend's tests/check, proof and base (396 files) give the same verdicts as before.
+  - `--verdict` doesn't know eta.
+  - The pattern that stuck Product (`zip` assoc and left identity on function-typed homs, an `OP` record) checks with eta and fails without it.
+- **Levels as quantities are on** (`act.quant.on()`). Qfix (ToBend/Qfix.bend) solves each quantity argument from the kind of the type passed: &1 for a function type, &2 for Data, the hom quantity for `Arr(C)(x, y)`. The gate solves them again after its repairs. The goldens for Level and Function.Base were remade with quantities, and Function.Base's 33 items all still check. agda2bend.bend gives 52 oks locally.
+- **yoneda19** (eta Bend plus Qfix): 1986 checked, 397 dependent, 144 dropped, of 2527. yoneda18 had 1976 / 389 / 150 of 2515.
+  - LiftSetoids: 5 of 7 (was 2).
+  - Category.Product: 8 of 16 (was 7), with 7 dropped.
+  - Setoids: 0 of 1.
+  - Functor.Hom: 3 of 7.
+  - Categories.Yoneda: 0 of 12, all 12 dependents.
+- **Top causes** (`agda2bend report run/a2b/yoneda19 run/a2b/yoneda18`):
+  - `expected Data observed Kind(a)`: 175 blocked, 4 roots.
+  - A value used twice: 64 blocked, 26 roots.
+  - `expected Data observed Type`: 52 blocked, 17 roots.
+  - An erased binder used live: 51 blocked, 15 roots.
+  - `Category<C.o, &2, &2>` vs `Category`: 23 blocked, 2 roots (Dinatural).
+  - Product's own: `_※ⁿ_`, `πʳ`, `Swap`.
+- **bend-tests in the nix sandbox:** 7 of 29 suites fail (ops, box, recipes, chain, act, drive, agda2bend) on missing fixture files. They fail the same way at 20c3d74 with the old Bend, so this isn't a regression. ops.bend and agda2bend.bend pass when run locally; the sandbox's fixture copy is still to fix.
+
+## CONTINUE HERE (2026-10-20, 08:00 UTC-6): agda2bend on the Yoneda cone, 1923 of 2527 items check; Product and Setoids hit Bend's missing record eta
 
 - **The loop:** `run/a2b/bin/agda2bend-O0 emit run/a2b/export2 run/a2b/yonedaN Categories.Yoneda` translates Categories.Yoneda's 121-module import cone (stdlib and agda-categories) with that day's translator. Each run is about 40 min and about 80 MB. Then `agda2bend report run/a2b/yonedaN run/a2b/yonedaM` ranks the causes against the previous run. Dev tools, uncommitted, in /tmp/claude-1000/a2b:
   - build.sh: the dev binary.
