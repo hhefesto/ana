@@ -69,8 +69,9 @@
 <p class="tag">A language model with a proven meaning, and one language from the proofs to the GPU:
 <a href="https://github.com/bendlang/bend">Bend</a>.</p>
 <p class="lead">ana's specification is a set of theorems that Bend's compiler checks. The model, the GPU trainer and
-its backprop, the tokenizer, the decoder and the tools that build the training data are Bend programs too, and the
-fast code is a proven refinement of the meaning. 115M parameters, GPT-2 small's shape, trained as a coding agent for
+its backprop, the tokenizer, the decoder and the tools that build the training data are Bend programs too. The
+code is proven to refine the meaning wherever Bend can prove it, and tested bit for bit where it can't (floating
+point). 115M parameters, GPT-2 small's shape, trained as a coding agent for
 Haskell, Agda, Lean, Bend and Nix on a few rented consumer GPUs.</p>
 
 <div class="stats">
@@ -184,17 +185,21 @@ just data, and its backward pass is computed from that list by a program transfo
 
 <h2 id="elliott">The meaning first: Conal Elliott's work in ana</h2>
 <h3>Denotational design</h3>
-<p>Say what a thing <i>means</i>, prove the laws on the meaning, and make every implementation a refinement of it.
-In ana the meanings are <code>bend/Spec/</code> (22 files, 127 laws) and the refinements are proven against the
+<p>From <a href="http://conal.net/papers/type-class-morphisms/">Denotational design with type class morphisms</a>
+(&ldquo;the instance's meaning is the meaning's instance&rdquo;): say what a thing <i>means</i>, prove the laws on the
+meaning, and make every implementation a refinement of it. In ana the meanings are <code>bend/Spec/</code> (22 files, 127 laws) and the refinements are proven against the
 executable code, not copies of it. <code>bend/Spec/Refinement.bend</code> proves that entry (c, j) of
 <code>Model.bend</code>'s attention-state update is exactly the spec's <code>&alpha;<sub>c</sub>&middot;S[c][j] +
 k&#770;<sub>c</sub>&middot;v[j]</code>. <code>bend/Spec/Linear.bend</code> proves the recurrent and the chunked
 forms of gated linear attention are one function, which is the license for the GPU trainer to run it in chunks.
-Floating point is axiomatic in Bend, so the one trusted part is <code>bend/Spec/Trusted.bend</code>: what F32
+The decoder's cache is the same idea: it is an observation trie of the model's language, and
+<code>Refinement.bend</code> proves, on the real decoder, that prefilling a prompt in chunks reaches the same state
+as feeding it one token at a time. Where a proof would be about floating point, the refinement is tested instead:
+the production decoder, on a flat store with bulk ops, matches the tree decoder bit for bit. Floating point is axiomatic in Bend, so the one trusted part is <code>bend/Spec/Trusted.bend</code>: what F32
 arithmetic, <code>exp</code> and <code>rsqrt</code> must satisfy, assumed rather than proven.</p>
 <h3>A model is a weighted language</h3>
 <p>From Elliott's <a href="http://conal.net/papers/language-derivatives/">Symbolic and automatic differentiation
-of languages</a>: a language is a function from words to weights, and it is determined by two observations, the
+of languages</a> (ICFP 2021): a language is a function from words to weights, and it is determined by two observations, the
 weight of the empty word (&nu;) and the residual after one token (&delta;). <code>bend/Spec/Weighted.bend</code> and
 <code>bend/Spec/Trie.bend</code> state that presentation (the trie is unfolded by depth, since Bend has no
 coinduction). <code>bend/Spec/Autoregressive.bend</code> then says what ana is: a state algebra, a coalgebra, whose
@@ -203,11 +208,12 @@ at every cut, and a residual of the model's language is the state it reaches, sc
 (<code>Decoding.bend</code>) and speculative decoding's exactness (<code>SpeculativeDecoding.bend</code>) are
 stated on that meaning. That is also the name: ana is an anamorphism, the unfold of that coalgebra.</p>
 <h3>Backprop as a program transformation</h3>
-<p>From <a href="http://conal.net/papers/essence-of-ad/">The simple essence of automatic differentiation</a>:
+<p>From <a href="https://arxiv.org/abs/1804.00746">The simple essence of automatic differentiation</a> (2018):
 reverse mode is not a tape but a transformation of programs, and its law is that the transpose of a composite is
 the composite of the transposes, in the opposite order. <code>bend/Spec/Reverse.bend</code> proves the chain rules
 for dual maps and augmented reverse derivatives (composition and pairing), and <code>Batch.bend</code> proves that
-pullbacks accumulate over sums and batches. In the GPU trainer (<code>bend/Dense/Op.bend</code>) the backward pass is
+pullbacks accumulate over sums and batches, the theorem that makes gradient accumulation over micro-batches
+exact. In the GPU trainer (<code>bend/Dense/Op.bend</code>) the backward pass is
 derived from the forward program: a product's transpose is two products, an <code>einsum</code>'s transpose
 multiplies the output tangent by the symbolic derivative of its expression, and a gather's is a scatter-add.
 <code>bend/Spec/Dense.bend</code> proves the structural law (the transpose of <code>xs ++ ys</code> is
@@ -217,8 +223,15 @@ reference trainer's to 4.5e-7 relative.</p>
 <p><code>legere</code>, the tool that splits coding sessions into prose and code for the corpus, has one meaning
 in a semiring: a text's weight is the sum over every labelling of the product of its weights. With Booleans that
 asks whether a text is well formed, with naturals how many segmentations it has, with log-probabilities the
-marginal, with (max, +) the best labelling. It is Elliott's convolution semiring and Goodman's semiring parsing.
-The spec enumerates every labelling; the fast forward pass is its memoized derivative.</p>
+marginal, with (max, +) the best labelling. It is the convolution semiring of Elliott's <i>Generalized
+convolution and efficient language recognition</i>, and Goodman's semiring parsing. The spec enumerates every
+labelling; the fast forward pass is its memoized derivative, and the two agree in the tests.</p>
+<h3>What's next from Elliott</h3>
+<p>His language operations (sums, scaling, and concatenation with its Leibniz rule for &delta;) would let ana state
+model mixtures, and a prompt followed by a completion as a concatenation of languages. Running the spec's model with
+dual numbers would turn the specification itself into a gradient check for the GPU trainer, and a proof that the
+symbolic derivative in <code>bend/Dense/Ex.bend</code> is the derivative would move the backprop's numbers from
+tested to proven.</p>
 
 <h2 id="bradley">Tai-Danae Bradley's category of texts in ana</h2>
 <p>In <a href="https://arxiv.org/abs/2106.07890">An enriched category theory of language: from syntax to
