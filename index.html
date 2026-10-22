@@ -6,7 +6,7 @@
 <title>ana: a language model with a proven meaning, written in Bend</title>
 <meta name="description" content="ana is a 115M-parameter language model written end to end in Bend: its specification is a set of checked theorems, and the same language runs its GPU trainer. Trained for very little money. Open source, MIT.">
 <meta property="og:title" content="ana: a language model with a proven meaning, written in Bend">
-<meta property="og:description" content="Specification and proofs, model, GPU trainer, tokenizer, decoder and data pipeline, all in Bend. 115M parameters; every GPU hour so far cost about $150. Open source.">
+<meta property="og:description" content="Specification and proofs, model, GPU trainer, tokenizer, decoder and data pipeline, all in Bend. 115M parameters; its best model so far cost $24 of rented GPU time to train. Open source.">
 <meta property="og:image" content="https://ana.hhefesto.dev/quicksort.png">
 <meta property="og:url" content="https://ana.hhefesto.dev/">
 <meta name="twitter:card" content="summary_large_image">
@@ -77,8 +77,7 @@ Haskell, Agda, Lean, Bend and Nix on a few rented consumer GPUs.</p>
 <div class="stats">
   <div class="stat"><b>~97,000</b><span>lines of Bend, 210 files: spec, model, trainer, data, ops</span></div>
   <div class="stat"><b>127 laws</b><span>in the spec, all proven; the whole gate checks in 3 s</span></div>
-  <div class="stat"><b>~$150</b><span>every rented GPU hour since the project began, all runs</span></div>
-  <div class="stat"><b>~$16</b><span>one full 115M run: 28 h on one rented RTX 5090</span></div>
+  <div class="stat"><b>$24</b><span>to train the best model so far from scratch: ~36 h on one rented RTX 5090</span></div>
   <div class="stat"><b>7.6&times;</b><span>on 16 threads, from plain recursion with no thread code</span></div>
   <div class="stat"><b>19 &rarr; 32</b><span>of 99 held-out tasks accepted first try, run 2 to run 3</span></div>
 </div>
@@ -116,8 +115,8 @@ Haskell, Agda, Lean, Bend and Nix on a few rented consumer GPUs.</p>
     its composition is the chain rule.</li>
   <li><b>It acts; the tools answer.</b> ana is trained as an agent that writes code and calls the real compiler.
     Every compiler message in its data came from the compiler. It never learns to write a tool's answer itself.</li>
-  <li><b>Small, cheap and reproducible.</b> Every GPU hour since the project began in July 2026, all runs and
-    false starts together, cost about $150; one full 115M run is about $16. Every run,
+  <li><b>Small, cheap and reproducible.</b> ana's best model so far (run 3) was trained from scratch for $24 of
+    rented GPU time: about 36 hours on one RTX 5090. Every run,
     decision, failure and eval is written down in the repo, and every number on this page can be reproduced from it.</li>
 </ul>
 
@@ -296,8 +295,7 @@ from its earlier Haskell trainer to Bend, the Bend run continued the Haskell one
   <tr><th>measured</th><th class="n"></th></tr>
   <tr><td>RTX 5090, batch 16 &times; 2,048 tokens</td><td class="n">1.95 s/step, 16,781 tok/s</td></tr>
   <tr><td>RTX 3090, same batch</td><td class="n">5.18 s/step, 6,317 tok/s</td></tr>
-  <tr><td>a whole run (run 2: 53,880 steps, ~28 h on a rented 5090 at $0.58/h)</td><td class="n">about $16</td></tr>
-  <tr><td>every rented GPU hour since the project began (July 2026): all runs, Haskell era included, and the false starts</td><td class="n">about $150</td></tr>
+  <tr><td>the best model so far, run 3 (<code>s2-step56725</code>): from scratch, 56,725 steps, ~36 h on rented RTX 5090s at $0.55&ndash;0.67/h; vast.ai's bill, storage and bandwidth included</td><td class="n">$24</td></tr>
 </table>
 <p>No cluster, no grant, no lab: consumer GPUs rented by the hour on vast.ai, from about $0.50/h. The Bend tools
 in <code>bend/Box/</code> stage the data, run the chain of stages, pull and verify the checkpoints, watch the credit,
