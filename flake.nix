@@ -14,9 +14,16 @@
     url = "github:bendlang/bend";
     inputs.nixpkgs.follows = "nixpkgs";
   };
+  # agda2bend (Agda in, checked Bend 2 out; ana's corpus tool for Agda) is its
+  # own repository since 2026-10-22, on the same nixpkgs and Bend as ana
+  inputs.agda2bend = {
+    url = "github:hhefesto/agda2bend";
+    inputs.nixpkgs.follows = "nixpkgs";
+    inputs.bend2.follows = "bend2";
+  };
 
   outputs =
-    { self, nixpkgs, bend2 }:
+    { self, nixpkgs, bend2, agda2bend }:
     let
       systems = [
         "x86_64-linux"
@@ -63,28 +70,6 @@
         pkgs: pkgs.haskellPackages.ghcWithPackages (p: map (n: p.${n}) ghcPackageNames);
       # the Agda the transcript harness drives (bend-check agda)
       agdaFor = pkgs: pkgs.agda.withPackages (p: [ p.standard-library ]);
-      # agda2bend's front end (tools/agda-export, its FORMAT.md, 2026-10-18):
-      # Agda 2.8.0 with one more backend, built on the same Haskell Agda
-      # library as agdaFor's agda, that writes every module's elaborated
-      # definitions as S-expressions; all translation is Bend's
-      agdaExportFor =
-        pkgs:
-        pkgs.haskell.lib.justStaticExecutables (
-          pkgs.haskellPackages.callCabal2nix "agda-export" (nixpkgs.lib.fileset.toSource {
-            root = ./tools/agda-export;
-            fileset = ./tools/agda-export;
-          }) { }
-        );
-      # its AGDA_DIR: the libraries it resolves (standard-library 2.3 and
-      # agda-categories 0.3.0, interfaces prebuilt) and no defaults
-      agdaExportDir =
-        pkgs:
-        pkgs.runCommand "agda-export-dir" { } ''
-          mkdir -p $out
-          printf '%s\n' ${pkgs.agdaPackages.standard-library}/standard-library.agda-lib \
-            ${pkgs.agdaPackages.agda-categories}/agda-categories.agda-lib > $out/libraries
-          touch $out/defaults
-        '';
       bendBinary =
         pkgs: name: entry:
         pkgs.runCommand name { nativeBuildInputs = [ (bendFor pkgs) ]; } ''
@@ -204,29 +189,9 @@
           # the GHC `bend-check haskell` drives: the common Hackage
           # packages, so a module importing only these checks on its own
           ghc-harness = ghcHarness pkgs;
-          # `agda-export --export-dir=OUT FILE.agda`, run from the root of
-          # FILE's library: OUT/<Module>.sexp for FILE and every module it
-          # imports, OUT/_index.sexp (tools/agda-export/FORMAT.md).  AGDA_DIR
-          # defaults to standard-library 2.3 and agda-categories 0.3.0.
-          agda-export-unwrapped = agdaExportFor pkgs;
-          agda-export = pkgs.runCommand "agda-export" { nativeBuildInputs = [ pkgs.makeWrapper ]; } ''
-            makeWrapper ${agdaExportFor pkgs}/bin/agda-export $out/bin/agda-export \
-              --set-default AGDA_DIR ${agdaExportDir pkgs}
-          '';
-          # agda2bend (bend/Agda2Bend.bend, the plan of 2026-10-19): Agda in,
-          # checked Bend 2 out.  `agda2bend translate FILE.agda OUT` runs
-          # agda-export on FILE into OUT/export and translates its module's
-          # cone into OUT/src, keeping only what the pinned bend checks
-          # (OUT/ledger.tsv says why the rest went; `agda2bend report OUT`
-          # ranks the causes).  The wrapper gives it the pinned bend (BEND),
-          # agda-export (AGDA_EXPORT, with its AGDA_DIR) and mkdir, realpath.
-          agda2bend-unwrapped = bendBinary pkgs "agda2bend" "Agda2Bend.bend";
-          agda2bend = pkgs.runCommand "agda2bend" { nativeBuildInputs = [ pkgs.makeWrapper ]; } ''
-            makeWrapper ${self.packages.${system}.agda2bend-unwrapped}/bin/agda2bend $out/bin/agda2bend \
-              --set-default BEND ${bendFor pkgs}/bin/bend \
-              --set-default AGDA_EXPORT ${self.packages.${system}.agda-export}/bin/agda-export \
-              --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.coreutils ]}
-          '';
+          # agda2bend and its front end agda-export, from github:hhefesto/agda2bend
+          # (bend/Agda2Bend.bend and tools/agda-export here until 2026-10-22)
+          inherit (agda2bend.packages.${system}) agda2bend agda-export;
           # the corpus tools by their job, with the toolchains they drive on
           # PATH: `nix run .#deploy -- check haskell UNITS.nul RESULTS.nul`
           # runs bend-check, `deploy transcripts all nix` bend-transcripts,
@@ -322,8 +287,10 @@
             cp ${./weights/code32k.bpe} src/tests/weights/code32k.bpe
             cd src/tests
             # bend-ops' primitives (bend/tests/ops.bend) read their fixtures from
-            # bend/tests/fixtures (bendSrc holds .bend files only)
-            cp -r ${./bend/tests/fixtures} fixtures
+            # bend/tests/fixtures.  bendSrc holds only .bend files, so the directory
+            # may be there already: copy into it, or cp -r nests the store copy as
+            # fixtures/<hash>-fixtures (2026-10-22)
+            cp -r ${./bend/tests/fixtures}/. fixtures
             bend Checks.bend suite
             touch $out
           '';
