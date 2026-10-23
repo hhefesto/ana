@@ -1,8 +1,10 @@
 import Base
+import ../Bulk.bend as B
 import ../Config.bend as C
 import ../Checkpoint.bend as K
 import ./Ex.bend as X
 import ./Op.bend as P
+import ./Run.bend as R
 import ./Layout.bend as L
 import ./Model.bend as M
 import ./Ckpt.bend as Dk
@@ -113,10 +115,10 @@ def dd.cn(+d: Dd) -> Nat:
 
 # Layout ----------------------------------------------------------------------
 
-def dd.v(off: U32, st: List<&2, U32>) -> View:
+def dd.v(off: U32, st: List<&2, U32>) -> B.View:
   P.view(off, st)
 
-def dd.ein(+es: Es) -> P.Op:
+def dd.ein(+es: B.Es) -> P.Op:
   P.ein(es, False{})
 
 # n tokens at a time (n = 1: the step; n = C: a chunk), the trainer's
@@ -258,7 +260,7 @@ def dd.gla.tok(+m: L.Dm, +w: L.Wg, +al: U32, +sst: U32, +i: U32) -> List<&2, P.O
   +r = U32.mul(i, d)
   +kh = U32.add(M.gla.key(L.Dm.rglru(m), w), r)
   +vv = U32.add(L.Wg.qkv(w), U32.add(U32.mul(2, d), U32.mul(i, U32.mul(3, d))))
-  [dd.ein(Es{[h, hd, hd], 0, 0, 0, dd.v(sst, [hh2, hd, 1]),
+  [dd.ein(B.Es{[h, hd, hd], 0, 0, 0, dd.v(sst, [hh2, hd, 1]),
      [dd.v(sst, [hh2, hd, 1]), dd.v(U32.add(al, r), [hd, 1, 0]), dd.v(kh, [hd, 1, 0]), dd.v(vv, [hd, 0, 1])],
      X.add(X.mul(X.x(1), X.x(0)), X.mul(X.x(2), X.x(3)))}),
    P.Mm{0, 0, 1, hd, hd, h, 1.0, U32.add(L.Wg.qh(w), r), hd, hd, sst, hd, hh2, 0.0, U32.add(L.Wg.o(w), r), hd, hd}]
@@ -298,20 +300,20 @@ def dd.sm.write(+m: L.Dm, +w: L.Wg, +kc: U32, +slot: U32, +i: U32) -> List<&2, P
   +ko = U32.add(Bool.pick(U32, q, L.Wg.kh0(w), U32.add(L.Wg.qkv(w), d)), U32.mul(i, Bool.pick(U32, q, d, d3)))
   +vo = U32.add(L.Wg.qkv(w), U32.add(U32.mul(2, d), U32.mul(i, d3)))
   +sl = U32.add(slot, i)
-  [dd.ein(Es{[d], 0, 0, 0, View{kc, [1], IxAt{sl, [0], d}}, [dd.v(ko, [1])], X.x(0)}),
-   dd.ein(Es{[d], 0, 0, 0, View{U32.add(kc, U32.mul(L.Dm.t(m), d)), [1], IxAt{sl, [0], d}}, [dd.v(vo, [1])], X.x(0)})]
+  [dd.ein(B.Es{[d], 0, 0, 0, B.View{kc, [1], B.IxAt{sl, [0], d}}, [dd.v(ko, [1])], X.x(0)}),
+   dd.ein(B.Es{[d], 0, 0, 0, B.View{U32.add(kc, U32.mul(L.Dm.t(m), d)), [1], B.IxAt{sl, [0], d}}, [dd.v(vo, [1])], X.x(0)})]
 
 def dd.sm.max(s: Bool, +h: U32, +bp: L.BP, +dx: Dx) -> List<&2, P.Op>:
   match s:
     case True{}:
-      [dd.ein(Es{[h], 0, 0, 0, dd.v(dd.dx.mm(dx), [1]), [dd.v(dd.dx.m1(dx), [1]), dd.v(L.BP.sink(bp), [1])], X.max(X.x(0), X.x(1))})]
+      [dd.ein(B.Es{[h], 0, 0, 0, dd.v(dd.dx.mm(dx), [1]), [dd.v(dd.dx.m1(dx), [1]), dd.v(L.BP.sink(bp), [1])], X.max(X.x(0), X.x(1))})]
     case False{}:
       Nil{}
 
 def dd.sm.den(s: Bool, +h: U32, +bp: L.BP, +dx: Dx, +mo: U32) -> List<&2, P.Op>:
   match s:
     case True{}:
-      [dd.ein(Es{[h], 0, 0, 0, dd.v(dd.dx.den(dx), [1]), [dd.v(dd.dx.se(dx), [1]), dd.v(L.BP.sink(bp), [1]), dd.v(mo, [1])],
+      [dd.ein(B.Es{[h], 0, 0, 0, dd.v(dd.dx.den(dx), [1]), [dd.v(dd.dx.se(dx), [1]), dd.v(L.BP.sink(bp), [1]), dd.v(mo, [1])],
          X.add(X.x(0), X.exp(X.sub(X.x(1), X.x(2))))})]
     case False{}:
       Nil{}
@@ -339,15 +341,15 @@ def dd.sm.attend(+m: L.Dm, +bp: L.BP, +w: L.Wg, +dx: Dx, +kc: U32, +npos: U32, +
   List.concat(&2, P.Op, [
     # s[h, t'] = q_h · K[t']_h, every slot, one product batched over heads
     [P.Mm{0, 1, 1, t, hd, h, 1.0, qo, hd, hd, kc, d, hd, 0.0, s, t, t},
-     dd.ein(Es{[h, t], 2, 1, 0, dd.v(dd.dx.m1(dx), [1, 0]), [dd.v(s, [t, 1]), dd.v(np, [0, 0])],
+     dd.ein(B.Es{[h, t], 2, 1, 0, dd.v(dd.dx.m1(dx), [1, 0]), [dd.v(s, [t, 1]), dd.v(np, [0, 0])],
        X.sel(live, X.mul(X.k(sc), X.x(0)), X.k(F32.neg(X.inf())))})],
     dd.sm.max(sk, h, bp, dx),
-    [dd.ein(Es{[h, t], 0, 0, 0, dd.v(e, [t, 1]), [dd.v(s, [t, 1]), dd.v(np, [0, 0]), dd.v(mo, [1, 0])],
+    [dd.ein(B.Es{[h, t], 0, 0, 0, dd.v(e, [t, 1]), [dd.v(s, [t, 1]), dd.v(np, [0, 0]), dd.v(mo, [1, 0])],
        X.sel(live, X.exp(X.sub(X.mul(X.k(sc), X.x(0)), X.x(2))), X.k(0.0))}),
-     dd.ein(Es{[h, t], 2, 0, 0, dd.v(dd.dx.se(dx), [1, 0]), [dd.v(e, [t, 1])], X.x(0)})],
+     dd.ein(B.Es{[h, t], 2, 0, 0, dd.v(dd.dx.se(dx), [1, 0]), [dd.v(e, [t, 1])], X.x(0)})],
     dd.sm.den(sk, h, bp, dx, mo),
     [P.Mm{0, 0, 1, hd, t, h, 1.0, e, t, t, vc, d, hd, 0.0, U32.add(L.Wg.oi(w), r), hd, hd},
-     dd.ein(Es{[h, hd], 0, 0, 0, dd.v(U32.add(L.Wg.o(w), r), [hd, 1]), [dd.v(U32.add(L.Wg.oi(w), r), [hd, 1]), dd.v(deno, [1, 0])],
+     dd.ein(B.Es{[h, hd], 0, 0, 0, dd.v(U32.add(L.Wg.o(w), r), [hd, 1]), [dd.v(U32.add(L.Wg.oi(w), r), [hd, 1]), dd.v(deno, [1, 0])],
        X.mul(X.div(X.k(1.0), X.x(1)), X.x(0))})]])
 
 def dd.sm.writes(k: Nat, +i: U32, +m: L.Dm, +w: L.Wg, +kc: U32, +slot: U32) -> List<&2, List<&2, P.Op>>:
@@ -369,14 +371,14 @@ def dd.sm.toks(k: Nat, +i: U32, +m: L.Dm, +bp: L.BP, +w: L.Wg, +dx: Dx, +kc: U32
 def dd.sm.rows.max(s: Bool, +n: U32, +h: U32, +bp: L.BP, +dx: Dx) -> List<&2, P.Op>:
   match s:
     case True{}:
-      [dd.ein(Es{[n, h], 0, 0, 0, dd.v(dd.dx.mm(dx), [h, 1]), [dd.v(dd.dx.m1(dx), [h, 1]), dd.v(L.BP.sink(bp), [0, 1])], X.max(X.x(0), X.x(1))})]
+      [dd.ein(B.Es{[n, h], 0, 0, 0, dd.v(dd.dx.mm(dx), [h, 1]), [dd.v(dd.dx.m1(dx), [h, 1]), dd.v(L.BP.sink(bp), [0, 1])], X.max(X.x(0), X.x(1))})]
     case False{}:
       Nil{}
 
 def dd.sm.rows.den(s: Bool, +n: U32, +h: U32, +bp: L.BP, +dx: Dx, +mo: U32) -> List<&2, P.Op>:
   match s:
     case True{}:
-      [dd.ein(Es{[n, h], 0, 0, 0, dd.v(dd.dx.den(dx), [h, 1]), [dd.v(dd.dx.se(dx), [h, 1]), dd.v(L.BP.sink(bp), [0, 1]), dd.v(mo, [h, 1])],
+      [dd.ein(B.Es{[n, h], 0, 0, 0, dd.v(dd.dx.den(dx), [h, 1]), [dd.v(dd.dx.se(dx), [h, 1]), dd.v(L.BP.sink(bp), [0, 1]), dd.v(mo, [h, 1])],
          X.add(X.x(0), X.exp(X.sub(X.x(1), X.x(2))))})]
     case False{}:
       Nil{}
@@ -406,15 +408,15 @@ def dd.sm.rows(+m: L.Dm, +bp: L.BP, +w: L.Wg, +dx: Dx, +kc: U32) -> List<&2, P.O
   +np = dd.dx.npos(dx)
   List.concat(&2, P.Op, [
     [P.Mm{0, 1, n, t, hd, h, 1.0, qo, Bool.pick(U32, q, d, U32.mul(3, d)), hd, kc, d, hd, 0.0, s, t, nt},
-     dd.ein(Es{[n, h, t], 4, 1, 0, dd.v(dd.dx.m1(dx), [h, 1, 0]), [dd.v(s, [t, nt, 1]), dd.v(np, [1, 0, 0])],
+     dd.ein(B.Es{[n, h, t], 4, 1, 0, dd.v(dd.dx.m1(dx), [h, 1, 0]), [dd.v(s, [t, nt, 1]), dd.v(np, [1, 0, 0])],
        X.sel(live, X.mul(X.k(sc), X.x(0)), X.k(F32.neg(X.inf())))})],
     dd.sm.rows.max(sk, n, h, bp, dx),
-    [dd.ein(Es{[n, h, t], 0, 0, 0, dd.v(e, [t, nt, 1]), [dd.v(s, [t, nt, 1]), dd.v(np, [1, 0, 0]), dd.v(mo, [h, 1, 0])],
+    [dd.ein(B.Es{[n, h, t], 0, 0, 0, dd.v(e, [t, nt, 1]), [dd.v(s, [t, nt, 1]), dd.v(np, [1, 0, 0]), dd.v(mo, [h, 1, 0])],
        X.sel(live, X.exp(X.sub(X.mul(X.k(sc), X.x(0)), X.x(2))), X.k(0.0))}),
-     dd.ein(Es{[n, h, t], 4, 0, 0, dd.v(dd.dx.se(dx), [h, 1, 0]), [dd.v(e, [t, nt, 1])], X.x(0)})],
+     dd.ein(B.Es{[n, h, t], 4, 0, 0, dd.v(dd.dx.se(dx), [h, 1, 0]), [dd.v(e, [t, nt, 1])], X.x(0)})],
     dd.sm.rows.den(sk, n, h, bp, dx, mo),
     [P.Mm{0, 0, n, hd, t, h, 1.0, e, t, nt, U32.add(kc, U32.mul(t, d)), d, hd, 0.0, L.Wg.oi(w), hd, nhd},
-     dd.ein(Es{[n, h, hd], 0, 0, 0, dd.v(L.Wg.o(w), [d, hd, 1]), [dd.v(L.Wg.oi(w), [hd, nhd, 1]), dd.v(deno, [h, 1, 0])],
+     dd.ein(B.Es{[n, h, hd], 0, 0, 0, dd.v(L.Wg.o(w), [d, hd, 1]), [dd.v(L.Wg.oi(w), [hd, nhd, 1]), dd.v(deno, [h, 1, 0])],
        X.mul(X.div(X.k(1.0), X.x(1)), X.x(0))})]])
 
 def dd.sm(+m: L.Dm, +bp: L.BP, +w: L.Wg, +dx: Dx, +kc: U32) -> DdLy:
@@ -455,7 +457,7 @@ def dd.lys(bs: List<&2, L.BP>, +m: L.Dm, +w: L.Wg, +dx: Dx, +o: U32) -> List<&2,
 # the embedding: row i gathers the row of E the token cell tok + i names
 def dd.embed(+m: L.Dm, +dx: Dx) -> List<&2, P.Op>:
   +d = L.Dm.d(m)
-  [dd.ein(Es{[L.Dm.n(m), d], 0, 0, 0, dd.v(dd.dx.x(dx), [d, 1]), [View{0, [0, 1], IxAt{dd.dx.tok(dx), [1, 0], d}}], X.x(0)})]
+  [dd.ein(B.Es{[L.Dm.n(m), d], 0, 0, 0, dd.v(dd.dx.x(dx), [d, 1]), [B.View{0, [0, 1], B.IxAt{dd.dx.tok(dx), [1, 0], d}}], X.x(0)})]
 
 # a layer as one program, token by token in between (the step's)
 def dd.flat(ly: DdLy) -> List<&2, P.Op>:
@@ -477,8 +479,8 @@ def dd.flats(lys: List<&2, DdLy>) -> List<&2, List<&2, P.Op>>:
 # integer below 2^24, exact in F32. No l_i >= m (m NaN) leaves 0 there:
 # dd.top answers v, and the caller falls back to the logits.
 def dd.pick(+v: U32, +lg: U32, +top: U32) -> List<&2, P.Op>:
-  [dd.ein(Es{[v], 1, 1, 0, dd.v(top, [0]), [dd.v(lg, [1])], X.x(0)}),
-   dd.ein(Es{[v], 1, 1, 0, dd.v(U32.add(top, 1), [0]), [dd.v(lg, [1]), dd.v(top, [0])],
+  [dd.ein(B.Es{[v], 1, 1, 0, dd.v(top, [0]), [dd.v(lg, [1])], X.x(0)}),
+   dd.ein(B.Es{[v], 1, 1, 0, dd.v(U32.add(top, 1), [0]), [dd.v(lg, [1]), dd.v(top, [0])],
      X.sel(X.le(X.x(1), X.x(0)), X.sub(X.k(U32.to_f32(v)), X.ix(0)), X.k(0.0))})]
 
 # The decoder for a config and a chunk size cn (at least 1): the layout and
@@ -510,7 +512,7 @@ def dd.of.n(+c: C.Config, +cn: U32) -> Dd:
   +total = dd.dx.end(cx)
   +feed = List.concat(&2, P.Op, dd.embed(m, dx) <> dd.flats(dd.lys(bs, m, w, dx, st0)))
   +head = List.append(&2, P.Op, M.norm(1, d, x, fin, ssf, fv), [P.linear(1, d, v, fv, d, 0, lg, v)])
-  +copy = {[dd.ein(Es{[d], 0, 0, 0, dd.v(x, [1]), [View{dd.dx.x(cx), [1], IxAt{dd.dx.last(cx), [0], d}}], X.x(0)})] : List<&2, P.Op>}
+  +copy = {[dd.ein(B.Es{[d], 0, 0, 0, dd.v(x, [1]), [B.View{dd.dx.x(cx), [1], B.IxAt{dd.dx.last(cx), [0], d}}], X.x(0)})] : List<&2, P.Op>}
   Dd{c, p, st0, stn, dd.dx.tok(dx), dd.dx.slot(dx), dd.dx.npos(dx), lg, v, L.Dm.t(m),
      L.depth(31n, U32.is_lt(2, total), total, 0n, 1), feed, head, top, dd.pick(v, lg, top),
      DdCh{cn, dd.dx.tok(cx), dd.dx.slot(cx), dd.dx.npos(cx), dd.dx.last(cx), dd.embed(cm, cx), dd.lys(bs, cm, wc, cx, st0), copy}}
@@ -530,10 +532,10 @@ def dd.new(+k: Dd) -> Array<F32>:
   Array.new(F32, dd.depth(k), 0.0)
 
 # every layer's state back to 0 (a fresh episode on loaded weights)
-def dd.reset(+k: Dd, s: Array<F32>) -> Array<F32>:
+def dd.reset(+k: Dd, s: Array<F32>) -> IO(Array<F32>):
   match k:
     case Dd{c, p, +st0, stn, tok, slot, npos, lg, v, ctx, dp, f, h, tp, pk, ch}:
-      P.run([P.zero(U32.sub(stn, st0), st0)], s)
+      R.run([P.zero(U32.sub(stn, st0), st0)], s)
 
 # a token's cells at a position: the token, its ring slot (pos mod ctx)
 # and the last live slot (min(pos, ctx - 1))
@@ -543,10 +545,10 @@ def dd.at(+ctx: U32, +pos: Nat, +t: U32, +tok: U32, +slot: U32, +npos: U32, s: A
   Array.set(F32, Array.set(F32, Array.set(F32, s, tok, U32.to_f32(t)), slot, U32.to_f32(slot1)), npos, U32.to_f32(live))
 
 # one token at a position: its cells, then every layer (no logits)
-def dd.feed(+k: Dd, +pos: Nat, +t: U32, s: Array<F32>) -> Array<F32>:
+def dd.feed(+k: Dd, +pos: Nat, +t: U32, s: Array<F32>) -> IO(Array<F32>):
   match k:
     case Dd{c, p, st0, stn, +tok, +slot, +npos, lg, v, +ctx, dp, f, h, tp, pk, ch}:
-      P.run(f, dd.at(ctx, pos, t, tok, slot, npos, s))
+      R.run(f, dd.at(ctx, pos, t, tok, slot, npos, s))
 
 # tokens from pos: token i's cells at tok + i, slot + i, npos + i
 def dd.cells(ts: List<&2, U32>, +ctx: U32, +pos: Nat, +tok: U32, +slot: U32, +npos: U32, s: Array<F32>) -> Array<F32>:
@@ -556,50 +558,56 @@ def dd.cells(ts: List<&2, U32>, +ctx: U32, +pos: Nat, +tok: U32, +slot: U32, +np
     case t <> rest:
       dd.cells(rest, ctx, 1n+pos, U32.inc(tok), U32.inc(slot), U32.inc(npos), dd.at(ctx, pos, t, tok, slot, npos, s))
 
-def dd.toks.run(ts: List<&2, List<&2, P.Op>>, s: Array<F32>) -> Array<F32>:
-  match ts:
-    case Nil{}:
-      s
-    case ops <> rest:
-      dd.toks.run(rest, P.run(ops, s))
+def dd.toks.run(ts: List<&2, List<&2, P.Op>>, s: Array<F32>) -> IO(Array<F32>):
+  R.runs(ts, s)
 
 # a layer for r tokens: before the wrap, the writes then every row's
 # attention; else each token's write and attention in turn
-def dd.ly.run(fresh: Bool, ly: DdLy, +r: Nat, s: Array<F32>) -> Array<F32>:
+def dd.ly.run(fresh: Bool, ly: DdLy, +r: Nat, s: Array<F32>) -> IO(Array<F32>):
   match fresh ly:
     case True{} DdLy{pre, toks, mid, wtoks, post}:
-      P.run(post, P.run(mid, dd.toks.run(List.take(&2, List<&2, P.Op>, toks, r), P.run(pre, s))))
+      do IO<Array<F32>>:
+        s1 : Array<F32> <- R.run(pre, s)
+        s2 : Array<F32> <- R.runs(List.take(&2, List<&2, P.Op>, toks, r), s1)
+        s3 : Array<F32> <- R.run(mid, s2)
+        R.run(post, s3)
     case False{} DdLy{pre, toks, mid, wtoks, post}:
-      P.run(post, dd.toks.run(List.take(&2, List<&2, P.Op>, wtoks, r), P.run(pre, s)))
+      do IO<Array<F32>>:
+        s1 : Array<F32> <- R.run(pre, s)
+        s2 : Array<F32> <- R.runs(List.take(&2, List<&2, P.Op>, wtoks, r), s1)
+        R.run(post, s2)
 
-def dd.lys.run(lys: List<&2, DdLy>, +fresh: Bool, +r: Nat, s: Array<F32>) -> Array<F32>:
+def dd.lys.run(lys: List<&2, DdLy>, +fresh: Bool, +r: Nat, s: Array<F32>) -> IO(Array<F32>):
   match lys:
     case Nil{}:
-      s
+      IO.pure(Array<F32>, s)
     case ly <> t:
-      dd.lys.run(t, fresh, r, dd.ly.run(fresh, ly, r, s))
+      IO.bind(Array<F32>, Array<F32>, dd.ly.run(fresh, ly, r, s), (x: Array<F32>) => dd.lys.run(t, fresh, r, x))
 
-def dd.chunk.run(+fresh: Bool, ch: DdCh, +ctx: U32, +pos: Nat, +ts: List<&2, U32>, s: Array<F32>) -> Array<F32>:
+def dd.chunk.run(+fresh: Bool, ch: DdCh, +ctx: U32, +pos: Nat, +ts: List<&2, U32>, s: Array<F32>) -> IO(Array<F32>):
   match ch:
     case DdCh{n, +tok, +slot, +npos, last, embed, lys, copy}:
       +r = List.length(&2, U32, ts)
-      P.run(copy, dd.lys.run(lys, fresh, r, P.run(embed,
-        Array.set(F32, dd.cells(ts, ctx, pos, tok, slot, npos, s), last, U32.to_f32(U32.from_nat(Nat.sub(r, 1n)))))))
+      do IO<Array<F32>>:
+        s1 : Array<F32> <- R.run(embed,
+          Array.set(F32, dd.cells(ts, ctx, pos, tok, slot, npos, s), last, U32.to_f32(U32.from_nat(Nat.sub(r, 1n)))))
+        s2 : Array<F32> <- dd.lys.run(lys, fresh, r, s1)
+        R.run(copy, s2)
 
 # 1 to C tokens from a position: as many dd.feed's (the chunk program; its
 # attention batched while every position stays below ctx)
-def dd.chunk(+k: Dd, +pos: Nat, +ts: List<&2, U32>, s: Array<F32>) -> Array<F32>:
+def dd.chunk(+k: Dd, +pos: Nat, +ts: List<&2, U32>, s: Array<F32>) -> IO(Array<F32>):
   match k:
     case Dd{c, p, st0, stn, tok, slot, npos, lg, v, +ctx, dp, f, h, tp, pk, ch}:
       dd.chunk.run(Nat.is_le(Nat.add(pos, List.length(&2, U32, ts)), U32.to_nat(ctx)), ch, ctx, pos, ts, s)
 
 # tokens one at a time from a position
-def dd.feed.each(xs: List<&2, U32>, +k: Dd, +pos: Nat, s: Array<F32>) -> Array<F32>:
+def dd.feed.each(xs: List<&2, U32>, +k: Dd, +pos: Nat, s: Array<F32>) -> IO(Array<F32>):
   match xs:
     case Nil{}:
-      s
+      IO.pure(Array<F32>, s)
     case t <> rest:
-      dd.feed.each(rest, k, 1n+pos, dd.feed(k, pos, t, s))
+      IO.bind(Array<F32>, Array<F32>, dd.feed(k, pos, t, s), (x: Array<F32>) => dd.feed.each(rest, k, 1n+pos, x))
 
 # A partial chunk costs about what a whole one does (every stage but the
 # recurrence runs on all C rows), so fewer tokens than this go one at a
@@ -608,7 +616,7 @@ def dd.feed.each(xs: List<&2, U32>, +k: Dd, +pos: Nat, s: Array<F32>) -> Array<F
 def dd.chunk.min() -> Nat:
   8n
 
-def dd.feeds.rest(chunk: Bool, +k: Dd, +xs: List<&2, U32>, +pos: Nat, s: Array<F32>) -> Array<F32>:
+def dd.feeds.rest(chunk: Bool, +k: Dd, +xs: List<&2, U32>, +pos: Nat, s: Array<F32>) -> IO(Array<F32>):
   match chunk:
     case True{}:
       dd.chunk(k, pos, xs, s)
@@ -616,24 +624,26 @@ def dd.feeds.rest(chunk: Bool, +k: Dd, +xs: List<&2, U32>, +pos: Nat, s: Array<F
       dd.feed.each(xs, k, pos, s)
 
 # q chunks of n tokens, then the rest: a partial chunk, or one at a time
-def dd.feeds.go(q: Nat, +k: Dd, +n: Nat, +xs: List<&2, U32>, +pos: Nat, s: Array<F32>) -> Array<F32>:
+def dd.feeds.go(q: Nat, +k: Dd, +n: Nat, +xs: List<&2, U32>, +pos: Nat, s: Array<F32>) -> IO(Array<F32>):
   match q:
     case 0n:
       dd.feeds.rest(Nat.is_le(dd.chunk.min(), List.length(&2, U32, xs)), k, xs, pos, s)
     case 1n+r:
-      dd.feeds.go(r, k, n, List.drop(&2, U32, xs, n), Nat.add(pos, n), dd.chunk(k, pos, List.take(&2, U32, xs, n), s))
+      IO.bind(Array<F32>, Array<F32>, dd.chunk(k, pos, List.take(&2, U32, xs, n), s),
+        (x: Array<F32>) => dd.feeds.go(r, k, n, List.drop(&2, U32, xs, n), Nat.add(pos, n), x))
 
 # tokens from a position, a chunk at a time: the store their dd.feed's
 # leave, bit for bit (head then reads the last token's logits)
-def dd.feeds(+k: Dd, +xs: List<&2, U32>, +pos: Nat, s: Array<F32>) -> Array<F32>:
+def dd.feeds(+k: Dd, +xs: List<&2, U32>, +pos: Nat, s: Array<F32>) -> IO(Array<F32>):
   +n = dd.cn(k)
   dd.feeds.go(Nat.div(List.length(&2, U32, xs), n), k, n, xs, pos, s)
 
 # the logits after the tokens fed so far
-def dd.logits(+k: Dd, s: Array<F32>) -> Array<F32> & List<&2, F32>:
+def dd.logits(+k: Dd, s: Array<F32>) -> IO(Array<F32> & List<&2, F32>):
   match k:
-    case Dd{c, p, st0, stn, tok, slot, npos, lg, v, ctx, dp, f, h, tp, pk, ch}:
-      Io.get(U32.to_nat(v), P.run(h, s), lg)
+    case Dd{c, p, st0, stn, tok, slot, npos, +lg, +v, ctx, dp, f, h, tp, pk, ch}:
+      IO.bind(Array<F32>, Array<F32> & List<&2, F32>, R.run(h, s),
+        (x: Array<F32>) => IO.pure(Array<F32> & List<&2, F32>, Io.get(U32.to_nat(v), x, lg)))
 
 def dd.top.of(+v: U32, r: Array<F32> & F32) -> Array<F32> & U32:
   (s, y) = r
@@ -641,10 +651,13 @@ def dd.top.of(+v: U32, r: Array<F32> & F32) -> Array<F32> & U32:
 
 # greedy's pick after the tokens fed so far (dd.pick): the head, then the
 # argmax on the store; v when no logit is the max (NaN)
-def dd.top(+k: Dd, s: Array<F32>) -> Array<F32> & U32:
+def dd.top(+k: Dd, s: Array<F32>) -> IO(Array<F32> & U32):
   match k:
     case Dd{c, p, st0, stn, tok, slot, npos, lg, +v, ctx, dp, f, h, +tp, pk, ch}:
-      dd.top.of(v, Array.get(F32, P.run(pk, P.run(h, s)), U32.add(tp, 1)))
+      do IO<Array<F32> & U32>:
+        s1 : Array<F32> <- R.run(h, s)
+        s2 : Array<F32> <- R.run(pk, s1)
+        return dd.top.of(v, Array.get(F32, s2, U32.add(tp, 1)))
 
 # Loading ---------------------------------------------------------------------
 

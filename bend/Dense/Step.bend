@@ -1,4 +1,5 @@
 import Base
+import ../Bulk.bend as B
 import ../Config.bend as C
 import ./Ex.bend as X
 import ./Op.bend as P
@@ -14,10 +15,10 @@ import ./Model.bend as M
 # writes, and the clip scale from a cell the device computes from the
 # gradient norm, so every program is built and encoded once.
 
-def v(off: U32, st: List<&2, U32>) -> View:
+def v(off: U32, st: List<&2, U32>) -> B.View:
   P.view(off, st)
 
-def op(+es: Es) -> P.Op:
+def op(+es: B.Es) -> P.Op:
   P.ein(es, True{})
 
 def cat(xss: List<&2, List<&2, P.Op>>) -> List<&2, P.Op>:
@@ -114,8 +115,8 @@ def clip(+ly: L.Lay, +max: F32) -> List<&2, P.Op>:
   # tangents up to the 2 MB boundary (zeros past the parameters)
   +rows = U32.div(L.align(L.Lay.params(ly)), 1024)
   +part = L.Lay.ws(ly)
-  [P.ein(Es{[rows, 1024], 2, 0, 0, v(part, [1, 0]), [v(L.Lay.g(ly), [1024, 1])], X.mul(X.x(0), X.x(0))}, False{}),
-   P.ein(Es{[rows], 1, 0, 0, v(cell.gss(ly), [0]), [v(part, [1])], X.x(0)}, False{}),
+  [P.ein(B.Es{[rows, 1024], 2, 0, 0, v(part, [1, 0]), [v(L.Lay.g(ly), [1024, 1])], X.mul(X.x(0), X.x(0))}, False{}),
+   P.ein(B.Es{[rows], 1, 0, 0, v(cell.gss(ly), [0]), [v(part, [1])], X.x(0)}, False{}),
    P.map1(1, L.Lay.gnorm(ly), [cell.gss(ly)], X.sqrt(X.x(0)), False{}),
    P.map1(1, cell.clip(ly), [L.Lay.gnorm(ly)],
      X.sel(X.eq(X.x(0), X.x(0)),
@@ -151,7 +152,7 @@ def Hy.mu(+h: Hy) -> F32:
     case Hy{a, b, c, d, e}:
       e
 
-def bcast(+c: U32) -> View:
+def bcast(+c: U32) -> B.View:
   v(c, [0])
 
 # m, v, p of the n parameters at off, in place (Train/Opt.bend adam.one on
@@ -164,13 +165,13 @@ def adam(+ly: L.Lay, +h: Hy, +off: U32, +n: U32, decay: Bool) -> List<&2, P.Op>:
   +gs = X.mul(X.x(2), X.x(1))
   +b1 = Hy.b1(h)
   +b2 = Hy.b2(h)
-  [P.ein(Es{[n], 0, 0, 0, mv, [mv, gv, bcast(cell.clip(ly))],
+  [P.ein(B.Es{[n], 0, 0, 0, mv, [mv, gv, bcast(cell.clip(ly))],
      X.add(X.mul(X.k(b1), X.x(0)), X.mul(X.k(F32.sub(1.0, b1)), gs))}, False{}),
-   P.ein(Es{[n], 0, 0, 0, vv, [vv, gv, bcast(cell.clip(ly))],
+   P.ein(B.Es{[n], 0, 0, 0, vv, [vv, gv, bcast(cell.clip(ly))],
      X.add(X.mul(X.k(b2), X.x(0)), X.mul(X.mul(X.k(F32.sub(1.0, b2)), gs), gs))}, False{}),
-   P.ein(Es{[n], 0, 0, 0, p, [p, mv, vv, bcast(cell.lr(ly)), bcast(cell.c1(ly)), bcast(cell.c2(ly))],
+   P.ein(B.Es{[n], 0, 0, 0, p, [p, mv, vv, bcast(cell.lr(ly)), bcast(cell.c1(ly)), bcast(cell.c2(ly))],
      X.sub(X.x(0), X.mul(X.x(3), X.add(X.div(X.div(X.x(1), X.x(4)), X.add(X.sqrt(X.div(X.x(2), X.x(5))), X.k(Hy.eps(h)))),
-       Bool.pick(Ex, decay, X.mul(X.k(Hy.wd(h)), X.x(0)), X.k(0.0)))))}, False{})]
+       Bool.pick(B.Ex, decay, X.mul(X.k(Hy.wd(h)), X.x(0)), X.k(0.0)))))}, False{})]
 
 # Muon -----------------------------------------------------------------------
 #
@@ -258,13 +259,13 @@ def muon(+ly: L.Lay, +h: Hy, +off: U32, +r: U32, +c: U32) -> List<&2, P.Op>:
   +mu = Hy.mu(h)
   +gs = X.mul(X.x(2), X.x(1))
   +sc = F32.mul(0.2, F32.sqrt(U32.to_f32(U32.max(r, c))))
-  cat([[P.ein(Es{[n], 0, 0, 0, mv, [mv, gv, bcast(cell.clip(ly))], X.add(X.mul(X.k(mu), X.x(0)), gs)}, False{}),
-        P.ein(Es{[n], 0, 0, 0, v(Sc.x(s), [1]), [mv, gv, bcast(cell.clip(ly))], X.add(gs, X.mul(X.k(mu), X.x(0)))}, False{}),
-        P.ein(Es{[n], 1, 0, 0, v(Sc.nx(s), [0]), [v(Sc.x(s), [1])], X.mul(X.x(0), X.x(0))}, False{}),
-        P.ein(Es{[n], 0, 0, 0, v(Sc.x(s), [1]), [v(Sc.x(s), [1]), bcast(Sc.nx(s))],
+  cat([[P.ein(B.Es{[n], 0, 0, 0, mv, [mv, gv, bcast(cell.clip(ly))], X.add(X.mul(X.k(mu), X.x(0)), gs)}, False{}),
+        P.ein(B.Es{[n], 0, 0, 0, v(Sc.x(s), [1]), [mv, gv, bcast(cell.clip(ly))], X.add(gs, X.mul(X.k(mu), X.x(0)))}, False{}),
+        P.ein(B.Es{[n], 1, 0, 0, v(Sc.nx(s), [0]), [v(Sc.x(s), [1])], X.mul(X.x(0), X.x(0))}, False{}),
+        P.ein(B.Es{[n], 0, 0, 0, v(Sc.x(s), [1]), [v(Sc.x(s), [1]), bcast(Sc.nx(s))],
           X.mul(X.div(X.k(1.0), X.add(X.sqrt(X.x(1)), X.k(1.0e-7))), X.x(0))}, False{})],
        ns.iter(5n, U32.is_le(r, c), s, r, c),
-       [P.ein(Es{[n], 0, 0, 0, p, [p, v(Sc.x(s), [1]), bcast(cell.lr(ly))],
+       [P.ein(B.Es{[n], 0, 0, 0, p, [p, v(Sc.x(s), [1]), bcast(cell.lr(ly))],
           X.add(X.x(0), X.mul(X.neg(X.x(2)), X.add(X.mul(X.k(sc), X.x(1)), X.mul(X.k(Hy.wd(h)), X.x(0)))))}, False{})]])
 
 # The whole update ---------------------------------------------------------

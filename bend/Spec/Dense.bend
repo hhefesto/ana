@@ -1,4 +1,5 @@
 import Base
+import ../Bulk.bend as B
 import ../Dense/Op.bend as P
 import ../Dense/Ex.bend as X
 
@@ -10,12 +11,12 @@ import ../Dense/Ex.bend as X
 # transpose of a program onto the ops already built (an accumulator), so
 # the transpose of xs ++ ys is ys's transpose followed by xs's.
 #
-# The numeric content -- each op's runtime (cuBLAS, generated kernels, the
-# loops) agreeing with its base.bend definition, and each einsum's transpose
-# being its derivative's -- is F32 and so is tested, not proven: the
-# conformance programs (bend/gpu) and tests/dense.bend (the derived backward
-# against the gradchecked tree pullbacks), as the pullbacks' correctness
-# rests on the gradcheck.
+# The numeric content -- each op's runtime (bend/effs/bulk.c: cuBLAS,
+# generated kernels, the loops) agreeing with its Bulk.bend definition, and
+# each einsum's transpose being its derivative's -- is F32 and so is tested,
+# not proven: the conformance programs (bend/gpu, tests/bulk-cpu.bend) and
+# tests/dense.bend (the derived backward against the gradchecked tree
+# pullbacks), as the pullbacks' correctness rests on the gradcheck.
 
 def back.append(+tg: U32, xs: List<&2, P.Op>, +ys: List<&2, P.Op>, +acc: List<&2, P.Op>) ->
   {P.back(tg, List.append(&2, P.Op, xs, ys), acc) == P.back(tg, ys, P.back(tg, xs, acc)) : List<&2, P.Op>}:
@@ -30,9 +31,9 @@ def back.nil(+tg: U32, +acc: List<&2, P.Op>) -> {P.back(tg, Nil{}, acc) == acc :
   {==}
 
 # a constant's derivative vanishes, so no einsum transposes into it
-def d.const(+c: F32, +j: U32) -> {X.d(EK{c}, j) == X.k(0.0) : Ex}:
+def d.const(+c: F32, +j: U32) -> {X.d(B.EK{c}, j) == X.k(0.0) : B.Ex}:
   {==}
 
 # a loop index's too: masks and positions carry no gradient
-def d.index(+i: U32, +j: U32) -> {X.d(EIx{i}, j) == X.k(0.0) : Ex}:
+def d.index(+i: U32, +j: U32) -> {X.d(B.EIx{i}, j) == X.k(0.0) : B.Ex}:
   {==}

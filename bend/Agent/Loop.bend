@@ -167,7 +167,8 @@ def al.called(+m: AlM, +pk: Sm.Pick, e: D.En, +pos: Nat, +pending: List<&2, U32>
       +d = D.dc.emit(b, pending, nlt)
       do IO<AlS>:
         IO.write(D.dc.Dec.text(d))
-        return AlCalled{tool, List.reverse(&2, U32, 10 <> out), 1n+count, D.dc.en.feed(e, pos, nlt), 1n+pos, D.dc.Pick.rng(pk), D.dc.Dec.pending(d)}
+        e2 : D.En <- D.dc.en.feed(e, pos, nlt)
+        return AlCalled{tool, List.reverse(&2, U32, 10 <> out), 1n+count, e2, 1n+pos, D.dc.Pick.rng(pk), D.dc.Dec.pending(d)}
 
 def al.halt(stop: Bool, +out: List<&2, U32>, +count: Nat) -> IO(AlS):
   match stop:
@@ -190,7 +191,8 @@ def al.gen(n: Nat, g: AlG, +m: AlM, +pos: Nat, +pending: List<&2, U32>, +l: AlLi
       +l2 = al.next.line(l, tb)
       do IO<AlS>:
         IO.write(D.dc.Dec.text(d))
-        al.gen(p, al.g.of(m, l2, D.dc.en.step.pick(e, pos, t, AlM.dm(m), AlM.st(m), AlM.vocab(m), False{}, D.dc.Pick.rng(pk))), m, 1n+pos, D.dc.Dec.pending(d), l2, List.append(&2, U32, List.reverse(&2, U32, tb), out), 1n+count)
+        px : D.Px <- D.dc.en.step.pick(e, pos, t, AlM.dm(m), AlM.st(m), AlM.vocab(m), False{}, D.dc.Pick.rng(pk))
+        al.gen(p, al.g.of(m, l2, px), m, 1n+pos, D.dc.Dec.pending(d), l2, List.append(&2, U32, List.reverse(&2, U32, tb), out), 1n+count)
     case _ AlG{e, pk, stop, call}:
       al.halt(stop, out, count)
 
@@ -250,7 +252,9 @@ def al.tool.of(r: Result<&1, &1, U32 & String, U32 & (String & String)>, e: D.En
 def al.resume(+m: AlM, +budget: Nat, +echo: List<&2, U32>, e: D.En, +pos: Nat, +rng: Sm.Rng, +pending: List<&2, U32>) -> IO(AlS):
   +ids = Tk.Bpe.encode(AlM.b(m), echo)
   +l = al.line.of(echo, AlLine{Nil{}, False{}})
-  al.gen(budget, al.g.of(m, l, D.dc.en.prefill.pick(ids, e, pos, AlM.dm(m), AlM.st(m), AlM.vocab(m), False{}, rng)), m, Nat.add(pos, List.length(&2, U32, ids)), pending, l, Nil{}, 0n)
+  do IO<AlS>:
+    px : D.Px <- D.dc.en.prefill.pick(ids, e, pos, AlM.dm(m), AlM.st(m), AlM.vocab(m), False{}, rng)
+    al.gen(budget, al.g.of(m, l, px), m, Nat.add(pos, List.length(&2, U32, ids)), pending, l, Nil{}, 0n)
 
 # The loop: `fuel` is two steps a call (the call, then resuming after a
 # failed check), so at most fuel / 2 calls; `cmd` the tool command (run by
@@ -295,5 +299,6 @@ def al.episode(+md: D.Model, e: D.En, +st: D.Settings, +seed: String, +cmd: Stri
   +l = al.line.of(prompt, AlLine{Nil{}, True{}})
   do IO<AlEp>:
     IO.write(al.str(prompt))
-    s : AlS <- al.gen(budget, al.g.of(m, l, D.dc.en.prefill.pick(ids, e, 0n, AlM.dm(m), AlM.st(m), AlM.vocab(m), False{}, D.dc.rng.of(seed))), m, List.length(&2, U32, ids), Nil{}, l, Nil{}, 0n)
+    px : D.Px <- D.dc.en.prefill.pick(ids, e, 0n, AlM.dm(m), AlM.st(m), AlM.vocab(m), False{}, D.dc.rng.of(seed))
+    s : AlS <- al.gen(budget, al.g.of(m, l, px), m, List.length(&2, U32, ids), Nil{}, l, Nil{}, 0n)
     al.round(Nat.mul(2n, calls), m, cmd, budget, s, AlEp{[E.EpSeg{0n, Nil{}, 0, prompt}], 0n, 0n, "", Nil{}})

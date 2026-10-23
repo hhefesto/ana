@@ -26,9 +26,10 @@ import ../CorpusV2/Steps.bend as St
 #                    (bend/tests/dense-identity.sh wrote it; 2026-10-15: unwired,
 #                    `bend-ops dense-identity` writes it)
 #   bulk-cpu SRC     the CPU bulk ops' outputs byte for byte: SRC/gpu/GemmConf
-#                    and EinsumConf on the JS lane, BEND_FT=loop on 1 thread
-#                    and the default on 8; SRC/tests/bulk-cpu on BEND_FT=loop,
-#                    BEND_FT=c and 1, 8 and 16 threads
+#                    and EinsumConf on the JS lane (Bulk.bend's definitions),
+#                    BEND_FT=loop on 1 thread and the default on 8;
+#                    SRC/tests/bulk-cpu as the definitions (`ref`), on
+#                    BEND_FT=loop, BEND_FT=c and 1, 8 and 16 threads
 #   same A B         the files A and B byte for byte (cmp's verdict)
 #
 # A number a program prints is read as awk read it: the decimal to the
@@ -758,13 +759,14 @@ def chk.build(+file: String, +exe: String) -> IO(Unit):
     chk.show(r)
     chk.must("bend " ++ file ++ " -o " ++ exe, r)
 
-# a conformance program (Array.gemm, Array.einsum): its JS lane, its C build
-# on the reference loops and on the fast kernels, the same bytes
+# a conformance program (gemm, einsum): its JS lane on Bulk.bend's
+# definitions (`ref`), its C build of BulkIo.bend's effects on the reference
+# loops and on the fast kernels, the same bytes
 def chk.conf(+src: String, +name: String) -> IO(List<&2, ChkLaw>):
   +file = src ++ "/gpu/" ++ name ++ ".bend"
   +exe = "./" ++ name ++ ".bin"
   do IO<List<&2, ChkLaw>>:
-    chk.to("bend " ++ file, name ++ ".js", [], "bend", [file])
+    chk.to("bend " ++ file ++ " ref", name ++ ".js", [], "bend", [file, "ref"])
     chk.build(file, exe)
     chk.to(name ++ " BEND_FT=loop", name ++ ".loop", ["BEND_FT=loop"], exe, ["+RTS", "--gpu", "off", "--threads", "1", "-RTS"])
     a : ChkLaw <- chk.same(name ++ ".js", name ++ ".loop")
@@ -777,19 +779,22 @@ def chk.bulk.threads(+exe: String, +t: String) -> IO(ChkLaw):
     chk.to("bulk-cpu on " ++ t ++ " threads", "actual." ++ t, [], exe, ["+RTS", "--gpu", "off", "--threads", t, "-RTS"])
     chk.same("reference", "actual." ++ t)
 
-# the seeded and adversarial cases: the reference loops against the C
-# kernels and the default on 1, 8 and 16 threads
+# the seeded and adversarial cases: Bulk.bend's definitions (`ref`, pure
+# Bend in C) and the reference loops against the C kernels and the default
+# on 1, 8 and 16 threads
 def chk.bulk(+src: String) -> IO(List<&2, ChkLaw>):
   +exe = {"./bulk-cpu.bin" : String}
   do IO<List<&2, ChkLaw>>:
     chk.build(src ++ "/tests/bulk-cpu.bend", exe)
+    chk.to("bulk-cpu ref", "definitions", [], exe, ["ref", "+RTS", "--gpu", "off", "--threads", "16", "-RTS"])
     chk.to("bulk-cpu BEND_FT=loop", "reference", ["BEND_FT=loop"], exe, ["+RTS", "--gpu", "off", "--threads", "1", "-RTS"])
+    d : ChkLaw <- chk.same("definitions", "reference")
     chk.to("bulk-cpu BEND_FT=c", "actual.c", ["BEND_FT=c"], exe, ["+RTS", "--gpu", "off", "--threads", "8", "-RTS"])
     c : ChkLaw <- chk.same("reference", "actual.c")
     t1 : ChkLaw <- chk.bulk.threads(exe, "1")
     t8 : ChkLaw <- chk.bulk.threads(exe, "8")
     t16 : ChkLaw <- chk.bulk.threads(exe, "16")
-    return [c, t1, t8, t16]
+    return [d, c, t1, t8, t16]
 
 def chk.bulk.cpu.go(+src: String) -> IO(Unit):
   do IO<Unit>:

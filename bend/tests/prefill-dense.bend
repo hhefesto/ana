@@ -74,15 +74,15 @@ def tp.out.top(sts: List<&2, F32>, lg: List<&2, F32>, r: Array<F32> & U32) -> Tp
   (s, t) = r
   TpOut{sts, lg, t}
 
-def tp.out.fin(+k: Dd.Dd, sts: List<&2, F32>, r: Array<F32> & List<&2, F32>) -> TpOut:
+def tp.out.fin(+k: Dd.Dd, sts: List<&2, F32>, r: Array<F32> & List<&2, F32>) -> IO(TpOut):
   (s, lg) = r
-  tp.out.top(sts, lg, Dd.dd.top(k, s))
+  IO.bind(Array<F32> & U32, TpOut, Dd.dd.top(k, s), (x: Array<F32> & U32) => IO.pure(TpOut, tp.out.top(sts, lg, x)))
 
-def tp.out.got(+k: Dd.Dd, r: Array<F32> & List<&2, F32>) -> TpOut:
+def tp.out.got(+k: Dd.Dd, r: Array<F32> & List<&2, F32>) -> IO(TpOut):
   (s, sts) = r
-  tp.out.fin(k, sts, Dd.dd.logits(k, s))
+  IO.bind(Array<F32> & List<&2, F32>, TpOut, Dd.dd.logits(k, s), (x: Array<F32> & List<&2, F32>) => tp.out.fin(k, sts, x))
 
-def tp.out(+k: Dd.Dd, s: Array<F32>) -> TpOut:
+def tp.out(+k: Dd.Dd, s: Array<F32>) -> IO(TpOut):
   tp.out.got(k, Io.get(U32.to_nat(U32.sub(Dd.dd.stn(k), Dd.dd.st0(k))), s, Dd.dd.st0(k)))
 
 # a fresh store holding the weights
@@ -90,20 +90,23 @@ def tp.fresh(+k: Dd.Dd, +ws: List<&2, F32>) -> Array<F32>:
   Io.put(ws, Dd.dd.new(k), 0)
 
 # tokens one at a time from pos (the step)
-def tp.each(ts: List<&2, U32>, +k: Dd.Dd, +pos: Nat, s: Array<F32>) -> Array<F32>:
+def tp.each(ts: List<&2, U32>, +k: Dd.Dd, +pos: Nat, s: Array<F32>) -> IO(Array<F32>):
   match ts:
     case Nil{}:
-      s
+      IO.pure(Array<F32>, s)
     case t <> rest:
-      tp.each(rest, k, 1n+pos, Dd.dd.feed(k, pos, t, s))
+      IO.bind(Array<F32>, Array<F32>, Dd.dd.feed(k, pos, t, s), (x: Array<F32>) => tp.each(rest, k, 1n+pos, x))
 
 # the meaning: every token through the step
-def tp.ref(+k: Dd.Dd, +ws: List<&2, F32>, +ts: List<&2, U32>) -> TpOut:
-  tp.out(k, tp.each(ts, k, 0n, tp.fresh(k, ws)))
+def tp.ref(+k: Dd.Dd, +ws: List<&2, F32>, +ts: List<&2, U32>) -> IO(TpOut):
+  IO.bind(Array<F32>, TpOut, tp.each(ts, k, 0n, tp.fresh(k, ws)), (x: Array<F32>) => tp.out(k, x))
 
 # the refinement: the first pre tokens through the step, the rest by dd.feeds
-def tp.chunked(+k: Dd.Dd, +ws: List<&2, F32>, +pre: Nat, +ts: List<&2, U32>) -> TpOut:
-  tp.out(k, Dd.dd.feeds(k, List.drop(&2, U32, ts, pre), pre, tp.each(List.take(&2, U32, ts, pre), k, 0n, tp.fresh(k, ws))))
+def tp.chunked(+k: Dd.Dd, +ws: List<&2, F32>, +pre: Nat, +ts: List<&2, U32>) -> IO(TpOut):
+  do IO<TpOut>:
+    s1 : Array<F32> <- tp.each(List.take(&2, U32, ts, pre), k, 0n, tp.fresh(k, ws))
+    s2 : Array<F32> <- Dd.dd.feeds(k, List.drop(&2, U32, ts, pre), pre, s1)
+    tp.out(k, s2)
 
 # The tally the verdict reads: exact laws checked and failed, logit
 # comparisons against Model.bend made and failed (each within 1e-5
@@ -155,17 +158,21 @@ def tp.tree(ts: List<&2, U32>, +dm: Md.Dims, +w: Md.Weights, o: Md.Out, +pos: Na
 # the first n tokens: pre steps, then chunks, against n steps
 def tp.run(+name: String, +k: Dd.Dd, +ws: List<&2, F32>, +pre: Nat, +n: Nat, +ts: List<&2, U32>) -> IO(TpT):
   +xs = List.take(&2, U32, ts, n)
-  tp.check(name, tp.ref(k, ws, xs), tp.chunked(k, ws, pre, xs))
+  do IO<TpT>:
+    a : TpOut <- tp.ref(k, ws, xs)
+    b : TpOut <- tp.chunked(k, ws, pre, xs)
+    tp.check(name, a, b)
 
 def tp.case(+name: String, +c: C.Config, +ts: List<&2, U32>) -> IO(TpT):
   +k = Dd.dd.of.n(c, 16)
   +ws = K.Weights.flat(I.init(c))
   +dm = Md.Dims.of(c)
-  +whole = tp.chunked(k, ws, 0n, ts)
   +tree = T.V.to_list(tp.o.logits(tp.tree(ts, dm, I.init(c), {Md.Out{T.VZ{}, Md.states.zero(C.Config.layers(c), dm, 0n)} : Md.Out}, 0n)))
-  +e = tp.err(tree, tp.lg(whole), TpErr{0.0, 0.0})
   do IO<TpT>:
-    r1 : TpT <- tp.check(name ++ " 96 from 0: 6 chunks", tp.ref(k, ws, ts), whole)
+    +whole : TpOut <- tp.chunked(k, ws, 0n, ts)
+    +e : TpErr = tp.err(tree, tp.lg(whole), TpErr{0.0, 0.0})
+    ref : TpOut <- tp.ref(k, ws, ts)
+    r1 : TpT <- tp.check(name ++ " 96 from 0: 6 chunks", ref, whole)
     r2 : TpT <- tp.run(name ++ " 95 from 0: 5 chunks and one of 15", k, ws, 0n, 95n, ts)
     r3 : TpT <- tp.run(name ++ " 40 from 0: 2 chunks and one of 8", k, ws, 0n, 40n, ts)
     r4 : TpT <- tp.run(name ++ " 50 from 0: 3 chunks and 2 steps", k, ws, 0n, 50n, ts)

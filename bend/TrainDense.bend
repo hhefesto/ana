@@ -9,6 +9,7 @@ import ./Train/Data.bend as D
 import ./Train/Ckpt.bend as K
 import ./Dense/Layout.bend as L
 import ./Dense/Op.bend as P
+import ./Dense/Run.bend as R
 import ./Dense/Step.bend as S
 import ./Dense/Io.bend as Io
 import ./Dense/Ckpt.bend as Dk
@@ -113,9 +114,9 @@ def SL.add(+l0: F32, r: Array<F32> & F32) -> Array<F32> & F32:
   (s, l) = r
   (s, F32.add(l0, l))
 
-def micro.back(+rn: Run, +l0: F32, r: Array<F32> & F32) -> Array<F32> & F32:
+def micro.back(+rn: Run, +l0: F32, r: Array<F32> & F32) -> IO(Array<F32> & F32):
   (s, +l) = r
-  (P.run(Run.bwd(rn), s), F32.add(l0, l))
+  IO.bind(Array<F32>, Array<F32> & F32, R.run(Run.bwd(rn), s), (x: Array<F32>) => IO.pure(Array<F32> & F32, (x, F32.add(l0, l))))
 
 def put(mw: List<&2, List<&2, U32>>, +rn: Run, s: Array<F32>) -> Array<F32>:
   Io.put.windows(mw, s, L.Lay.tin(Run.ly(rn)), L.Lay.ttg(Run.ly(rn)), L.Lay.tw(Run.ly(rn)), L.Dm.t(Run.m(rn)))
@@ -132,17 +133,22 @@ def put.mask(+mw: List<&2, List<&2, U32>>, +rn: Run, mk: Ms.Mask, s: Array<F32>)
 def put.train(mw: List<&2, List<&2, U32>>, +rn: Run, s: Array<F32>) -> Array<F32>:
   put.mask(mw, rn, Run.mask(rn), s)
 
-def micro.one(mw: List<&2, List<&2, U32>>, +rn: Run, r: Array<F32> & F32) -> Array<F32> & F32:
-  (s, l0) = r
-  micro.back(rn, l0, Io.get1(P.run(Run.fwd(rn), put.train(mw, rn, s)), L.Lay.lmean(Run.ly(rn))))
+# the program, then one cell of the store read
+def run.get1(ops: List<&2, P.Op>, +at: U32, s: Array<F32>) -> IO(Array<F32> & F32):
+  IO.bind(Array<F32>, Array<F32> & F32, R.run(ops, s), (x: Array<F32>) => IO.pure(Array<F32> & F32, Io.get1(x, at)))
+
+def micro.one(mw: List<&2, List<&2, U32>>, +rn: Run, r: Array<F32> & F32) -> IO(Array<F32> & F32):
+  (s, +l0) = r
+  IO.bind(Array<F32> & F32, Array<F32> & F32, run.get1(Run.fwd(rn), L.Lay.lmean(Run.ly(rn)), put.train(mw, rn, s)),
+    (x: Array<F32> & F32) => micro.back(rn, l0, x))
 
 # forward then backward over each micro-batch; the losses summed
-def micro.go(ms: List<&2, List<&2, List<&2, U32>>>, +rn: Run, r: Array<F32> & F32) -> Array<F32> & F32:
+def micro.go(ms: List<&2, List<&2, List<&2, U32>>>, +rn: Run, r: Array<F32> & F32) -> IO(Array<F32> & F32):
   match ms:
     case Nil{}:
-      r
+      IO.pure(Array<F32> & F32, r)
     case mw <> t:
-      micro.go(t, rn, micro.one(mw, rn, r))
+      IO.bind(Array<F32> & F32, Array<F32> & F32, micro.one(mw, rn, r), (x: Array<F32> & F32) => micro.go(t, rn, x))
 
 def Out.fin(+loss: F32, r: Array<F32> & F32) -> Array<F32> & F32 & F32:
   (s, n) = r
@@ -213,29 +219,34 @@ def Hp.eps(+h: Hp) -> F32:
 def hyper(+hp: Hp, +ly: L.Lay, +lr: F32, +step: Nat, s: Array<F32>) -> Array<F32>:
   Io.put([lr, F32.sub(1.0, F32.pow(Hp.b1(hp), F32.from_nat(step))), F32.sub(1.0, F32.pow(Hp.b2(hp), F32.from_nat(step)))], s, S.cell.lr(ly))
 
-def step.fin(+rn: Run, +hp: Hp, +lr: F32, +step: Nat, +k: F32, r: Array<F32> & F32) -> Array<F32> & F32 & F32:
-  (s, l) = r
+def step.fin(+rn: Run, +hp: Hp, +lr: F32, +step: Nat, +k: F32, r: Array<F32> & F32) -> IO(Array<F32> & F32 & F32):
+  (s, +l) = r
   +ly = Run.ly(rn)
-  Out.fin(F32.div(l, k), Io.get1(P.run(Run.upd(rn), hyper(hp, ly, lr, step, s)), L.Lay.gnorm(ly)))
+  IO.bind(Array<F32> & F32, Array<F32> & F32 & F32, run.get1(Run.upd(rn), L.Lay.gnorm(ly), hyper(hp, ly, lr, step, s)),
+    (x: Array<F32> & F32) => IO.pure(Array<F32> & F32 & F32, Out.fin(F32.div(l, k), x)))
 
 # one optimizer step: zero the gradients, accumulate the micro-batches,
 # clip and update
-def train.step(+rn: Run, +hp: Hp, bw: List<&2, List<&2, U32>>, +lr: F32, +step: Nat, s: Array<F32>) -> Array<F32> & F32 & F32:
+def train.step(+rn: Run, +hp: Hp, bw: List<&2, List<&2, U32>>, +lr: F32, +step: Nat, s: Array<F32>) -> IO(Array<F32> & F32 & F32):
   +ms = micros(Hp.mb(hp), bw)
   +k = F32.from_nat(List.length(&2, List<&2, List<&2, U32>>, ms))
-  step.fin(rn, hp, lr, step, k, micro.go(ms, rn, (P.run(S.zero.grads(Run.ly(rn)), s), 0.0)))
+  do IO<Array<F32> & F32 & F32>:
+    s1 : Array<F32> <- R.run(S.zero.grads(Run.ly(rn)), s)
+    r : Array<F32> & F32 <- micro.go(ms, rn, (s1, 0.0))
+    step.fin(rn, hp, lr, step, k, r)
 
-def valid.one(mw: List<&2, List<&2, U32>>, +rn: Run, r: Array<F32> & F32) -> Array<F32> & F32:
-  (s, l0) = r
-  SL.add(l0, Io.get1(P.run(Run.fwd(rn), put(mw, rn, s)), L.Lay.lmean(Run.ly(rn))))
+def valid.one(mw: List<&2, List<&2, U32>>, +rn: Run, r: Array<F32> & F32) -> IO(Array<F32> & F32):
+  (s, +l0) = r
+  IO.bind(Array<F32> & F32, Array<F32> & F32, run.get1(Run.fwd(rn), L.Lay.lmean(Run.ly(rn)), put(mw, rn, s)),
+    (x: Array<F32> & F32) => IO.pure(Array<F32> & F32, SL.add(l0, x)))
 
 # validation: the mean loss over whole micro-batches of the windows
-def valid.go(ms: List<&2, List<&2, List<&2, U32>>>, +rn: Run, r: Array<F32> & F32) -> Array<F32> & F32:
+def valid.go(ms: List<&2, List<&2, List<&2, U32>>>, +rn: Run, r: Array<F32> & F32) -> IO(Array<F32> & F32):
   match ms:
     case Nil{}:
-      r
+      IO.pure(Array<F32> & F32, r)
     case mw <> t:
-      valid.go(t, rn, valid.one(mw, rn, r))
+      IO.bind(Array<F32> & F32, Array<F32> & F32, valid.one(mw, rn, r), (x: Array<F32> & F32) => valid.go(t, rn, x))
 
 def valid.fin(+k: Nat, r: Array<F32> & F32) -> Array<F32> & F32:
   (s, l) = r
@@ -251,9 +262,10 @@ def valid.pad(+mb: Nat, +ws: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>
   +n = List.length(&2, List<&2, U32>, ws)
   List.append(&2, List<&2, U32>, ws, List.replicate(List<&2, U32>, Nat.mod(Nat.sub(mb, Nat.mod(n, mb)), mb), [0]))
 
-def valid(+rn: Run, +mb: Nat, +ws: List<&2, List<&2, U32>>, s: Array<F32>) -> Array<F32> & F32:
+def valid(+rn: Run, +mb: Nat, +ws: List<&2, List<&2, U32>>, s: Array<F32>) -> IO(Array<F32> & F32):
   +ms = micros(mb, valid.pad(mb, ws))
-  valid.fin(List.length(&2, List<&2, List<&2, U32>>, ms), valid.go(ms, rn, (s, 0.0)))
+  IO.bind(Array<F32> & F32, Array<F32> & F32, valid.go(ms, rn, (s, 0.0)),
+    (r: Array<F32> & F32) => IO.pure(Array<F32> & F32, valid.fin(List.length(&2, List<&2, List<&2, U32>>, ms), r)))
 
 # Saving -------------------------------------------------------------------
 
@@ -372,7 +384,8 @@ def report.valid.on(on: Bool, +rn: Run, +hp: Hp, +vw: List<&2, List<&2, U32>>, +
                     st: St, s: Array<F32>) -> IO(Array<F32> & St):
   match on:
     case True{}:
-      report.valid.print(step, scale, left, st, valid(rn, Hp.mb(hp), vw, s))
+      IO.bind(Array<F32> & F32, Array<F32> & St, valid(rn, Hp.mb(hp), vw, s),
+        (r: Array<F32> & F32) => report.valid.print(step, scale, left, st, r))
     case False{}:
       IO.pure(Array<F32> & St, (s, st))
 
@@ -405,7 +418,8 @@ def loop(n: Nat, +rn: Run, +hp: Hp, +ws: List<&2, List<&2, U32>>, +nw: Nat, +vw:
       +every = Hp.every(hp)
       do IO<Array<F32> & St>:
         +t0 : Nat <- IO.now()
-        r2 : Array<F32> & St <- loop.print(hp, step2, lr, t0, st, train.step(rn, hp, Tr.batch.at(ws, nw, step, Hp.batch(hp)), lr, step2, s))
+        o : Array<F32> & F32 & F32 <- train.step(rn, hp, Tr.batch.at(ws, nw, step, Hp.batch(hp)), lr, step2, s)
+        r2 : Array<F32> & St <- loop.print(hp, step2, lr, t0, st, o)
         r3 : Array<F32> & St <- report.valid.r(Bool.or(Nat.is_eq(step2, Hp.total(hp)),
           Bool.and(Nat.is_lt(0n, every), Nat.is_eq(Nat.mod(step2, Nat.max(every, 1n)), 0n))), rn, hp, vw, step2, scale,
           Nat.sub(Hp.total(hp), step2), r2)
@@ -627,7 +641,8 @@ def loop.hot(n: Nat, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, +head: List<&2, Li
       +lr = O.lr.at(Hp.lr(hp), Nat.sub(step2, Hs.base(hs)), Hp.warm(hp), Nat.sub(Hp.total(hp), Hs.base(hs)))
       do IO<Array<F32> & St>:
         +t0 : Nat <- IO.now()
-        r2 : Array<F32> & St <- loop.print(hp, step2, lr, t0, st, train.step(rn, hp, bw, lr, step2, s))
+        o : Array<F32> & F32 & F32 <- train.step(rn, hp, bw, lr, step2, s)
+        r2 : Array<F32> & St <- loop.print(hp, step2, lr, t0, st, o)
         r3 : Array<F32> & St <- report.valid.r(every.at(Hp.every(hp), step2), rn, hp, vw, step2, scale, Nat.sub(Hs.stop(hs), step2), r2)
         r4 : Array<F32> & St <- hot.save.r(Bool.or(every.at(Hs.every(hs), step2), Nat.is_eq(step2, Hs.stop(hs))), hs, rn, muon, step2, r3)
         loop.hot(p, rn, hp, hs, muon, head, vw, scale, step2, batch.next(Hp.batch(hp), head, rest), r4)
@@ -836,17 +851,18 @@ def eval.counts(+mk: Ms.Mask, +b: Tk.Bpe, +ws: List<&2, List<&2, U32>>) -> Nat &
     case Ms.MsOn{+ids}:
       eval.counts.on(ids, b, ws, 0n, 0n)
 
-def eval.one(+mw: List<&2, List<&2, U32>>, +rn: Run, r: Array<F32> & Ea) -> Array<F32> & Ea:
+def eval.one(+mw: List<&2, List<&2, U32>>, +rn: Run, r: Array<F32> & Ea) -> IO(Array<F32> & Ea):
   (s, +a) = r
   +k = eval.weight(Run.mask(rn), mw)
-  eval.add(k, a, Io.get1(P.run(Run.fwd(rn), put.mask(mw, rn, Run.mask(rn), s)), L.Lay.lmean(Run.ly(rn))))
+  IO.bind(Array<F32> & F32, Array<F32> & Ea, run.get1(Run.fwd(rn), L.Lay.lmean(Run.ly(rn)), put.mask(mw, rn, Run.mask(rn), s)),
+    (x: Array<F32> & F32) => IO.pure(Array<F32> & Ea, eval.add(k, a, x)))
 
-def eval.go(ms: List<&2, List<&2, List<&2, U32>>>, +rn: Run, r: Array<F32> & Ea) -> Array<F32> & Ea:
+def eval.go(ms: List<&2, List<&2, List<&2, U32>>>, +rn: Run, r: Array<F32> & Ea) -> IO(Array<F32> & Ea):
   match ms:
     case Nil{}:
-      r
+      IO.pure(Array<F32> & Ea, r)
     case mw <> t:
-      eval.go(t, rn, eval.one(mw, rn, r))
+      IO.bind(Array<F32> & Ea, Array<F32> & Ea, eval.one(mw, rn, r), (x: Array<F32> & Ea) => eval.go(t, rn, x))
 
 # EVAL_LINES=1: each micro-batch's mean loss, in order (TRAIN_MICRO=1: each
 # window's, for paired comparisons between checkpoints on one corpus)
@@ -904,7 +920,8 @@ def eval.run.scored(+c: C.Config, +tok: Tr.Tok, +mb: Nat, +chunk: Nat, +path: St
   do IO<Unit>:
     u : Unit <- Dk.fail.if(Cc.Corpus.problem(co, Tr.Tok.id(tok)))
     say("evaluate (dense): step " ++ Nat.show(Dk.Src.step(src)) ++ " on " ++ path ++ " (" ++ Cc.Corpus.dataset(co) ++ ")" ++ Bool.pick(String, eval.masked(mk), ", " ++ Ms.ms.name(mk), ""))
-    eval.fin(lines, eval.masked(mk), scale, preds, bytes, eval.go(micros(mb, pad.to(mb, ws)), rn, (s, Ea{0.0, 0n, Nil{}})))
+    r : Array<F32> & Ea <- eval.go(micros(mb, pad.to(mb, ws)), rn, (s, Ea{0.0, 0n, Nil{}}))
+    eval.fin(lines, eval.masked(mk), scale, preds, bytes, r)
 
 def eval.run.go(+c: C.Config, +tok: Tr.Tok, +mb: Nat, +chunk: Nat, +path: String, +limit: Nat, +xs: List<&2, U32>,
                 +mk: Ms.Mask, +lines: Bool, r: Array<F32> & Dk.Src) -> IO(Unit):

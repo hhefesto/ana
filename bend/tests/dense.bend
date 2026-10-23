@@ -8,6 +8,7 @@ import ../Train/Opt.bend as O
 import ../Train/Ckpt.bend as K
 import ../Dense/Layout.bend as L
 import ../Dense/Op.bend as P
+import ../Dense/Run.bend as R
 import ../Dense/Step.bend as S
 import ../Dense/Io.bend as Io
 
@@ -97,21 +98,26 @@ def dense.fin(+l: F32, r: Array<F32> & List<&2, F32>) -> DOut:
   (s, xs) = r
   DOut{l, xs}
 
-def dense.back(+ly: L.Lay, +m: L.Dm, r: Array<F32> & F32) -> DOut:
+def dense.back(+ly: L.Lay, +m: L.Dm, r: Array<F32> & F32) -> IO(DOut):
   (s, +l) = r
-  dense.fin(l, Io.get(U32.to_nat(L.Lay.params(ly)), P.run(List.append(&2, P.Op, S.zero.grads(ly), S.bwd(m, ly, 1.0)), s), L.Lay.g(ly)))
+  IO.bind(Array<F32>, DOut, R.run(List.append(&2, P.Op, S.zero.grads(ly), S.bwd(m, ly, 1.0)), s),
+    (x: Array<F32>) => IO.pure(DOut, dense.fin(l, Io.get(U32.to_nat(L.Lay.params(ly)), x, L.Lay.g(ly)))))
+
+# the forward from a store, its mean loss read, then dense.back
+def dense.fwd(+ly: L.Lay, +m: L.Dm, s: Array<F32>) -> IO(DOut):
+  IO.bind(Array<F32>, DOut, R.run(S.fwd(m, ly), s), (x: Array<F32>) => dense.back(ly, m, Io.get1(x, L.Lay.lmean(ly))))
 
 # the forward, the mean loss, the backward, the gradients
-def dense(+ly: L.Lay, +m: L.Dm, +w: List<&2, F32>, +ws: List<&2, List<&2, U32>>) -> DOut:
-  dense.back(ly, m, Io.get1(P.run(S.fwd(m, ly), Io.put.windows(ws, Io.put(w, Array.new(F32, L.Lay.depth(ly), 0.0), 0),
-    L.Lay.tin(ly), L.Lay.ttg(ly), L.Lay.tw(ly), L.Dm.t(m))), L.Lay.lmean(ly)))
+def dense(+ly: L.Lay, +m: L.Dm, +w: List<&2, F32>, +ws: List<&2, List<&2, U32>>) -> IO(DOut):
+  dense.fwd(ly, m, Io.put.windows(ws, Io.put(w, Array.new(F32, L.Lay.depth(ly), 0.0), 0),
+    L.Lay.tin(ly), L.Lay.ttg(ly), L.Lay.tw(ly), L.Dm.t(m)))
 
 def report(+name: String, +c: C.Config, +cc: U32, +flat: List<&2, F32>, +ws: List<&2, List<&2, U32>>, +tgrad: List<&2, F32>) -> IO(Bool):
   +m = L.Dm.of.cc(c, 2n, cc)
   +ly = L.Lay.of(c, m)
-  +o = dense(ly, m, flat, ws)
-  +e = err.go(tgrad, DOut.grads(o), Err{0.0, 0.0})
   do IO<Bool>:
+    +o : DOut <- dense(ly, m, flat, ws)
+    +e : Err = err.go(tgrad, DOut.grads(o), Err{0.0, 0.0})
     IO.print(name ++ ": dense loss " ++ F32.show(DOut.loss(o)))
     IO.print(Err.line(name, e))
     return Err.ok(e)
@@ -140,9 +146,9 @@ def tree.grad.w(ws: List<&2, List<&2, U32>>, wt: List<&2, List<&2, F32>>, +dm: M
     case _ _:
       G.LossGrad{0.0, O.W.zero()}
 
-def dense.w(+ly: L.Lay, +m: L.Dm, +w: List<&2, F32>, +ws: List<&2, List<&2, U32>>, +wt: List<&2, List<&2, F32>>) -> DOut:
-  dense.back(ly, m, Io.get1(P.run(S.fwd(m, ly), Io.put.windows.w(ws, wt, Io.put(w, Array.new(F32, L.Lay.depth(ly), 0.0), 0),
-    L.Lay.tin(ly), L.Lay.ttg(ly), L.Lay.tw(ly), L.Dm.t(m))), L.Lay.lmean(ly)))
+def dense.w(+ly: L.Lay, +m: L.Dm, +w: List<&2, F32>, +ws: List<&2, List<&2, U32>>, +wt: List<&2, List<&2, F32>>) -> IO(DOut):
+  dense.fwd(ly, m, Io.put.windows.w(ws, wt, Io.put(w, Array.new(F32, L.Lay.depth(ly), 0.0), 0),
+    L.Lay.tin(ly), L.Lay.ttg(ly), L.Lay.tw(ly), L.Dm.t(m)))
 
 def masked(+c: C.Config, +cc: U32, +ws: List<&2, List<&2, U32>>) -> IO(Bool):
   +dm = Md.Dims.of(c)
@@ -152,9 +158,9 @@ def masked(+c: C.Config, +cc: U32, +ws: List<&2, List<&2, U32>>) -> IO(Bool):
   +tg = tree.grad.w(ws, wt, dm, w, scale)
   +m = L.Dm.of.cc(c, 2n, cc)
   +ly = L.Lay.of(c, m)
-  +o = dense.w(ly, m, K.Weights.flat(w), ws, wt)
-  +e = err.go(K.Weights.flat(LG.w(tg)), DOut.grads(o), Err{0.0, 0.0})
   do IO<Bool>:
+    +o : DOut <- dense.w(ly, m, K.Weights.flat(w), ws, wt)
+    +e : Err = err.go(K.Weights.flat(LG.w(tg)), DOut.grads(o), Err{0.0, 0.0})
     IO.print("masked tree loss " ++ F32.show(LG.loss(tg)) ++ ", dense loss " ++ F32.show(DOut.loss(o)))
     IO.print(Err.line("masked", e))
     return Err.ok(e)

@@ -4,7 +4,9 @@ import ../Bytes.bend as B
 import ../Config.bend as C
 import ../Checkpoint.bend as K
 import ./Ex.bend as X
+import ../BulkIo.bend as BI
 import ./Op.bend as P
+import ./Run.bend as R
 import ./Layout.bend as L
 
 # FTC2 (master's compact checkpoint, Checkpoint.bend) to and from the dense
@@ -190,7 +192,7 @@ type Rd is Data:
 def rd.one(+o: U32, +n: U32, +a: U32, fs: File & Array<F32>) -> IO(File & Array<F32>):
   (f, s) = fs
   do IO<File & Array<F32>>:
-    r : Put() <- File.read_f32be(f, o, n, s, a)
+    r : Put() <- BI.bk.read_f32be(f, o, n, s, a)
     rd.fin(r)
 
 # each (file offset, count, store index): count f32 from the file into the store
@@ -491,12 +493,12 @@ def wr.bytes(+xs: List<&2, U32>, fs: File & Array<F32>) -> IO(File & Array<F32>)
 def wr.arr(+n: U32, +a: U32, fs: File & Array<F32>) -> IO(File & Array<F32>):
   (f, s) = fs
   do IO<File & Array<F32>>:
-    r : Put() <- File.write_f32be(f, n, s, a)
+    r : Put() <- BI.bk.write_f32be(f, n, s, a)
     wr.fin(r)
 
-def wr.ops(ops: List<&2, P.Op>, fs: File & Array<F32>) -> File & Array<F32>:
+def wr.ops(ops: List<&2, P.Op>, fs: File & Array<F32>) -> IO(File & Array<F32>):
   (f, s) = fs
-  (f, P.run(ops, s))
+  IO.bind(Array<F32>, File & Array<F32>, R.run(ops, s), (x: Array<F32>) => IO.pure(File & Array<F32>, (f, x)))
 
 def wr.one(pc: Pc, fs: File & Array<F32>) -> IO(File & Array<F32>):
   match pc:
@@ -505,7 +507,7 @@ def wr.one(pc: Pc, fs: File & Array<F32>) -> IO(File & Array<F32>):
     case PA{n, a}:
       wr.arr(n, a, fs)
     case PO{ops}:
-      IO.pure(File & Array<F32>, wr.ops(ops, fs))
+      wr.ops(ops, fs)
 
 def wr(ps: List<&2, Pc>, fs: File & Array<F32>) -> IO(File & Array<F32>):
   match ps:

@@ -7,6 +7,7 @@ import ../Train/Ckpt.bend as K
 import ../Dense/Io.bend as Io
 import ../Dense/Decode.bend as Dd
 import ../Dense/Op.bend as P
+import ../Dense/Run.bend as R
 import ../Sample.bend as S
 
 # Model.bend's decode (the meaning) against the dense decode step
@@ -95,25 +96,32 @@ def td.cons(acc: List<&2, List<&2, F32>>, r: Array<F32> & List<&2, F32>) -> Arra
   (s, xs) = r
   (s, xs <> acc)
 
-def td.next(+k: Dd.Dd, +pos: Nat, +t: U32, r: Array<F32> & List<&2, List<&2, F32>>) -> Array<F32> & List<&2, List<&2, F32>>:
+def td.next(+k: Dd.Dd, +pos: Nat, +t: U32, r: Array<F32> & List<&2, List<&2, F32>>) -> IO(Array<F32> & List<&2, List<&2, F32>>):
   (s, acc) = r
-  td.cons(acc, Dd.dd.logits(k, Dd.dd.feed(k, pos, t, s)))
+  do IO<Array<F32> & List<&2, List<&2, F32>>>:
+    s1 : Array<F32> <- Dd.dd.feed(k, pos, t, s)
+    x : Array<F32> & List<&2, F32> <- Dd.dd.logits(k, s1)
+    return td.cons(acc, x)
 
-def td.dense(ts: List<&2, U32>, +k: Dd.Dd, +pos: Nat, r: Array<F32> & List<&2, List<&2, F32>>) -> Array<F32> & List<&2, List<&2, F32>>:
+def td.dense(ts: List<&2, U32>, +k: Dd.Dd, +pos: Nat, r: Array<F32> & List<&2, List<&2, F32>>) -> IO(Array<F32> & List<&2, List<&2, F32>>):
   match ts:
     case Nil{}:
-      r
+      IO.pure(Array<F32> & List<&2, List<&2, F32>>, r)
     case t <> rest:
-      td.dense(rest, k, 1n+pos, td.next(k, pos, t, r))
+      IO.bind(Array<F32> & List<&2, List<&2, F32>>, Array<F32> & List<&2, List<&2, F32>>, td.next(k, pos, t, r),
+        (x: Array<F32> & List<&2, List<&2, F32>>) => td.dense(rest, k, 1n+pos, x))
 
 def td.rows(r: Array<F32> & List<&2, List<&2, F32>>) -> List<&2, List<&2, F32>>:
   (s, acc) = r
   List.reverse(&2, List<&2, F32>, acc)
 
 # after one run: reset the states, run again, keep both
-def td.again(+k: Dd.Dd, +ts: List<&2, U32>, r: Array<F32> & List<&2, List<&2, F32>>) -> List<&2, List<&2, F32>> & List<&2, List<&2, F32>>:
+def td.again(+k: Dd.Dd, +ts: List<&2, U32>, r: Array<F32> & List<&2, List<&2, F32>>) -> IO(List<&2, List<&2, F32>> & List<&2, List<&2, F32>>):
   (s, acc) = r
-  (List.reverse(&2, List<&2, F32>, acc), td.rows(td.dense(ts, k, 0n, (Dd.dd.reset(k, s), Nil{}))))
+  do IO<List<&2, List<&2, F32>> & List<&2, List<&2, F32>>>:
+    s1 : Array<F32> <- Dd.dd.reset(k, s)
+    x : Array<F32> & List<&2, List<&2, F32>> <- td.dense(ts, k, 0n, (s1, Nil{}))
+    return (List.reverse(&2, List<&2, F32>, acc), td.rows(x))
 
 # The tally the verdict reads: logit comparisons made and failed (each
 # within 1e-5 relative, the F32 its line shows; a NaN fails), exact laws
@@ -162,20 +170,25 @@ def td.top.cmp(+want: U32, r: Array<F32> & U32) -> Array<F32> & Bool:
   (s, got) = r
   (s, U32.is_eq(want, got))
 
-def td.top.one(+k: Dd.Dd, +dv: Nat, r: Array<F32> & List<&2, F32>) -> Array<F32> & Bool:
+def td.top.one(+k: Dd.Dd, +dv: Nat, r: Array<F32> & List<&2, F32>) -> IO(Array<F32> & Bool):
   (s, xs) = r
-  td.top.cmp(S.argmax(dv, T.V.of_list(dv, xs)), Dd.dd.top(k, s))
+  +want = S.argmax(dv, T.V.of_list(dv, xs))
+  IO.bind(Array<F32> & U32, Array<F32> & Bool, Dd.dd.top(k, s), (x: Array<F32> & U32) => IO.pure(Array<F32> & Bool, td.top.cmp(want, x)))
 
-def td.top.step(+k: Dd.Dd, +dv: Nat, +pos: Nat, +t: U32, r: Array<F32> & Bool) -> Array<F32> & Bool:
-  (s, ok) = r
-  td.top.and(ok, td.top.one(k, dv, Dd.dd.logits(k, Dd.dd.feed(k, pos, t, s))))
+def td.top.step(+k: Dd.Dd, +dv: Nat, +pos: Nat, +t: U32, r: Array<F32> & Bool) -> IO(Array<F32> & Bool):
+  (s, +ok) = r
+  do IO<Array<F32> & Bool>:
+    s1 : Array<F32> <- Dd.dd.feed(k, pos, t, s)
+    x : Array<F32> & List<&2, F32> <- Dd.dd.logits(k, s1)
+    y : Array<F32> & Bool <- td.top.one(k, dv, x)
+    return td.top.and(ok, y)
 
-def td.tops(ts: List<&2, U32>, +k: Dd.Dd, +dv: Nat, +pos: Nat, r: Array<F32> & Bool) -> Array<F32> & Bool:
+def td.tops(ts: List<&2, U32>, +k: Dd.Dd, +dv: Nat, +pos: Nat, r: Array<F32> & Bool) -> IO(Array<F32> & Bool):
   match ts:
     case Nil{}:
-      r
+      IO.pure(Array<F32> & Bool, r)
     case t <> rest:
-      td.tops(rest, k, dv, 1n+pos, td.top.step(k, dv, pos, t, r))
+      IO.bind(Array<F32> & Bool, Array<F32> & Bool, td.top.step(k, dv, pos, t, r), (x: Array<F32> & Bool) => td.tops(rest, k, dv, 1n+pos, x))
 
 def td.top.line(+name: String, r: Array<F32> & Bool) -> IO(TdT):
   (s, +ok) = r
@@ -188,19 +201,33 @@ def td.tie.got(r: Array<F32> & F32) -> U32:
   (s, y) = r
   U32.sub(4, F32.to_u32(y))
 
-def td.tie(+xs: List<&2, F32>) -> Bool:
-  U32.is_eq(td.tie.got(Array.get(F32, P.run(Dd.dd.pick(4, 0, 4), Io.put(xs, Array.new(F32, 3n, 0.0), 0)), 5)), S.argmax(2n, T.V.of_list(2n, xs)))
+def td.tie(+xs: List<&2, F32>) -> IO(Bool):
+  IO.bind(Array<F32>, Bool, R.run(Dd.dd.pick(4, 0, 4), Io.put(xs, Array.new(F32, 3n, 0.0), 0)),
+    (x: Array<F32>) => IO.pure(Bool, U32.is_eq(td.tie.got(Array.get(F32, x, 5)), S.argmax(2n, T.V.of_list(2n, xs)))))
 
-def td.ties() -> Bool:
-  Bool.and(Bool.and(td.tie([1.0, 3.0, 3.0, 2.0]), td.tie([0.0, 0.0, 0.0, 0.0])),
-    Bool.and(Bool.and(td.tie([F32.neg(1.0), F32.neg(5.0), F32.neg(1.0), F32.neg(2.0)]), td.tie([2.0, 1.0, 0.0, 7.0])), td.tie([F32.neg(0.0), 0.0, F32.neg(3.0), 0.0])))
+def td.ties.go(xss: List<&2, List<&2, F32>>) -> IO(Bool):
+  match xss:
+    case Nil{}:
+      IO.pure(Bool, True{})
+    case +xs <> t:
+      do IO<Bool>:
+        +a : Bool <- td.tie(xs)
+        +b : Bool <- td.ties.go(t)
+        return Bool.and(a, b)
+
+def td.ties() -> IO(Bool):
+  td.ties.go([[1.0, 3.0, 3.0, 2.0], [0.0, 0.0, 0.0, 0.0],
+    [F32.neg(1.0), F32.neg(5.0), F32.neg(1.0), F32.neg(2.0)], [2.0, 1.0, 0.0, 7.0], [F32.neg(0.0), 0.0, F32.neg(3.0), 0.0]])
 
 def td.case(+name: String, +c: C.Config, +ts: List<&2, U32>) -> IO(TdT):
   +k = Dd.dd.of(c)
   +w = K.Weights.flat(I.init(c))
   do IO<TdT>:
-    a : TdT <- td.check(name, c, ts, td.again(k, ts, td.dense(ts, k, 0n, (Io.put(w, Dd.dd.new(k), 0), Nil{}))))
-    g : TdT <- td.top.line(name, td.tops(ts, k, Md.Dims.dv(Md.Dims.of(c)), 0n, (Io.put(w, Dd.dd.new(k), 0), True{})))
+    d : Array<F32> & List<&2, List<&2, F32>> <- td.dense(ts, k, 0n, (Io.put(w, Dd.dd.new(k), 0), Nil{}))
+    p : List<&2, List<&2, F32>> & List<&2, List<&2, F32>> <- td.again(k, ts, d)
+    a : TdT <- td.check(name, c, ts, p)
+    q : Array<F32> & Bool <- td.tops(ts, k, Md.Dims.dv(Md.Dims.of(c)), 0n, (Io.put(w, Dd.dd.new(k), 0), True{}))
+    g : TdT <- td.top.line(name, q)
     return td.add(a, g)
 
 def td.verdict.if(ok: Bool, msg: String) -> IO(Unit):
@@ -222,8 +249,8 @@ def td.verdict(t: TdT) -> IO(Unit):
 
 def main() -> IO(Unit):
   +ts = td.window(95n, 7)
-  +ties = td.ties()
   do IO<Unit>:
+    +ties : Bool <- td.ties()
     a : TdT <- td.case("v3 arms", C.Config.small4_v3(), ts)
     b : TdT <- td.case("no arms", {C.Config{U32.to_nat(258), 64n, 64n, U32.to_nat(192), 4n, 4n, False{}, False{}, False{}, True{}} : C.Config}, ts)
     IO.print(Bool.pick(String, ties, "ok ", "FAIL ") ++ "greedy pick ties go to the least index")

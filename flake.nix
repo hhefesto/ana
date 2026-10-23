@@ -2,16 +2,16 @@
   description = "ana: an autoregressive transformer specified, trained and evaluated in Bend, and the corpus tools that feed it";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  # Bend 2: the ft-kernels fork of bendlang/bend (github:hhefesto/bend2),
-  # which adds the bulk GPU ops the dense trainer runs on (Array.gemm/mm on
-  # cuBLAS, Array.einsum as generated CUDA kernels; each op's meaning is its
-  # base.bend definition) and F32 file I/O (the wall clock, its IO.time until
-  # 2026-10-15, is our own effect now: bend/Clock.bend's ck.wall over
-  # bend/effs/wall.c and wall.js).  Bend is a flake; the
-  # fork's `default` package runs its own source with Bun (upstream's
-  # `default` fetches the release archive, which cannot carry the fork).
+  # Bend 2: upstream's (bendlang/bend; its `default` package is the release
+  # archive). Until 2026-10-22 it was our fork, github:hhefesto/bend2
+  # ft-kernels, which added the bulk F32 ops the dense model runs on
+  # (Array.gemm/mm, Array.einsum; cuBLAS and generated CUDA kernels on a
+  # GPU) and big-endian F32 file I/O. Those are our own effects now, as the
+  # wall clock is (its IO.time until 2026-10-15, bend/Clock.bend's ck.wall):
+  # bend/Bulk.bend holds the ops' meaning, bend/BulkIo.bend the effects over
+  # bend/effs/bulk.c and bulk.js.
   inputs.bend2 = {
-    url = "github:hhefesto/bend2/ft-kernels";
+    url = "github:bendlang/bend";
     inputs.nixpkgs.follows = "nixpkgs";
   };
 
@@ -45,8 +45,14 @@
         ./flake.nix
         ./tools/lint
       ];
-      # the pinned bend command (clang on its PATH, telemetry off)
-      bendFor = pkgs: bend2.packages.${pkgs.stdenv.hostPlatform.system}.default;
+      # the pinned bend command (upstream's wrapper puts clang on its PATH;
+      # this one turns telemetry off: the daily version check, main.ts)
+      bendFor =
+        pkgs:
+        pkgs.writeShellScriptBin "bend" ''
+          export BEND_NO_TELEMETRY=1
+          exec ${bend2.packages.${pkgs.stdenv.hostPlatform.system}.default}/bin/bend "$@"
+        '';
       # A Bend2 program compiled to a native binary (C via clang).
       # the GHC `bend-check haskell` drives: the packages listed in
       # deploy/check/ghc-packages.txt (one per line, # comments)

@@ -45,7 +45,8 @@ def gen(n: Nat, g: Gs, +dm: Md.Dims, +b: Tk.Bpe, +st: D.Settings, +vocab: Nat, +
       do IO<Nat>:
         D.dc.stats.line(stats, pos, t, pr)
         IO.write(D.dc.Dec.text(d))
-        gen(p, gs.of(D.dc.en.step.pick(e, pos, t, dm, st, vocab, stats, D.dc.Pick.rng(pk))), dm, b, st, vocab, 1n+pos, D.dc.Dec.pending(d), 1n+count, stats)
+        px : D.Px <- D.dc.en.step.pick(e, pos, t, dm, st, vocab, stats, D.dc.Pick.rng(pk))
+        gen(p, gs.of(px), dm, b, st, vocab, 1n+pos, D.dc.Dec.pending(d), 1n+count, stats)
     case _ _:
       IO.pure(Nat, count)
 
@@ -72,7 +73,8 @@ def go(+c: C.Config, +total: Nat, +b: Tk.Bpe, e: D.En, +step: Nat, +prompt: Stri
     IO.print_err("generate: loaded in " ++ D.dc.ms(t0, t1) ++ " ms; prompt_tokens=" ++ Nat.show(List.length(&2, U32, ids)))
     IO.print("=== ana: step " ++ Nat.show(step) ++ " of " ++ Nat.show(total) ++ " (" ++ pct(step, Nat.max(total, 1n)) ++ "% of its plan) ===")
     IO.write(D.dc.bytes.str(Nil{}) ++ text)
-    n : Nat <- gen(budget, gs.of(D.dc.en.prefill.pick(ids, e, 0n, dm, st, vocab, stats, D.dc.rng.of(seed))), dm, b, st, vocab, List.length(&2, U32, ids), Nil{}, 0n, stats)
+    px : D.Px <- D.dc.en.prefill.pick(ids, e, 0n, dm, st, vocab, stats, D.dc.rng.of(seed))
+    n : Nat <- gen(budget, gs.of(px), dm, b, st, vocab, List.length(&2, U32, ids), Nil{}, 0n, stats)
     go.fin(t1, ids, n)
 
 def open.model(+prompt: String, +budget: Nat, +st: D.Settings, +seed: String, +t0: Nat, +stats: Bool, me: D.Model & D.En) -> IO(Unit):

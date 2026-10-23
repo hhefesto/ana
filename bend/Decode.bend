@@ -5,6 +5,7 @@ import ./Config.bend as C
 import ./Checkpoint.bend as K
 import ./Train/Ckpt.bend as TC
 import ./Model.bend as Md
+import ./Prefill.bend as Pf
 import ./Sample.bend as S
 import ./Tensor.bend as T
 import ./Tokenizer.bend as Tk
@@ -151,11 +152,6 @@ def dc.Out.logits(o: Md.Out) -> T.V:
     case Md.Out{l, s}:
       l
 
-def dc.Out.sts(o: Md.Out) -> List<&2, Md.LState>:
-  match o:
-    case Md.Out{l, s}:
-      s
-
 def dc.Pick.token(p: S.Pick) -> U32:
   match p:
     case S.Pick{t, r}:
@@ -165,14 +161,6 @@ def dc.Pick.rng(p: S.Pick) -> S.Rng:
   match p:
     case S.Pick{t, r}:
       r
-
-# feed the prompt; answer the output after its last token
-def dc.prefill(xs: List<&2, U32>, +dm: Md.Dims, +w: Md.Weights, +o: Md.Out, +pos: Nat) -> Md.Out:
-  match xs:
-    case Nil{}:
-      o
-    case t <> rest:
-      dc.prefill(rest, dm, w, Md.decode(dm, w, dc.Out.sts(o), pos, t), 1n+pos)
 
 def dc.pick(+dm: Md.Dims, +st: Settings, +vocab: Nat, +logits: T.V, r: S.Rng) -> S.Pick:
   match st:
@@ -326,57 +314,65 @@ def dc.en.dense(+k: Dd.Dd, +dv: Nat, r: Array<F32> & List<&2, F32>) -> En & T.V:
   (s, xs) = r
   (EDense{k, dv, s}, T.V.of_list(dv, xs))
 
+# the dense engine's logits after a token, or after the tokens fed so far
+def dc.en.dense.io(+k: Dd.Dd, +dv: Nat, s: Array<F32>) -> IO(En & T.V):
+  IO.bind(Array<F32> & List<&2, F32>, En & T.V, Dd.dd.logits(k, s),
+    (r: Array<F32> & List<&2, F32>) => IO.pure(En & T.V, dc.en.dense(k, dv, r)))
+
 # a token in, the logits after it
-def dc.en.step(e: En, +pos: Nat, +t: U32) -> En & T.V:
+def dc.en.step(e: En, +pos: Nat, +t: U32) -> IO(En & T.V):
   match e:
     case ETree{+dm, +w, sts}:
-      dc.en.tree(dm, w, Md.decode(dm, w, sts, pos, t))
+      IO.pure(En & T.V, dc.en.tree(dm, w, Md.decode(dm, w, sts, pos, t)))
     case EDense{+k, +dv, s}:
-      dc.en.dense(k, dv, Dd.dd.logits(k, Dd.dd.feed(k, pos, t, s)))
+      IO.bind(Array<F32>, En & T.V, Dd.dd.feed(k, pos, t, s), (x: Array<F32>) => dc.en.dense.io(k, dv, x))
+
+def dc.en.dense.of(+k: Dd.Dd, +dv: Nat, s: Array<F32>) -> IO(En):
+  IO.pure(En, EDense{k, dv, s})
 
 # a token in, no logits wanted (the dense head is not run)
-def dc.en.feed(e: En, +pos: Nat, +t: U32) -> En:
+def dc.en.feed(e: En, +pos: Nat, +t: U32) -> IO(En):
   match e:
     case ETree{+dm, +w, sts}:
-      ETree{dm, w, dc.Out.sts(Md.decode(dm, w, sts, pos, t))}
-    case EDense{+k, dv, s}:
-      EDense{k, dv, Dd.dd.feed(k, pos, t, s)}
+      IO.pure(En, ETree{dm, w, Pf.dc.Out.sts(Md.decode(dm, w, sts, pos, t))})
+    case EDense{+k, +dv, s}:
+      IO.bind(Array<F32>, En, Dd.dd.feed(k, pos, t, s), (x: Array<F32>) => dc.en.dense.of(k, dv, x))
 
 # a fold of feeds: every token without logits
-def dc.en.feeds.each(xs: List<&2, U32>, e: En, +pos: Nat) -> En:
+def dc.en.feeds.each(xs: List<&2, U32>, e: En, +pos: Nat) -> IO(En):
   match xs:
     case Nil{}:
-      e
+      IO.pure(En, e)
     case t <> rest:
-      dc.en.feeds.each(rest, dc.en.feed(e, pos, t), 1n+pos)
+      IO.bind(En, En, dc.en.feed(e, pos, t), (x: En) => dc.en.feeds.each(rest, x, 1n+pos))
 
 # every token without logits: the tree engine one at a time (the fold);
 # the dense engine a chunk at a time (Dense/Decode.bend dd.feeds, the same
 # store as the fold, bit for bit: tests/prefill-dense.bend)
-def dc.en.feeds(+xs: List<&2, U32>, e: En, +pos: Nat) -> En:
+def dc.en.feeds(+xs: List<&2, U32>, e: En, +pos: Nat) -> IO(En):
   match e:
     case ETree{+dm, +w, sts}:
       dc.en.feeds.each(xs, ETree{dm, w, sts}, pos)
-    case EDense{+k, dv, s}:
-      EDense{k, dv, Dd.dd.feeds(k, xs, pos, s)}
+    case EDense{+k, +dv, s}:
+      IO.bind(Array<F32>, En, Dd.dd.feeds(k, xs, pos, s), (x: Array<F32>) => dc.en.dense.of(k, dv, x))
 
 # the dense engine's prefill: the tokens (if any) a chunk at a time, then
 # the head once, on the last token's row
-def dc.en.prefill.dense(xs: List<&2, U32>, +k: Dd.Dd, +dv: Nat, +pos: Nat, s: Array<F32>) -> En & T.V:
+def dc.en.prefill.dense(xs: List<&2, U32>, +k: Dd.Dd, +dv: Nat, +pos: Nat, s: Array<F32>) -> IO(En & T.V):
   match xs:
     case Nil{}:
-      (EDense{k, dv, s}, T.VZ{})
+      IO.pure(En & T.V, (EDense{k, dv, s}, T.VZ{}))
     case t <> rest:
-      dc.en.dense(k, dv, Dd.dd.logits(k, Dd.dd.feeds(k, t <> rest, pos, s)))
+      IO.bind(Array<F32>, En & T.V, Dd.dd.feeds(k, t <> rest, pos, s), (x: Array<F32>) => dc.en.dense.io(k, dv, x))
 
 # tokens in from pos, the logits after the last (none: T.VZ). The tree
 # engine prefills with dc.prefill, the meaning's (Spec/Refinement.bend's
 # prefill_chunks law is about it); the dense engine reads them a chunk at a
 # time (dd.feeds) and runs the head only for the last.
-def dc.en.prefill(+xs: List<&2, U32>, e: En, +pos: Nat) -> En & T.V:
+def dc.en.prefill(+xs: List<&2, U32>, e: En, +pos: Nat) -> IO(En & T.V):
   match e:
     case ETree{+dm, +w, sts}:
-      dc.en.tree(dm, w, dc.prefill(xs, dm, w, {Md.Out{T.VZ{}, sts} : Md.Out}, pos))
+      IO.pure(En & T.V, dc.en.tree(dm, w, Pf.dc.prefill(xs, dm, w, {Md.Out{T.VZ{}, sts} : Md.Out}, pos)))
     case EDense{+k, +dv, s}:
       dc.en.prefill.dense(xs, k, dv, pos, s)
 
@@ -404,61 +400,67 @@ def dc.px.of(+dm: Md.Dims, +st: Settings, +vocab: Nat, +stats: Bool, rng: S.Rng,
   +pk = dc.pick(dm, st, vocab, lg, rng)
   Px{e, pk, dc.px.p(stats, Md.Dims.dv(dm), lg, dc.Pick.token(pk))}
 
+# the meaning's way after an IO step: its logits, then the pick
+def dc.px.io(+dm: Md.Dims, +st: Settings, +vocab: Nat, +stats: Bool, rng: S.Rng, m: IO(En & T.V)) -> IO(Px):
+  IO.bind(En & T.V, Px, m, (r: En & T.V) => IO.pure(Px, dc.px.of(dm, st, vocab, stats, rng, r)))
+
 # greedy's token from the store (Dd.dd.top) is Sample.bend's greedy pick
 # (argmax; the rng untouched); none (a NaN max) takes the meaning's way
-def dc.px.top(ok: Bool, +k: Dd.Dd, +dv: Nat, +dm: Md.Dims, +st: Settings, +vocab: Nat, rng: S.Rng, +t: U32, s: Array<F32>) -> Px:
+def dc.px.top(ok: Bool, +k: Dd.Dd, +dv: Nat, +dm: Md.Dims, +st: Settings, +vocab: Nat, rng: S.Rng, +t: U32, s: Array<F32>) -> IO(Px):
   match ok:
     case True{}:
-      Px{EDense{k, dv, s}, S.Pick{t, rng}, 0.0}
+      IO.pure(Px, Px{EDense{k, dv, s}, S.Pick{t, rng}, 0.0})
     case False{}:
-      dc.px.of(dm, st, vocab, False{}, rng, dc.en.dense(k, dv, Dd.dd.logits(k, s)))
+      dc.px.io(dm, st, vocab, False{}, rng, dc.en.dense.io(k, dv, s))
 
-def dc.px.dense(+k: Dd.Dd, +dv: Nat, +dm: Md.Dims, +st: Settings, +vocab: Nat, rng: S.Rng, r: Array<F32> & U32) -> Px:
+def dc.px.dense(+k: Dd.Dd, +dv: Nat, +dm: Md.Dims, +st: Settings, +vocab: Nat, rng: S.Rng, r: Array<F32> & U32) -> IO(Px):
   (s, +t) = r
   dc.px.top(U32.is_lt(t, Dd.dd.vocab(k)), k, dv, dm, st, vocab, rng, t, s)
 
-def dc.en.dense.pick(fast: Bool, +k: Dd.Dd, +dv: Nat, +dm: Md.Dims, +st: Settings, +vocab: Nat, +stats: Bool, rng: S.Rng, s: Array<F32>) -> Px:
+def dc.en.dense.pick(fast: Bool, +k: Dd.Dd, +dv: Nat, +dm: Md.Dims, +st: Settings, +vocab: Nat, +stats: Bool, rng: S.Rng, s: Array<F32>) -> IO(Px):
   match fast:
     case True{}:
-      dc.px.dense(k, dv, dm, st, vocab, rng, Dd.dd.top(k, s))
+      IO.bind(Array<F32> & U32, Px, Dd.dd.top(k, s), (r: Array<F32> & U32) => dc.px.dense(k, dv, dm, st, vocab, rng, r))
     case False{}:
-      dc.px.of(dm, st, vocab, stats, rng, dc.en.dense(k, dv, Dd.dd.logits(k, s)))
+      dc.px.io(dm, st, vocab, stats, rng, dc.en.dense.io(k, dv, s))
 
 # a token in, the pick after it: greedy on the dense engine without stats
 # picks on the store (the v logits never leave it); everything else is the
 # meaning's way (dc.en.step, then the pick from its logits)
-def dc.en.step.pick(e: En, +pos: Nat, +t: U32, +dm: Md.Dims, +st: Settings, +vocab: Nat, +stats: Bool, rng: S.Rng) -> Px:
+def dc.en.step.pick(e: En, +pos: Nat, +t: U32, +dm: Md.Dims, +st: Settings, +vocab: Nat, +stats: Bool, rng: S.Rng) -> IO(Px):
   match e:
     case ETree{+tdm, +w, sts}:
-      dc.px.of(dm, st, vocab, stats, rng, dc.en.step(ETree{tdm, w, sts}, pos, t))
+      dc.px.io(dm, st, vocab, stats, rng, dc.en.step(ETree{tdm, w, sts}, pos, t))
     case EDense{+k, +dv, s}:
-      dc.en.dense.pick(Bool.and(dc.greedy(st), Bool.not(stats)), k, dv, dm, st, vocab, stats, rng, Dd.dd.feed(k, pos, t, s))
+      IO.bind(Array<F32>, Px, Dd.dd.feed(k, pos, t, s),
+        (x: Array<F32>) => dc.en.dense.pick(Bool.and(dc.greedy(st), Bool.not(stats)), k, dv, dm, st, vocab, stats, rng, x))
 
 # the dense engine's prefill answered with a pick: the tokens (if any) a
 # chunk at a time (dd.feeds), then the pick after the last as
 # dc.en.step.pick takes it (on the store when greedy without stats)
-def dc.en.prefill.dense.pick(xs: List<&2, U32>, +k: Dd.Dd, +dv: Nat, +pos: Nat, +dm: Md.Dims, +st: Settings, +vocab: Nat, +stats: Bool, rng: S.Rng, s: Array<F32>) -> Px:
+def dc.en.prefill.dense.pick(xs: List<&2, U32>, +k: Dd.Dd, +dv: Nat, +pos: Nat, +dm: Md.Dims, +st: Settings, +vocab: Nat, +stats: Bool, rng: S.Rng, s: Array<F32>) -> IO(Px):
   match xs:
     case Nil{}:
-      dc.px.of(dm, st, vocab, stats, rng, (EDense{k, dv, s}, T.VZ{}))
+      IO.pure(Px, dc.px.of(dm, st, vocab, stats, rng, (EDense{k, dv, s}, T.VZ{})))
     case t <> rest:
-      dc.en.dense.pick(Bool.and(dc.greedy(st), Bool.not(stats)), k, dv, dm, st, vocab, stats, rng, Dd.dd.feeds(k, t <> rest, pos, s))
+      IO.bind(Array<F32>, Px, Dd.dd.feeds(k, t <> rest, pos, s),
+        (x: Array<F32>) => dc.en.dense.pick(Bool.and(dc.greedy(st), Bool.not(stats)), k, dv, dm, st, vocab, stats, rng, x))
 
 # dc.en.prefill answered with a pick
-def dc.en.prefill.pick(+xs: List<&2, U32>, e: En, +pos: Nat, +dm: Md.Dims, +st: Settings, +vocab: Nat, +stats: Bool, rng: S.Rng) -> Px:
+def dc.en.prefill.pick(+xs: List<&2, U32>, e: En, +pos: Nat, +dm: Md.Dims, +st: Settings, +vocab: Nat, +stats: Bool, rng: S.Rng) -> IO(Px):
   match e:
     case ETree{+tdm, +w, sts}:
-      dc.px.of(dm, st, vocab, stats, rng, dc.en.prefill(xs, ETree{tdm, w, sts}, pos))
+      dc.px.io(dm, st, vocab, stats, rng, dc.en.prefill(xs, ETree{tdm, w, sts}, pos))
     case EDense{+k, +dv, s}:
       dc.en.prefill.dense.pick(xs, k, dv, pos, dm, st, vocab, stats, rng, s)
 
 # every layer's state back to empty (a fresh episode on loaded weights)
-def dc.en.reset(e: En) -> En:
+def dc.en.reset(e: En) -> IO(En):
   match e:
     case ETree{+dm, w, +sts}:
-      ETree{dm, w, Md.states.zero(List.length(&2, Md.LState, sts), dm, 0n)}
-    case EDense{+k, dv, s}:
-      EDense{k, dv, Dd.dd.reset(k, s)}
+      IO.pure(En, ETree{dm, w, Md.states.zero(List.length(&2, Md.LState, sts), dm, 0n)})
+    case EDense{+k, +dv, s}:
+      IO.bind(Array<F32>, En, Dd.dd.reset(k, s), (x: Array<F32>) => dc.en.dense.of(k, dv, x))
 
 def dc.en.name(e: En) -> En & String:
   match e:

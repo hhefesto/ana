@@ -3,7 +3,7 @@ import ./Tokenizer.bend as Tk
 import ./Nul.bend as Ns
 
 # Sys: what the corpus tools need from the operating system, over the one
-# primitive that reaches it, Process.run (the fork's base.bend).
+# primitive that reaches it, Process.run (Base's).
 #
 # Meaning.  `run(dir, env, secs, prog, args, input)` is what the shell line
 #

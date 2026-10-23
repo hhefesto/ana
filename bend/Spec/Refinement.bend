@@ -3,7 +3,7 @@ import ../Tensor.bend as T
 import ../Model.bend as Md
 import ./Order.bend as O
 import ./Nat.bend as NL
-import ../Decode.bend as G
+import ../Prefill.bend as G
 
 # The executable model refines the specification.
 #

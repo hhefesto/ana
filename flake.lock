@@ -7,17 +7,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1792709014,
-        "narHash": "sha256-aTTjllHArRBQ+FvC6kTCwvIbzfkeO0N//6eYhTsSxwY=",
-        "owner": "hhefesto",
-        "repo": "bend2",
-        "rev": "2f3ad5f85160fc5cefde91f7bc6adfee4fa9d6fe",
+        "lastModified": 1792703680,
+        "narHash": "sha256-gvCxPq10zVDOX1FAwzXM8g9Ny7dJqYeszrE190qOq44=",
+        "owner": "bendlang",
+        "repo": "bend",
+        "rev": "b8664b0a7ff36858b353fdbee77e41a3dd3548db",
         "type": "github"
       },
       "original": {
-        "owner": "hhefesto",
-        "ref": "ft-kernels",
-        "repo": "bend2",
+        "owner": "bendlang",
+        "repo": "bend",
         "type": "github"
       }
     },

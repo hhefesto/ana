@@ -1,6 +1,8 @@
 import Base
+import ../BulkIo.bend as BI
 
-# Array.gemm timing (gate G0): REPS calls of one shape, the arrays filled
+# gemm timing (gate G0; BulkIo.bk.gemm since 2026-10-22, the fork's Array.gemm
+# before): REPS calls of one shape, the arrays filled
 # on the host once (0.125 everywhere, so every C entry is exactly k/64),
 # timed by the runtime (BEND_PROFILE=2 prints each call; the first carries
 # the arrays' migration to the GPU). g0.sh (unwired 2026-10-14, G0 done) ran it next to a direct cuBLAS
@@ -49,24 +51,25 @@ def G.ld.if(z: Bool, r: U32, c: U32) -> U32:
 def G.ld(t: U32, r: U32, c: U32) -> U32:
   G.ld.if(U32.is_eq(t, 0), r, c)
 
-def G.call(+g: G, a: Array<F32>, b: Array<F32>, c: Array<F32>) -> Array<F32> & Array<F32> & Array<F32>:
+def G.call(+g: G, a: Array<F32>, b: Array<F32>, c: Array<F32>) -> IO(Array<F32> & Array<F32> & Array<F32>):
   match g:
     case G{+ta, +tb, +m, +n, +k, +nb}:
-      Array.gemm(ta, tb, m, n, k, nb, 1.0,
+      BI.bk.gemm(ta, tb, m, n, k, nb, 1.0,
         a, 0, G.ld(ta, m, k), U32.mul(m, k),
         b, 0, G.ld(tb, k, n), U32.mul(k, n),
         0.0, c, 0, n, U32.mul(m, n))
 
-def reps.one(+g: G, t: Array<F32> & Array<F32> & Array<F32>) -> Array<F32> & Array<F32> & Array<F32>:
+def reps.one(+g: G, t: Array<F32> & Array<F32> & Array<F32>) -> IO(Array<F32> & Array<F32> & Array<F32>):
   (c, a, b) = t
   G.call(g, a, b, c)
 
-def reps(n: Nat, +g: G, t: Array<F32> & Array<F32> & Array<F32>) -> Array<F32> & Array<F32> & Array<F32>:
+def reps(n: Nat, +g: G, t: Array<F32> & Array<F32> & Array<F32>) -> IO(Array<F32> & Array<F32> & Array<F32>):
   match n:
     case 0n:
-      t
+      IO.pure(Array<F32> & Array<F32> & Array<F32>, t)
     case 1n+p:
-      reps(p, g, reps.one(g, t))
+      IO.bind(Array<F32> & Array<F32> & Array<F32>, Array<F32> & Array<F32> & Array<F32>, reps.one(g, t),
+        (x: Array<F32> & Array<F32> & Array<F32>) => reps(p, g, x))
 
 def show.fin(r: Array<F32> & F32) -> F32:
   (c, x) = r
@@ -76,12 +79,13 @@ def show(+last: U32, t: Array<F32> & Array<F32> & Array<F32>) -> String:
   (c, a, b) = t
   "C[last] = " ++ F32.show(show.fin(Array.get(F32, c, last)))
 
-def run(+g: G, +r: U32) -> String:
+def run(+g: G, +r: U32) -> IO(String):
   match g:
     case G{ta, tb, +m, +n, +k, +nb}:
-      show(U32.sub(U32.mul(nb, U32.mul(m, n)), 1),
+      IO.bind(Array<F32> & Array<F32> & Array<F32>, String,
         reps(U32.to_nat(r), g, (mk(U32.mul(nb, U32.mul(m, n))),
-          mk(U32.mul(nb, U32.mul(m, k))), mk(U32.mul(nb, U32.mul(k, n))))))
+          mk(U32.mul(nb, U32.mul(m, k))), mk(U32.mul(nb, U32.mul(k, n))))),
+        (x: Array<F32> & Array<F32> & Array<F32>) => IO.pure(String, show(U32.sub(U32.mul(nb, U32.mul(m, n)), 1), x)))
 
 def main() -> IO(Unit):
   do IO<Unit>:
@@ -92,4 +96,5 @@ def main() -> IO(Unit):
     ta : U32 <- env("TA", 0)
     tb : U32 <- env("TB", 0)
     r : U32 <- env("REPS", 20)
-    IO.print(run(G{ta, tb, m, n, k, nb}, r))
+    out : String <- run(G{ta, tb, m, n, k, nb}, r)
+    IO.print(out)

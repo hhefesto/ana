@@ -8,6 +8,7 @@ import ./Checkpoint.bend as K
 import ./Model.bend as Md
 import ./Tokenizer.bend as Tk
 import ./Decode.bend as Gen
+import ./Prefill.bend as Pf
 import ./Train/Grad.bend as G
 import ./Train/Data.bend as D
 import ./Corpus.bend as Cc
@@ -33,7 +34,7 @@ def window.go(xs: List<&2, U32>, ys: List<&2, U32>, +dm: Md.Dims, +w: Md.Weights
   match xs ys:
     case +x <> xt +y <> yt:
       +o = Md.decode(dm, w, sts, pos, x)
-      window.go(xt, yt, dm, w, Gen.dc.Out.sts(o), 1n+pos,
+      window.go(xt, yt, dm, w, Pf.dc.Out.sts(o), 1n+pos,
         F32.add(acc, F32.sub(G.lse(Gen.dc.Out.logits(o)), T.V.at(Md.Dims.dv(dm), Gen.dc.Out.logits(o), y))))
     case _ _:
       acc

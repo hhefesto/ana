@@ -1,11 +1,13 @@
 import Base
+import ../Bulk.bend as B
 import ./Ex.bend as X
 
 # The dense model's instructions and their meaning. A program is a list of
 # ops over one store (an Array<F32> holding parameters, activations,
-# gradients and optimizer state); each op's meaning is its base.bend
-# primitive's: Array.mm (a matrix product) or Array.einsum (an expression
-# summed over loop indices), each a function from the store to the store.
+# gradients and optimizer state); each op's meaning is its Bulk.bend
+# definition's: mm (a matrix product) or einsum (an expression summed over
+# loop indices), each a function from the store to the store. Run.bend runs
+# a program fast, each op as its BulkIo.bend effect.
 #
 # Reverse mode is a transformation of programs (Elliott, "The simple
 # essence of automatic differentiation"): every value at store index i has
@@ -20,16 +22,16 @@ type Op is Data:
   Mm{ta: U32, tb: U32, m: U32, n: U32, k: U32, nb: U32, alpha: F32,
      ao: U32, lda: U32, sa: U32, bo: U32, ldb: U32, sb: U32, beta: F32,
      co: U32, ldc: U32, sc: U32}
-  Ein{es: Es, spec: String, grad: Bool}
+  Ein{es: B.Es, spec: String, grad: Bool}
 
 # an einsum op, its encoding made once (every step reuses the string)
-def ein(+es: Es, g: Bool) -> Op:
-  Ein{es, Es.encode(es), g}
+def ein(+es: B.Es, g: Bool) -> Op:
+  Ein{es, B.Es.encode(es), g}
 
-def view(off: U32, st: List<&2, U32>) -> View:
-  View{off, st, IxNo{}}
+def view(off: U32, st: List<&2, U32>) -> B.View:
+  B.View{off, st, B.IxNo{}}
 
-def map1.ins(xs: List<&2, U32>) -> List<&2, View>:
+def map1.ins(xs: List<&2, U32>) -> List<&2, B.View>:
   match xs:
     case Nil{}:
       Nil{}
@@ -37,8 +39,8 @@ def map1.ins(xs: List<&2, U32>) -> List<&2, View>:
       view(o, [1]) <> map1.ins(t)
 
 # y[i] = e over n cells from `off` (a map, no reduction)
-def map1(+n: U32, +out: U32, ins: List<&2, U32>, e: Ex, g: Bool) -> Op:
-  ein(Es{[n], 0, 0, 0, view(out, [1]), map1.ins(ins), e}, g)
+def map1(+n: U32, +out: U32, ins: List<&2, U32>, e: B.Ex, g: Bool) -> Op:
+  ein(B.Es{[n], 0, 0, 0, view(out, [1]), map1.ins(ins), e}, g)
 
 def zero(+n: U32, +off: U32) -> Op:
   map1(n, off, Nil{}, X.k(0.0), False{})
@@ -57,9 +59,9 @@ def linear(+rows: U32, +cols: U32, +outs: U32, +x: U32, +ldx: U32, +w: U32,
 def Op.run(op: Op, s: Array<F32>) -> Array<F32>:
   match op:
     case Mm{ta, tb, m, n, k, nb, al, ao, lda, sa, bo, ldb, sb, be, co, ldc, sc}:
-      Array.mm(ta, tb, m, n, k, nb, al, ao, lda, sa, bo, ldb, sb, be, co, ldc, sc, s)
+      B.mm(ta, tb, m, n, k, nb, al, ao, lda, sa, bo, ldb, sb, be, co, ldc, sc, s)
     case Ein{es, spec, g}:
-      Array.einsum.prim(es, spec, s)
+      B.einsum.prim(es, spec, s)
 
 def run(ops: List<&2, Op>, s: Array<F32>) -> Array<F32>:
   match ops:
@@ -105,37 +107,37 @@ def free.bits(st: List<&2, U32>, xs: List<&2, U32>, +bit: U32) -> U32:
 def pad6(xs: List<&2, U32>) -> List<&2, U32>:
   List.take(&2, U32, List.append(&2, U32, xs, [0, 0, 0, 0, 0, 0]), 6n)
 
-def Ix.st(+ix: Ix) -> List<&2, U32>:
+def Ix.st(+ix: B.Ix) -> List<&2, U32>:
   match ix:
-    case IxNo{}:
+    case B.IxNo{}:
       Nil{}
-    case IxAt{o, st, m}:
+    case B.IxAt{o, st, m}:
       st
 
-def View.free(+v: View) -> U32:
+def View.free(+v: B.View) -> U32:
   match v:
-    case View{o, st, ix}:
+    case B.View{o, st, ix}:
       free.bits(pad6(st), pad6(Ix.st(ix)), 1)
 
-def View.shift(+tg: U32, v: View) -> View:
+def View.shift(+tg: U32, v: B.View) -> B.View:
   match v:
-    case View{o, st, ix}:
-      View{U32.add(o, tg), st, ix}
+    case B.View{o, st, ix}:
+      B.View{U32.add(o, tg), st, ix}
 
 # input j's transpose: its tangent += (output tangent) * d ex / d x_j,
 # summed over the indices input j does not vary with
-def Ein.back.one(+tg: U32, +ns: List<&2, U32>, +out: View, +ins: List<&2, View>,
-  +nin: U32, +ex: Ex, +j: U32, +v: View, dz: Bool) -> List<&2, Op>:
+def Ein.back.one(+tg: U32, +ns: List<&2, U32>, +out: B.View, +ins: List<&2, B.View>,
+  +nin: U32, +ex: B.Ex, +j: U32, +v: B.View, dz: Bool) -> List<&2, Op>:
   match dz:
     case True{}:
       Nil{}
     case False{}:
-      [ein(Es{ns, View.free(v), 0, 1, View.shift(tg, v),
-        List.append(&2, View, ins, [View.shift(tg, out)]),
+      [ein(B.Es{ns, View.free(v), 0, 1, View.shift(tg, v),
+        List.append(&2, B.View, ins, [View.shift(tg, out)]),
         X.mul(X.x(nin), X.d(ex, j))}, True{})]
 
-def Ein.back.go(vs: List<&2, View>, +tg: U32, +ns: List<&2, U32>, +out: View,
-  +ins: List<&2, View>, +nin: U32, +ex: Ex, +j: U32) -> List<&2, Op>:
+def Ein.back.go(vs: List<&2, B.View>, +tg: U32, +ns: List<&2, U32>, +out: B.View,
+  +ins: List<&2, B.View>, +nin: U32, +ex: B.Ex, +j: U32) -> List<&2, Op>:
   match vs:
     case Nil{}:
       Nil{}
@@ -143,10 +145,10 @@ def Ein.back.go(vs: List<&2, View>, +tg: U32, +ns: List<&2, U32>, +out: View,
       List.append(&2, Op, Ein.back.one(tg, ns, out, ins, nin, ex, j, v, X.is0(X.d(ex, j))),
         Ein.back.go(t, tg, ns, out, ins, nin, ex, U32.inc(j)))
 
-def Ein.back(+tg: U32, es: Es, g: Bool) -> List<&2, Op>:
+def Ein.back(+tg: U32, es: B.Es, g: Bool) -> List<&2, Op>:
   match es g:
-    case Es{ns, red, op, acc, out, +ins, ex} True{}:
-      Ein.back.go(ins, tg, ns, out, ins, U32.from_nat(List.length(&2, View, ins)), ex, 0)
+    case B.Es{ns, red, op, acc, out, +ins, ex} True{}:
+      Ein.back.go(ins, tg, ns, out, ins, U32.from_nat(List.length(&2, B.View, ins)), ex, 0)
     case _ False{}:
       Nil{}
 
