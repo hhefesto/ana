@@ -130,6 +130,14 @@ bend-ops guard tools/runs/run4.cfg              # starts chain, watch and handov
   - resume rewrites the stage's STAGES line and keeps the old one as STAGES.OLD_INSTANCE.
 - `bend-ops sim drive all run/sim-drive` runs 7 scenarios against run 3's boot-guard.sh, s2-driver.sh and move.sh. Not yet shown: act-ensure, act-pull, `move restage` and `move act`, which need real nix on a box, and `guard install` against real systemd.
 
+## agda2bend's Bend for run 5's raw pool (2026-10-22, 21:10 UTC-6; in progress)
+
+- **The user (10-22, evening):** "work on agda2bend. we should extend the ana corpus with as much bend as advisable. Start with category theory themed code and continue with any code you think would do good for training ana."
+- **What it is:** checked Bend 2 translated from Agda by agda2bend's corpus mode (~/src/agda2bend, HANDOFF.md there): agda-categories and its standard-library cone first, then the rest of the standard library, agdarsec, functional-linear-algebra, generics, agda2hs-base and agda-prelude. Every definition in it passed upstream Bend's checker. Each module's copy keeps only items whose lines are at most 2,000 characters (C6's limit) and that don't use a wider item of the module.
+- **Where:** run/v5/a2b/bend.jsonl (`{"id", "text"}` a module), written by agda2bend's unit a2b-finish when its five corpus runs end; it then runs `bend-corpus-v2 raw run/v5/a2b/raw run/v5/a2b/bend.jsonl` and prints the summary into ~/src/agda2bend/run/a2b/finish.log.
+- **The holdout follows the Agda sources:** an id mirrors its Agda file (`a2b:agda-stdlib/src/Data/Bool/Base.bend`), so `v2.held.id` holds out the translation of a held-out Agda unit. On a 12-module test, raw kept 11 and held out Data.Bool.Base.
+- **Its share (advice, not yet decided):** the style is machine-made (every implicit argument spelled out, names like `const_r`, `x_9`) and narrow (algebra, order theory, category theory), and it is rich in proofs that the rest of the Bend corpus lacks. Give it a capped share of Bend's raw tokens, about 15-25%, rather than its natural share.
+
 ## agda2bend is its own repository (2026-10-22, 18:40 UTC-6)
 
 - **~/src/agda2bend, github:hhefesto/agda2bend** (public). It holds bend/Agda2Bend.bend, bend/Agda2Bend/, bend/ToBend/, bend/tests/agda2bend.bend and its fixtures, tools/a2b, tools/agda-export and tools/agda2bend/spike, with their history (32 commits). It also has its own copies of Sys, Nul, Tokenizer, Sha256, Num and Clock (bend/effs/wall.*). ana gets `agda2bend` and `agda-export` from the flake input `agda2bend`, which follows ana's nixpkgs and bend2.
