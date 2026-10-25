@@ -145,6 +145,7 @@ bend-ops guard tools/runs/run4.cfg              # starts chain, watch and handov
 - **~/src/agda2bend, github:hhefesto/agda2bend** (public). It holds bend/Agda2Bend.bend, bend/Agda2Bend/, bend/ToBend/, bend/tests/agda2bend.bend and its fixtures, tools/a2b, tools/agda-export and tools/agda2bend/spike, with their history (32 commits). It also has its own copies of Sys, Nul, Tokenizer, Sha256, Num and Clock (bend/effs/wall.*). ana gets `agda2bend` and `agda-export` from the flake input `agda2bend`, which follows ana's nixpkgs and bend2.
 - Its handoff is ~/src/agda2bend/HANDOFF.md. That's where the record-eta, Qfix and yoneda notes from this file went, along with the agda2bend sections of 2026-10-19 and 10-20. Its dev runs moved from run/a2b to ~/src/agda2bend/run/a2b.
 - bend-tests no longer runs agda2bend.bend. agda2bend's own `nix flake check` runs it.
+- **ana stays on nixpkgs** (the user, 10-25: "if ekapkgs requires our own cache, then no"). The local branch `ekapkgs` (0a83538, with agda2bend's local `ekapkgs` 9eede20) builds every package and passes the flake check, but ekala's cache has lost even gcc and glibc, so each machine (the GPU boxes too) would build the toolchain and ~600 Haskell derivations from source.
 
 ## Previous (2026-10-22, 07:30 UTC-6): the workspace is ~/src/ana; the sandboxes pass
 
