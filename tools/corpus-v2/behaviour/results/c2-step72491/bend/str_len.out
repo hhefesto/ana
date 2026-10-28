@@ -1,0 +1,52 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+The number of characters in a string.
+
+## Type
+
+type
+```bend
+def str_len(s: String) -> Nat:
+```
+
+## Term
+
+```bend
+match s:
+  case SNil{}:
+    0n
+  case SCon{c, t}:
+    1n+str_len(t)
+```
+
+## bend
+: the literal SNil{} is a literal string
+```
+
+## bend
+: the literal SNil{} is a literal string
+```
+
+## bend
+: the literal SNil{} is a literal string
+```
+
+## bend
+: the literal SNil{} is a literal string
+```
+
+## bend
+: the literal SNil{} is a literal string
+```
+
+## bend
+: the literal SNil{} is a literal string
+```
+
+## bend
+: the literal SNil{} is a literal string
+```
+
+## bend
+: the literal SNil

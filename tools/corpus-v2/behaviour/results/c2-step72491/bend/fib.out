@@ -1,0 +1,67 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+The n-th Fibonacci number, with fib(0) = 0 and fib(1) = 1.
+
+## Type
+
+type
+```bend
+def fib(n: Nat) -> Nat:
+```
+
+## Term
+
+```bend
+match n:
+  case 0n:
+    0n
+  case 1n+p:
+    1n+fib(p)
+```
+
+## bend
+: compute_fib(2)
+```
+
+## bend
+: compute_fib(2)
+```
+
+## bend
+: compute_fib(2)
+```
+
+## bend
+: compute_fib(2)
+```
+
+## bend
+: compute_fib(2)
+```
+
+## bend
+
+## bend
+
+# The fib(0) case
+```
+
+## bend
+
+## bend
+
+# The fib(0) case
+```
+
+## bend
+
+# The fib(0) case
+```
+
+## bend
+
+# The fib(0) case
+```
+
+##

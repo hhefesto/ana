@@ -1,0 +1,57 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+The values of a binary tree, left subtree first, then the node, then the right subtree.
+
+## Context
+
+```bend
+type Tree is Data:
+  Leaf{}
+  Node{left: Tree, value: Nat, right: Tree}
+```
+
+## Type
+
+type
+```bend
+def inorder(t: Tree) -> List<&2, Nat>:
+```
+
+## Term
+
+```bend
+match t:
+  case Leaf{}:
+    Nil{}
+  case Node{left, value, right}:
+    Con{value, inorder(left)}
+```
+
+## bend
+: by simp [inorder]
+a +b +v inorder(t)
+```
+
+## bend
+: by simp [inorder]
+a +b +v inorder(t)
+```
+
+## bend
+: by simp [inorder]
+a +b +v inorder(t)
+```
+
+## bend
+: by simp [inorder]
+a +b +v inorder(t)
+```
+
+## bend
+: by simp [inorder]
+a +b +v inorder(t)
+```
+
+## bend
+: by

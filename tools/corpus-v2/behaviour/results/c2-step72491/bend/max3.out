@@ -1,0 +1,75 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+The largest of three natural numbers.
+
+## Type
+
+type
+```bend
+def max3(+a: Nat, +b: Nat, +c: Nat) -> Nat:
+```
+
+## Term
+
+```bend
+match a b c:
+  case 0n _ _:
+    b
+  case 1n+p 0n _:
+    1n+p
+  case 1n+p 1n+q:
+    max3(p, q, 1n+p)
+```
+
+## bend
+:
+1. a
+2. b
+3. c
+4. d
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+

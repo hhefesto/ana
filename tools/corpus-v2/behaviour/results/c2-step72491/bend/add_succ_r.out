@@ -1,0 +1,32 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+Prove `add_succ_r`.
+
+## Type
+
+proposition
+```bend
+law add_succ_r:
+  for n: Nat
+  for m: Nat
+  {Nat.add(n, 1n+m) == 1n+Nat.add(n, m) : Nat}
+```
+
+## Term
+
+```bend
+def add_succ_r(n, m):
+  match n:
+    case 0n:
+      {==}
+    case 1n+p:
+      %add_succ_r(p, m) : {1n+Nat.add(p, 1n+m) == 1n+_ : Nat}
+      {==}
+```
+
+## bend
+-- The `+` operator is stuck on a variable here, and the `+` operator is stuck on a variable
+-- here, and the `+` operator is stuck on a variable here, and the `+` operator is stuck on a
+-- variable here, and the `+` operator is stuck on a variable here, and the `+` operator is stuck on
+-- a variable here, and the `+` operator is stuck on a variable here, and the `

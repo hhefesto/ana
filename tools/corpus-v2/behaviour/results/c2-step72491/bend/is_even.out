@@ -1,0 +1,71 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+Whether a natural number is even.
+
+## Type
+
+type
+```bend
+def is_even(n: Nat) -> Bool:
+```
+
+## Term
+
+```bend
+match n:
+  case 0n:
+    True{}
+  case 1n+p:
+    False{}
+```
+
+## bend
+:
+{
+  Nat.is_even(p)
+}
+```
+
+## bend
+:
+{
+  Nat.is_even(p)
+}
+```
+
+## bend
+:
+{
+  Nat.is_even(p)
+}
+```
+
+## bend
+:
+{
+  Nat.is_even(p)
+}
+```
+
+## bend
+
+## bend
+
+# The nat's own Nat
+
+## bend
+
+# The nat's own Nat
+
+## bend
+
+# The nat's own Nat
+
+## bend
+
+# The nat's own Nat
+
+## bend
+
+# The nat

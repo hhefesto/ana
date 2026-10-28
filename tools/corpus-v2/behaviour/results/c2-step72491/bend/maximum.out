@@ -1,0 +1,59 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+The largest element of a list of natural numbers, or 0 for the empty list.
+
+## Type
+
+type
+```bend
+def maximum(xs: List<&2, Nat>) -> Nat:
+```
+
+## Term
+
+```bend
+match xs:
+  case Nil{}:
+    0n
+  case Con{h, t}:
+    h
+```
+
+## bend
+: unfold t
+
+## bend
+: unfold t
+
+## bend
+: unfold
+
+## bend
+: unfold
+
+## bend
+
+# The largest element of a list of natural numbers
+def maximum(xs: List<&2, Nat>) -> Nat:
+```
+
+## bend
+: unfold
+
+## bend
+: unfold
+
+## bend
+
+# The largest element of a list of natural numbers
+def maximum(xs: List<&2, Nat>) -> Nat:
+```
+
+## bend
+: unfold
+
+## bend
+
+# The largest element of a list of natural numbers
+def maximum_nil(xs: List

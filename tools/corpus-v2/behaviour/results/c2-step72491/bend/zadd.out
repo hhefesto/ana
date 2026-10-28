@@ -1,0 +1,62 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+The pointwise sum of two lists, as long as the shorter one.
+
+## Type
+
+type
+```bend
+def zadd(xs: List<&2, Nat>, ys: List<&2, Nat>) -> List<&2, Nat>:
+```
+
+## Term
+
+```bend
+match xs:
+  case Nil{}:
+    ys
+  case Con{h, t}:
+    h <> zadd(t, ys)
+```
+
+## bend
+: unfold zadd
+
+  case h <> t:
+    h <> zadd(t, ys)
+```
+
+## bend
+: unfold zadd
+
+  case Nil{}:
+    ys
+```
+
+## bend
+: unfold zadd
+
+  case h <> t:
+    h <> zadd(t, ys)
+```
+
+## bend
+: unfold zadd
+
+  case Nil{}:
+    ys
+```
+
+## bend
+: unfold zadd
+
+  case h <> t:
+    h <> zadd(t, ys)
+```
+
+## bend
+: unfold zadd
+
+  case Nil{}:
+    ys

@@ -1,0 +1,61 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+How many times the letter `a` occurs in a string.
+
+## Type
+
+type
+```bend
+def count_a(s: String) -> Nat:
+```
+
+## Term
+
+```bend
+match s:
+  case SNil{}:
+    0n
+  case SCon{c, t}:
+    1n+count_a(t)
+```
+
+## bend
+: count_a(t)
+```
+
+## bend
+: count_a(t)
+```
+
+## bend
+: count_a(t)
+```
+
+## bend
+: count_a(t)
+```
+
+## bend
+: count_a(t)
+```
+
+## bend
+: count_a(t)
+```
+
+## bend
+
+## bend
+
+# The number of times a letter is counted
+def count_a(s: String) -> Nat:
+```
+
+## Term
+
+```bend
+match s:
+  case SNil{}:
+    0n
+  case SCon{

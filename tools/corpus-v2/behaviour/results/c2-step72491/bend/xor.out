@@ -1,0 +1,62 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+Exclusive or: true when exactly one of a and b is true.
+
+## Type
+
+type
+```bend
+def xor(a: Bool, b: Bool) -> Bool:
+```
+
+## Term
+
+```bend
+match a b:
+  case True{} True{}:
+    True{}
+  case True{} False{}:
+    False{}
+  case False{} True{}:
+    False{}
+  case False{} False{}:
+    True{}
+```
+
+## bend
+
+## bend
+
+ bend
+
+def xor(a: Bool, b: Bool) -> Bool:
+```
+
+## bend
+
+## bend
+
+ | True
+ | False
+ | True
+ | False
+ | False
+```
+
+## Term
+
+```bend
+match a b:
+  case True{} True{}:
+    True{}
+  case True{} False{}:
+    False{}
+  case False{} True{}:
+    False{}
+  case False{} False{}:
+    True{}
+```
+
+## bend
+

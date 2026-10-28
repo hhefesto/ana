@@ -1,0 +1,80 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+The last element of a list, if it has one.
+
+## Type
+
+type
+```bend
+def last(xs: List<&2, Nat>) -> Maybe<&2, Nat>:
+```
+
+## Term
+
+```bend
+match xs:
+  case Nil{}:
+    None{}
+  case Con{h, t}:
+    Some{h}
+```
+
+## bend
+: unfold t
+A{h} is a list of natural numbers and the last element is the head of the list.
+```
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+
+## bend
+
+
+

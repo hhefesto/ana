@@ -1,0 +1,41 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+Prove `len_app`.
+
+## Type
+
+proposition
+```bend
+law len_app:
+  for xs: List<&2, Nat>
+  for ys: List<&2, Nat>
+  {List.length(&2, Nat, List.append(&2, Nat, xs, ys)) == Nat.add(List.length(&2, Nat, xs), List.length(&2, Nat, ys)) : Nat}
+```
+
+## Term
+
+```bend
+def len_app(xs, ys):
+  match xs:
+    case Nil{}:
+      {==}
+    case h <> t:
+      %len_app(t, ys) : {1n+List.length(&2, Nat, List.append(&2, Nat, t, ys)) == 1n+_ : Nat}
+      {==}
+```
+
+## bend
+-- The `len_app` tactic is not in the goal but the goal's own proof
+-- def, so the goal is a plain `len_app` lemma and the goal is not in the goal's own proof
+-- def.
+
+#|x => y => {==}
+```
+
+## bend
+|x => y => {==}
+```
+
+## bend
+|x => y => {

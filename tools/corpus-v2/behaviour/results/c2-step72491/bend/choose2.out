@@ -1,0 +1,44 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+The number of ways to choose 2 things out of n.
+
+## Type
+
+type
+```bend
+def choose2(+n: Nat) -> Nat:
+```
+
+## Term
+
+```bend
+match n:
+  case 0n:
+    0n
+  case 1n+p:
+    2n+choose2(p)
+```
+
+## bend
+: the goal is to use the inductive hypothesis and the recursive call to choose2
+```
+
+## bend
+: the goal is to use the inductive hypothesis and the recursive call to choose2
+```
+
+## bend
+: the goal is to use the inductive hypothesis and the recursive call to choose2
+```
+
+## bend
+: the goal is to use the inductive hypothesis and the recursive call to choose2
+```
+
+## bend
+: the goal is to use the inductive hypothesis and the recursive call to choose2
+```
+
+## bend
+: the goal is to use the inductive hypothesis and the recursive

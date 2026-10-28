@@ -1,0 +1,67 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+The number of values in a binary tree.
+
+## Context
+
+```bend
+type Tree is Data:
+  Leaf{}
+  Node{left: Tree, value: Nat, right: Tree}
+```
+
+## Type
+
+type
+```bend
+def size(t: Tree) -> Nat:
+```
+
+## Term
+
+```bend
+match t:
+  case Leaf{}:
+    1n
+  case Node{left, value, right}:
+    1n+size(left) + size(right)
+```
+
+## bend
+: sizeOf(left, right)
+```
+
+## bend
+: sizeOf(left, right)
+```
+
+## bend
+: sizeOf(left, right)
+```
+
+## bend
+: sizeOf(left, right)
+```
+
+## bend
+: sizeOf(left, right)
+```
+
+## bend
+Source: Tree
+Source: sizeOf
+Licit: Nat
+Pic: Nat
+Mix: Nat
+Root: Tree
+Version: 2
+Os: size: Tree
+Done:
+  tree
+```
+
+## Term
+
+```bend
+match t

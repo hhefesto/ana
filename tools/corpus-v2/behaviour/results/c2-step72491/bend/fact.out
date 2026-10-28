@@ -1,0 +1,61 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+The factorial of a natural number.
+
+## Type
+
+type
+```bend
+def fact(+n: Nat) -> Nat:
+```
+
+## Term
+
+```bend
+match n:
+  case 0n:
+    1n
+  case 1n+p:
+    p
+```
+
+## bend
+:
+a = 1n+p
+b = 1n+p
+
+def fact(+n: Nat) -> Nat:
+```
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+# Nat
+
+# The factorial of a natural number is the product of the factorial of its
+# factors, which is the product of the factorials of its factors, which is
+# the product of the factorials of its factors.

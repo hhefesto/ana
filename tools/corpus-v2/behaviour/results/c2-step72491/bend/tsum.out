@@ -1,0 +1,72 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+The sum of the values in a binary tree.
+
+## Context
+
+```bend
+type Tree is Data:
+  Leaf{}
+  Node{left: Tree, value: Nat, right: Tree}
+```
+
+## Type
+
+type
+```bend
+def tsum(t: Tree) -> Nat:
+```
+
+## Term
+
+```bend
+match t:
+  case Leaf{}:
+    1n
+  case Node{left, value, right}:
+    match value:
+      case 0n:
+        1n
+      case 1n+p:
+        +p2 = p
+        +t2 = tsum(t)
+        Nat.add(p, Nat.add(t2, t2))
+```
+
+## bend
+
+:1:1
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+# =========================================================
+# The tree's sum, as a function of the tree's sum
+#
+#   tree(t)

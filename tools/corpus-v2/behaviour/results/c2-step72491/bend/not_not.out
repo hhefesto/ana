@@ -1,0 +1,70 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+Prove `not_not`.
+
+## Type
+
+proposition
+```bend
+law not_not:
+  for b: Bool
+  {Bool.not(Bool.not(b)) == b : Bool}
+```
+
+## Term
+
+```bend
+def not_not(b):
+  match b:
+    case False{}: {==}
+    case True{}: {==}
+```
+
+## bend
+law not_not
+```
+
+## bend
+law not_not
+```
+
+## bend
+law not_not
+```
+
+## bend
+law not_not
+```
+
+## bend
+law not_not
+```
+
+## bend
+law not_not
+```
+
+## bend
+law not_not
+```
+
+## bend
+law not_not
+```
+
+## bend
+law not_not
+```
+
+## bend
+law not_not
+```
+
+## bend
+law not_not
+```
+
+## bend
+law not_not
+```

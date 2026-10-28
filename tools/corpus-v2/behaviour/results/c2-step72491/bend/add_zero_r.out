@@ -1,0 +1,44 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+Prove `add_zero_r`.
+
+## Type
+
+proposition
+```bend
+law add_zero_r:
+  for n: Nat
+  {Nat.add(n, 0n) == n : Nat}
+```
+
+## Term
+
+```bend
+def add_zero_r(n):
+  match n:
+    case 0n:
+      {==}
+    case 1n+p:
+      %add_zero_r(p) : {1n+Nat.add(p, 0n) == 1n+_ : Nat}
+      {==}
+```
+
+## bend
+-- Nat.add is associative
+
+# Nat.add(n, 0n) is n
+law add_zero_l:
+  for n: Nat
+  {Nat.add(n, 0n) == n : Nat}
+```
+
+## Term
+
+```bend
+def add_zero_l(n):
+  match n:
+    case 0n:
+      {==}
+    case 1n+p:
+      %add_zero_l(p) : {1n+Nat.add(p, 0

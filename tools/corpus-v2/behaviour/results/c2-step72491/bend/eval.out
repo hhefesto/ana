@@ -1,0 +1,51 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+The value of an arithmetic expression.
+
+## Context
+
+```bend
+type Expr is Data:
+  Num{n: Nat}
+  Add{a: Expr, b: Expr}
+  Mul{a: Expr, b: Expr}
+```
+
+## Type
+
+type
+```bend
+def eval(e: Expr) -> Nat:
+```
+
+## Term
+
+```bend
+match e:
+  case Num{n}:
+    n
+  case Add{a, b}:
+    Nat.add(eval(a), eval(b))
+  case Mul{a, b}:
+    Nat.mul(eval(a), eval(b))
+```
+
+## bend
+: the result is a recursive call, so the recursive call is the literal 4
+def eval(e):
+  match e:
+    case Num{n}:
+      n
+    case Add{a, b}:
+      Nat.add(eval(a), eval(b))
+    case Mul{a, b}:
+      Nat.mul(eval(a), eval(b))
+```
+
+## bend
+: the result is a recursive call, so the recursive call is the literal 4
+def eval(e):
+  match e:
+    case Num{n}:
+     

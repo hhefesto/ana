@@ -1,0 +1,83 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+The sum 0 + 1 + ... + n.
+
+## Type
+
+type
+```bend
+def sum_to(+n: Nat) -> Nat:
+```
+
+## Term
+
+```bend
+match n:
+  case 0n:
+    0n
+  case 1n+p:
+    1n+sum_to(p)
+```
+
+## bend
+:
+{
+  Nat = 1n+sum_to(p)
+  Nat.add(1n+sum_to(p), 1n+sum_to(p))
+}
+```
+
+## bend
+:
+{
+  Nat = 1n+sum_to(p)
+  Nat.add(1n+sum_to(p), 1n+sum_to(p))
+}
+```
+
+## bend
+
+## bend
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

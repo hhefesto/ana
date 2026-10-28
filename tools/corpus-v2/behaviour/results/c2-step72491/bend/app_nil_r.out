@@ -1,0 +1,73 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+Prove `app_nil_r`.
+
+## Type
+
+proposition
+```bend
+law app_nil_r:
+  for xs: List<&2, Nat>
+  {List.append(&2, Nat, xs, []) == xs : List<&2, Nat>}
+```
+
+## Term
+
+```bend
+def app_nil_r(xs):
+  match xs:
+    case Nil{}:
+      {==}
+    case h <> t:
+      %app_nil_r(t) : {h <> List.append(&2, Nat, t, []) == h <> _ : List<&2, Nat>}
+      {==}
+```
+
+## bend
+
+{==}, x}
+```
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+
+## bend
+

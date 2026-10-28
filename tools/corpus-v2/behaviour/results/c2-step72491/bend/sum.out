@@ -1,0 +1,60 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+The sum of a list of natural numbers.
+
+## Type
+
+type
+```bend
+def sum(xs: List<&2, Nat>) -> Nat:
+```
+
+## Term
+
+```bend
+match xs:
+  case Nil{}:
+    0n
+  case Con{h, t}:
+    h + sum(t)
+```
+
+## bend
+: unfold sum
+```
+
+## bend
+: unfold sum
+```
+
+## bend
+: unfold sum
+```
+
+## bend
+: unfold sum
+```
+
+## bend
+: unfold sum
+```
+
+## bend
+
+## bend
+
+# The sum of a list of natural numbers
+def sum(xs: List<&2, Nat>) -> Nat:
+```
+
+## bend
+
+# The sum of a list of natural numbers
+def sum(xs: List<&2, Nat>) -> Nat:
+```
+
+## bend
+
+# The sum of a list of natural numbers
+def sum

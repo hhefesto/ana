@@ -1,0 +1,41 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+The element at index n of a list (counting from 0), if there is one.
+
+## Type
+
+type
+```bend
+def nth(xs: List<&2, Nat>, n: Nat) -> Maybe<&2, Nat>:
+```
+
+## Term
+
+```bend
+match xs n:
+  case Nil{} _:
+    None{}
+  case h <> t 0n:
+    Some{h}
+  case h <> t 1n+p:
+    nth(t, p)
+```
+
+## bend
+:u
+A list with fewer than nth elements is not a member of the list.
+A list with fewer than nth elements is not a member of the list.
+A list with fewer than nth elements is not a member of the list.
+
+## Context
+
+```bend
+def Empty.absurd(-A: Type, e: Empty) -> A
+def nth(xs: List<&2, Nat>, n: Nat) -> Maybe<&2, Nat>
+```
+
+## Type
+
+type
+```

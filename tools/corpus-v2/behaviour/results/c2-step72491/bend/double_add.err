@@ -1,0 +1,4 @@
+ana: /home/hhefesto/src/ana/run/v4/run4/out/c2-step72491.checkpoint
+generate: temperature=0 top_k= top_p=0.95 seed=0
+generate: loaded in 1612 ms; prompt_tokens=114
+generate: 114 prompt tokens and 160 tokens in 4021 ms

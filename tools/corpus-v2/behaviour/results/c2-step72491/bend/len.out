@@ -1,0 +1,58 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+The number of elements of a list of natural numbers.
+
+## Type
+
+type
+```bend
+def len(xs: List<&2, Nat>) -> Nat:
+```
+
+## Term
+
+```bend
+match xs:
+  case Nil{}:
+    0n
+  case Con{h, t}:
+    1n+len(t)
+```
+
+## bend
+: unfold &2, Nat
+```
+
+## bend
+: unfold &2, Nat
+```
+
+## bend
+: unfold &2, Nat
+```
+
+## bend
+: the same proof as the number of elements of a list
+```
+
+## bend
+: the number of elements of a list of natural numbers is the number of elements of the list
+```
+
+## bend
+: len(xs)
+```
+
+## bend
+: len(xs)
+```
+
+## bend
+: len(xs)
+```
+
+## bend
+
+# The number of elements of a list of natural numbers
+def

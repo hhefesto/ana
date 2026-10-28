@@ -1,0 +1,62 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+Whether a list of natural numbers is in non-decreasing order.
+
+## Type
+
+type
+```bend
+def sorted(xs: List<&2, Nat>) -> Bool:
+```
+
+## Term
+
+```bend
+match xs:
+  case Nil{}:
+    True{}
+  case Con{h, t}:
+    False{}
+```
+
+## bend
+
+:(
+  +m = {1n+n : Nat}
+  sorted(t)
+)
+```
+
+## bend
+
+law sorted_nil:
+  for xs: List<&2, Nat>
+  sorted(xs)
+```
+
+## Term
+
+```bend
+def sorted_nil(xs):
+  match xs:
+    case Nil{}:
+      True{}
+    case Con{h, t}:
+      False{}
+```
+
+## bend
+
+law sorted_nil:
+  for xs: List<&2, Nat>
+  sorted(xs)
+```
+
+## bend
+
+## bend
+
+## bend
+
+## bend

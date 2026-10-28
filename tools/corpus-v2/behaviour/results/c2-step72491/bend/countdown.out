@@ -1,0 +1,59 @@
+=== ana: step 72491 of 72491 (100.000% of its plan) ===
+## User
+
+The list n, n-1, ..., 1.
+
+## Type
+
+type
+```bend
+def countdown(+n: Nat) -> List<&2, Nat>:
+```
+
+## Term
+
+```bend
+match n:
+  case 0n:
+    Nil{}
+  case 1n+p:
+    Con{n, Nil{}}
+```
+
+## bend
+:
+[
+```bend
+law countdown:
+  for +n: Nat
+  List<&2, Nat>
+```
+
+## Term
+
+```bend
+match n:
+  case 0n:
+    Nil{}
+  case 1n+p:
+    Con{n, Nil{}}
+```
+
+## bend
+:
+[
+```bend
+law countdown:
+  for +n: Nat
+  List<&2, Nat>
+```
+
+## bend
+def countdown(n):
+  countdown(n)
+```
+
+## bend
+:
+[
+```bend
