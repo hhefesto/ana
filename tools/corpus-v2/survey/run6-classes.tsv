@@ -1,0 +1,272 @@
+0x5f3759df-fs/scrapanium	60	2	222	2026-09-20	2026-10-08		MIT	0	33685	False
+0x7067/unreal-review	9	2	222	2026-09-24	2026-10-27		MIT	1	1541	False
+0xAndoroid/bend-groth16	37	2	122	2026-09-18	2026-09-19		MIT	0	433	False
+2571-project/tropical-experiment	1	1	1	2024-09-30	2024-12-07			6	36	False
+777genius/bend-codec	13	2	222	2026-09-20	2026-10-26		Apache-2.0	1	28	False
+777genius/bend-parse	6	2	222	2026-09-20	2026-09-27		Apache-2.0	0	13	False
+777genius/bend-time	45	2	222	2026-09-20	2026-10-08		Apache-2.0	2	148	False
+AHartNtkn/RMCBend	1	1	1	2024-07-21	2024-07-22		Apache-2.0	1	27	False
+AdrielSantana/bendcraft	43	2	222	2026-09-20	2026-10-01			4	2989	False
+AdrielSantana/three-bodies	4	2	222	2026-10-02	2026-10-02		MIT	7	1464	False
+AfkaraLP/ibeatkids	9	2	222	2026-10-24	2026-10-24			1	1515	False
+AfkaraLP/pi-bend2	26	2	222	2026-10-25	2026-10-25			0	124	False
+Alfex4936/k-pullup	1	0	0	2024-02-12	2026-10-26		MIT	9	20674	False
+Arthur742Ramos/afterglide-bend	11	2	222	2026-09-17	2026-09-17		MIT	0	23	False
+AugustoSchw/linguagem-bend	2	1	11	2024-05-18	2024-05-18			0	1	False
+BackplaneWorks/Backplane	749	2	222	2026-09-06	2026-10-28		MIT	802	251469	False
+BenchCommons/catalog-algorithms	1	0	0	2018-10-21	2026-10-12		MIT	1	654	False
+Carolinewk/starfox2d-bend	1	2	2	2026-03-13	2026-03-13			0	3049	False
+CodexOperator/AGI	3	2	222	2026-09-18	2026-10-28		AGPL-3.0	2	227981	False
+DKormann/bend2_playground	8	2	222	2026-09-25	2026-09-25			0	393	False
+DKormann/bend_nock	2	1	11	2024-10-19	2024-10-22			1	14	False
+Dicklesworthstone/beads_bend	46	2	222	2026-09-20	2026-10-15		NOASSERTION	6	5407	False
+DiegoPGs/Bend-Classroom	17	2	112	2025-03-09	2025-03-10			0	34	False
+ECSC2024/openECSC-2024	1	1	1	2024-03-29	2024-10-01		GPL-3.0	82	372129	False
+EffDuBois/Base	1	1	1	2022-09-07	2024-08-05			1	455	False
+Emerging-Patterns/ezjson	12	2	222	2026-09-21	2026-10-27		MIT	0	1521	False
+Emerging-Patterns/eztoml	7	2	222	2026-09-21	2026-10-25		MIT	0	2918	False
+Emerging-Patterns/shake	10	2	222	2026-09-21	2026-10-25		MIT	0	356	False
+FabianVegaA/ber	25	2	222	2026-09-26	2026-09-27		BSD-3-Clause	0	184	False
+FeSens/openTPU	15	2	222	2026-09-24	2026-10-23		Apache-2.0	860	16081	False
+FranchuFranchu/inet-hoas	1	1	1	2024-06-14	2024-06-14		0BSD	0	4	False
+FreshMedlar/bend	7	2	222	2026-09-18	2026-09-27			0	35458	False
+GitDigital-ZK/Architecture-Decision-Records-ADRs-	6	0	000	2026-05-03	2026-05-13		NOASSERTION	2	23486	False
+Gitzzly/Swak4Foam-Unofficial-Mirror	1	0	0	2022-02-08	2022-02-10		GPL-2.0	0	35402	False
+Giulio2002/bend-keccak	18	2	222	2026-09-20	2026-09-21		MIT	1	171	False
+Giulio2002/bend-sha256	24	2	222	2026-09-18	2026-09-20			20	341	False
+Giulio2002/bend-vscode	1	2	2	2026-09-22	2026-09-22		MIT	5	47	False
+Giulio2002/bend-zcash-blake2b	1	2	2	2026-10-05	2026-10-05		MIT	0	249	False
+GuiTadeuS/topicos-especiais	1	1	1	2024-05-23	2024-05-24			0	5	False
+GurmeharSinghKalra/Backplane-Windows	370	2	222	2026-10-17	2026-10-18		MIT	0	21736	False
+H4ad/bend-stdlib	22	2	222	2026-09-19	2026-09-19		Apache-2.0	0	88	False
+HaileyStorm/InteractionNets	471	1	111	2026-01-02	2026-09-14			0	1562	False
+Hedronite/rust-tops	5	2	222	2026-09-25	2026-10-25		NOASSERTION	2	718	False
+HigherOrderCO-archive/HVM3-Strict	1	0	0	2025-03-19	2025-04-23		MIT	10	280	False
+HigherOrderCO-archive/WanShi	229	2	222	2025-06-17	2025-10-16			11	157	False
+HigherOrderCO-archive/hvm-64	21	0	000	2023-08-10	2024-06-11		Apache-2.0	497	2770	False
+HigherOrderCO-archive/kindbook	1	0	0	2024-10-20	2025-01-05			61	1191	False
+HigherOrderCO-archive/tree-sitter-bend	1	1	1	2024-06-24	2024-10-18		NOASSERTION	8	1631	False
+IlyaGulya/bend2-lsp-rs	3	2	200	2026-10-01	2026-10-28		Apache-2.0	2	3460	False
+InferBend/Bolt	33	1	111	2024-06-22	2024-11-25		BSD-3-Clause	5	838	False
+Janiczek/apl-in-hvm	63	0	000	2024-05-10	2024-05-20			7	53	False
+Janiczek/elm-sourcemaps	1	1	1	2024-07-15	2024-07-15		BSD-3-Clause	19	7671	False
+JiaJunDeng5930/ChatGPT2Local	66	2	222	2026-09-27	2026-09-28		MIT	0	24383	False
+Joao-Alba/tcc-bend-algorithms	6	1	111	2025-03-23	2025-09-02			0	13895	False
+John-Carson/bend	12	2	222	2026-09-19	2026-09-19			0	9	False
+JonasLoos/fire-bend	13	2	222	2026-09-20	2026-09-24			1	1487	False
+KTH-Biomedical-flows/BOpenFOAM	1	0	0	2023-12-13	2024-06-24			2	67270	False
+KalinIvanov-l/playground	2	1	11	2023-11-24	2026-01-26			0	184947	False
+LucasGois1/bend-trace-context	59	2	222	2026-09-24	2026-10-22		MIT	0	1353	False
+Lulzx/gavel	2681	2	222	2026-09-18	2026-10-23			0	3506	False
+Lulzx/hvm	5	1	111	2025-12-12	2026-02-22			41	326	False
+Lulzx/paragon	11	1	111	2024-05-17	2025-12-18		Apache-2.0	7	120	False
+Lulzx/recall	3	1	111	2025-12-20	2025-12-20			0	201	False
+M31-Labs/bend-intel	1	1	1	2026-07-15	2026-07-15		MIT	0	691	False
+M4RZ1997/University	1	0	0	2019-11-15	2023-07-20			3	2022589	False
+MarkChu-git/typesafe-mcp	5	2	222	2026-09-21	2026-10-26		MIT	2	2574	False
+MatheusVBellini/parallel-programming-algorithms	1	1	1	2024-03-21	2024-06-06		Unlicense	0	261	False
+Mysechka/testrepo	1	0	0	2026-10-20	2026-10-20			0	72	False
+NoahOsmonth/gsd-bend	3	2	222	2026-09-29	2026-10-02		MIT	1	136	False
+NoamDev/sic-hoas	1	2	2	2024-09-11	2024-09-11			0	1	False
+NoamDev/sic-type-checking	10	1	111	2024-09-30	2024-10-09			0	67	False
+NoamDev/unpolarized-inet-hoas	1	2	2	2024-09-15	2024-09-15		MIT	0	4	False
+Piyush-io/Cpp	1	1	1	2023-04-24	2024-09-05			0	1994	False
+RLTree/ultragoal	56	2	222	2026-07-11	2026-09-29			0	35899	False
+RamonJales/codigos-bend	2	1	11	2025-09-22	2025-09-22			0	10	False
+RedLynx101/eldergrove-faire	14	2	222	2026-09-24	2026-09-25		MIT	0	5154	False
+RohanHandore/Desktop-Cleaner-Script	1	0	0	2024-05-24	2024-05-24			20	10	False
+RohanVashisht1234/bend-syntax-highlighter	1	1	1	2024-05-17	2025-01-01		MIT	8	5433	False
+RyanLatimer/minecraft-bend	13	2	222	2026-10-01	2026-10-01			0	61	False
+SambhavG/Bend-Matmul	2	1	11	2024-06-20	2024-06-22			1	6	False
+SootyOwl/bend-devcontainer	12	1	010	2024-09-03	2024-09-03			0	7	False
+TheMhv/Bend-Sha256	2	2	22	2025-05-18	2025-05-18		GPL-3.0	5	17	False
+Torwalt/vim-flow	22	2	222	2026-10-26	2026-10-26			0	139	False
+TravisBumgarner/Learning-Explorations	5	2	222	2017-02-05	2026-10-27			3	62874	False
+TuckermanGroup/PINY	2	0	00	2013-05-13	2016-12-09		NOASSERTION	14	3585	False
+Unofficial-Extend-Project-Mirror/openfoam-extend-Breeder1.7-libraries-swak4Foam	1	0	0	2013-06-22	2015-06-24		GPL-2.0	0	2844	False
+Unofficial-Extend-Project-Mirror/openfoam-extend-Breeder2.0-libraries-swak4Foam	1	0	0	2013-06-22	2017-06-08		GPL-2.0	11	3404	False
+Unofficial-Extend-Project-Mirror/openfoam-extend-swak4Foam-dev	1	0	0	2014-10-26	2021-03-28		GPL-2.0	28	42609	False
+Var1377/parallax-old	4	1	100	2024-11-25	2025-05-18			0	83711	False
+VeigaPunk/hvm-gemma4	2	1	01	2026-07-22	2026-07-28			0	206	False
+VeigaPunk/vgn-bounty-lab-pub	3	2	222	2026-09-04	2026-09-28			0	13	False
+WarpWing/Kingslayer	1	1	1	2024-05-17	2025-06-20		AGPL-3.0	5	48	False
+WilliamGomes41/Metis-DS	10	2	222	2026-08-19	2026-10-28			0	18683	False
+Yazelix/eon	13	2	222	2026-10-15	2026-10-28		Apache-2.0	0	60853	False
+a3fckx/agent-meta	5	1	110	2026-09-27	2026-09-27			0	1252	False
+aaaxn/bend-visgraph	7	2	222	2026-10-19	2026-10-20		MIT	0	24078	False
+acdh-oeaw/schoenbach	5	0	000	2022-10-24	2026-07-14		NOASSERTION	0	3402	False
+acherm/PL-ultimate-llm	1	1	1	2025-10-22	2026-10-03			0	125739	False
+adagora/ai-audit	48	2	222	2026-10-20	2026-10-28		MIT	0	1994	False
+adeerkhan/MLBend	43	2	222	2026-10-19	2026-10-28		MIT	5	1548	False
+adeerkhan/mlbend-datasets	1	2	2	2026-10-21	2026-10-21		MIT	0	10	False
+adeerkhan/mlbend-huggingface	1	2	2	2026-10-21	2026-10-21		MIT	0	5	False
+adeerkhan/mlbend-metrics	1	2	2	2026-10-21	2026-10-21		MIT	0	4	False
+adeerkhan/mlbend-preprocess	1	2	2	2026-10-22	2026-10-22		MIT	0	4	False
+adeerkhan/mlbend-select	1	2	2	2026-10-22	2026-10-22		MIT	0	3	False
+adeerkhan/mlbend-split	1	2	2	2026-10-22	2026-10-22		MIT	0	5	False
+adust09/bend-client	6	2	222	2026-10-02	2026-10-03		MIT	0	29	False
+agustinrojas1/ramal	2	2	22	2026-10-22	2026-10-24		MIT	0	2387	False
+aivv73/bend-ui-test	7	2	222	2026-10-02	2026-10-25			0	31	False
+aivv73/bend-window-capture	3	2	222	2026-10-15	2026-10-25		NOASSERTION	0	13	False
+aivv73/bend-window-ref	4	2	222	2026-10-15	2026-10-25		NOASSERTION	0	11	False
+akshayp-mangospring/linux-study	1	0	0	2024-01-12	2024-06-25		GPL-3.0	0	1150	False
+alicelanguage/alice	7	2	222	2026-10-16	2026-10-28		Apache-2.0	9	6987	False
+amrierscuo/github-linguist-hello-world-corpus	1	2	2	2026-10-08	2026-10-09		MIT	0	7951	False
+andrewacashner/computing	1	0	0	2022-12-12	2026-10-27			0	102653	False
+andrey-kokoev/marici	2	1	01	2026-08-13	2026-10-20		NOASSERTION	1	191561	False
+angeloocana/JumpOverJump	2	1	11	2014-10-25	2024-10-09			0	27418	False
+anoma/geb	1	1	1	2022-09-19	2026-10-28		GPL-3.0	39	51219	False
+aricarmo/godot-bend	999	2	222	2026-09-18	2026-09-19		MIT	0	947	False
+arphen/bend-stuff	1	1	1	2024-05-21	2024-05-21			0	3	False
+art-santos/language-database-benchmark	1	1	1	2024-03-15	2024-08-09			1	1240720	False
+arthur-schnitzler/schnitzler-briefe-tex	48	0	000	2022-05-25	2026-10-22		MIT	0	1660239	False
+audreyt/paseo-spacedock	4	2	222	2026-09-21	2026-09-23		CC0-1.0	4	191	False
+ayooooo123/hyperdht-private-routing-bend2	3	2	222	2026-10-24	2026-10-24		MIT	0	13366	False
+benjamintd/bend-playground	144	2	222	2026-09-30	2026-09-30			0	16836	False
+blasphemetheus/exphil	1	1	1	2026-01-19	2026-10-28		MIT	3	90720	False
+boom90lb/transformer-bend	1	0	0	2024-05-24	2024-05-24		MIT	1	1	False
+brasga-a/bend-math	5	2	002	2026-09-23	2026-09-23		MIT	0	7	False
+c-u-l8er/bendscript-old-watch	1	0	0	2024-05-29	2024-06-09			0	30	False
+c0utin/bend-test	1	2	2	2026-09-17	2026-09-17			0	44	False
+caiodomingues/bend-lemmas	13	2	222	2026-09-19	2026-10-16		MIT	0	23	False
+caiodomingues/bend-python	3	2	222	2026-09-22	2026-09-22		Apache-2.0	0	60	False
+caiodomingues/bend-tty	6	2	222	2026-09-20	2026-10-17		MIT	0	52	False
+caiodomingues/bend-tui	6	2	222	2026-09-20	2026-10-17		MIT	0	26	False
+calvinloveland/bend_mandelbrot	1	1	1	2024-06-11	2026-06-15			0	3	False
+cenez/HPC	7	1	101	2021-07-07	2026-10-16			2	1379	False
+cisterciansis/sanctum	3	2	222	2026-10-23	2026-10-26		AGPL-3.0	0	1505	False
+connerohnesorge/bend-build	3	2	222	2026-10-24	2026-10-24		MIT	0	24	False
+connorads/bend-universe	5	2	222	2026-09-21	2026-09-21			0	316	False
+danielhe4rt/portal-bend	31	2	222	2026-09-18	2026-09-18			2	89	False
+dark-enstein/ls	7	1	111	2024-02-10	2025-02-21			0	15238	False
+dearlordylord/beat-that-swarm-survivors	25	2	222	2026-10-26	2026-10-28		Apache-2.0	0	9924	False
+dearlordylord/bendvy-ecs-examples	247	2	222	2026-10-22	2026-10-27		Apache-2.0	0	9577	False
+deckori/notes	1	0	0	2026-02-11	2026-07-02			0	48570	False
+developerfred/Bend-PVM	7	2	211	2025-03-27	2026-04-23		NOASSERTION	3	423100	False
+dmbarbour/glam-in-bend	12	2	222	2026-10-26	2026-10-27		GPL-3.0	0	328	False
+dnbt777/Polynomial_Perceptron	1	1	1	2024-05-30	2024-06-02			2	11538	False
+edo9k/learn	3	0	000	2018-02-18	2026-05-21			2	38861	False
+egelja/caelus-cml	1	0	0	2021-06-14	2021-07-21			5	363625	False
+egorys2000/FundamentalFight	3	2	222	2026-09-29	2026-09-29			0	1904	False
+el-Dude-engineering/bend	1	0	0	2024-07-26	2024-07-26			0	1	False
+elianiva/lajur	23	2	222	2026-10-24	2026-10-27		MIT	0	10192	False
+eliesgalvira/bendoom	92	2	222	2026-09-19	2026-10-22		GPL-2.0	15	3199	False
+ericfode/knot	687	2	222	2026-09-27	2026-09-30			0	30951	False
+ericfode/zed-bend2	5	2	222	2026-09-27	2026-09-27		MIT	0	189	False
+erickweil/aprendendo-bend2	43	2	222	2026-09-12	2026-10-22			0	943	False
+erikhsu08/computacao-paralela	1	0	0	2024-02-28	2024-05-22			0	295	False
+eurisko-info-lab/phi	9	1	111	2025-12-31	2026-01-03			0	4248	False
+evanw/bend	39	0	000	2012-08-03	2012-08-19			20	351	False
+fcrownarisk/theory	2	1	01	2024-05-28	2026-01-20			0	146	False
+franzramadhan/homie	11	2	222	2026-10-22	2026-10-28		MIT	0	14521	False
+gakonst/evm-bend	73	2	222	2026-09-18	2026-09-18			21	703	False
+gavintabor/blockSketch	1	0	0	2026-04-23	2026-05-13		GPL-2.0	31	11516	False
+gildrb/elpis-lossless	257	2	222	2026-09-03	2026-10-27		MIT	0	5664	False
+github-linguist/linguist	3	2	122	2011-05-09	2026-10-24		MIT	13752	42333	False
+gouveags/openai-bend	11	2	222	2026-09-20	2026-09-30		NOASSERTION	0	50	False
+haddocking/3D-DART-server	1	0	0	2020-08-27	2020-12-16		Apache-2.0	5	7364	False
+harlanljones/bend-equity	8	2	222	2026-10-23	2026-10-23			0	31	False
+harlanljones/bend-re24	11	2	222	2026-10-27	2026-10-27			0	95	False
+harlanljones/bend-winprob	5	2	222	2026-10-24	2026-10-26			0	3084	False
+hexuria/gol	3	2	222	2026-09-23	2026-09-30			0	2110	False
+hiibolt/nix-templates	1	0	0	2023-03-18	2026-04-24			2	76	False
+hiibolt/symbolic_math	16	1	111	2024-09-14	2024-09-16			3	17	False
+hlaff147/bend-lab	13	2	222	2026-09-17	2026-09-19			0	75	False
+hoopdad/bendlang	1	1	1	2024-05-21	2024-07-12			0	10397	False
+hustcer/setup-bend	3	1	100	2024-06-09	2025-12-14		MIT	5	36	False
+iagocavalcante/bend-mobile	3	2	222	2026-09-18	2026-09-18		Apache-2.0	0	121	False
+iamsahilsonawane/bend2-http-server	8	2	222	2026-09-18	2026-09-18		MIT	1	20	False
+iancleary/crate-ports-to-bend2	3	2	222	2026-09-30	2026-09-30			0	15	False
+ianpotpie/cs1952y_final	4	1	101	2025-05-04	2025-05-05			0	1409	False
+imaqtkatt/oktu	1	1	1	2024-04-05	2024-06-12			2	104	False
+ind-igo/bend-evm	75	2	222	2026-09-23	2026-10-01		MIT	3	715	False
+ind-igo/bend-frontend	10	2	222	2026-09-23	2026-09-30		MIT	38	108	False
+irfndi/NeuraTrade	6	2	222	2025-08-08	2026-10-26		MIT	2	265691	False
+irfndi/prism-liquidity-agent	3	2	222	2026-06-01	2026-10-20		MIT	131	7880	False
+jacknpoe/todos_juros	2	1	01	2023-09-17	2026-10-27		GPL-3.0	6	58062	False
+jacobef/learnc	1	2	2	2025-12-19	2026-10-26			0	21980	False
+jaredkrinke/100-languages	1	1	1	2024-03-17	2025-05-19			239	504	False
+jazzu72/Nia-LeSane	1	0	0	2025-12-30	2026-03-22			1	1772	False
+jesuswr/language-bender	36	0	000	2021-05-19	2022-01-10			11	5439	False
+jonbaldie/phpscan	21	2	222	2026-10-24	2026-10-27		NOASSERTION	0	264	False
+jpcamara/yaml-for-bend	20	2	222	2026-10-27	2026-10-27		MIT	0	82	False
+justinmdougherty/RTX5070Ti-Development-Environment	10	1	101	2025-08-01	2025-08-01			1	46	False
+k3ybladewielder/BendSR	40	2	222	2026-09-19	2026-09-26		MIT	12	298	False
+kentslaney/nnd-bend	9	1	111	2024-10-12	2024-11-21			0	120	False
+kirillleventcov/bendirstat	8	2	222	2026-09-19	2026-10-27			1	39	False
+korulang/koru-benchmarks	35	2	222	2026-07-03	2026-10-25		NOASSERTION	0	1815	False
+kvnloo/z0	5	2	222	2025-12-10	2026-10-27		GPL-3.0	2	1346	False
+kyoya-p/samples	1	0	0	2020-04-07	2026-10-25		Apache-2.0	2	178847	False
+lambdasolver2/winning-is-a-bug-effect	3	2	222	2026-09-12	2026-09-13			0	951	False
+leofmarciano/groot	7	2	222	2026-10-22	2026-10-23		Apache-2.0	13	525	False
+linobollansee/all-programming-languages	1	0	0	2025-11-18	2025-11-28			0	103	False
+lodado/playwright-spec-for-AI-Agent	4	2	222	2026-05-30	2026-10-08			11	3190	False
+lodado/shareds	38	2	222	2026-08-14	2026-10-28		MIT	0	7464	False
+lucasew/playground	4	2	222	2020-11-04	2026-10-25			8	115733	False
+luiscleto/framebender	50	2	222	2026-10-27	2026-10-27		MIT	0	446	False
+luiscleto/minebender	24	2	222	2026-10-25	2026-10-28		MIT	5	466	False
+luised94/explorations	3	2	222	2025-05-29	2026-10-05			0	4718	False
+marvinborner/optimal-effects	6	1	111	2025-06-20	2026-01-09			16	4740	False
+maxencefrenette/bendbase	84	2	222	2026-09-23	2026-09-26			0	669	False
+meghanto/valverank	3	2	222	2026-10-11	2026-10-11			0	63045	False
+mitschabaude-bot/pi-bend	1422	2	222	2026-09-17	2026-10-02		MIT	1	25491	False
+mkusaka/ghok	4	2	222	2026-10-14	2026-10-28		MIT	0	28323	False
+mrzhbr/bend-aco-partitioning	2	2	22	2026-10-20	2026-10-20			0	94	False
+mrzhbr/bend-verified-merge-sort	1	2	2	2026-10-23	2026-10-23			0	23	False
+mw2000/monte-carlo-experiments	1	1	1	2024-05-20	2024-05-20			0	2	False
+naoeosavio/Bend-Book	4	0	000	2024-05-29	2025-10-09			2	1616	False
+nbardy/bend_stdlib	26	2	222	2026-09-19	2026-09-24		MIT	0	231	False
+niclasberg/BOpenFOAM	1	0	0	2017-10-13	2022-12-06			4	66489	False
+nuxyel/BendTorch	39	2	222	2026-10-16	2026-10-27		MIT	18	8887	False
+nuxyel/bend2-nvim	5	2	220	2026-09-28	2026-09-28		NOASSERTION	1	245	False
+o1lo01ol1o/bend-proof-of-compile	4	2	222	2026-09-22	2026-09-28			0	202	False
+octakitten/velvet	4	2	212	2024-11-10	2025-04-29		Apache-2.0	1	53	False
+omagebright/mosaics-studio-preprint	2	0	00	2026-09-08	2026-09-08		CC-BY-4.0	0	18412	False
+omagebright/mosaics-tutorial-windows	11	0	000	2026-03-10	2026-03-10			0	3251	False
+onblueroses/claude-code-wrapped	22	2	222	2026-04-07	2026-10-08		MIT	3	1710	False
+onblueroses/strata	16	2	222	2026-03-01	2026-10-18		MIT	3	759	False
+ozeron/grounds	412	2	222	2026-09-26	2026-10-24		NOASSERTION	0	4065	False
+patrick-ogrady/qmdb-bend2	7	2	222	2026-09-18	2026-09-18			4	60	False
+pelikanade/paseo-plugins	2	2	22	2026-10-09	2026-10-20			0	1477	False
+pmarreck/llm_skills	5	2	222	2026-06-08	2026-10-28		MIT	2	1160	False
+pmarreck/random	21	2	222	2026-06-01	2026-10-23		MIT	0	3469	False
+pragtical/pragtical	1	0	0	2023-05-20	2026-10-28		MIT	724	16808	False
+pranavkarkera/swak4Foam	1	0	0	2025-03-12	2025-03-12		GPL-2.0	0	61342	False
+qrk-labs/dabe-clean-20260619	1	0	0	2026-06-19	2026-09-17		MIT	0	4753	False
+renanliberato/bend-buddy	1	2	2	2026-09-19	2026-09-22			0	18	False
+renxida/myhvm	10	1	111	2024-05-13	2024-05-21			1	16	False
+richsuca/100-languages	1	1	1	2025-03-20	2025-03-20			0	475	False
+rkrstacic/bend-parallel	24	1	110	2024-06-09	2024-09-14			0	172	False
+rokopt/geb-mathlib	4	1	111	2026-05-15	2026-10-28		Apache-2.0	0	24493	False
+rootagi/bend-json	11	2	222	2026-09-18	2026-09-25		Apache-2.0	2	119	False
+rosdyana/bURL	7	2	222	2026-09-19	2026-09-19			0	33	False
+roundup-app/roundup	6	2	222	2026-10-01	2026-10-28		MIT	0	3279730	False
+ryan-brosas/pi-time-tracker	5	2	222	2026-09-27	2026-10-11		MIT	1	479	False
+ryan-brosas/workspan	5	2	222	2026-10-02	2026-10-22		MIT	0	1080	False
+seant4/datasciNotebook	1	0	0	2024-06-21	2024-09-27			0	1071	False
+shivam2014/ratchet	2	2	22	2026-10-26	2026-10-28		MIT	0	1030	False
+sirelves/black-hole-page-curve-investigation	15	2	222	2026-09-22	2026-09-22			0	411	False
+sirelves/multimodal-logistics-brazil	19	2	222	2026-09-22	2026-09-22			0	148	False
+svdrecbd/SCC	11	2	222	2026-09-13	2026-09-26			0	21017	False
+t4rxnn-devel/SKYwatch-20	1	1	1	2026-08-20	2026-08-21		Apache-2.0	0	421	False
+takashi/bend-playground	4	2	222	2026-09-30	2026-09-30			0	6	False
+tangentstorm/b4	9	2	222	2012-08-02	2026-10-23		NOASSERTION	41	4599	False
+thacer13/Bendverse	57	2	222	2026-09-18	2026-09-21			0	4230	False
+thalesfm/bend-asteroids	27	1	101	2024-07-25	2024-08-05			3	100	False
+tomoritemitopex-byte/physicoin-v3	12	2	222	2026-09-15	2026-09-23			0	1028	False
+ultra-move/bend-trie	5	2	222	2026-10-25	2026-10-25			0	1449	False
+unicornultralabs/subnet-vm	8	1	010	2024-05-25	2024-06-08			0	294	False
+unknownsaying/threads-of-time	4	0	000	2024-11-11	2026-06-15			0	75	False
+vincitamore/agora	30	2	222	2026-09-03	2026-10-27		MIT	1	60067	False
+viridale/bend-cli	23	2	222	2026-10-10	2026-10-28		NOASSERTION	3	3287	False
+war-and-code/dircue	11	2	222	2026-09-07	2026-10-07		MIT	0	15385	False
+watzon/bendui	210	2	222	2026-09-20	2026-09-21		MIT	1	6617	False
+wisp-sh/wisp	1	2	2	2026-10-24	2026-10-26		Apache-2.0	0	3797	False
+wtfnukee/bendgrad	3	2	020	2024-05-17	2024-05-17			5	3	False
+wyattgill9/HVM3-Strict	1	0	0	2025-04-09	2025-06-24		MIT	4	332	False
+yablokolabs/bendkernels	7	1	111	2026-05-02	2026-05-02		MIT	0	9	False
+yasuhito/pions	3	2	222	2026-09-06	2026-10-07			0	1976	False
+yuzyayvri/rubend	204	2	222	2026-10-16	2026-10-27		GPL-3.0	0	122720	False
+yvesl29/bendCompose	4	2	222	2026-09-26	2026-09-26			0	129	False
+zagrajmy/ludamus	16	2	222	2025-06-07	2026-10-28		AGPL-3.0	1	63962	False
+zw3rk/birc	267	2	222	2026-09-24	2026-10-28		Apache-2.0	5	4518	False
