@@ -1,0 +1,8 @@
+def t1() -> {last([]) == None{} : Maybe<&2, Nat>}:
+  {==}
+
+def t2() -> {last([4n]) == Some{4n} : Maybe<&2, Nat>}:
+  {==}
+
+def t3() -> {last([4n, 5n, 6n]) == Some{6n} : Maybe<&2, Nat>}:
+  {==}

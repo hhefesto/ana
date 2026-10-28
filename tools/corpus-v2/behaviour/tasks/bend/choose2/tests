@@ -1,0 +1,8 @@
+def t1() -> {choose2(0n) == 0n : Nat}:
+  {==}
+
+def t2() -> {choose2(1n) == 0n : Nat}:
+  {==}
+
+def t3() -> {choose2(5n) == 10n : Nat}:
+  {==}

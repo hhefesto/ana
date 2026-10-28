@@ -1,0 +1,14 @@
+## User
+
+The list n, n-1, ..., 1.
+
+## Type
+
+type
+```bend
+def countdown(+n: Nat) -> List<&2, Nat>:
+```
+
+## Term
+
+```bend

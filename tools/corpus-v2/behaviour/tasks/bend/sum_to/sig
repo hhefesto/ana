@@ -1,0 +1,1 @@
+def sum_to(+n: Nat) -> Nat:

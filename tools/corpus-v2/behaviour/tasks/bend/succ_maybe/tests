@@ -1,0 +1,5 @@
+def t1() -> {succ_maybe(Some{3n}) == Some{4n} : Maybe<&2, Nat>}:
+  {==}
+
+def t2() -> {succ_maybe(None{}) == None{} : Maybe<&2, Nat>}:
+  {==}

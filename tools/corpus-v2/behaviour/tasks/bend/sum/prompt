@@ -1,0 +1,14 @@
+## User
+
+The sum of a list of natural numbers.
+
+## Type
+
+type
+```bend
+def sum(xs: List<&2, Nat>) -> Nat:
+```
+
+## Term
+
+```bend

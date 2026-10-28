@@ -1,0 +1,8 @@
+def t1() -> {isort([]) == [] : List<&2, Nat>}:
+  {==}
+
+def t2() -> {isort([3n, 1n, 2n]) == [1n, 2n, 3n] : List<&2, Nat>}:
+  {==}
+
+def t3() -> {isort([5n, 5n, 0n]) == [0n, 5n, 5n] : List<&2, Nat>}:
+  {==}

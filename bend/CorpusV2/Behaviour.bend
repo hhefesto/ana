@@ -1504,6 +1504,72 @@ def bhv.agda(+c: BhCf, +n: String, +r: String, e: BhE) -> IO(List<&2, U32>):
     case BhE{True{}, v, +term}:
       bhv.agda.go(bhv.agda.gives.up(term), c, n, r, term)
 
+# Bend (2026-10-28): Task.bend is `import Base`, the pre, then the Type and
+# the answer: a type task's answer is its def's body, indented under the
+# Type's header line as Agent/Tools.bend's at.file joins them (an answer that
+# repeats the header is the whole def); a proposition's Type is its `law` and
+# the answer the def proving it.  The tests follow: defs that prove
+# equalities by computation (`def t1() -> {f(2n) == 4n : Nat}:` then `  {==}`).
+# BEND (else `bend`) `Task.bend --check-only` under BEND_TIMEOUT (60 s), in
+# NAME's build directory: first without the tests (an error is `compile`,
+# NAME.head.log), then with them (an error is `wrong`, NAME.log).
+def bhv.bend.ind(xs: List<&2, U32>, nl: Bool) -> List<&2, U32>:
+  match xs nl:
+    case Nil{} _:
+      Nil{}
+    case +h <> t True{}:
+      32 <> 32 <> h <> bhv.bend.ind(t, U32.is_eq(h, 10))
+    case +h <> t False{}:
+      h <> bhv.bend.ind(t, U32.is_eq(h, 10))
+
+def bhv.bend.join(+sig: List<&2, U32>, +term: List<&2, U32>, prop: Bool) -> List<&2, U32>:
+  match prop:
+    case True{}:
+      bhv.cat([sig, S.b("\n\n"), term])
+    case False{}:
+      Bool.pick(List<&2, U32>, S.prefix(term, sig), term, bhv.cat([sig, [10], bhv.bend.ind(term, True{})]))
+
+def bhv.bend.head(+pre: List<&2, U32>, +sig: List<&2, U32>, +term: List<&2, U32>, prop: Bool) -> List<&2, U32>:
+  bhv.cat([S.b("import Base\n\n"), Bool.pick(List<&2, U32>, bhv.empty(pre), Nil{}, List.append(&2, U32, pre, S.b("\n\n"))),
+    bhv.bend.join(sig, term, prop), [10]])
+
+def bhv.bend.v(+st1: U32, +st2: U32) -> List<&2, U32>:
+  Bool.pick(List<&2, U32>, U32.is_eq(st1, 124), S.b("timeout"),
+    Bool.pick(List<&2, U32>, Bool.not(U32.is_eq(st1, 0)), S.b("compile"),
+      Bool.pick(List<&2, U32>, U32.is_eq(st2, 0), S.b("pass"), Bool.pick(List<&2, U32>, U32.is_eq(st2, 124), S.b("timeout"), S.b("wrong")))))
+
+def bhv.bend.tests(ok: Bool, +c: BhCf, +b: String, +r: String, +n: String, +f: List<&2, U32>) -> IO(U32):
+  match ok:
+    case False{}:
+      IO.pure(U32, 1)
+    case True{}:
+      do IO<U32>:
+        S.write(b ++ "/Task.bend", f)
+        S.run.log(b, ["BEND_NO_TELEMETRY=1"], bhv.cf.secs(c), bhv.cf.tool(c), ["Task.bend", "--check-only"], r ++ "/" ++ n ++ ".log")
+
+def bhv.bend(+c: BhCf, +n: String, +r: String, e: BhE) -> IO(List<&2, U32>):
+  match e:
+    case BhE{False{}, v, t}:
+      IO.pure(List<&2, U32>, v)
+    case BhE{True{}, v, +term}:
+      do IO<List<&2, U32>>:
+        +d : String = bhv.cf.q(c) ++ "/tasks/bend/" ++ n
+        sig0 : List<&2, U32> <- S.read(d ++ "/sig")
+        pre : List<&2, U32> <- S.read(d ++ "/pre")
+        tests : List<&2, U32> <- S.read(d ++ "/tests")
+        kind : List<&2, U32> <- S.read(d ++ "/kind")
+        +h : List<&2, U32> = bhv.bend.head(pre, bhv.subst(sig0), term, S.prefix(kind, S.b("proposition")))
+        +f : List<&2, U32> = bhv.cat([h, [10], tests, [10]])
+        +b : String = r ++ "/build/" ++ n
+        S.rm(b)
+        S.mkdir(b)
+        S.write(b ++ "/Task.bend", h)
+        +st1 : U32 <- S.run.log(b, ["BEND_NO_TELEMETRY=1"], bhv.cf.secs(c), bhv.cf.tool(c), ["Task.bend", "--check-only"], r ++ "/" ++ n ++ ".head.log")
+        S.write(r ++ "/" ++ n ++ ".bend", f)
+        +st2 : U32 <- bhv.bend.tests(U32.is_eq(st1, 0), c, b, r, n, f)
+        bhv.unbuild(bhv.cf.keep(c), b)
+        return bhv.bend.v(st1, st2)
+
 # a task's verdict line: NAME TAB VERDICT
 def bhv.check.lang(k: Nat, +c: BhCf, +n: String, +r: String, e: BhE) -> IO(List<&2, U32>):
   match k:
@@ -1511,8 +1577,10 @@ def bhv.check.lang(k: Nat, +c: BhCf, +n: String, +r: String, e: BhE) -> IO(List<
       bhv.hs(c, n, r, e)
     case 1n:
       bhv.lean(c, n, r, e)
-    case _:
+    case 2n:
       bhv.agda(c, n, r, e)
+    case _:
+      bhv.bend(c, n, r, e)
 
 def bhv.check(+c: BhCf, +lang: String, +k: Nat, +n: String, +r: String) -> IO(List<&2, U32>):
   do IO<List<&2, U32>>:
@@ -1678,7 +1746,7 @@ def bhv.lang(+c: BhCf, +lang: String, +k: Nat, +quiet: Bool, +jobs: Nat, +gjobs:
 
 # The languages' checkers (run.sh's case)
 def bhv.lang.code(+l: String) -> Nat:
-  Bool.pick(Nat, String.eq(l, "haskell"), 0n, Bool.pick(Nat, String.eq(l, "lean"), 1n, Bool.pick(Nat, String.eq(l, "agda"), 2n, 3n)))
+  Bool.pick(Nat, String.eq(l, "haskell"), 0n, Bool.pick(Nat, String.eq(l, "lean"), 1n, Bool.pick(Nat, String.eq(l, "agda"), 2n, Bool.pick(Nat, String.eq(l, "bend"), 3n, 4n))))
 
 # elan's toolchain directory: sed 's|/|--|; s|:|---|' lean-toolchain | tr -d '\n'
 def bhv.toolchain(ls: List<&2, List<&2, U32>>) -> List<&2, U32>:
@@ -1787,8 +1855,13 @@ def bhv.tools(k: Nat, +c: BhCf, +lang: String) -> IO(BhCf):
         +libs : String <- bhv.env("AGDA_LIBS", bhv.cf.ft(c) ++ "/run/check-cache/agda/libraries")
         +to : Nat <- S.env.nat("AGDA_TIMEOUT", 300n)
         return bhv.cf.with(c, agda, Nil{}, to, libs)
+    case 3n:
+      do IO<BhCf>:
+        +bend : String <- bhv.env("BEND", "bend")
+        +to : Nat <- S.env.nat("BEND_TIMEOUT", 60n)
+        return bhv.cf.with(c, bend, Nil{}, to, "")
     case _:
-      IO.die(BhCf, 2, "behaviour run: no language " ++ lang ++ " (haskell, lean, agda)")
+      IO.die(BhCf, 2, "behaviour run: no language " ++ lang ++ " (haskell, lean, agda, bend)")
 
 def bhv.langs(ls: List<&2, String>, +c: BhCf, +quiet: Bool, +jobs: Nat, +gjobs: Nat) -> IO(Unit):
   match ls:

@@ -1,0 +1,1 @@
+def implies(a: Bool, b: Bool) -> Bool:

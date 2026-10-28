@@ -1,0 +1,5 @@
+def t1() -> {maximum([]) == 0n : Nat}:
+  {==}
+
+def t2() -> {maximum([3n, 9n, 4n]) == 9n : Nat}:
+  {==}

@@ -1,0 +1,8 @@
+match n:
+  case 0n:
+    True{}
+  case 1n:
+    False{}
+  case 2n+p:
+    is_even(p)
+```

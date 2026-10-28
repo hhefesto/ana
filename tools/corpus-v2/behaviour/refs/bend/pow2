@@ -1,0 +1,6 @@
+match n:
+  case 0n:
+    1n
+  case 1n+p:
+    Nat.double(pow2(p))
+```

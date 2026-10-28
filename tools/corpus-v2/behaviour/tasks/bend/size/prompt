@@ -1,0 +1,22 @@
+## User
+
+The number of values in a binary tree.
+
+## Context
+
+```bend
+type Tree is Data:
+  Leaf{}
+  Node{left: Tree, value: Nat, right: Tree}
+```
+
+## Type
+
+type
+```bend
+def size(t: Tree) -> Nat:
+```
+
+## Term
+
+```bend

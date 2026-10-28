@@ -1,0 +1,8 @@
+def t1() -> {insert([], 3n) == [3n] : List<&2, Nat>}:
+  {==}
+
+def t2() -> {insert([1n, 4n, 6n], 5n) == [1n, 4n, 5n, 6n] : List<&2, Nat>}:
+  {==}
+
+def t3() -> {insert([1n, 4n], 0n) == [0n, 1n, 4n] : List<&2, Nat>}:
+  {==}

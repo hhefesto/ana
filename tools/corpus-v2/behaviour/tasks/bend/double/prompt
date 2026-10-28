@@ -1,0 +1,14 @@
+## User
+
+Twice a natural number.
+
+## Type
+
+type
+```bend
+def double(+n: Nat) -> Nat:
+```
+
+## Term
+
+```bend

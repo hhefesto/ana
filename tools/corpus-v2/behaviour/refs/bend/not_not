@@ -1,0 +1,7 @@
+def not_not(b):
+  match b:
+    case True{}:
+      {==}
+    case False{}:
+      {==}
+```

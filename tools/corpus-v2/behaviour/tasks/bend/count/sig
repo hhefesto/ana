@@ -1,0 +1,1 @@
+def count(xs: List<&2, Nat>, +n: Nat) -> Nat:

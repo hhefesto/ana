@@ -1,0 +1,5 @@
+def t1() -> {tsum(Leaf{}) == 0n : Nat}:
+  {==}
+
+def t2() -> {tsum(Node{Node{Leaf{}, 1n, Leaf{}}, 2n, Node{Leaf{}, 3n, Leaf{}}}) == 6n : Nat}:
+  {==}

@@ -1,0 +1,25 @@
+## User
+
+Prove `double_add`, using add_succ_r.
+
+## Context
+
+```bend
+law add_succ_r:
+  for n: Nat
+  for m: Nat
+  {Nat.add(n, 1n+m) == 1n+Nat.add(n, m) : Nat}
+```
+
+## Type
+
+proposition
+```bend
+law double_add:
+  for n: Nat
+  {Nat.double(n) == Nat.add(n, n) : Nat}
+```
+
+## Term
+
+```bend

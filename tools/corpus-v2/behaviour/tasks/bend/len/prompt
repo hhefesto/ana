@@ -1,0 +1,14 @@
+## User
+
+The number of elements of a list of natural numbers.
+
+## Type
+
+type
+```bend
+def len(xs: List<&2, Nat>) -> Nat:
+```
+
+## Term
+
+```bend

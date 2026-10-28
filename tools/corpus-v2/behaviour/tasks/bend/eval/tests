@@ -1,0 +1,5 @@
+def t1() -> {eval(Num{4n}) == 4n : Nat}:
+  {==}
+
+def t2() -> {eval(Add{Num{2n}, Mul{Num{3n}, Num{4n}}}) == 14n : Nat}:
+  {==}

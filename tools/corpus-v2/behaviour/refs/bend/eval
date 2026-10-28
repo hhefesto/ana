@@ -1,0 +1,8 @@
+match e:
+  case Num{n}:
+    n
+  case Add{a, b}:
+    Nat.add(eval(a), eval(b))
+  case Mul{a, b}:
+    Nat.mul(eval(a), eval(b))
+```

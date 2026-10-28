@@ -1,0 +1,6 @@
+match n:
+  case 0n:
+    Nil{}
+  case 1n+k:
+    n <> countdown(k)
+```

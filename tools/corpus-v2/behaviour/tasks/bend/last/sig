@@ -1,0 +1,1 @@
+def last(xs: List<&2, Nat>) -> Maybe<&2, Nat>:

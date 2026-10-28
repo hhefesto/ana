@@ -1,0 +1,8 @@
+def t1() -> {fact(0n) == 1n : Nat}:
+  {==}
+
+def t2() -> {fact(1n) == 1n : Nat}:
+  {==}
+
+def t3() -> {fact(5n) == 120n : Nat}:
+  {==}

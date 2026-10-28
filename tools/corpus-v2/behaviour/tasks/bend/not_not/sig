@@ -1,0 +1,3 @@
+law not_not:
+  for b: Bool
+  {Bool.not(Bool.not(b)) == b : Bool}

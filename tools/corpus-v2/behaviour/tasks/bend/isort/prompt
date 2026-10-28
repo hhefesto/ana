@@ -1,0 +1,20 @@
+## User
+
+A list sorted in ascending order by insertion sort, using insert.
+
+## Context
+
+```bend
+def insert(xs: List<&2, Nat>, +n: Nat) -> List<&2, Nat>
+```
+
+## Type
+
+type
+```bend
+def isort(xs: List<&2, Nat>) -> List<&2, Nat>:
+```
+
+## Term
+
+```bend

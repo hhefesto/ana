@@ -1,0 +1,5 @@
+def t1() -> {str_len("") == 0n : Nat}:
+  {==}
+
+def t2() -> {str_len("bend") == 4n : Nat}:
+  {==}

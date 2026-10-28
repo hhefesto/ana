@@ -1,0 +1,6 @@
+match t:
+  case Leaf{}:
+    Nil{}
+  case Node{l, v, r}:
+    List.append(&2, Nat, inorder(l), v <> inorder(r))
+```

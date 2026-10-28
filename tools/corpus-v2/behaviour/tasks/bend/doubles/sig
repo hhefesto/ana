@@ -1,0 +1,1 @@
+def doubles(xs: List<&2, Nat>) -> List<&2, Nat>:

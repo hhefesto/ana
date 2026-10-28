@@ -1,0 +1,8 @@
+def t1() -> {sorted([]) == True{} : Bool}:
+  {==}
+
+def t2() -> {sorted([1n, 1n, 4n]) == True{} : Bool}:
+  {==}
+
+def t3() -> {sorted([2n, 1n]) == False{} : Bool}:
+  {==}

@@ -1,0 +1,14 @@
+## User
+
+The last element of a list, if it has one.
+
+## Type
+
+type
+```bend
+def last(xs: List<&2, Nat>) -> Maybe<&2, Nat>:
+```
+
+## Term
+
+```bend

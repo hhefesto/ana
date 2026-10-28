@@ -1,0 +1,8 @@
+def add_zero_r(n):
+  match n:
+    case 0n:
+      {==}
+    case 1n+p:
+      %add_zero_r(p) : {1n+Nat.add(p, 0n) == 1n+_ : Nat}
+      {==}
+```

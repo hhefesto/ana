@@ -1,0 +1,6 @@
+match a:
+  case True{}:
+    Bool.not(b)
+  case False{}:
+    b
+```

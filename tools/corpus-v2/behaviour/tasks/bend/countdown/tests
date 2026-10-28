@@ -1,0 +1,5 @@
+def t1() -> {countdown(0n) == [] : List<&2, Nat>}:
+  {==}
+
+def t2() -> {countdown(3n) == [3n, 2n, 1n] : List<&2, Nat>}:
+  {==}

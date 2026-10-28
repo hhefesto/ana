@@ -1,0 +1,16 @@
+## User
+
+Prove `add_zero_r`.
+
+## Type
+
+proposition
+```bend
+law add_zero_r:
+  for n: Nat
+  {Nat.add(n, 0n) == n : Nat}
+```
+
+## Term
+
+```bend

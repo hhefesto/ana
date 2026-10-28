@@ -1,0 +1,6 @@
+match xs:
+  case Nil{}:
+    0n
+  case h <> t:
+    Nat.add(h, sum(t))
+```

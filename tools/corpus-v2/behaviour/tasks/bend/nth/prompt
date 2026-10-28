@@ -1,0 +1,14 @@
+## User
+
+The element at index n of a list (counting from 0), if there is one.
+
+## Type
+
+type
+```bend
+def nth(xs: List<&2, Nat>, n: Nat) -> Maybe<&2, Nat>:
+```
+
+## Term
+
+```bend

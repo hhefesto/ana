@@ -1,0 +1,5 @@
+def t1() -> {double(0n) == 0n : Nat}:
+  {==}
+
+def t2() -> {double(21n) == 42n : Nat}:
+  {==}

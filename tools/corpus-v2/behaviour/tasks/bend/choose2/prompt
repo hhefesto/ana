@@ -1,0 +1,14 @@
+## User
+
+The number of ways to choose 2 things out of n.
+
+## Type
+
+type
+```bend
+def choose2(+n: Nat) -> Nat:
+```
+
+## Term
+
+```bend

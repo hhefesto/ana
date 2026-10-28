@@ -1,0 +1,14 @@
+## User
+
+Two to the power n.
+
+## Type
+
+type
+```bend
+def pow2(n: Nat) -> Nat:
+```
+
+## Term
+
+```bend

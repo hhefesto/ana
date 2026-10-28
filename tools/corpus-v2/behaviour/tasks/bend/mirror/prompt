@@ -1,0 +1,22 @@
+## User
+
+A binary tree with every node's children swapped.
+
+## Context
+
+```bend
+type Tree is Data:
+  Leaf{}
+  Node{left: Tree, value: Nat, right: Tree}
+```
+
+## Type
+
+type
+```bend
+def mirror(t: Tree) -> Tree:
+```
+
+## Term
+
+```bend

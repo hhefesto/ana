@@ -1,0 +1,8 @@
+match xs:
+  case Nil{}:
+    None{}
+  case h <> Nil{}:
+    Some{h}
+  case _ <> t:
+    last(t)
+```

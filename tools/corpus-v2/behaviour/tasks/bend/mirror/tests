@@ -1,0 +1,5 @@
+def t1() -> {mirror(Leaf{}) == Leaf{} : Tree}:
+  {==}
+
+def t2() -> {mirror(Node{Node{Leaf{}, 1n, Leaf{}}, 2n, Leaf{}}) == Node{Leaf{}, 2n, Node{Leaf{}, 1n, Leaf{}}} : Tree}:
+  {==}

@@ -1,0 +1,4 @@
+law len_app:
+  for xs: List<&2, Nat>
+  for ys: List<&2, Nat>
+  {List.length(&2, Nat, List.append(&2, Nat, xs, ys)) == Nat.add(List.length(&2, Nat, xs), List.length(&2, Nat, ys)) : Nat}

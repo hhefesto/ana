@@ -1,0 +1,3 @@
+law double_add:
+  for n: Nat
+  {Nat.double(n) == Nat.add(n, n) : Nat}

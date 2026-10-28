@@ -1,0 +1,8 @@
+def t1() -> {count([], 1n) == 0n : Nat}:
+  {==}
+
+def t2() -> {count([1n, 2n, 1n, 1n], 1n) == 3n : Nat}:
+  {==}
+
+def t3() -> {count([1n, 2n, 1n, 1n], 5n) == 0n : Nat}:
+  {==}

@@ -1,0 +1,6 @@
+match xs:
+  case Nil{}:
+    Nil{}
+  case h <> t:
+    insert(isort(t), h)
+```

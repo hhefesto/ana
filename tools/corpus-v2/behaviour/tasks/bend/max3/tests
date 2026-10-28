@@ -1,0 +1,8 @@
+def t1() -> {max3(1n, 2n, 3n) == 3n : Nat}:
+  {==}
+
+def t2() -> {max3(9n, 2n, 3n) == 9n : Nat}:
+  {==}
+
+def t3() -> {max3(4n, 8n, 1n) == 8n : Nat}:
+  {==}

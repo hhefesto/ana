@@ -12,6 +12,10 @@ checker.  A checkpoint's score is the number of tasks that pass.
                       (run/harness/mathlib4), 15 definitions + 6 proofs
   agda     21 tasks   Agda 2.8.0 with standard-library-2.3, --safe,
                       15 definitions + 6 proofs
+  bend     42 tasks   Bend 2.0.38 (upstream, the flake's lock), 36
+                      definitions + 6 proofs (2026-10-28; name it:
+                      `behaviour run CKPT TAG bend`, it is not in the
+                      default three)
 
 The Haskell tasks moved here from run/v2/evalruns/behaviour/ (untracked).
 Their prompts, sigs, pres, tests and refs are byte-identical to the old ones,
@@ -136,6 +140,18 @@ agda     Task.agda: `{-# OPTIONS --safe #-}`, `module Task where`, open
          `open import Agda.Builtin.Unit using ()`, the tests (`_ : f x ≡ y`
          / `_ = refl` pairs, checked by normalisation).
          agda --library-file=AGDA_LIBS -l standard-library-2.3 -i . Task.agda
+
+bend     Task.bend: `import Base`, the pre, then the Type and the answer: a
+         type task's Type is the def's header line (`def f(+n: Nat) -> Nat:`)
+         and the answer its body, indented two spaces under it, as
+         bend/Agent/Tools.bend at.file joins them (an answer that repeats
+         the header line is taken as the whole def); a proposition's Type is
+         its `law` and the answer the def proving it.  The tests are defs
+         proving equalities by computation (`def t1() -> {f(2n) == 4n :
+         Nat}:` then `  {==}`), so the checker decides them.  BEND (else
+         `bend`) `Task.bend --check-only` under BEND_TIMEOUT (60 s): first
+         without the tests (an error: compile, NAME.head.log), then with them
+         (an error: wrong, NAME.log).
 
 A proposition task has no tests: its test is the kernel accepting the proof.
 

@@ -1,0 +1,14 @@
+## User
+
+The lists of a list joined in order.
+
+## Type
+
+type
+```bend
+def flat(xss: List<&2, List<&2, Nat>>) -> List<&2, Nat>:
+```
+
+## Term
+
+```bend

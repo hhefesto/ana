@@ -1,0 +1,17 @@
+## User
+
+Prove `add_succ_r`.
+
+## Type
+
+proposition
+```bend
+law add_succ_r:
+  for n: Nat
+  for m: Nat
+  {Nat.add(n, 1n+m) == 1n+Nat.add(n, m) : Nat}
+```
+
+## Term
+
+```bend

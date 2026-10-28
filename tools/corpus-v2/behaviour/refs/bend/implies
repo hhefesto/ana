@@ -1,0 +1,6 @@
+match a:
+  case True{}:
+    b
+  case False{}:
+    True{}
+```

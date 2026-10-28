@@ -1,0 +1,6 @@
+match m:
+  case Some{x}:
+    Some{1n+x}
+  case None{}:
+    None{}
+```

@@ -1,0 +1,14 @@
+## User
+
+Whether a list of natural numbers is in non-decreasing order.
+
+## Type
+
+type
+```bend
+def sorted(xs: List<&2, Nat>) -> Bool:
+```
+
+## Term
+
+```bend

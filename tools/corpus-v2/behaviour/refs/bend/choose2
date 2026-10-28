@@ -1,0 +1,2 @@
+Nat.div(Nat.mul(n, Nat.sub(n, 1n)), 2n)
+```

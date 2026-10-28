@@ -1,0 +1,8 @@
+def t1() -> {fib(0n) == 0n : Nat}:
+  {==}
+
+def t2() -> {fib(1n) == 1n : Nat}:
+  {==}
+
+def t3() -> {fib(10n) == 55n : Nat}:
+  {==}

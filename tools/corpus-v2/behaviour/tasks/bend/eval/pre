@@ -1,0 +1,4 @@
+type Expr is Data:
+  Num{n: Nat}
+  Add{a: Expr, b: Expr}
+  Mul{a: Expr, b: Expr}

@@ -1,0 +1,8 @@
+match xs:
+  case Nil{}:
+    True{}
+  case _ <> Nil{}:
+    True{}
+  case a <> +b <> t:
+    Bool.and(Nat.is_le(a, b), sorted(b <> t))
+```

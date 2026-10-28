@@ -1,0 +1,8 @@
+match n:
+  case 0n:
+    0n
+  case 1n:
+    1n
+  case 2n+ +p:
+    Nat.add(fib(p), fib(1n+p))
+```

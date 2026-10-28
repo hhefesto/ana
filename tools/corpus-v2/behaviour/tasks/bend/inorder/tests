@@ -1,0 +1,5 @@
+def t1() -> {inorder(Leaf{}) == [] : List<&2, Nat>}:
+  {==}
+
+def t2() -> {inorder(Node{Node{Leaf{}, 1n, Leaf{}}, 2n, Node{Leaf{}, 3n, Leaf{}}}) == [1n, 2n, 3n] : List<&2, Nat>}:
+  {==}

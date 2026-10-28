@@ -1,0 +1,1 @@
+def succ_maybe(m: Maybe<&2, Nat>) -> Maybe<&2, Nat>:

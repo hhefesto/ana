@@ -1,0 +1,12 @@
+law add_succ_r:
+  for n: Nat
+  for m: Nat
+  {Nat.add(n, 1n+m) == 1n+Nat.add(n, m) : Nat}
+
+def add_succ_r(n, m):
+  match n:
+    case 0n:
+      {==}
+    case 1n+p:
+      %add_succ_r(p, m) : {1n+Nat.add(p, 1n+m) == 1n+_ : Nat}
+      {==}

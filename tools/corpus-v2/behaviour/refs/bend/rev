@@ -1,0 +1,2 @@
+List.reverse(&2, Nat, xs)
+```

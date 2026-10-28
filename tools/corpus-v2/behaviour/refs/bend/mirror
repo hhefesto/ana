@@ -1,0 +1,6 @@
+match t:
+  case Leaf{}:
+    Leaf{}
+  case Node{l, v, r}:
+    Node{mirror(r), v, mirror(l)}
+```

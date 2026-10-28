@@ -1,0 +1,14 @@
+## User
+
+Exclusive or: true when exactly one of a and b is true.
+
+## Type
+
+type
+```bend
+def xor(a: Bool, b: Bool) -> Bool:
+```
+
+## Term
+
+```bend

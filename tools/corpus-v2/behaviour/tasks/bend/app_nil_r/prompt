@@ -1,0 +1,16 @@
+## User
+
+Prove `app_nil_r`.
+
+## Type
+
+proposition
+```bend
+law app_nil_r:
+  for xs: List<&2, Nat>
+  {List.append(&2, Nat, xs, []) == xs : List<&2, Nat>}
+```
+
+## Term
+
+```bend

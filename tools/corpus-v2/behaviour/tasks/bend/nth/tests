@@ -1,0 +1,8 @@
+def t1() -> {nth([7n, 8n, 9n], 0n) == Some{7n} : Maybe<&2, Nat>}:
+  {==}
+
+def t2() -> {nth([7n, 8n, 9n], 2n) == Some{9n} : Maybe<&2, Nat>}:
+  {==}
+
+def t3() -> {nth([7n, 8n, 9n], 3n) == None{} : Maybe<&2, Nat>}:
+  {==}

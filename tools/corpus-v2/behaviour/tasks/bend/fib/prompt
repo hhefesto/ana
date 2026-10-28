@@ -1,0 +1,14 @@
+## User
+
+The n-th Fibonacci number, with fib(0) = 0 and fib(1) = 1.
+
+## Type
+
+type
+```bend
+def fib(n: Nat) -> Nat:
+```
+
+## Term
+
+```bend

@@ -1,0 +1,6 @@
+match s:
+  case SNil{}:
+    0n
+  case SCon{Chr{c}, t}:
+    Nat.add(Bool.pick(Nat, U32.is_eq(c, 97), 1n, 0n), count_a(t))
+```

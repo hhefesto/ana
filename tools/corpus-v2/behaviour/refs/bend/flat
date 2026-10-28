@@ -1,0 +1,6 @@
+match xss:
+  case Nil{}:
+    Nil{}
+  case xs <> t:
+    List.append(&2, Nat, xs, flat(t))
+```

@@ -1,0 +1,6 @@
+match xs ys:
+  case h <> t g <> u:
+    Nat.add(h, g) <> zadd(t, u)
+  case _ _:
+    Nil{}
+```

@@ -1,0 +1,14 @@
+## User
+
+The factorial of a natural number.
+
+## Type
+
+type
+```bend
+def fact(+n: Nat) -> Nat:
+```
+
+## Term
+
+```bend

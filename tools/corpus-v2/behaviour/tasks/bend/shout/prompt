@@ -1,0 +1,14 @@
+## User
+
+A string followed by an exclamation mark.
+
+## Type
+
+type
+```bend
+def shout(s: String) -> String:
+```
+
+## Term
+
+```bend

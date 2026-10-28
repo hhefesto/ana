@@ -1,0 +1,8 @@
+def t1() -> {implies(True{}, False{}) == False{} : Bool}:
+  {==}
+
+def t2() -> {implies(False{}, False{}) == True{} : Bool}:
+  {==}
+
+def t3() -> {implies(True{}, True{}) == True{} : Bool}:
+  {==}

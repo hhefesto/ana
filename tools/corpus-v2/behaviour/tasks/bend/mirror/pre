@@ -1,0 +1,3 @@
+type Tree is Data:
+  Leaf{}
+  Node{left: Tree, value: Nat, right: Tree}

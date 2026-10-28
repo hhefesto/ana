@@ -1,0 +1,14 @@
+## User
+
+Every element of a list doubled.
+
+## Type
+
+type
+```bend
+def doubles(xs: List<&2, Nat>) -> List<&2, Nat>:
+```
+
+## Term
+
+```bend

@@ -1,0 +1,6 @@
+match xs:
+  case Nil{}:
+    [n]
+  case +h <> +t:
+    Bool.pick(List<&2, Nat>, Nat.is_le(n, h), n <> h <> t, h <> insert(t, n))
+```

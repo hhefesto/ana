@@ -1,0 +1,14 @@
+## User
+
+A sorted list with n inserted, still sorted.
+
+## Type
+
+type
+```bend
+def insert(xs: List<&2, Nat>, +n: Nat) -> List<&2, Nat>:
+```
+
+## Term
+
+```bend

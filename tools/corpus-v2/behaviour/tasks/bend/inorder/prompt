@@ -1,0 +1,22 @@
+## User
+
+The values of a binary tree, left subtree first, then the node, then the right subtree.
+
+## Context
+
+```bend
+type Tree is Data:
+  Leaf{}
+  Node{left: Tree, value: Nat, right: Tree}
+```
+
+## Type
+
+type
+```bend
+def inorder(t: Tree) -> List<&2, Nat>:
+```
+
+## Term
+
+```bend

@@ -1,0 +1,8 @@
+def len_app(xs, ys):
+  match xs:
+    case Nil{}:
+      {==}
+    case h <> t:
+      %len_app(t, ys) : {1n+List.length(&2, Nat, List.append(&2, Nat, t, ys)) == 1n+_ : Nat}
+      {==}
+```

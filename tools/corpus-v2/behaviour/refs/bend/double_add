@@ -1,0 +1,9 @@
+def double_add(n):
+  match n:
+    case 0n:
+      {==}
+    case 1n+ +p:
+      %Equal.sym(Nat, Nat.add(p, 1n+p), 1n+Nat.add(p, p), add_succ_r(p, p)) : {2n+Nat.double(p) == 1n+_ : Nat}
+      %Equal.sym(Nat, Nat.double(p), Nat.add(p, p), double_add(p)) : {2n+_ == 2n+Nat.add(p, p) : Nat}
+      {==}
+```

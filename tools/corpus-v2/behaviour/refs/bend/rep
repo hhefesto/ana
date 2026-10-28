@@ -1,0 +1,6 @@
+match n:
+  case 0n:
+    Nil{}
+  case 1n+k:
+    x <> rep(k, x)
+```

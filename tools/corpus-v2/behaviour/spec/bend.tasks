@@ -1,0 +1,857 @@
+@@# Bend 2 behaviour tasks (2026-10-28), checked with the locked compiler (upstream Bend 2.0.38;
+@@# BEND, else `bend` on PATH): behaviour run writes Task.bend as `import Base`, the pre, then the
+@@# Type and the answer.  A `type` task's Type is the def's header line and the answer its body,
+@@# indented under it (an answer that repeats the header is taken as the whole def); a
+@@# `proposition` task's Type is the `law` and the answer the def proving it.  The tests are
+@@# defs proving equalities by computation (`{==}`): the checker decides them by evaluating
+@@# both sides.  An answer that fails to check alone is `compile`; one whose tests fail,
+@@# `wrong`.  Format: see ../README.txt.
+
+@@ task double type
+@@ user
+Twice a natural number.
+@@ type
+def double(+n: Nat) -> Nat:
+@@ tests
+def t1() -> {double(0n) == 0n : Nat}:
+  {==}
+
+def t2() -> {double(21n) == 42n : Nat}:
+  {==}
+@@ ref
+Nat.add(n, n)
+
+@@ task fact type
+@@ user
+The factorial of a natural number.
+@@ type
+def fact(+n: Nat) -> Nat:
+@@ tests
+def t1() -> {fact(0n) == 1n : Nat}:
+  {==}
+
+def t2() -> {fact(1n) == 1n : Nat}:
+  {==}
+
+def t3() -> {fact(5n) == 120n : Nat}:
+  {==}
+@@ ref
+match n:
+  case 0n:
+    1n
+  case 1n+p:
+    Nat.mul(n, fact(p))
+
+@@ task fib type
+@@ user
+The n-th Fibonacci number, with fib(0) = 0 and fib(1) = 1.
+@@ type
+def fib(n: Nat) -> Nat:
+@@ tests
+def t1() -> {fib(0n) == 0n : Nat}:
+  {==}
+
+def t2() -> {fib(1n) == 1n : Nat}:
+  {==}
+
+def t3() -> {fib(10n) == 55n : Nat}:
+  {==}
+@@ ref
+match n:
+  case 0n:
+    0n
+  case 1n:
+    1n
+  case 2n+ +p:
+    Nat.add(fib(p), fib(1n+p))
+
+@@ task sum_to type
+@@ user
+The sum 0 + 1 + ... + n.
+@@ type
+def sum_to(+n: Nat) -> Nat:
+@@ tests
+def t1() -> {sum_to(0n) == 0n : Nat}:
+  {==}
+
+def t2() -> {sum_to(4n) == 10n : Nat}:
+  {==}
+
+def t3() -> {sum_to(10n) == 55n : Nat}:
+  {==}
+@@ ref
+match n:
+  case 0n:
+    0n
+  case 1n+p:
+    Nat.add(n, sum_to(p))
+
+@@ task pow2 type
+@@ user
+Two to the power n.
+@@ type
+def pow2(n: Nat) -> Nat:
+@@ tests
+def t1() -> {pow2(0n) == 1n : Nat}:
+  {==}
+
+def t2() -> {pow2(5n) == 32n : Nat}:
+  {==}
+@@ ref
+match n:
+  case 0n:
+    1n
+  case 1n+p:
+    Nat.double(pow2(p))
+
+@@ task is_even type
+@@ user
+Whether a natural number is even.
+@@ type
+def is_even(n: Nat) -> Bool:
+@@ tests
+def t1() -> {is_even(0n) == True{} : Bool}:
+  {==}
+
+def t2() -> {is_even(7n) == False{} : Bool}:
+  {==}
+
+def t3() -> {is_even(10n) == True{} : Bool}:
+  {==}
+@@ ref
+match n:
+  case 0n:
+    True{}
+  case 1n:
+    False{}
+  case 2n+p:
+    is_even(p)
+
+@@ task max3 type
+@@ user
+The largest of three natural numbers.
+@@ type
+def max3(+a: Nat, +b: Nat, +c: Nat) -> Nat:
+@@ tests
+def t1() -> {max3(1n, 2n, 3n) == 3n : Nat}:
+  {==}
+
+def t2() -> {max3(9n, 2n, 3n) == 9n : Nat}:
+  {==}
+
+def t3() -> {max3(4n, 8n, 1n) == 8n : Nat}:
+  {==}
+@@ ref
+Nat.max(a, Nat.max(b, c))
+
+@@ task choose2 type
+@@ user
+The number of ways to choose 2 things out of n.
+@@ type
+def choose2(+n: Nat) -> Nat:
+@@ tests
+def t1() -> {choose2(0n) == 0n : Nat}:
+  {==}
+
+def t2() -> {choose2(1n) == 0n : Nat}:
+  {==}
+
+def t3() -> {choose2(5n) == 10n : Nat}:
+  {==}
+@@ ref
+Nat.div(Nat.mul(n, Nat.sub(n, 1n)), 2n)
+
+@@ task sum type
+@@ user
+The sum of a list of natural numbers.
+@@ type
+def sum(xs: List<&2, Nat>) -> Nat:
+@@ tests
+def t1() -> {sum([]) == 0n : Nat}:
+  {==}
+
+def t2() -> {sum([1n, 2n, 3n]) == 6n : Nat}:
+  {==}
+@@ ref
+match xs:
+  case Nil{}:
+    0n
+  case h <> t:
+    Nat.add(h, sum(t))
+
+@@ task len type
+@@ user
+The number of elements of a list of natural numbers.
+@@ type
+def len(xs: List<&2, Nat>) -> Nat:
+@@ tests
+def t1() -> {len([]) == 0n : Nat}:
+  {==}
+
+def t2() -> {len([7n, 7n, 7n]) == 3n : Nat}:
+  {==}
+@@ ref
+match xs:
+  case Nil{}:
+    0n
+  case _ <> t:
+    1n+len(t)
+
+@@ task rev type
+@@ user
+A list of natural numbers, reversed.
+@@ type
+def rev(xs: List<&2, Nat>) -> List<&2, Nat>:
+@@ tests
+def t1() -> {rev([]) == [] : List<&2, Nat>}:
+  {==}
+
+def t2() -> {rev([1n, 2n, 3n]) == [3n, 2n, 1n] : List<&2, Nat>}:
+  {==}
+@@ ref
+List.reverse(&2, Nat, xs)
+
+@@ task maximum type
+@@ user
+The largest element of a list of natural numbers, or 0 for the empty list.
+@@ type
+def maximum(xs: List<&2, Nat>) -> Nat:
+@@ tests
+def t1() -> {maximum([]) == 0n : Nat}:
+  {==}
+
+def t2() -> {maximum([3n, 9n, 4n]) == 9n : Nat}:
+  {==}
+@@ ref
+match xs:
+  case Nil{}:
+    0n
+  case h <> t:
+    Nat.max(h, maximum(t))
+
+@@ task count type
+@@ user
+How many times n occurs in a list.
+@@ type
+def count(xs: List<&2, Nat>, +n: Nat) -> Nat:
+@@ tests
+def t1() -> {count([], 1n) == 0n : Nat}:
+  {==}
+
+def t2() -> {count([1n, 2n, 1n, 1n], 1n) == 3n : Nat}:
+  {==}
+
+def t3() -> {count([1n, 2n, 1n, 1n], 5n) == 0n : Nat}:
+  {==}
+@@ ref
+match xs:
+  case Nil{}:
+    0n
+  case h <> t:
+    Nat.add(Bool.pick(Nat, Nat.is_eq(n, h), 1n, 0n), count(t, n))
+
+@@ task app type
+@@ user
+Two lists joined, the first one's elements first.
+@@ type
+def app(xs: List<&2, Nat>, ys: List<&2, Nat>) -> List<&2, Nat>:
+@@ tests
+def t1() -> {app([], [1n]) == [1n] : List<&2, Nat>}:
+  {==}
+
+def t2() -> {app([1n, 2n], [3n]) == [1n, 2n, 3n] : List<&2, Nat>}:
+  {==}
+@@ ref
+match xs:
+  case Nil{}:
+    ys
+  case h <> t:
+    h <> app(t, ys)
+
+@@ task doubles type
+@@ user
+Every element of a list doubled.
+@@ type
+def doubles(xs: List<&2, Nat>) -> List<&2, Nat>:
+@@ tests
+def t1() -> {doubles([]) == [] : List<&2, Nat>}:
+  {==}
+
+def t2() -> {doubles([1n, 5n]) == [2n, 10n] : List<&2, Nat>}:
+  {==}
+@@ ref
+match xs:
+  case Nil{}:
+    Nil{}
+  case +h <> t:
+    Nat.add(h, h) <> doubles(t)
+
+@@ task last type
+@@ user
+The last element of a list, if it has one.
+@@ type
+def last(xs: List<&2, Nat>) -> Maybe<&2, Nat>:
+@@ tests
+def t1() -> {last([]) == None{} : Maybe<&2, Nat>}:
+  {==}
+
+def t2() -> {last([4n]) == Some{4n} : Maybe<&2, Nat>}:
+  {==}
+
+def t3() -> {last([4n, 5n, 6n]) == Some{6n} : Maybe<&2, Nat>}:
+  {==}
+@@ ref
+match xs:
+  case Nil{}:
+    None{}
+  case h <> Nil{}:
+    Some{h}
+  case _ <> t:
+    last(t)
+
+@@ task nth type
+@@ user
+The element at index n of a list (counting from 0), if there is one.
+@@ type
+def nth(xs: List<&2, Nat>, n: Nat) -> Maybe<&2, Nat>:
+@@ tests
+def t1() -> {nth([7n, 8n, 9n], 0n) == Some{7n} : Maybe<&2, Nat>}:
+  {==}
+
+def t2() -> {nth([7n, 8n, 9n], 2n) == Some{9n} : Maybe<&2, Nat>}:
+  {==}
+
+def t3() -> {nth([7n, 8n, 9n], 3n) == None{} : Maybe<&2, Nat>}:
+  {==}
+@@ ref
+match xs n:
+  case Nil{} _:
+    None{}
+  case h <> _ 0n:
+    Some{h}
+  case _ <> t 1n+k:
+    nth(t, k)
+
+@@ task rep type
+@@ user
+A list holding x, n times.
+@@ type
+def rep(n: Nat, +x: Nat) -> List<&2, Nat>:
+@@ tests
+def t1() -> {rep(0n, 5n) == [] : List<&2, Nat>}:
+  {==}
+
+def t2() -> {rep(3n, 5n) == [5n, 5n, 5n] : List<&2, Nat>}:
+  {==}
+@@ ref
+match n:
+  case 0n:
+    Nil{}
+  case 1n+k:
+    x <> rep(k, x)
+
+@@ task countdown type
+@@ user
+The list n, n-1, ..., 1.
+@@ type
+def countdown(+n: Nat) -> List<&2, Nat>:
+@@ tests
+def t1() -> {countdown(0n) == [] : List<&2, Nat>}:
+  {==}
+
+def t2() -> {countdown(3n) == [3n, 2n, 1n] : List<&2, Nat>}:
+  {==}
+@@ ref
+match n:
+  case 0n:
+    Nil{}
+  case 1n+k:
+    n <> countdown(k)
+
+@@ task sorted type
+@@ user
+Whether a list of natural numbers is in non-decreasing order.
+@@ type
+def sorted(xs: List<&2, Nat>) -> Bool:
+@@ tests
+def t1() -> {sorted([]) == True{} : Bool}:
+  {==}
+
+def t2() -> {sorted([1n, 1n, 4n]) == True{} : Bool}:
+  {==}
+
+def t3() -> {sorted([2n, 1n]) == False{} : Bool}:
+  {==}
+@@ ref
+match xs:
+  case Nil{}:
+    True{}
+  case _ <> Nil{}:
+    True{}
+  case a <> +b <> t:
+    Bool.and(Nat.is_le(a, b), sorted(b <> t))
+
+@@ task insert type
+@@ user
+A sorted list with n inserted, still sorted.
+@@ type
+def insert(xs: List<&2, Nat>, +n: Nat) -> List<&2, Nat>:
+@@ tests
+def t1() -> {insert([], 3n) == [3n] : List<&2, Nat>}:
+  {==}
+
+def t2() -> {insert([1n, 4n, 6n], 5n) == [1n, 4n, 5n, 6n] : List<&2, Nat>}:
+  {==}
+
+def t3() -> {insert([1n, 4n], 0n) == [0n, 1n, 4n] : List<&2, Nat>}:
+  {==}
+@@ ref
+match xs:
+  case Nil{}:
+    [n]
+  case +h <> +t:
+    Bool.pick(List<&2, Nat>, Nat.is_le(n, h), n <> h <> t, h <> insert(t, n))
+
+@@ task isort type
+@@ user
+A list sorted in ascending order by insertion sort, using insert.
+@@ context
+def insert(xs: List<&2, Nat>, +n: Nat) -> List<&2, Nat>
+@@ pre
+def insert(xs: List<&2, Nat>, +n: Nat) -> List<&2, Nat>:
+  match xs:
+    case Nil{}:
+      [n]
+    case +h <> +t:
+      Bool.pick(List<&2, Nat>, Nat.is_le(n, h), n <> h <> t, h <> insert(t, n))
+@@ type
+def isort(xs: List<&2, Nat>) -> List<&2, Nat>:
+@@ tests
+def t1() -> {isort([]) == [] : List<&2, Nat>}:
+  {==}
+
+def t2() -> {isort([3n, 1n, 2n]) == [1n, 2n, 3n] : List<&2, Nat>}:
+  {==}
+
+def t3() -> {isort([5n, 5n, 0n]) == [0n, 5n, 5n] : List<&2, Nat>}:
+  {==}
+@@ ref
+match xs:
+  case Nil{}:
+    Nil{}
+  case h <> t:
+    insert(isort(t), h)
+
+@@ task zadd type
+@@ user
+The pointwise sum of two lists, as long as the shorter one.
+@@ type
+def zadd(xs: List<&2, Nat>, ys: List<&2, Nat>) -> List<&2, Nat>:
+@@ tests
+def t1() -> {zadd([1n, 2n], [10n, 20n, 30n]) == [11n, 22n] : List<&2, Nat>}:
+  {==}
+
+def t2() -> {zadd([], [1n]) == [] : List<&2, Nat>}:
+  {==}
+@@ ref
+match xs ys:
+  case h <> t g <> u:
+    Nat.add(h, g) <> zadd(t, u)
+  case _ _:
+    Nil{}
+
+@@ task flat type
+@@ user
+The lists of a list joined in order.
+@@ type
+def flat(xss: List<&2, List<&2, Nat>>) -> List<&2, Nat>:
+@@ tests
+def t1() -> {flat([]) == [] : List<&2, Nat>}:
+  {==}
+
+def t2() -> {flat([[1n], [], [2n, 3n]]) == [1n, 2n, 3n] : List<&2, Nat>}:
+  {==}
+@@ ref
+match xss:
+  case Nil{}:
+    Nil{}
+  case xs <> t:
+    List.append(&2, Nat, xs, flat(t))
+
+@@ task xor type
+@@ user
+Exclusive or: true when exactly one of a and b is true.
+@@ type
+def xor(a: Bool, b: Bool) -> Bool:
+@@ tests
+def t1() -> {xor(True{}, False{}) == True{} : Bool}:
+  {==}
+
+def t2() -> {xor(True{}, True{}) == False{} : Bool}:
+  {==}
+
+def t3() -> {xor(False{}, False{}) == False{} : Bool}:
+  {==}
+@@ ref
+match a:
+  case True{}:
+    Bool.not(b)
+  case False{}:
+    b
+
+@@ task implies type
+@@ user
+Logical implication: a implies b.
+@@ type
+def implies(a: Bool, b: Bool) -> Bool:
+@@ tests
+def t1() -> {implies(True{}, False{}) == False{} : Bool}:
+  {==}
+
+def t2() -> {implies(False{}, False{}) == True{} : Bool}:
+  {==}
+
+def t3() -> {implies(True{}, True{}) == True{} : Bool}:
+  {==}
+@@ ref
+match a:
+  case True{}:
+    b
+  case False{}:
+    True{}
+
+@@ task or_else type
+@@ user
+The value inside m, or d when m is None.
+@@ type
+def or_else(m: Maybe<&2, Nat>, d: Nat) -> Nat:
+@@ tests
+def t1() -> {or_else(Some{3n}, 9n) == 3n : Nat}:
+  {==}
+
+def t2() -> {or_else(None{}, 9n) == 9n : Nat}:
+  {==}
+@@ ref
+match m:
+  case Some{x}:
+    x
+  case None{}:
+    d
+
+@@ task succ_maybe type
+@@ user
+One more than the value inside m, if there is one.
+@@ type
+def succ_maybe(m: Maybe<&2, Nat>) -> Maybe<&2, Nat>:
+@@ tests
+def t1() -> {succ_maybe(Some{3n}) == Some{4n} : Maybe<&2, Nat>}:
+  {==}
+
+def t2() -> {succ_maybe(None{}) == None{} : Maybe<&2, Nat>}:
+  {==}
+@@ ref
+match m:
+  case Some{x}:
+    Some{1n+x}
+  case None{}:
+    None{}
+
+@@ task size type
+@@ user
+The number of values in a binary tree.
+@@ context
+type Tree is Data:
+  Leaf{}
+  Node{left: Tree, value: Nat, right: Tree}
+@@ pre
+type Tree is Data:
+  Leaf{}
+  Node{left: Tree, value: Nat, right: Tree}
+@@ type
+def size(t: Tree) -> Nat:
+@@ tests
+def t1() -> {size(Leaf{}) == 0n : Nat}:
+  {==}
+
+def t2() -> {size(Node{Node{Leaf{}, 1n, Leaf{}}, 2n, Node{Leaf{}, 3n, Leaf{}}}) == 3n : Nat}:
+  {==}
+@@ ref
+match t:
+  case Leaf{}:
+    0n
+  case Node{l, _, r}:
+    1n+Nat.add(size(l), size(r))
+
+@@ task tsum type
+@@ user
+The sum of the values in a binary tree.
+@@ context
+type Tree is Data:
+  Leaf{}
+  Node{left: Tree, value: Nat, right: Tree}
+@@ pre
+type Tree is Data:
+  Leaf{}
+  Node{left: Tree, value: Nat, right: Tree}
+@@ type
+def tsum(t: Tree) -> Nat:
+@@ tests
+def t1() -> {tsum(Leaf{}) == 0n : Nat}:
+  {==}
+
+def t2() -> {tsum(Node{Node{Leaf{}, 1n, Leaf{}}, 2n, Node{Leaf{}, 3n, Leaf{}}}) == 6n : Nat}:
+  {==}
+@@ ref
+match t:
+  case Leaf{}:
+    0n
+  case Node{l, v, r}:
+    Nat.add(tsum(l), Nat.add(v, tsum(r)))
+
+@@ task mirror type
+@@ user
+A binary tree with every node's children swapped.
+@@ context
+type Tree is Data:
+  Leaf{}
+  Node{left: Tree, value: Nat, right: Tree}
+@@ pre
+type Tree is Data:
+  Leaf{}
+  Node{left: Tree, value: Nat, right: Tree}
+@@ type
+def mirror(t: Tree) -> Tree:
+@@ tests
+def t1() -> {mirror(Leaf{}) == Leaf{} : Tree}:
+  {==}
+
+def t2() -> {mirror(Node{Node{Leaf{}, 1n, Leaf{}}, 2n, Leaf{}}) == Node{Leaf{}, 2n, Node{Leaf{}, 1n, Leaf{}}} : Tree}:
+  {==}
+@@ ref
+match t:
+  case Leaf{}:
+    Leaf{}
+  case Node{l, v, r}:
+    Node{mirror(r), v, mirror(l)}
+
+@@ task inorder type
+@@ user
+The values of a binary tree, left subtree first, then the node, then the right subtree.
+@@ context
+type Tree is Data:
+  Leaf{}
+  Node{left: Tree, value: Nat, right: Tree}
+@@ pre
+type Tree is Data:
+  Leaf{}
+  Node{left: Tree, value: Nat, right: Tree}
+@@ type
+def inorder(t: Tree) -> List<&2, Nat>:
+@@ tests
+def t1() -> {inorder(Leaf{}) == [] : List<&2, Nat>}:
+  {==}
+
+def t2() -> {inorder(Node{Node{Leaf{}, 1n, Leaf{}}, 2n, Node{Leaf{}, 3n, Leaf{}}}) == [1n, 2n, 3n] : List<&2, Nat>}:
+  {==}
+@@ ref
+match t:
+  case Leaf{}:
+    Nil{}
+  case Node{l, v, r}:
+    List.append(&2, Nat, inorder(l), v <> inorder(r))
+
+@@ task eval type
+@@ user
+The value of an arithmetic expression.
+@@ context
+type Expr is Data:
+  Num{n: Nat}
+  Add{a: Expr, b: Expr}
+  Mul{a: Expr, b: Expr}
+@@ pre
+type Expr is Data:
+  Num{n: Nat}
+  Add{a: Expr, b: Expr}
+  Mul{a: Expr, b: Expr}
+@@ type
+def eval(e: Expr) -> Nat:
+@@ tests
+def t1() -> {eval(Num{4n}) == 4n : Nat}:
+  {==}
+
+def t2() -> {eval(Add{Num{2n}, Mul{Num{3n}, Num{4n}}}) == 14n : Nat}:
+  {==}
+@@ ref
+match e:
+  case Num{n}:
+    n
+  case Add{a, b}:
+    Nat.add(eval(a), eval(b))
+  case Mul{a, b}:
+    Nat.mul(eval(a), eval(b))
+
+@@ task str_len type
+@@ user
+The number of characters in a string.
+@@ type
+def str_len(s: String) -> Nat:
+@@ tests
+def t1() -> {str_len("") == 0n : Nat}:
+  {==}
+
+def t2() -> {str_len("bend") == 4n : Nat}:
+  {==}
+@@ ref
+match s:
+  case SNil{}:
+    0n
+  case SCon{_, t}:
+    1n+str_len(t)
+
+@@ task count_a type
+@@ user
+How many times the letter `a` occurs in a string.
+@@ type
+def count_a(s: String) -> Nat:
+@@ tests
+def t1() -> {count_a("") == 0n : Nat}:
+  {==}
+
+def t2() -> {count_a("banana") == 3n : Nat}:
+  {==}
+@@ ref
+match s:
+  case SNil{}:
+    0n
+  case SCon{Chr{c}, t}:
+    Nat.add(Bool.pick(Nat, U32.is_eq(c, 97), 1n, 0n), count_a(t))
+
+@@ task shout type
+@@ user
+A string followed by an exclamation mark.
+@@ type
+def shout(s: String) -> String:
+@@ tests
+def t1() -> {shout("hi") == "hi!" : String}:
+  {==}
+
+def t2() -> {shout("") == "!" : String}:
+  {==}
+@@ ref
+s ++ "!"
+
+@@ task add_zero_r proposition
+@@ user
+Prove `add_zero_r`.
+@@ type
+law add_zero_r:
+  for n: Nat
+  {Nat.add(n, 0n) == n : Nat}
+@@ ref
+def add_zero_r(n):
+  match n:
+    case 0n:
+      {==}
+    case 1n+p:
+      %add_zero_r(p) : {1n+Nat.add(p, 0n) == 1n+_ : Nat}
+      {==}
+
+@@ task add_succ_r proposition
+@@ user
+Prove `add_succ_r`.
+@@ type
+law add_succ_r:
+  for n: Nat
+  for m: Nat
+  {Nat.add(n, 1n+m) == 1n+Nat.add(n, m) : Nat}
+@@ ref
+def add_succ_r(n, m):
+  match n:
+    case 0n:
+      {==}
+    case 1n+p:
+      %add_succ_r(p, m) : {1n+Nat.add(p, 1n+m) == 1n+_ : Nat}
+      {==}
+
+@@ task not_not proposition
+@@ user
+Prove `not_not`.
+@@ type
+law not_not:
+  for b: Bool
+  {Bool.not(Bool.not(b)) == b : Bool}
+@@ ref
+def not_not(b):
+  match b:
+    case True{}:
+      {==}
+    case False{}:
+      {==}
+
+@@ task app_nil_r proposition
+@@ user
+Prove `app_nil_r`.
+@@ type
+law app_nil_r:
+  for xs: List<&2, Nat>
+  {List.append(&2, Nat, xs, []) == xs : List<&2, Nat>}
+@@ ref
+def app_nil_r(xs):
+  match xs:
+    case Nil{}:
+      {==}
+    case h <> t:
+      %app_nil_r(t) : {h <> List.append(&2, Nat, t, []) == h <> _ : List<&2, Nat>}
+      {==}
+
+@@ task len_app proposition
+@@ user
+Prove `len_app`.
+@@ type
+law len_app:
+  for xs: List<&2, Nat>
+  for ys: List<&2, Nat>
+  {List.length(&2, Nat, List.append(&2, Nat, xs, ys)) == Nat.add(List.length(&2, Nat, xs), List.length(&2, Nat, ys)) : Nat}
+@@ ref
+def len_app(xs, ys):
+  match xs:
+    case Nil{}:
+      {==}
+    case h <> t:
+      %len_app(t, ys) : {1n+List.length(&2, Nat, List.append(&2, Nat, t, ys)) == 1n+_ : Nat}
+      {==}
+
+@@ task double_add proposition
+@@ user
+Prove `double_add`, using add_succ_r.
+@@ context
+law add_succ_r:
+  for n: Nat
+  for m: Nat
+  {Nat.add(n, 1n+m) == 1n+Nat.add(n, m) : Nat}
+@@ pre
+law add_succ_r:
+  for n: Nat
+  for m: Nat
+  {Nat.add(n, 1n+m) == 1n+Nat.add(n, m) : Nat}
+
+def add_succ_r(n, m):
+  match n:
+    case 0n:
+      {==}
+    case 1n+p:
+      %add_succ_r(p, m) : {1n+Nat.add(p, 1n+m) == 1n+_ : Nat}
+      {==}
+@@ type
+law double_add:
+  for n: Nat
+  {Nat.double(n) == Nat.add(n, n) : Nat}
+@@ ref
+def double_add(n):
+  match n:
+    case 0n:
+      {==}
+    case 1n+ +p:
+      %Equal.sym(Nat, Nat.add(p, 1n+p), 1n+Nat.add(p, p), add_succ_r(p, p)) : {2n+Nat.double(p) == 1n+_ : Nat}
+      %Equal.sym(Nat, Nat.double(p), Nat.add(p, p), double_add(p)) : {2n+_ == 2n+Nat.add(p, p) : Nat}
+      {==}

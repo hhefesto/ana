@@ -1,0 +1,14 @@
+## User
+
+The largest of three natural numbers.
+
+## Type
+
+type
+```bend
+def max3(+a: Nat, +b: Nat, +c: Nat) -> Nat:
+```
+
+## Term
+
+```bend

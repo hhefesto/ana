@@ -1,0 +1,6 @@
+match t:
+  case Leaf{}:
+    0n
+  case Node{l, _, r}:
+    1n+Nat.add(size(l), size(r))
+```

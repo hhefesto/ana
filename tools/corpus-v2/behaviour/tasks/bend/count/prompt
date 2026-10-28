@@ -1,0 +1,14 @@
+## User
+
+How many times n occurs in a list.
+
+## Type
+
+type
+```bend
+def count(xs: List<&2, Nat>, +n: Nat) -> Nat:
+```
+
+## Term
+
+```bend

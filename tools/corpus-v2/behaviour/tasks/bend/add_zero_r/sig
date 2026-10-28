@@ -1,0 +1,3 @@
+law add_zero_r:
+  for n: Nat
+  {Nat.add(n, 0n) == n : Nat}

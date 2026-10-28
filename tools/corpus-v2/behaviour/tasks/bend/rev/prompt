@@ -1,0 +1,14 @@
+## User
+
+A list of natural numbers, reversed.
+
+## Type
+
+type
+```bend
+def rev(xs: List<&2, Nat>) -> List<&2, Nat>:
+```
+
+## Term
+
+```bend

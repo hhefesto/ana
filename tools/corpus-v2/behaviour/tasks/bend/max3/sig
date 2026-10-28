@@ -1,0 +1,1 @@
+def max3(+a: Nat, +b: Nat, +c: Nat) -> Nat:

@@ -1,0 +1,14 @@
+## User
+
+Whether a natural number is even.
+
+## Type
+
+type
+```bend
+def is_even(n: Nat) -> Bool:
+```
+
+## Term
+
+```bend

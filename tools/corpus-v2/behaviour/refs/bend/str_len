@@ -1,0 +1,6 @@
+match s:
+  case SNil{}:
+    0n
+  case SCon{_, t}:
+    1n+str_len(t)
+```

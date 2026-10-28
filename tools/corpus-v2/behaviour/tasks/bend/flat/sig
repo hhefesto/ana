@@ -1,0 +1,1 @@
+def flat(xss: List<&2, List<&2, Nat>>) -> List<&2, Nat>:

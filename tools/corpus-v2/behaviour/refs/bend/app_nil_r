@@ -1,0 +1,8 @@
+def app_nil_r(xs):
+  match xs:
+    case Nil{}:
+      {==}
+    case h <> t:
+      %app_nil_r(t) : {h <> List.append(&2, Nat, t, []) == h <> _ : List<&2, Nat>}
+      {==}
+```

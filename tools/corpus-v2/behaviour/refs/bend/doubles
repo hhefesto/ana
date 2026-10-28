@@ -1,0 +1,6 @@
+match xs:
+  case Nil{}:
+    Nil{}
+  case +h <> t:
+    Nat.add(h, h) <> doubles(t)
+```

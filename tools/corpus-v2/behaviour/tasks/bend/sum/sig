@@ -1,0 +1,1 @@
+def sum(xs: List<&2, Nat>) -> Nat:

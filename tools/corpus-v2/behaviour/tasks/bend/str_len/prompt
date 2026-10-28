@@ -1,0 +1,14 @@
+## User
+
+The number of characters in a string.
+
+## Type
+
+type
+```bend
+def str_len(s: String) -> Nat:
+```
+
+## Term
+
+```bend

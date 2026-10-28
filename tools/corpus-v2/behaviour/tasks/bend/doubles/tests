@@ -1,0 +1,5 @@
+def t1() -> {doubles([]) == [] : List<&2, Nat>}:
+  {==}
+
+def t2() -> {doubles([1n, 5n]) == [2n, 10n] : List<&2, Nat>}:
+  {==}

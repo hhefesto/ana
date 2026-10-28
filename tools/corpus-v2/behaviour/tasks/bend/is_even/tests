@@ -1,0 +1,8 @@
+def t1() -> {is_even(0n) == True{} : Bool}:
+  {==}
+
+def t2() -> {is_even(7n) == False{} : Bool}:
+  {==}
+
+def t3() -> {is_even(10n) == True{} : Bool}:
+  {==}

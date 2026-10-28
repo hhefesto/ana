@@ -1,0 +1,14 @@
+## User
+
+Logical implication: a implies b.
+
+## Type
+
+type
+```bend
+def implies(a: Bool, b: Bool) -> Bool:
+```
+
+## Term
+
+```bend

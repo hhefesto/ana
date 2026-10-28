@@ -1,0 +1,14 @@
+## User
+
+One more than the value inside m, if there is one.
+
+## Type
+
+type
+```bend
+def succ_maybe(m: Maybe<&2, Nat>) -> Maybe<&2, Nat>:
+```
+
+## Term
+
+```bend

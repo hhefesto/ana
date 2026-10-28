@@ -1,0 +1,1 @@
+def or_else(m: Maybe<&2, Nat>, d: Nat) -> Nat:

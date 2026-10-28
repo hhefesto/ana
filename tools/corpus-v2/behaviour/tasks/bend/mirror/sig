@@ -1,0 +1,1 @@
+def mirror(t: Tree) -> Tree:

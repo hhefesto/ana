@@ -1,0 +1,6 @@
+match xs:
+  case Nil{}:
+    0n
+  case h <> t:
+    Nat.add(Bool.pick(Nat, Nat.is_eq(n, h), 1n, 0n), count(t, n))
+```

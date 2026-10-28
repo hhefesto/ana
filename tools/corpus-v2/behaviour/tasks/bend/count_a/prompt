@@ -1,0 +1,14 @@
+## User
+
+How many times the letter `a` occurs in a string.
+
+## Type
+
+type
+```bend
+def count_a(s: String) -> Nat:
+```
+
+## Term
+
+```bend

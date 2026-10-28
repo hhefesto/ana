@@ -1,0 +1,23 @@
+## User
+
+The value of an arithmetic expression.
+
+## Context
+
+```bend
+type Expr is Data:
+  Num{n: Nat}
+  Add{a: Expr, b: Expr}
+  Mul{a: Expr, b: Expr}
+```
+
+## Type
+
+type
+```bend
+def eval(e: Expr) -> Nat:
+```
+
+## Term
+
+```bend

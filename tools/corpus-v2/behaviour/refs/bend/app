@@ -1,0 +1,6 @@
+match xs:
+  case Nil{}:
+    ys
+  case h <> t:
+    h <> app(t, ys)
+```

@@ -1,0 +1,8 @@
+def t1() -> {sum_to(0n) == 0n : Nat}:
+  {==}
+
+def t2() -> {sum_to(4n) == 10n : Nat}:
+  {==}
+
+def t3() -> {sum_to(10n) == 55n : Nat}:
+  {==}

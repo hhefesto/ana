@@ -1,0 +1,14 @@
+## User
+
+A list holding x, n times.
+
+## Type
+
+type
+```bend
+def rep(n: Nat, +x: Nat) -> List<&2, Nat>:
+```
+
+## Term
+
+```bend

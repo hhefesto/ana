@@ -1,0 +1,5 @@
+def t1() -> {rep(0n, 5n) == [] : List<&2, Nat>}:
+  {==}
+
+def t2() -> {rep(3n, 5n) == [5n, 5n, 5n] : List<&2, Nat>}:
+  {==}

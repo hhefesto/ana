@@ -1,0 +1,8 @@
+def t1() -> {xor(True{}, False{}) == True{} : Bool}:
+  {==}
+
+def t2() -> {xor(True{}, True{}) == False{} : Bool}:
+  {==}
+
+def t3() -> {xor(False{}, False{}) == False{} : Bool}:
+  {==}

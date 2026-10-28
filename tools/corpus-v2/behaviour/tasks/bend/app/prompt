@@ -1,0 +1,14 @@
+## User
+
+Two lists joined, the first one's elements first.
+
+## Type
+
+type
+```bend
+def app(xs: List<&2, Nat>, ys: List<&2, Nat>) -> List<&2, Nat>:
+```
+
+## Term
+
+```bend

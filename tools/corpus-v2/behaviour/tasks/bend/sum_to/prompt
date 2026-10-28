@@ -1,0 +1,14 @@
+## User
+
+The sum 0 + 1 + ... + n.
+
+## Type
+
+type
+```bend
+def sum_to(+n: Nat) -> Nat:
+```
+
+## Term
+
+```bend

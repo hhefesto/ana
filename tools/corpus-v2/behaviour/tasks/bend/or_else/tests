@@ -1,0 +1,5 @@
+def t1() -> {or_else(Some{3n}, 9n) == 3n : Nat}:
+  {==}
+
+def t2() -> {or_else(None{}, 9n) == 9n : Nat}:
+  {==}

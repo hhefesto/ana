@@ -1,0 +1,8 @@
+match xs n:
+  case Nil{} _:
+    None{}
+  case h <> _ 0n:
+    Some{h}
+  case _ <> t 1n+k:
+    nth(t, k)
+```
