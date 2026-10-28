@@ -13,11 +13,18 @@ import ./Ratio.bend as R
 # run/v5/collect/bend/held-decl.files; the port's, Codex's and the fixed
 # files' declarations are checked against the vaults and holdouts first).
 #
-#   bend-corpus-v2 files-jsonl PREFIX DIR OUT
+#   bend-corpus-v2 files-jsonl PREFIX DIR OUT [skip=GLOB]... [drop=NAME]...
 #       every *.bend file under DIR (`find`, bytewise order) as a JSON line
 #       `{"id": "PREFIX/REL", "text": ...}` (Lib's v2.py.line, as Python's
 #       json.dumps wrote them); a file holding a NUL byte is left out and
-#       counted; OUT.stats
+#       counted; OUT.stats.  (2026-10-27) skip=GLOB leaves out the files
+#       find's `-path GLOB` matches (the whole path, DIR in it: `*/Test.bend`,
+#       `*/fixtures/*`); drop=NAME takes every top-level def named NAME out
+#       of each file (NAME ending in `*`: every name with that prefix), with
+#       the comment lines just above it, the rest of the file as it was, a
+#       newline after every line (for a test harness: `drop=main
+#       drop=observations*`); the stats then add `defs-dropped` and
+#       `bytes-dropped`.  With neither option the output is as before.
 #
 #   bend-corpus-v2 raw-drop OUT IN.jsonl... drop=FILE...
 #       the records of each IN (JSON lines), in order, less those whose id a
@@ -65,36 +72,158 @@ def itk.has.nul(xs: List<&2, U32>) -> Bool:
     case +c <> t:
       Bool.or(U32.is_eq(c, 0), itk.has.nul(t))
 
+# drop=: a file's lines, each a kind: a top-level comment (`#` in column
+# 0), a top-level line that starts a def to keep or one to drop, or any
+# other line (blank or indented: the current block's)
+type ItDk is Data:
+  DkBody{}
+  DkNote{}
+  DkKeep{}
+  DkDrop{}
+
+# the lines kept (latest first), the comment lines not yet placed (latest
+# first), the defs and bytes dropped
+type ItDd is Type:
+  ItDd{out: List<&2, List<&2, U32>>, buf: List<&2, List<&2, U32>>, n: Nat, b: Nat}
+
+# a def header's name: up to `(`, `:`, ` ` or `<` (stop: the next byte is one)
+def itk.dd.stop(xs: List<&2, U32>) -> Bool:
+  match xs:
+    case Nil{}:
+      True{}
+    case +c <> _:
+      Bool.or(Bool.or(U32.is_eq(c, 40), U32.is_eq(c, 58)), Bool.or(U32.is_eq(c, 32), U32.is_eq(c, 60)))
+
+def itk.dd.name(xs: List<&2, U32>, stop: Bool) -> List<&2, U32>:
+  match xs stop:
+    case Nil{} _:
+      Nil{}
+    case _ True{}:
+      Nil{}
+    case c <> +t False{}:
+      c <> itk.dd.name(t, itk.dd.stop(t))
+
+# does a drop= word (NAME, or PREFIX*) name it
+def itk.dd.one(+w: List<&2, U32>, +name: List<&2, U32>) -> Bool:
+  +star = List.reverse(&2, U32, w)
+  Bool.pick(Bool, S.head.is(star, 42), S.prefix(name, List.reverse(&2, U32, List.drop(&2, U32, star, 1n))), S.eq(name, w))
+
+def itk.dd.any(ws: List<&2, List<&2, U32>>, +name: List<&2, U32>) -> Bool:
+  match ws:
+    case Nil{}:
+      False{}
+    case w <> more:
+      Bool.or(itk.dd.one(w, name), itk.dd.any(more, name))
+
+def itk.dd.pick(note: Bool, body: Bool, hit: Bool) -> ItDk:
+  match note body hit:
+    case True{} _ _:
+      DkNote{}
+    case False{} True{} _:
+      DkBody{}
+    case False{} False{} True{}:
+      DkDrop{}
+    case False{} False{} False{}:
+      DkKeep{}
+
+def itk.dd.kind.of(+ws: List<&2, List<&2, U32>>, +l: List<&2, U32>) -> ItDk:
+  +body = Bool.or(Nat.is_eq(S.len(l), 0n), Bool.or(S.head.is(l, 32), S.head.is(l, 9)))
+  +rest = List.drop(&2, U32, l, 4n)
+  +hit = Bool.and(S.prefix(l, S.b("def ")), itk.dd.any(ws, itk.dd.name(rest, itk.dd.stop(rest))))
+  itk.dd.pick(S.head.is(l, 35), body, hit)
+
+def itk.dd.kind(+ws: List<&2, List<&2, U32>>, ls: List<&2, List<&2, U32>>) -> ItDk:
+  match ls:
+    case Nil{}:
+      DkBody{}
+    case l <> _:
+      itk.dd.kind.of(ws, l)
+
+def itk.dd.bytes(xs: List<&2, List<&2, U32>>) -> Nat:
+  match xs:
+    case Nil{}:
+      0n
+    case x <> more:
+      Nat.add(1n+S.len(x), itk.dd.bytes(more))
+
+# the pending comments and a line, kept or dropped with the current block
+def itk.dd.put(drop: Bool, +l: List<&2, U32>, s: ItDd) -> ItDd:
+  match drop s:
+    case True{} ItDd{o, +f, n, +b}:
+      ItDd{o, Nil{}, n, Nat.add(b, Nat.add(1n+S.len(l), itk.dd.bytes(f)))}
+    case False{} ItDd{o, f, n, b}:
+      ItDd{l <> List.append(&2, List<&2, U32>, f, o), Nil{}, n, b}
+
+def itk.dd.go(ls: List<&2, List<&2, U32>>, k: ItDk, +ws: List<&2, List<&2, U32>>, +drop: Bool, s: ItDd) -> ItDd:
+  match ls k s:
+    case Nil{} _ ItDd{o, f, n, b}:
+      ItDd{List.append(&2, List<&2, U32>, f, o), Nil{}, n, b}
+    case +l <> +more DkNote{} ItDd{o, f, n, b}:
+      itk.dd.go(more, itk.dd.kind(ws, more), ws, drop, ItDd{o, l <> f, n, b})
+    case +l <> +more DkKeep{} st:
+      itk.dd.go(more, itk.dd.kind(ws, more), ws, False{}, itk.dd.put(False{}, l, st))
+    case +l <> +more DkDrop{} ItDd{o, f, n, b}:
+      itk.dd.go(more, itk.dd.kind(ws, more), ws, True{}, itk.dd.put(True{}, l, ItDd{o, f, 1n+n, b}))
+    case +l <> +more DkBody{} st:
+      itk.dd.go(more, itk.dd.kind(ws, more), ws, drop, itk.dd.put(drop, l, st))
+
+def itk.dd.lines(xs: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case x <> more:
+      List.append(&2, U32, x, 10 <> itk.dd.lines(more))
+
+def itk.dd.out(s: ItDd) -> List<&2, U32> & Nat & Nat:
+  match s:
+    case ItDd{o, _, n, b}:
+      (itk.dd.lines(List.reverse(&2, List<&2, U32>, o)), n, b)
+
+# a file less its dropped defs, and how many defs and bytes went
+def itk.dd.file(+ws: List<&2, List<&2, U32>>, +t: List<&2, U32>) -> List<&2, U32> & Nat & Nat:
+  +ls = S.split(t, 10)
+  itk.dd.out(itk.dd.go(ls, itk.dd.kind(ws, ls), ws, False{}, ItDd{Nil{}, Nil{}, 0n, 0n}))
+
 type ItFj is Type:
-  ItFj{o: File, n: Nat, nul: Nat, b: Nat}
+  ItFj{o: File, n: Nat, nul: Nat, b: Nat, dn: Nat, db: Nat}
 
-def itk.fj.put(+nul: Bool, +id: List<&2, U32>, +t: List<&2, U32>, s: ItFj) -> IO(ItFj):
-  match nul s:
-    case True{} ItFj{o, +n, +z, +b}:
-      IO.pure(ItFj, ItFj{o, n, 1n+z, b})
-    case False{} ItFj{o, +n, +z, +b}:
+def itk.fj.emit(+id: List<&2, U32>, x: List<&2, U32> & Nat & Nat, s: ItFj) -> IO(ItFj):
+  (t, dn2, db2) = x
+  match s:
+    case ItFj{o, +n, +z, +b, +dn, +db}:
       do IO<ItFj>:
-        o2 : File <- S.emit(o, L.v2.py.line(id, t))
-        return ItFj{o2, 1n+n, z, Nat.add(b, S.len(t))}
+        +u : List<&2, U32> <- IO.pure(List<&2, U32>, t)
+        o2 : File <- S.emit(o, L.v2.py.line(id, u))
+        return ItFj{o2, 1n+n, z, Nat.add(b, S.len(u)), Nat.add(dn, dn2), Nat.add(db, db2)}
 
-def itk.fj.go(+pre: String, +dir: String, rs: List<&2, List<&2, U32>>, s: ItFj) -> IO(ItFj):
+def itk.fj.put(+ws: List<&2, List<&2, U32>>, +nul: Bool, +id: List<&2, U32>, +t: List<&2, U32>, s: ItFj, dd: Bool) -> IO(ItFj):
+  match nul s dd:
+    case True{} ItFj{o, +n, +z, +b, +dn, +db} _:
+      IO.pure(ItFj, ItFj{o, n, 1n+z, b, dn, db})
+    case False{} st False{}:
+      itk.fj.emit(id, (t, 0n, 0n), st)
+    case False{} st True{}:
+      itk.fj.emit(id, itk.dd.file(ws, t), st)
+
+def itk.fj.go(+ws: List<&2, List<&2, U32>>, +pre: String, +dir: String, rs: List<&2, List<&2, U32>>, s: ItFj) -> IO(ItFj):
   match rs:
     case Nil{}:
       IO.pure(ItFj, s)
     case +rel <> more:
       do IO<ItFj>:
         +t : List<&2, U32> <- S.read(dir ++ "/" ++ S.str(rel))
-        s2 : ItFj <- itk.fj.put(itk.has.nul(t), L.v2.concat([S.b(pre), [47], rel]), t, s)
-        itk.fj.go(pre, dir, more, s2)
+        s2 : ItFj <- itk.fj.put(ws, itk.has.nul(t), L.v2.concat([S.b(pre), [47], rel]), t, s, Bool.not(Nat.is_eq(List.length(&2, List<&2, U32>, ws), 0n)))
+        itk.fj.go(ws, pre, dir, more, s2)
 
-def itk.fj.fin(+out: String, s: ItFj) -> IO(Unit):
+def itk.fj.fin(+dropping: Bool, +out: String, s: ItFj) -> IO(Unit):
   match s:
-    case ItFj{o, +n, +z, +b}:
-      +st = "bytes " ++ Nat.show(b) ++ "\nfiles " ++ Nat.show(n) ++ "\nnul " ++ Nat.show(z) ++ "\n"
+    case ItFj{o, +n, +z, +b, +dn, +db}:
+      +more = Bool.pick(String, dropping, "defs-dropped " ++ Nat.show(dn) ++ "\nbytes-dropped " ++ Nat.show(db) ++ "\n", "")
+      +st = "bytes " ++ Nat.show(b) ++ "\nfiles " ++ Nat.show(n) ++ "\nnul " ++ Nat.show(z) ++ "\n" ++ more
       do IO<Unit>:
         File.close(o)
         S.write(out ++ ".stats", S.b(st))
-        itk.log(out ++ ": " ++ Nat.show(n) ++ " files, " ++ Nat.show(b) ++ " bytes; " ++ Nat.show(z) ++ " with a NUL left out")
+        itk.log(out ++ ": " ++ Nat.show(n) ++ " files, " ++ Nat.show(b) ++ " bytes; " ++ Nat.show(z) ++ " with a NUL left out" ++ Bool.pick(String, dropping, "; " ++ Nat.show(dn) ++ " defs (" ++ Nat.show(db) ++ " bytes) dropped", ""))
 
 # the files under DIR, as paths relative to it, in bytewise order
 def itk.find(+dir: String, +name: String) -> IO(List<&2, List<&2, U32>>):
@@ -103,12 +232,29 @@ def itk.find(+dir: String, +name: String) -> IO(List<&2, List<&2, U32>>):
     Bool.pick(IO(List<&2, List<&2, U32>>), U32.is_eq(S.Out.status(o), 0), IO.pure(List<&2, List<&2, U32>>, S.bytes.sort(itk.lines(S.Out.text(o)))),
       IO.die(List<&2, List<&2, U32>>, 1, "intake: find " ++ dir ++ " failed: " ++ S.str(S.lines.take(S.Out.text(o), 3n))))
 
-def itk.files.jsonl(+pre: String, +dir: String, +out: String) -> IO(Unit):
+# find's `-not -path GLOB` for each skip= word
+def itk.find.not(gs: List<&2, String>) -> List<String>:
+  match gs:
+    case Nil{}:
+      ["-printf", "%P\\n"]
+    case g <> more:
+      "-not" <> "-path" <> g <> itk.find.not(more)
+
+def itk.find.skip(+dir: String, +name: String, +gs: List<&2, String>) -> IO(List<&2, List<&2, U32>>):
+  do IO<List<&2, List<&2, U32>>>:
+    +o : S.Out <- S.run(".", ["LC_ALL=C"], 600, "find", dir <> "-type" <> "f" <> "-name" <> name <> itk.find.not(gs), Nil{})
+    Bool.pick(IO(List<&2, List<&2, U32>>), U32.is_eq(S.Out.status(o), 0), IO.pure(List<&2, List<&2, U32>>, S.bytes.sort(itk.lines(S.Out.text(o)))),
+      IO.die(List<&2, List<&2, U32>>, 1, "intake: find " ++ dir ++ " failed: " ++ S.str(S.lines.take(S.Out.text(o), 3n))))
+
+def itk.files.jsonl.with(+pre: String, +dir: String, +out: String, +gs: List<&2, String>, +ws: List<&2, List<&2, U32>>) -> IO(Unit):
   do IO<Unit>:
-    rs : List<&2, List<&2, U32>> <- itk.find(dir, "*.bend")
+    rs : List<&2, List<&2, U32>> <- itk.find.skip(dir, "*.bend", gs)
     o : File <- IO.try(File, File.open(out, "w"))
-    s : ItFj <- itk.fj.go(pre, dir, rs, ItFj{o, 0n, 0n, 0n})
-    itk.fj.fin(out, s)
+    s : ItFj <- itk.fj.go(ws, pre, dir, rs, ItFj{o, 0n, 0n, 0n, 0n, 0n})
+    itk.fj.fin(Bool.not(Nat.is_eq(List.length(&2, List<&2, U32>, ws), 0n)), out, s)
+
+def itk.files.jsonl(+pre: String, +dir: String, +out: String) -> IO(Unit):
+  itk.files.jsonl.with(pre, dir, out, Nil{}, Nil{})
 
 # raw-drop -------------------------------------------------------------------------------------
 
@@ -353,12 +499,36 @@ def itk.say(+p: String) -> IO(Unit):
     +t : List<&2, U32> <- S.read(p)
     IO.print(S.str(t))
 
+type ItFo is Data:
+  ItFo{skips: List<&2, String>, drops: List<&2, List<&2, U32>>, bad: List<&2, String>}
+
+def itk.fo.arg(+w: String, a: ItFo) -> ItFo:
+  match a:
+    case ItFo{+g, +d, +x}:
+      +b = S.b(w)
+      Bool.pick(ItFo, S.prefix(b, S.b("skip=")), ItFo{S.str(List.drop(&2, U32, b, 5n)) <> g, d, x},
+        Bool.pick(ItFo, S.prefix(b, S.b("drop=")), ItFo{g, List.drop(&2, U32, b, 5n) <> d, x}, ItFo{g, d, w <> x}))
+
+def itk.fo.args(ws: List<String>) -> ItFo:
+  match ws:
+    case Nil{}:
+      ItFo{Nil{}, Nil{}, Nil{}}
+    case +w <> more:
+      itk.fo.arg(w, itk.fo.args(more))
+
+def itk.main.files.of(+pre: String, +dir: String, +out: String, a: ItFo) -> IO(Unit):
+  match a:
+    case ItFo{g, d, Nil{}}:
+      itk.files.jsonl.with(pre, dir, out, g, d)
+    case ItFo{_, _, w <> _}:
+      IO.die(Unit, 2, "files-jsonl: not an option: " ++ w ++ " (skip=GLOB or drop=NAME)")
+
 def itk.main.files(xs: List<String>) -> IO(Unit):
   match xs:
-    case +pre <> +dir <> +out <> Nil{}:
-      itk.files.jsonl(pre, dir, out)
+    case +pre <> +dir <> +out <> more:
+      itk.main.files.of(pre, dir, out, itk.fo.args(more))
     case _:
-      IO.die(Unit, 2, "usage: bend-corpus-v2 files-jsonl PREFIX DIR OUT")
+      IO.die(Unit, 2, "usage: bend-corpus-v2 files-jsonl PREFIX DIR OUT [skip=GLOB]... [drop=NAME]...")
 
 def itk.main.drop.of(+out: String, a: ItRa) -> IO(Unit):
   match a:

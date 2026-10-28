@@ -396,6 +396,39 @@ def rt.fj(+dir: String) -> IO(List<&2, RtCk>):
         rt.is(o, "{\"id\": \"own:x/b.bend\", \"text\": \"def b() -> String:\\n  \\\"q\\\\\\\"\\\"\\n\"}\n{\"id\": \"own:x/sub/a.bend\", \"text\": \"import Base\\n\\ndef a() -> U32:\\n  1\\n\"}\n")},
       RtCk{"files-jsonl: the stats", rt.is(s, "bytes 60\nfiles 2\nnul 1\n")}]
 
+# files-jsonl's drop= (2026-10-27): a file less the named defs and the comments just above them
+def rt.dd.text(x: List<&2, U32> & Nat & Nat) -> List<&2, U32>:
+  (t, _, _) = x
+  t
+
+def rt.dd.count.is(x: List<&2, U32> & Nat & Nat, +n: Nat, +b: Nat) -> Bool:
+  (_, n2, b2) = x
+  Bool.and(Nat.is_eq(n, n2), Nat.is_eq(b, b2))
+
+def rt.dd.src() -> List<&2, U32>:
+  S.b("import Base\n\n# keep me\ndef f(+n: Nat) -> Nat:\n  n\n\n# a test\ndef observations0() -> IO(Unit):\n  IO.print(\"x\")\n\n# not a test\ndef observe(+n: Nat) -> Nat:\n  n\n\n# main runs it\ndef main() -> IO(Unit):\n  observations0()\n")
+
+def rt.fjd(+dir: String) -> IO(List<&2, RtCk>):
+  +d = dir ++ "/fjd"
+  +ws : List<&2, List<&2, U32>> = [S.b("main"), S.b("observations*")]
+  +kept : String = "import Base\n\n# keep me\ndef f(+n: Nat) -> Nat:\n  n\n\n# not a test\ndef observe(+n: Nat) -> Nat:\n  n\n\n"
+  do IO<List<&2, RtCk>>:
+    S.mkdir(d ++ "/t")
+    S.write(d ++ "/m.bend", rt.dd.src())
+    S.write(d ++ "/t/Test.bend", S.b("def main() -> U32:\n  1\n"))
+    I.itk.files.jsonl.with("own:y", d, dir ++ "/fjd.jsonl", ["*/Test.bend"], ws)
+    +o : List<&2, U32> <- S.read(dir ++ "/fjd.jsonl")
+    +s : List<&2, U32> <- S.read(dir ++ "/fjd.jsonl.stats")
+    return [RtCk{"files-jsonl drop=: main and observations* go with the comments above them; observe stays (a prefix needs its *)",
+        rt.is(rt.dd.text(I.itk.dd.file(ws, rt.dd.src())), kept)},
+      RtCk{"files-jsonl drop=: 2 defs, 116 bytes dropped (the kept and dropped bytes add up to the file's)",
+        Bool.and(Nat.is_eq(Nat.add(S.len(S.b(kept)), 116n), S.len(rt.dd.src())), rt.dd.count.is(I.itk.dd.file(ws, rt.dd.src()), 2n, 116n))},
+      RtCk{"files-jsonl drop=: a file none of whose defs is named stays byte for byte",
+        rt.is(rt.dd.text(I.itk.dd.file([S.b("zzz")], rt.dd.src())), S.str(rt.dd.src()))},
+      RtCk{"files-jsonl skip=: */Test.bend is left out; drop= writes the stripped text",
+        rt.is(o, "{\"id\": \"own:y/m.bend\", \"text\": \"import Base\\n\\n# keep me\\ndef f(+n: Nat) -> Nat:\\n  n\\n\\n# not a test\\ndef observe(+n: Nat) -> Nat:\\n  n\\n\\n\"}\n")},
+      RtCk{"files-jsonl drop=: the stats add defs-dropped and bytes-dropped", rt.is(s, "bytes 98\nfiles 1\nnul 0\ndefs-dropped 2\nbytes-dropped 116\n")}]
+
 def rt.rd(+dir: String) -> IO(List<&2, RtCk>):
   do IO<List<&2, RtCk>>:
     S.write(dir ++ "/in1.jsonl", S.b("{\"id\": \"repo:x/a.bend\", \"text\": \"1\"}\n{\"id\": \"repo:x/b.bend\", \"text\": \"2\"}\n"))
@@ -441,7 +474,8 @@ def main() -> IO(Unit):
     tool : List<&2, RtCk> <- rt.tool(dir)
     vary : List<&2, RtCk> <- rt.vary(dir)
     fj : List<&2, RtCk> <- rt.fj(dir)
+    fjd : List<&2, RtCk> <- rt.fjd(dir)
     rd : List<&2, RtCk> <- rt.rd(dir)
     pf : List<&2, RtCk> <- rt.pf(dir)
     S.rm(dir)
-    rt.say(List.concat(&2, RtCk, [rt.pure(), rt.texts(base, mut, chain, t2t, port), tool, vary, fj, rd, pf]), 0n, "")
+    rt.say(List.concat(&2, RtCk, [rt.pure(), rt.texts(base, mut, chain, t2t, port), tool, vary, fj, fjd, rd, pf]), 0n, "")

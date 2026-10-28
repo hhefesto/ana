@@ -552,7 +552,7 @@ def chk.tests() -> List<&2, ChkTest>:
    # by reason, held-out units gone, copies and derived transcripts, key order, a second run the same
    # bytes, dry; cap=2, ratio=2, share=50, fill=repair; files-jsonl, raw-drop and port-fix (`bend` on
    # the PATH, weights/code32k.bpe); compiled (the interpreter's stack does not hold the reader)
-   ChkTest{"ratio.bend", True{}, ROks{50n}},
+   ChkTest{"ratio.bend", True{}, ROks{55n}},
    # bend-corpus-v2 port's renames (bend/CorpusV2/PortOps.bend, 2026-10-16): declarations and the
    # header as the loader reads them, import paths through a sibling link, fresh names; the own,
    # alias and binder renames on modules written here (strings and comments untouched, an importer
