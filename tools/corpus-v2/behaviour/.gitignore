@@ -11,6 +11,7 @@ results/**/*.ghc
 results/**/*.run
 results/**/*.lean
 results/**/*.agda
+results/**/*.bend
 results/**/*.log
 results/selftest/
 results/control/**/*.out
