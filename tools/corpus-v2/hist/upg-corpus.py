@@ -6,7 +6,7 @@
 #     classes them (exit 0 pass; a `Location: NAME`, unsafe/foreign or TODO line: checked, a def's
 #     own error; else load, which drops the file), pass and checked ones as JSON lines {id, text}
 #     (`repo:PATH`); not a file of a held (vault, holdout) repository's, nor a TRAIN id; counts on
-#     stderr, UPG/classes.tsv
+#     stderr, UPG/classes.tsv.  A file whose upgrade.py run ended `pass` is not checked again
 #   upg-corpus.py git UPG SRC upg.jsonl
 #     a git repository a repository of upg.jsonl, UPG/git/SLUG: its .bend files as SRC has them,
 #     then as UPG/tree has them; UPG/git/LOCAL.tsv for hist6.py (HIST_LOCAL=1 HIST_HUB=1)
@@ -47,8 +47,15 @@ def corpus(upg, lst, src, train, held):
         if i.split('/', 1)[0] in hr: c['held repository'] += 1; continue
         if i in tr: c['in train already'] += 1; continue
         todo.append(r)
+    # a file upgrade.py's last check passed is a pass (10-28: br6's 6,830 files, the machine at load
+    # 45: the check twice was hours); UPG_RECHECK=1 checks it again
+    up = {}
+    if os.path.exists(upg + '/upgrade.tsv') and os.environ.get('UPG_RECHECK') != '1':
+        for ln in open(upg + '/upgrade.tsv'):
+            f = ln.rstrip('\n').split('\t')
+            if len(f) >= 3: up[f[0]] = f[2]
     with cf.ThreadPoolExecutor(PROCS) as ex, open(upg + '/classes.tsv', 'w') as t:
-        for r, k in zip(todo, ex.map(lambda r: klass(os.path.join(upg, 'tree', r)), todo)):
+        for r, k in zip(todo, ex.map(lambda r: 'pass' if up.get(r) == 'pass' else klass(os.path.join(upg, 'tree', r)), todo)):
             t.write('%s\t%s\n' % (r, k)); c[k] += 1
             if k in ('pass', 'checked'):
                 text = open(os.path.join(upg, 'tree', r), 'rb').read().decode('utf-8', 'surrogateescape')

@@ -18,3 +18,11 @@
   in no PINS file: never grown), 61 Bend 1, 45 no marker.
 - `run6-new.tsv`: mkcfg's input (87 `repo`, 75 `growth`), `run6-classes.tsv` classify's table,
   `run6-repos.tsv` the survey's repositories and hits.
+- `disc7.py` (10-28 night): the code search has no hit in bendlib/bendlib (217 .bend files,
+  Apache-2.0; hapsland's submodule named it), so the survey only saw that index.  Candidates no
+  collection knows: every repository of a collected one's owner pushed since 08-20 (Bend 2's
+  bend.ts is from 08-25), the collected repositories' submodules, repository search (bend2,
+  bendlang, topics ...); 3,812 candidates, each one's tree (one REST call) for .bend files:
+  /tmp/bx/disc7 (files.tsv, repos.tsv, as survey.py), then `run/v5/clean/col7.sh`: classify.py,
+  the Bend 2 non-forks as `repo ... all` in tools/corpus-v2/collect/bend-run7.cfg, collect after
+  the night run, units: run/v7/transcripts-col7.
