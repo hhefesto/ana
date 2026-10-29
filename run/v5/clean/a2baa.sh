@@ -3,7 +3,7 @@
 # c761767 (universal algebra, 341 modules, Apache-2.0; its LICENSE-data grants machine-extracted corpora under
 # Apache-2.0 or CC0, ML training named), exported by ~/src/agda2bend/run/a2b/ev-aa/aaexp.sh (export-aa, whose
 # stdlib modules are export3's; 340 modules, AlternatingGroup5.Tables over the size limit) and emitted by
-# ev-aa/aaemit.sh (unit a2b-aaemit: corpus-aa, bin/agda2bend-O0-j4, agda2bend with J).  As a2baa.sh:
+# ev-aa/aaemit.sh (unit a2b-aaemit: corpus-aa, bin/agda2bend-O0-j6, agda2bend with J).  As a2baa.sh:
 # corpus ids a2b:agda-algebras/src/PATH.bend (ana holds none of it out), less a2b-s's ids (the stdlib
 # modules), raw's holdout, tree clean/src/a2baa (corpus-aa's corpus copies, the stdlib ones included,
 # under mods/), units/decl-new/cap/trim/check: run/v6/transcripts-a2baa.
@@ -19,7 +19,7 @@ while systemctl --user is-active -q a2b-aaemit; do sleep 300; done
 say "a2baa: a2b-aaemit ended: $(tail -2 $A/run/a2b/ev-aa/aaemit.log | cut -c1-200 | tr '\n' ' ')"
 grep -q 'emit exit 0' $A/run/a2b/ev-aa/aaemit.log || { say "a2baa: a2b-aaemit did not end well"; exit 1; }
 if [ ! -s $U/all.jsonl ]; then
-  (cd $A && run/a2b/bin/agda2bend-O0-j4 corpus /home/hhefesto/src/ana/$U/all.jsonl run/a2b/export-aa run/a2b/corpus-aa) > $U/corpus.log 2>&1 || { say "a2baa corpus FAILED"; exit 1; }
+  (cd $A && run/a2b/bin/agda2bend-O0-j6 corpus /home/hhefesto/src/ana/$U/all.jsonl run/a2b/export-aa run/a2b/corpus-aa) > $U/corpus.log 2>&1 || { say "a2baa corpus FAILED"; exit 1; }
   tail -1 $U/corpus.log
 fi
 if [ ! -s $U/raw/bend.jsonl ]; then
