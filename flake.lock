@@ -10,11 +10,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1792716407,
-        "narHash": "sha256-Flr1NqYPMo926eF0IsIup6Ft+r6C97cCMAsWJwcROoM=",
+        "lastModified": 1793282558,
+        "narHash": "sha256-DiLjiauajSut4vXTvnbmzEEYanOc2N/F4uom5wWjvgo=",
         "owner": "hhefesto",
         "repo": "agda2bend",
-        "rev": "2a2171a385d4ce1d23ca5278226da9caf4c101c7",
+        "rev": "074209b1ac9676568d515b1f3aedb2314db4a9ff",
         "type": "github"
       },
       "original": {
@@ -30,11 +30,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1793202414,
-        "narHash": "sha256-/kIKwOUei8y86VhXX3uokI+xLNWWpL/7rvsR3CYAFz8=",
+        "lastModified": 1793282563,
+        "narHash": "sha256-G99XY0QxXm85ljR6WzCqnC6A/63B8SfdbnKdNCFeAko=",
         "owner": "bendlang",
         "repo": "bend",
-        "rev": "a888ef279b8ea0eb668c913b19dfeab542f1aab6",
+        "rev": "fd6bc771a990a395c5f8db7dd3aadb9e3c9ed65a",
         "type": "github"
       },
       "original": {
