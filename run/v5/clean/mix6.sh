@@ -52,7 +52,7 @@ add in run/v6/transcripts-a2bm7/bend/transcripts.train.nul
 add in run/v6/transcripts-a2bum/bend/transcripts.train.nul
 # PLFA (plfa/plfa.github.io part1-3; agda2bend corpus-plfa; a2bplfa.sh, 10-29)
 add in run/v6/transcripts-a2bplfa/bend/transcripts.train.nul
-# PLFA's cone again with agda2bend O0-j43 (10-29 08:30): only the declarations a2b-s and a2bplfa lack (a2bplfa2.sh)
+# PLFA's cone again with agda2bend O0-j44 (56435f2, 10-29 08:45): only the declarations a2b-s and a2bplfa lack (a2bplfa2.sh)
 add in run/v6/transcripts-a2bplfa2/bend/transcripts.train.nul
 # agda-algebras (ualib/agda-algebras c761767, Apache-2.0; agda2bend corpus-aa with J; a2baa.sh, 10-29)
 add in run/v6/transcripts-a2baa/bend/transcripts.train.nul

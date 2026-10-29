@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PLFA again, agda2bend 074209b+ (O0-j43: forced patterns, dotted fields at pattern variables, multi-column
+# PLFA again, agda2bend 56435f2 (O0-j44: forced patterns, NonZero absurdities, dotted fields at pattern variables, multi-column
 # coverage, unique record constructors; Bend 2.0.39), every module of the cone, the stdlib ones too: decl-new
 # drops what a2b-s (transcripts-a2bm5) and the first PLFA run (transcripts-a2bplfa) have, so only the
 # declarations the newer translator gets are new units (2026-10-29 08:30).
@@ -18,11 +18,11 @@ D=run/v5/gcroot-deploy-982e162/bin/deploy
 A=/home/hhefesto/src/agda2bend
 U=run/v6/a2bplfa2; T=run/v6/transcripts-a2bplfa2; SRC=run/v5/clean/src/a2bplfa2
 mkdir -p $U $T/bend
-while systemctl --user is-active -q a2b-plfa43; do sleep 300; done
-say "a2bplfa2: a2b-plfa43 ended: $(tail -2 $A/run/a2b/corpus-plfa-j43.log | cut -c1-200 | tr '\n' ' ')"
-grep -q 'emit exit 0' $A/run/a2b/corpus-plfa-j43.log || { say "a2bplfa2: a2b-plfa43 did not end well"; exit 1; }
+while systemctl --user is-active -q a2b-plfa44; do sleep 300; done
+say "a2bplfa2: a2b-plfa44 ended: $(tail -2 $A/run/a2b/corpus-plfa-j44.log | cut -c1-200 | tr '\n' ' ')"
+grep -q 'emit exit 0' $A/run/a2b/corpus-plfa-j44.log || { say "a2bplfa2: a2b-plfa44 did not end well"; exit 1; }
 if [ ! -s $U/all.jsonl ]; then
-  (cd $A && run/a2b/bin/agda2bend-O0-j43 corpus /home/hhefesto/src/ana/$U/all.jsonl run/a2b/export-plfa run/a2b/corpus-plfa-j43) > $U/corpus.log 2>&1 || { say "a2bplfa2 corpus FAILED"; exit 1; }
+  (cd $A && run/a2b/bin/agda2bend-O0-j44 corpus /home/hhefesto/src/ana/$U/all.jsonl run/a2b/export-plfa run/a2b/corpus-plfa-j44) > $U/corpus.log 2>&1 || { say "a2bplfa2 corpus FAILED"; exit 1; }
   tail -1 $U/corpus.log
 fi
 if [ ! -s $U/raw/bend.jsonl ]; then
@@ -43,7 +43,7 @@ PY
 fi
 if [ ! -s $T/a2bplfa.jsonl ] || [ ! -d $SRC ]; then
   rm -rf $SRC.tmp
-  python3 -I - $U/raw/bend.jsonl $T/a2bplfa.jsonl $A/run/a2b/corpus-plfa-j43/corpus $SRC.tmp <<'PY' || { say "a2bplfa2 tree FAILED"; exit 1; }
+  python3 -I - $U/raw/bend.jsonl $T/a2bplfa.jsonl $A/run/a2b/corpus-plfa-j44/corpus $SRC.tmp <<'PY' || { say "a2bplfa2 tree FAILED"; exit 1; }
 import sys, json, os, re, shutil, collections
 inp, out, cp, tree = sys.argv[1:5]
 hdr = re.compile(r'^# Bend 2 translation of the Agda module (\S+)', re.M)
