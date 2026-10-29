@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # The Bend repair mix over every transcript stream (2026-10-28): the user's rule (11388) — real,
-# first-time solutions at least 4 for every repair deduced from a correct one, and no unit with
-# more deduced repairs than itself (ratio=4 cap=1).  The nightly real-error attempts
+# first-time solutions at least 4 for every repair deduced from a correct one (ratio=4), each
+# unit's own first-time transcript repeated to cover its repairs; at most 4 deduced repairs a unit
+# (cap=4, the user 2026-10-29: "cap at 4 per unit"; mutate makes at most 5, so 5 is no cap; cap=1
+# before).  A unit with real history repairs (hist5.sh) keeps those and none of its made-up ones.
+# The nightly real-error attempts
 # (run/v5/act5: ana's own wrong programs and her fixes, not deduced from a correct one) pass
 # whole (free=).  A stream that is not there yet is left out, and said.
 #   mix6.sh OUT [dry]     OUT e.g. run/v6/mix/bend; dry: OUT.stats and the summary only
@@ -13,7 +16,7 @@ args=()
 add() { if [ -s "$2" ]; then args+=("$1=$2"); else echo "mix6: not there: $2" >&2; fi; }
 # first-time transcripts and their check-mutant repairs, by source
 # a stream whose units got real history repairs (hist5.sh, 10-28): those repairs, and the stream
-# and its mutate run less those units' made-up repairs (the mix keeps one repair a unit)
+# and its mutate run less those units' made-up repairs (such a unit keeps its real repairs only)
 # a stream rechecked on today's Bend (recheck6.sh, 10-28: run 2's and run 5's collection's units
 # were checked on 10-04's and 10-16's Bend) less every transcript of a unit that fails today
 fresh() { local r=run/v6/recheck-$1 f=$2 o; if [ -e $r/DONE ] && [ -s "$f" ]; then
@@ -90,4 +93,4 @@ add held run/v5/leak/v2train/units.decl.nul.dropped
 add held run/v5/leak/port/units.decl.nul.dropped
 mkdir -p "$(dirname "$OUT")"
 echo "mix6: ${#args[@]} streams" >&2
-exec $CV repair-mix "$OUT" "${args[@]}" derive=whole ratio=4 cap=1 ${DRY:+dry}
+exec $CV repair-mix "$OUT" "${args[@]}" derive=whole ratio=4 cap=4 ${DRY:+dry}
