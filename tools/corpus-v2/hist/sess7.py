@@ -97,9 +97,19 @@ def excerpt(t):
     return t[k:k + 1500]
 
 
+GATEFAIL = re.compile(r'(?m)^FAIL check (\S+\.bend)\b')
+
 def shell_event(proj, f, st, pend, cmd, cwd, res, ts):
-    if '.bend' not in cmd: return
+    if '.bend' not in cmd and 'FAIL check' not in (res or ''): return
     p, text, many, why = sess7sh.run(cmd, cwd, st, HOME)
+    # a gate's report (Codex's tools/Check.hs: `FAIL check PATH` and the error): the file as known now
+    for m in GATEFAIL.finditer(res or ''):
+        q = norm(m.group(1), cwd)
+        if q in st:
+            stats[proj, 'gate-failed'] += 1
+            states.setdefault(('?', q, hashlib.sha256(st[q].encode('utf-8', 'surrogateescape')).hexdigest()), (ts, f, res[m.start():m.start() + 1500], st[q]))
+        else:
+            stats[proj, 'gate-unknown'] += 1
     v = verdict(res) if res else None
     # a file the command named is no longer waiting for an Edit's originalFile
     for q in list(pend):
