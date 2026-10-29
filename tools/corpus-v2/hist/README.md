@@ -129,3 +129,28 @@ in another version.
   Map.get.go to the old one-level route, proved by cases as the author's map_bridge.bend does;
   tried in /tmp, both then check up to map_insert's Map.ins.deep, also gone), not done: run 6's
   tree has the author's own port.
+
+## gavel, assembled; wrong-on-purpose mutants; upg6 again (10-28)
+
+- **gavel** (Lulzx/gavel, run 6's largest Bend 2 repository) keeps a task's `LAWS.bend` and
+  `prelude.bend` in `tasks/N/T/` and its answer in `references/T/{solution,PROOF}.bend`; its harness
+  puts them in one directory. Run 6's loader dropped 273 of its files for "no such file" (prelude 219,
+  LAWS 53), upg6 130 more. `run/v5/clean/gav6.sh` fills each `references/T` with the task's missing
+  `prelude.bend`/`LAWS.bend` (363 copies, not corpus files), upgrades the 385 files with
+  `upgrade.py` (347 pass) and goes on as upg6: `run/v6/transcripts-gav6`, a stream of mix6.sh.
+- **upgrade.py** wrapped `{a + b == c : Nat}` whole (`expected ')'`, upg6's 32 gavel files): a
+  wrap now stops at ` == ` / ` != ` on either side.
+- **mutants/**: gavel's `references/T/mutants/*.bend` and knot's
+  `tests/perch-performance/cases/C/mutants/*.bend` are wrong on purpose (a law or a test is there
+  to catch each) and they check, so run 2 (94 units) and col6 (17) took them as code.
+  `mutheld.py` lists the units of such files whose def differs from every def beside the
+  `mutants/` directory: 106 of 118, `run/v6/held-mutants.txt`, held out by mix6.sh (`held=`).
+  gavel's mutants are also a source of law-failure repairs (the mutant, `bend PROOF.bend`'s
+  error, the reference): not taken yet (the unit check leaves the laws out: it would need whole-file
+  units, as the port's).
+- **upg6b** (`run/v5/clean/upg6b.sh`): upg6 ran before `upgrade.py` mended removed Base helpers;
+  its 104 files that ended "a defined name" (not gavel's, not evm-bend's: its `Word_` is a bad
+  rename, the file also calls Base's `Word(n)`) again from the files as collected: 73 pass.
+- Not upgradable here: jnadeau207-collab/BendCAD (206 files; `0xFF`, `u64` and `f64` literal suffixes: Bend's
+  literals are decimal only and Base has no U64/F64), pi-bend (a patched Bend with a native
+  `F64{high, low}`: 31 of 40 sampled stop there, 4 pass), WanShi and avikj/math (older syntax).

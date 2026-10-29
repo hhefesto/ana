@@ -62,6 +62,8 @@ def extent(s, c):
             d -= 1
         elif d == 0 and (ch in ',;' or s.startswith(' : ', k) or ch == '#' or (ch == ':' and k + 1 < len(s) and s[k + 1] in ' \n' and s[k - 1] != ' ')):
             break
+        elif d == 0 and k > c and (s.startswith(' == ', k) or s.startswith(' != ', k)):
+            break   # an equation's side: `{a + b == c : Nat}` wraps `a + b` (10-28: gavel's proofs)
         k += 1
     e = k
     while e > c and s[e - 1] in ' \t': e -= 1
@@ -240,6 +242,7 @@ def start(s, c):
             d -= 1
         elif d == 0:
             if ch in ',;': break
+            if ch == '=' and k >= 1 and s[k - 1] in '=!': break   # the other side of `==`, `!=`
             if ch == '=' and (k + 1 >= len(s) or s[k + 1] not in '=') and (k == 0 or s[k - 1] not in '=<>!'): break
             if ch == ':' and k + 1 < len(s) and s[k + 1] == ' ': break
             if ch == '-' and k + 1 < len(s) and s[k + 1] == '>': break
