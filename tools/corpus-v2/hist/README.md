@@ -94,3 +94,38 @@ merged that yet).
 Run 2's tree (recheck.py tree) lacked 54 files run 2's files import: 185 files failed "no such
 file".  31 copied from run 5's and 6's collections, 18 fetched at the pins, 5 gone;
 run/v5/clean/refill6.sh checks those 185 again after recheck6 and puts their verdicts in.
+
+## Run 2's stale files: the tree they meet, and upgraded (10-28 night)
+
+recheck6 found 2,091 of run 2's 5,594 curated files failing Bend 2.0.39 whole.  Many are not
+broken at all: recheck.py tree rebuilt run 2's repositories from its units, each file as its units
+have it and the files they import as files-hi.nul had them, so a file can meet an import of
+another day (Giulio2002/bend-collections' 332 meet an old native_map.bend that calls Map.get.bit,
+gone from Base 09-26; run 6's copy of native_map imports map_bridge.bend instead).  1,121 of the
+2,091 are byte for byte a file of run 6's collection (365 of them pass there; 652 are of
+repositories run 6 never checked: bend-collections, godot-bend, bendmon-engine); 311 more are there
+in another version.
+
+- `run/v5/clean/retree6.sh` (after recheck6 and refill6): the byte-for-byte ones checked whole in
+  run 6's tree (run/v6/collect/src/bend), then their failing units one by one there; the other
+  versions' units one by one there (a unit is its file's head and itself, so run 6's tree only
+  gives it its imports).  The verdicts replace theirs in curated/stale.ids and stale.ids
+  (run/v6/recheck-v2/curated-v6).
+- upgrade.py now also mends a Base helper removed since ("a defined name", observed): Nat.div.fin(x)
+  becomes Pair.fst(Nat, Nat, x) and Nat.mod.fin Pair.snd (today's Nat.div and Nat.mod are exactly
+  that, so a proof unfolding them still meets it; a bare Nat.div.fin becomes a lambda);
+  String.eq.fin and Map.get.bit get their old def after the file's imports (below its use a def
+  does not unfold there).  And an import alias a Base name shadows ("the alias TCP shadows
+  TCP.recv_bytes"): the alias becomes TCP_ in that file, and its uses of the imported file's own
+  names with it (bend-net's 39: they then fail on IO.bind's new type, not mended).  A line no file
+  has any more (another file's run moved it) is checked again, twice at most.
+- `run/v5/clean/upg2.sh`: upg6.sh for run 2's failing files with what upgrade.py mends (bare
+  operators, names Base took, removed helpers; 783), less pi-bend, gavel's mutants, held
+  repositories and the files run 6 has byte for byte (retree6.sh's): 259 files, 66 pass after
+  upgrade.  Its corpus leaves out any file col6 or upg6 has; its decl-new's seen= is run 2's
+  results less its stale units (`nul-without.py --ids`), so a unit of run 2's that checks today
+  is not taken again.  run/v6/transcripts-upg2, a stream of mix6.sh.
+- Bend-collections' native_map.bend and map_insert.bend can be ported by hand (a bridge law,
+  Map.get.go to the old one-level route, proved by cases as the author's map_bridge.bend does;
+  tried in /tmp, both then check up to map_insert's Map.ins.deep, also gone), not done: run 6's
+  tree has the author's own port.

@@ -15,7 +15,8 @@
 # the upgraded text when it changed; OUT/renames.tsv: repository TAB a name Base took, renamed NAME_.
 # A name Base took since (`a fresh name (duplicate declaration: NAME)`, ~1,100 of run 6's dropped
 # files: Text, Ready, Wait, Pair, Word, Window, ...) is renamed NAME_ in the file declaring it and
-# every file reaching it (RENAME=0: not).  env BEND, PROCS (4), STEPS (300), TIMEOUT (120 s).
+# every file reaching it (RENAME=0: not).  A Base helper removed since (Nat.div.fin, Map.get.bit, ...):
+# HELPERS below; OUT/helpers.tsv.  An alias a Base name shadows: ALIAS below; OUT/aliases.tsv.  env BEND, PROCS (4), STEPS (300), TIMEOUT (120 s).
 import sys, os, re, subprocess, shutil, concurrent.futures as cf
 
 BEND = os.environ.get('BEND', '/home/hhefesto/src/ana/run/v5/gcroot-bend-2.0.39/bin/bend')
@@ -149,6 +150,82 @@ def rename(p, fs, ln, shown, name):
             if n != t: open(g, 'w', encoding='utf-8', errors='surrogateescape').write(n)
     return True
 
+# Base helpers removed since (`a defined name`, observed NAME): Map.get.bit (bend2 a0107463, 09-26),
+# Nat.div.fin, Nat.mod.fin, String.eq.fin (6de56b97, #1153, 09-28: "Base fewer helpers").  NAME(
+# becomes what today's Base writes in its place (Nat.div is Pair.fst(Nat, Nat, Nat.divmod(a, b))
+# now: a proof unfolding Nat.div still meets it); else the old def goes in the file, after its
+# imports (a def below its use does not unfold there).  HELPERS=0: not.
+HELPERS = os.environ.get('HELPERS', '1') == '1'
+SUBST = {'Nat.div.fin': ('Pair.fst(Nat, Nat, ', '(qr => Pair.fst(Nat, Nat, qr))'),   # NAME( ; NAME alone
+         'Nat.mod.fin': ('Pair.snd(Nat, Nat, ', '(qr => Pair.snd(Nat, Nat, qr))')}
+VENDOR = {
+ 'String.eq.fin': 'def String.eq.fin(r: (String & String) & Cmp) -> Bool:\n  ((a2, b2), c) = r\n  Cmp.is_eq(c)\n',
+ 'Map.get.bit': ('def Map.get.bit(\n  -V: Data, d: V, lo: Map<&2, V>, hi: Map<&2, V>, p2: Nat, kb: String & Bool\n'
+                 ') -> Map<&2, V> & V:\n  (key2, b) = kb\n  match b:\n    case False{}:\n'
+                 '      Map.lo(&2, V, V, p2, hi, Map.get(V, d, lo, key2))\n    case True{}:\n'
+                 '      Map.hi(&2, V, V, p2, lo, Map.get(V, d, hi, key2))\n'),
+}
+
+def helper(fs, ln, shown, name):
+    """a Base helper removed since, NAME, in the file whose line ln is shown: NAME( as today's Base
+    writes it, or the old def after the file's imports"""
+    f = next((g for g in fs if (lambda ls: ln - 1 < len(ls) and ls[ln - 1].rstrip() == shown.rstrip())(
+        open(g, encoding='utf-8', errors='surrogateescape').read().split('\n'))), None)
+    if f is None: return False
+    with lock(f):
+        t = open(f, encoding='utf-8', errors='surrogateescape').read()
+        word = re.compile(r'(?<![A-Za-z0-9_.])' + re.escape(name) + r'(?![A-Za-z0-9_.])')
+        if not word.search(t): return True   # gone already (another file's run fixed it): check again
+        how = None
+        if name in SUBST:
+            call = re.compile(r'(?<![A-Za-z0-9_.])' + re.escape(name) + r'\(')
+            n = '\n'.join(code_sub(code_sub(line, call, SUBST[name][0]), word, SUBST[name][1]) for line in t.split('\n'))
+            if n == t: return False
+            t, how = n, 'subst'
+        else:
+            if re.search(r'^def ' + re.escape(name) + r'\b', t, re.M): return False
+            ls = t.split('\n')
+            k = max([j for j, l in enumerate(ls) if l.startswith('import ')], default=-1)
+            ls[k + 1:k + 1] = ([''] if k >= 0 else []) + VENDOR[name].rstrip('\n').split('\n') + ['']
+            t, how = '\n'.join(ls), 'vendor'
+        open(f, 'w', encoding='utf-8', errors='surrogateescape').write(t)
+    with glock:
+        open(OUT + '/helpers.tsv', 'a').write('%s\t%s\t%s\n' % (os.path.relpath(f, OUT + '/tree'), name, how))
+    return True
+
+# An import's alias that a Base name now shadows ("an unambiguous name (the alias TCP shadows
+# TCP.recv_bytes)": naoeosavio/bend-net's `import ./tcp.bend as TCP`, whose tcp.bend has its own
+# recv_bytes; Base took TCP.recv_bytes since): the alias becomes TCP_ in the file importing so, and
+# its uses of the imported file's own names with it (a TCP.NAME the file does not define is Base's,
+# as it was).  ALIAS=0: not.
+ALIAS = os.environ.get('ALIAS', '1') == '1'
+DEFN = re.compile(r'^(?:def|law|type|assert)\s+([A-Za-z_][A-Za-z0-9_.]*)', re.M)
+def unalias(fs, ln, shown, a):
+    f = next((g for g in fs if (lambda ls: ln - 1 < len(ls) and ls[ln - 1].rstrip() == shown.rstrip())(
+        open(g, encoding='utf-8', errors='surrogateescape').read().split('\n'))), None)
+    if f is None: return False
+    with lock(f):
+        t = open(f, encoding='utf-8', errors='surrogateescape').read()
+        m = re.search(r'^import\s+(\S+\.bend)\s+as\s+' + re.escape(a) + r'[ \t]*$', t, re.M)
+        if not m: return False
+        q = os.path.normpath(os.path.join(os.path.dirname(f), m.group(1)))
+        try: names = set(DEFN.findall(open(q, encoding='utf-8', errors='surrogateescape').read()))
+        except OSError: return False
+        b = a + '_'
+        while re.search(r'(?<![A-Za-z0-9_.])' + re.escape(b) + r'(?![A-Za-z0-9_])', t): b += '_'
+        ls = t.split('\n')
+        k = t[:m.start()].count('\n')
+        ls[k] = re.sub(r'\bas\s+' + re.escape(a) + r'([ \t]*)$', 'as ' + b + r'\1', ls[k])
+        if names:
+            use = re.compile(r'(?<![A-Za-z0-9_.])' + re.escape(a) + r'\.(' + '|'.join(re.escape(n) for n in sorted(names, key=len, reverse=True)) + r')(?![A-Za-z0-9_.])')
+            ls = [l if j == k else code_sub(l, use, b + r'.\1') for j, l in enumerate(ls)]
+        n = '\n'.join(ls)
+        if n == t: return False
+        open(f, 'w', encoding='utf-8', errors='surrogateescape').write(n)
+    with glock:
+        open(OUT + '/aliases.tsv', 'a').write('%s\t%s\t%s\n' % (os.path.relpath(f, OUT + '/tree'), a, b))
+    return True
+
 OPS = '+-*/%<>=!&|^'
 def start(s, c):
     """the left operand's start of the operator at s[c]: back to a `,`, an unmatched opener, a `=`
@@ -177,14 +254,20 @@ def upgrade(rel):
     it imports (found by the line the error shows), is wrapped where it is, in the copy"""
     p = os.path.join(OUT, 'tree', rel)
     seen = set()
-    steps = 0
+    steps = miss = 0
     end = 'limit'
     while steps < STEPS:
         rc, out = check(p)
         if rc == 0 and out[:1] == ['ALL PROOFS CHECK']: end = 'pass'; break
         msg = next((l for l in out if l.startswith('- message') or l.startswith('- expected')), out[0] if out else '')
         dup = re.search(r'a fresh (?:constructor )?name \(duplicate declaration: ([A-Za-z_][A-Za-z0-9_.]*)\)', msg) if RENAME else None
-        if 'a type for this operator' not in msg and not dup:
+        gone = None
+        if HELPERS and msg.strip().startswith('- expected : a defined name'):
+            o = next((l for l in out if l.startswith('- observed')), '')
+            gone = o.split(':', 1)[1].strip() if ':' in o else None
+            if gone not in VENDOR and gone not in SUBST: gone = None
+        ali = re.search(r'an unambiguous name \(the alias ([A-Za-z_][A-Za-z0-9_]*) shadows ', msg) if ALIAS else None
+        if 'a type for this operator' not in msg and not dup and not gone and not ali:
             end = 'other: ' + msg.strip()[:120]; break
         w = where(out)
         if w is None: end = 'other: no location'; break
@@ -193,9 +276,13 @@ def upgrade(rel):
         if key in seen: end = 'stuck'; break
         seen.add(key)
         fs = [p] + closure(p)
-        if dup:
-            if not rename(p, fs, ln, shown, dup.group(1)): end = 'other: the line shown is in no file it reaches'; break
-        elif not any(wrap(f, ln, col, shown) for f in fs):
+        if gone: ok = helper(fs, ln, shown, gone)
+        elif ali: ok = unalias(fs, ln, shown, ali.group(1))
+        elif dup: ok = rename(p, fs, ln, shown, dup.group(1))
+        else: ok = any(wrap(f, ln, col, shown) for f in fs)
+        if not ok:
+            # another file's run may have moved the line (a def put in, PROCS at once): check again
+            if miss < 2: miss += 1; seen.discard(key); continue
             end = 'other: the line shown is in no file it reaches'; break
         steps += 1
     return rel, steps, end
