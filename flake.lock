@@ -10,11 +10,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1793282558,
-        "narHash": "sha256-DiLjiauajSut4vXTvnbmzEEYanOc2N/F4uom5wWjvgo=",
+        "lastModified": 1793287092,
+        "narHash": "sha256-HWBoVYtm/lvm28iLbaI0D2SbVSOpiwU9gMiEbaA83p8=",
         "owner": "hhefesto",
         "repo": "agda2bend",
-        "rev": "074209b1ac9676568d515b1f3aedb2314db4a9ff",
+        "rev": "a88dc391901baa3486a1986db0d1bcd56b5e4a0d",
         "type": "github"
       },
       "original": {
