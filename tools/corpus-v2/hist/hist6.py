@@ -6,6 +6,8 @@
 #
 # A CORPUS may be NUL pairs (.nul) too.  HIST_CLASS: the GitHub repositories' id class (repo; run
 # 2's corpus: curated, `curated:OWNER__NAME/PATH`).
+# HIST_HUB=1: BendHub packages' files are wanted too (hubhist.py made their version histories git
+# histories; with HIST_LOCAL=1).
 # HIST_LOCAL=1: PINS.tsv lines are `CLASS:SLUG TAB DIR` instead, local repositories (the user's own,
 # own5's `own:ana/...` ids: ~/src/ana), cloned from DIR, every branch's history (`--all`).
 #
@@ -61,7 +63,7 @@ want = {}   # CLASS:SLUG -> {path: corpus text}
 for c in CORPORA:
     for d in corpus(c):
         i = d['id']
-        if ':' not in i or i.startswith('repo:hub__'): continue
+        if ':' not in i or (i.startswith('repo:hub__') and os.environ.get('HIST_HUB') != '1'): continue
         cls, rest = i.split(':', 1)
         if '/' not in rest: continue
         slug, path = rest.split('/', 1)

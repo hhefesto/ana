@@ -34,3 +34,37 @@ history repairs checked apart, `run/v6/hist-NAME/{repairs,NAME,mut-NAME}.train.n
 First numbers (10-28): zw3rk/birc's 30 sampled candidates: 12 rejected by today's check, 7 still
 checking, 11 whose today's file did not check alone.  own: ana 667 history mutants of 7245
 units, telomare 357/1672, mugen 56/859, agda2bend 83/637.
+
+## BendHub's version histories (10-28 evening)
+
+`hubhist.py SRC OUTDIR CORPUS...` makes a git repository per named BendHub package of a
+collection, a commit per older version (fetched from the hub, checked against its manifest), the
+pinned version last; `hist6.py` with `HIST_LOCAL=1 HIST_HUB=1` mines them like any repository.
+Run 6: 46 packages, 255 older versions, 6,300 units, 334 history mutants
+(`run/v5/clean/hubhist6.sh`, joined to `run/v6/hist/hist.nul` before col6's merge; the git ones
+are `hist.nul.git`).
+
+## Today's Bend on the older streams (10-28 evening)
+
+Run 2's units were checked on 10-04's Bend, run 5's collection's on 10-16's.  Under 2.0.39 a sample
+of 480 of run 2's curated train units fails 148 (31%): Base renamed helpers (Map.get.bit,
+Nat.div.fin, String.eq.fin; List.find.put became List.find.if in 2.0.38, #1730), Base's new
+names clash with a file's own (Text, Ready, Wait, Window, ...), @unsafe and foreign defs no longer
+check.  Their transcripts say ALL PROOFS CHECK where today's Bend does not.  own5 (2.0.38, 10-28):
+299 of 300 sampled fine.
+
+- `recheck.py tree|files|stale`: run 2's tree (its files-hi.nul, then each unit's own file over
+  it), each file with a unit checked whole (a file that checks has every unit checking: 312 of
+  313 in the sample), the other files' units checked one by one, the units that fail today
+  (`stale.ids`).
+- `hist-drop.py` with `ALL=1`: every transcript of a listed unit out.
+- `run/v5/clean/recheck6.sh v2 collect5`, then `mix6.sh` leaves the stale units out (`fresh`).
+
+## Bare operators (experimental, not in any run)
+
+`upgrade.py SRC LIST OUT`: until Bend 2.0.16 (09-19) a bare operator meant Nat; the error says
+to write `(a + b : Nat)`.  Run 6's loader dropped 1,978 files for it (pi-bend 1,255, gavel 658).
+upgrade.py wraps the operator's expression where the error points (in the file or a file it
+imports) and checks again.  On 12 of pi-bend's files it fixed their operators, then each failed
+on something else (a name Base took: Ready, Look; F64 not found; proofs): none passes, so it is
+not used.
