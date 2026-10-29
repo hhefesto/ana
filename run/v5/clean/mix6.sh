@@ -60,6 +60,8 @@ add in run/v6/transcripts-a2baa/bend/transcripts.train.nul
 add in run/v6/transcripts-a2bplfa3/bend/transcripts.train.nul
 # agda-algebras again with agda2bend O0-j47 (5528567): only the declarations a2baa lacks (a2baa2.sh)
 add in run/v6/transcripts-a2baa2/bend/transcripts.train.nul
+# the standard library and agda-categories again with agda2bend O0-j47 (corpus1u): only declarations no earlier run has (a2bm8.sh)
+add in run/v6/transcripts-a2bm8/bend/transcripts.train.nul
 # run 5's units dropped only for Bend's verdict on @unsafe/foreign-effect defs, checked with bend-ff
 # (ff6.sh, 10-29): with FF=1 only, the user's word pending
 if [ "${FF:-0}" = 1 ]; then
