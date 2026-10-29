@@ -60,11 +60,23 @@ check.  Their transcripts say ALL PROOFS CHECK where today's Bend does not.  own
 - `hist-drop.py` with `ALL=1`: every transcript of a listed unit out.
 - `run/v5/clean/recheck6.sh v2 collect5`, then `mix6.sh` leaves the stale units out (`fresh`).
 
-## Bare operators (experimental, not in any run)
+## Run 6's dropped files, upgraded (10-28 evening)
 
-`upgrade.py SRC LIST OUT`: until Bend 2.0.16 (09-19) a bare operator meant Nat; the error says
-to write `(a + b : Nat)`.  Run 6's loader dropped 1,978 files for it (pi-bend 1,255, gavel 658).
-upgrade.py wraps the operator's expression where the error points (in the file or a file it
-imports) and checks again.  On 12 of pi-bend's files it fixed their operators, then each failed
-on something else (a name Base took: Ready, Look; F64 not found; proofs): none passes, so it is
-not used.
+Run 6's loader dropped 6,152 files: 1,978 for a bare operator (an error since Bend 2.0.16, 09-19;
+until then one meant Nat, and the error says to write `(a + b : Nat)`), ~1,100 for a name Base took
+since (`duplicate declaration`: Text, Ready, Wait, Pair, Word, Window, ...), 1,547 for missing files
+(gavel's mutants' prelude.bend, submodules).
+
+- `upgrade.py SRC LIST OUT`: wraps the operator's expression where the error points (in the file
+  or a file it imports, found by the line the error shows), renames a name Base took to NAME_ in
+  the file declaring it and every file reaching it (code only, not strings or comments), checks
+  again; rounds for files whose imports were upgraded meanwhile.  40 sampled files (not pi-bend's):
+  14 pass, 11 check but for a def's own error.  pi-bend's 1,255 are left out (written for a Bend
+  with a native F64 constructor: 0 of 12 passed), so are gavel's mutants/ (wrong on purpose).
+- `upg-corpus.py corpus|git|filter`: the upgraded files (pass or checked, not a vault or holdout
+  repository's) as a corpus; a git history per repository (as collected, then upgraded) for
+  hist6.py, so a unit's collected body is its history mutant; the mutants that differ by a rename
+  alone are dropped, the rest get the renames (their error is the bare operator its author wrote).
+- `run/v5/clean/upg6.sh`: list, upgrade, corpus, history mutants, then as units6.sh (units,
+  decl-new held/seen, cap, trim, merge, check, hist-pick, render): run/v6/transcripts-upg6, a
+  stream of mix6.sh.  First 125 of its 1,463 files: 58 pass.
