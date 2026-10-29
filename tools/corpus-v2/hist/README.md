@@ -80,3 +80,17 @@ since (`duplicate declaration`: Text, Ready, Wait, Pair, Word, Window, ...), 1,5
 - `run/v5/clean/upg6.sh`: list, upgrade, corpus, history mutants, then as units6.sh (units,
   decl-new held/seen, cap, trim, merge, check, hist-pick, render): run/v6/transcripts-upg6, a
   stream of mix6.sh.  First 125 of its 1,463 files: 58 pass.
+
+## More than one older body a unit (HIST_M, 10-28)
+
+hist6.py gave a unit its newest older body alone; where that one checks today the unit had no
+history repair, though an older one might not.  `HIST_M=3` gives up to three, newest first, each
+differing from today's and from the ones before it; hist-merge.py hands them all to the check,
+hist-pick.py keeps the newest the check rejected.  On birc and hapsland 271 of 999 history units
+have more than one (1,368 bodies).  Run 6's git and BendHub histories again with it:
+run/v5/clean/hist6m.sh (run/v6/hist-m3; it takes run/v6/hist/hist.nul's place if col6 has not
+merged that yet).
+
+Run 2's tree (recheck.py tree) lacked 54 files run 2's files import: 185 files failed "no such
+file".  31 copied from run 5's and 6's collections, 18 fetched at the pins, 5 gone;
+run/v5/clean/refill6.sh checks those 185 again after recheck6 and puts their verdicts in.

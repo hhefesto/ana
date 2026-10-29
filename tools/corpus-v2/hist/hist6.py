@@ -38,6 +38,10 @@ if '--' in args:
     k = args.index('--'); ONLY = set(args[k + 1:]); args = args[:k]
 PINS, OUT, CORPORA = args[0], args[1], args[2:]
 K = int(os.environ.get('HIST_K', '8'))
+# HIST_M: up to M older bodies a unit (newest first, each differing from today's and from the ones
+# before it beyond whitespace): the check may take an older one where the newest checks today
+# (10-28; hist-merge.py hands them all, hist-pick.py keeps the newest the check rejects)
+M = int(os.environ.get('HIST_M', '1'))
 BATCH = int(os.environ.get('HIST_BATCH', '150'))
 UNITS = os.environ.get('BEND_UNITS', '/nix/store/impkz92xqmwzfk1f07yiz9vimkbvljd1-bend-units/bin/bend-units')
 env = dict(os.environ, GIT_TERMINAL_PROMPT='0', GIT_ASKPASS='false', BEND_NO_TELEMETRY='1')
@@ -173,10 +177,14 @@ def repo(name, pin, files, cls='repo', slug=None, url=None):
         with open(OUT + '/hist.nul', 'ab') as o:
             for uid, (sp, nm, body) in now.items():
                 cs = sorted(old.get((sp, nm), []), key=lambda x: -x[0])  # newest first
+                had = {ws(body)}; m = 0
                 for t, c, ob in cs:
-                    if ws(ob) == ws(body) or not ob.strip(): continue  # the same up to layout: older still
+                    if ws(ob) in had or not ob.strip(): continue  # the same up to layout: older still
+                    had.add(ws(ob))
                     o.write(uid + b'\0' + hashlib.sha256(body).hexdigest().encode() + b'\x1e' + ob + b'\x1e' + c + b'\x1e' + str(t).encode() + b'\0')
-                    n += 1; break
+                    if m == 0: n += 1
+                    m += 1
+                    if m >= M: break
     r = (ncommits, len(files), len(vers), lost, nunits, n)
     with open(OUT + '/stats.tsv', 'a') as s:
         s.write('\t'.join(map(str, (name,) + r)) + '\n')
