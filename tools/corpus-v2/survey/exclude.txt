@@ -13,3 +13,4 @@ HigherOrderCO/Bend
 IlyaGulya/bend2-lsp-rs
 github-linguist/linguist
 amrierscuo/github-linguist-hello-world-corpus
+HigherOrderCO/bend2-mirror
