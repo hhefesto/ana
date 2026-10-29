@@ -76,7 +76,7 @@ if [ ! -e $T/bend/units.all.nul ]; then
 fi
 if [ ! -e $T/bend/units.decl.nul ]; then
   say "a2baa decl-new held/seen"
-  run/v5/gcroot-bend-corpus-v2-decl2/bin/bend-corpus-v2 decl-new $T/bend/units.all.nul $T/bend/units.decl.nul $(cat run/v5/leak/held.args) seen=run/v2/results/bend.train.nul seen=run/transcripts-py2bend/bend/results.train.nul seen=run/v5/transcripts-collect5 seen=run/v5/transcripts-a2bm5/bend/results.train.nul > $T/decl.log 2>&1 || { say "decl-new FAILED"; exit 1; }
+  run/v5/gcroot-bend-corpus-v2-decl2/bin/bend-corpus-v2 decl-new $T/bend/units.all.nul $T/bend/units.decl.nul $(cat run/v5/leak/held.args) seen=run/v2/results/bend.train.nul seen=run/transcripts-py2bend/bend/results.train.nul seen=run/v5/transcripts-collect5/bend/results.train.nul seen=run/v5/transcripts-a2bm5/bend/results.train.nul > $T/decl.log 2>&1 || { say "decl-new FAILED"; exit 1; }
 fi
 if [ ! -e $T/bend/units.nul ]; then
   say "a2baa decl-new cap"
