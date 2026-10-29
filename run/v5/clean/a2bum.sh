@@ -26,7 +26,7 @@ while systemctl --user is-active -q a2b-umemit; do sleep 300; done
 say "a2bum: a2b-umemit ended: $(tail -2 $A/run/a2b/ev-um/umemit.log | cut -c1-200 | tr '\n' ' ')"
 grep -q 'emit exit 0' $A/run/a2b/ev-um/umemit.log || { say "a2bum: umemit did not end well"; exit 1; }
 if [ ! -s $U/all.jsonl ]; then
-  (cd $A && run/a2b/bin/agda2bend-O0-cop1 corpus /home/hhefesto/src/ana/$U/all.jsonl run/a2b/export-um run/a2b/corpus-um) > $U/corpus.log 2>&1 || { say "a2bum corpus FAILED"; exit 1; }
+  (cd $A && run/a2b/bin/agda2bend-O0-cop2 corpus /home/hhefesto/src/ana/$U/all.jsonl run/a2b/export-um run/a2b/corpus-um) > $U/corpus.log 2>&1 || { say "a2bum corpus FAILED"; exit 1; }
   tail -1 $U/corpus.log
 fi
 if [ ! -s $U/raw/bend.jsonl ]; then
