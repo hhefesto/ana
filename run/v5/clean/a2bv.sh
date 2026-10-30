@@ -26,7 +26,7 @@ case $K in
   aa)     N=a2baa3;   C=corpus-aa-v5747;   X=export-aa;   PREV="ana-a2baa2" ;;
   hs)     N=a2bhs;    C=corpus4v;          X=export-hs;   PREV="" ;;
   prelude) N=a2bpre;  C=corpus5v;          X=export-prelude; PREV="" ;;
-  stdlib) N=a2bm9;    C=corpus2v;          X=export3v;    PREV="ana-a2bm8 ana-a2bplfa4 ana-a2baa3" ;;
+  stdlib) N=a2bm9;    C=corpus2v;          X=export4;     PREV="ana-a2bm8 ana-a2bplfa4 ana-a2baa3" ;;
   *) echo "a2bv.sh: $K: plfa, aa, hs, prelude or stdlib"; exit 2 ;;
 esac
 U=run/v6/$N; T=run/v6/transcripts-$N; SRC=run/v5/clean/src/$N
@@ -41,7 +41,7 @@ for u in $PREV; do while systemctl --user is-active -q $u; do sleep 300; done; d
 grep -q "] $K: exit 0" $L || { say "$N: $C did not end well: $(grep "] $K: exit" $L)"; exit 1; }
 say "$N: $C ended: $(tail -n 1 $A/run/a2b/$C.log | cut -c1-200)"
 if [ ! -s $U/all.jsonl ]; then
-  (cd $A && run/a2b/bin/agda2bend-O0-v5747 corpus /home/hhefesto/src/ana/$U/all.jsonl run/a2b/$X run/a2b/$C) > $U/corpus.log 2>&1 || { say "$N corpus FAILED"; exit 1; }
+  (cd $A && run/a2b/bin/agda2bend-O0-v3c4d28c corpus /home/hhefesto/src/ana/$U/all.jsonl run/a2b/$X run/a2b/$C) > $U/corpus.log 2>&1 || { say "$N corpus FAILED"; exit 1; }
   tail -n 1 $U/corpus.log
 fi
 if [ ! -s $U/raw/bend.jsonl ]; then
