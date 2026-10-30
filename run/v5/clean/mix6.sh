@@ -69,6 +69,11 @@ add in run/v6/transcripts-a2bplfa3/bend/transcripts.train.nul
 add in run/v6/transcripts-a2baa2/bend/transcripts.train.nul
 # the standard library and agda-categories again with agda2bend O0-j47 (corpus1u): only declarations no earlier run has (a2bm8.sh)
 add in run/v6/transcripts-a2bm8/bend/transcripts.train.nul
+# PLFA, agda-algebras, the standard library and agda-categories again with agda2bend O0-v5747 (5747eec, 10-29 22:25:
+# nested patterns of indexed families, absurd patterns by clause evaluation): only declarations no earlier run has (a2bv.sh)
+add in run/v6/transcripts-a2bplfa4/bend/transcripts.train.nul
+add in run/v6/transcripts-a2baa3/bend/transcripts.train.nul
+add in run/v6/transcripts-a2bm9/bend/transcripts.train.nul
 # run 5's units dropped only for Bend's verdict on @unsafe/foreign-effect defs, checked with bend-ff
 # (ff6.sh, 10-29): with FF=1 only, the user's word pending
 if [ "${FF:-0}" = 1 ]; then
