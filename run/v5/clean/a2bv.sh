@@ -9,7 +9,8 @@
 # trim, check, render).  Waits for requeue.sh's emit of the corpus and for the stream before it.
 #   a2bv.sh plfa     a2bplfa4: corpus-plfa-v5747 (after ana-a2bplfa3)
 #   a2bv.sh aa       a2baa3:   corpus-aa-v5747, agda-algebras' own modules (after ana-a2baa2)
-#   a2bv.sh stdlib   a2bm9:    corpus1v (after ana-a2bm8, ana-a2bplfa4, ana-a2baa3)
+#   a2bv.sh stdlib   a2bm9:    corpus2v: export3v, the whole standard library, agda-categories' exports of 34 MB or less,
+#                              agdarsec, functional-linear-algebra, generics (after ana-a2bm8, ana-a2bplfa4, ana-a2baa3)
 # mix6.sh adds run/v6/transcripts-NAME/bend/transcripts.train.nul.
 cd /home/hhefesto/src/ana || exit 1
 export BEND_NO_TELEMETRY=1
@@ -21,7 +22,7 @@ A=/home/hhefesto/src/agda2bend
 case $K in
   plfa)   N=a2bplfa4; C=corpus-plfa-v5747; X=export-plfa; PREV="ana-a2bplfa3" ;;
   aa)     N=a2baa3;   C=corpus-aa-v5747;   X=export-aa;   PREV="ana-a2baa2" ;;
-  stdlib) N=a2bm9;    C=corpus1v;          X=export2s;    PREV="ana-a2bm8 ana-a2bplfa4 ana-a2baa3" ;;
+  stdlib) N=a2bm9;    C=corpus2v;          X=export3v;    PREV="ana-a2bm8 ana-a2bplfa4 ana-a2baa3" ;;
   *) echo "a2bv.sh: $K: plfa, aa or stdlib"; exit 2 ;;
 esac
 U=run/v6/$N; T=run/v6/transcripts-$N; SRC=run/v5/clean/src/$N
@@ -58,7 +59,7 @@ fi
 if [ ! -s $T/$N.jsonl ] || [ ! -d $SRC ]; then
   rm -rf $SRC.tmp
   if [ $K = stdlib ]; then
-    # as a2bm8.sh: a2bm8's tree (a2bm7's, a2bmf's) and corpus1v's emitted modules over it; ids the dotted path
+    # as a2bm8.sh: a2bm8's tree (a2bm7's, a2bmf's) and corpus2v's emitted modules over it; ids the dotted path
     BASE=run/v5/clean/src/a2bm8; [ -d $BASE ] || BASE=run/v5/clean/src/a2bm7; [ -d $BASE ] || BASE=run/v5/clean/src/a2bmf
     python3 -I - $U/raw/bend.jsonl $T/$N.jsonl $BASE $SRC.tmp $A/run/a2b/$C/src <<'PY' || { say "$N tree FAILED"; exit 1; }
 import sys, json, os, re, shutil, collections
