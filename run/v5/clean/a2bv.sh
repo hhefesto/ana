@@ -9,12 +9,14 @@
 # trim, check, render).  Waits for requeue.sh's emit of the corpus and for the stream before it.
 #   a2bv.sh plfa     a2bplfa4: corpus-plfa-v5747 (after ana-a2bplfa3)
 #   a2bv.sh aa       a2baa3:   corpus-aa-v5747, agda-algebras' own modules (after ana-a2baa2)
+#   a2bv.sh hs       a2bhs:    corpus4v: agda2hs-base (export-hs)
+#   a2bv.sh prelude  a2bpre:   corpus5v: agda-prelude (export-prelude)
 #   a2bv.sh stdlib   a2bm9:    corpus2v: export3v, the whole standard library, agda-categories' exports of 34 MB or less,
 #                              agdarsec, functional-linear-algebra, generics (after ana-a2bm8, ana-a2bplfa4, ana-a2baa3)
 # mix6.sh adds run/v6/transcripts-NAME/bend/transcripts.train.nul.
 cd /home/hhefesto/src/ana || exit 1
 export BEND_NO_TELEMETRY=1
-K=${1:?usage: a2bv.sh plfa|aa|stdlib}
+K=${1:?usage: a2bv.sh plfa|aa|hs|prelude|stdlib}
 say() { echo "$(date '+%F %T') $*"; }
 B=/home/hhefesto/src/ana/run/v5/gcroot-bend-2.0.39/bin/bend
 D=run/v5/gcroot-deploy-982e162/bin/deploy
@@ -22,8 +24,10 @@ A=/home/hhefesto/src/agda2bend
 case $K in
   plfa)   N=a2bplfa4; C=corpus-plfa-v5747; X=export-plfa; PREV="ana-a2bplfa3" ;;
   aa)     N=a2baa3;   C=corpus-aa-v5747;   X=export-aa;   PREV="ana-a2baa2" ;;
+  hs)     N=a2bhs;    C=corpus4v;          X=export-hs;   PREV="" ;;
+  prelude) N=a2bpre;  C=corpus5v;          X=export-prelude; PREV="" ;;
   stdlib) N=a2bm9;    C=corpus2v;          X=export3v;    PREV="ana-a2bm8 ana-a2bplfa4 ana-a2baa3" ;;
-  *) echo "a2bv.sh: $K: plfa, aa or stdlib"; exit 2 ;;
+  *) echo "a2bv.sh: $K: plfa, aa, hs, prelude or stdlib"; exit 2 ;;
 esac
 U=run/v6/$N; T=run/v6/transcripts-$N; SRC=run/v5/clean/src/$N
 L=$A/run/a2b/ev-nu/requeue.log
@@ -120,7 +124,7 @@ if [ ! -e $T/bend/units.all.nul ]; then
   say "$N units"; env $E CHUNK=25 UNIT_JOBS=4 $D transcripts units bend > $T/units.log 2>&1 || { say "units FAILED"; exit 1; }
   mv $T/bend/units.nul $T/bend/units.all.nul
 fi
-SEENX=; for x in run/v6/transcripts-a2bm6 run/v6/transcripts-a2bm7 run/v6/transcripts-a2bm8 run/v6/transcripts-a2bplfa run/v6/transcripts-a2bplfa2 run/v6/transcripts-a2bplfa3 run/v6/transcripts-a2bplfa4 run/v6/transcripts-a2baa run/v6/transcripts-a2baa2 run/v6/transcripts-a2baa3 run/v6/transcripts-a2bum; do
+SEENX=; for x in run/v6/transcripts-a2bm6 run/v6/transcripts-a2bm7 run/v6/transcripts-a2bm8 run/v6/transcripts-a2bplfa run/v6/transcripts-a2bplfa2 run/v6/transcripts-a2bplfa3 run/v6/transcripts-a2bplfa4 run/v6/transcripts-a2baa run/v6/transcripts-a2baa2 run/v6/transcripts-a2baa3 run/v6/transcripts-a2bhs run/v6/transcripts-a2bpre run/v6/transcripts-a2bum; do
   [ $x = $T ] && continue; [ -e $x/bend/results.train.nul ] && SEENX="$SEENX seen=$x/bend/results.train.nul"; done
 say "$N: seen also:$SEENX"
 if [ ! -e $T/bend/units.decl.nul ]; then

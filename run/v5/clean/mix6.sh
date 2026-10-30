@@ -74,6 +74,9 @@ add in run/v6/transcripts-a2bm8/bend/transcripts.train.nul
 add in run/v6/transcripts-a2bplfa4/bend/transcripts.train.nul
 add in run/v6/transcripts-a2baa3/bend/transcripts.train.nul
 add in run/v6/transcripts-a2bm9/bend/transcripts.train.nul
+# agda2hs-base and agda-prelude again with O0-v5747 (last on 10-22; a2bv.sh)
+add in run/v6/transcripts-a2bhs/bend/transcripts.train.nul
+add in run/v6/transcripts-a2bpre/bend/transcripts.train.nul
 # run 5's units dropped only for Bend's verdict on @unsafe/foreign-effect defs, checked with bend-ff
 # (ff6.sh, 10-29): with FF=1 only, the user's word pending
 if [ "${FF:-0}" = 1 ]; then
