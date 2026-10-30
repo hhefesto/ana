@@ -51,6 +51,10 @@ add in run/v6/transcripts-gen5/bend/transcripts.train.nul
 add in run/v6/transcripts-a2bm6/bend/transcripts.train.nul
 # agda-categories past module 355 (agda2bend corpus1t, exports up to 20 MB; a2bm7.sh, 10-29)
 add in run/v6/transcripts-a2bm7/bend/transcripts.train.nul
+# a2bm6's and a2bm7's dropped units again with Bend checks at 180 s, not 60 (recheck180.sh, 10-29;
+# the user: yes, recheck what the 60 s limit lost once the machine is quieter)
+add in run/v6/transcripts-a2bm6t/bend/transcripts.train.nul
+add in run/v6/transcripts-a2bm7t/bend/transcripts.train.nul
 # agda-unimath (UniMath/agda-unimath, MIT; agda2bend corpus-um, its builtins as Bend's; a2bum.sh, 10-29)
 add in run/v6/transcripts-a2bum/bend/transcripts.train.nul
 # PLFA (plfa/plfa.github.io part1-3; agda2bend corpus-plfa; a2bplfa.sh, 10-29)
