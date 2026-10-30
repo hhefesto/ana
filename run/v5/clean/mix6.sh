@@ -78,7 +78,7 @@ add in run/v6/transcripts-a2bm9/bend/transcripts.train.nul
 add in run/v6/transcripts-a2bhs/bend/transcripts.train.nul
 add in run/v6/transcripts-a2bpre/bend/transcripts.train.nul
 # run 5's units dropped only for Bend's verdict on @unsafe/foreign-effect defs, checked with bend-ff
-# (ff6.sh, 10-29): with FF=1 only, the user's word pending
+# (ff6.sh, 10-29): with FF=1 only (the user 10-30: they go into the training mix; mixgo6ff.sh sets FF=1)
 if [ "${FF:-0}" = 1 ]; then
   for s in own5 port5 collect5 col6 gav6 upg6b sub6 upg6 upg2 br6 brf6 upg5 gen5; do add in run/v6/transcripts-ff-$s/bend/transcripts.train.nul; done
 fi

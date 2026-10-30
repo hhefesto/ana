@@ -4,7 +4,8 @@
 # modules, Agda 2.8.0, category-theory's 176 modules and their 529-module cone first) exported by
 # ~/src/agda2bend/run/a2b/ev-um/umexp.sh (agda-export with a 20 s reconstruction limit and a 2 MB
 # explicit-definition limit: category theory's projection parameters blow up), translated by
-# ev-um/umemit.sh (unit a2b-umemit: bin/agda2bend-O0-um, master plus agda-unimath's builtins,
+# ev-um/umemit2.sh (unit a2b-umemit; the user 10-30: "Do start a fresh agda-unimath": bin/agda2bend-O0-v29da3f1;
+# before, umemit.sh with bin/agda2bend-O0-um/O0-j47, master plus agda-unimath's builtins,
 # Id/_＝_ as Bend's equality, and copatterns at type-valued definitions) into run/a2b/corpus-um.
 # Bend has no J (a rewrite's motive cannot mention the path): unimath's path algebra (ap-id,
 # inv-inv, ...) drops; the rest checks (the precategories cone's first modules: 46%).
@@ -26,7 +27,7 @@ while systemctl --user is-active -q a2b-umemit; do sleep 300; done
 say "a2bum: a2b-umemit ended: $(tail -2 $A/run/a2b/ev-um/umemit.log | cut -c1-200 | tr '\n' ' ')"
 grep -q 'emit exit 0' $A/run/a2b/ev-um/umemit.log || { say "a2bum: umemit did not end well"; exit 1; }
 if [ ! -s $U/all.jsonl ]; then
-  (cd $A && run/a2b/bin/agda2bend-O0-j47 corpus /home/hhefesto/src/ana/$U/all.jsonl run/a2b/export-um run/a2b/corpus-um) > $U/corpus.log 2>&1 || { say "a2bum corpus FAILED"; exit 1; }
+  (cd $A && run/a2b/bin/agda2bend-O0-v29da3f1 corpus /home/hhefesto/src/ana/$U/all.jsonl run/a2b/export-um run/a2b/corpus-um) > $U/corpus.log 2>&1 || { say "a2bum corpus FAILED"; exit 1; }
   tail -1 $U/corpus.log
 fi
 if [ ! -s $U/raw/bend.jsonl ]; then
