@@ -444,6 +444,10 @@ def chk.tests() -> List<&2, ChkTest>:
    # turns, the direct shape byte for byte, every Term the original, a
    # unit's presentations distinct, Nix never direct
    ChkTest{"transcript.bend", False{}, RExact{chk.oks(["direct", "turns 0", "turns 1", "turns 2", "turns 3", "turns 4", "turns 5", "terms", "copies repo:x/A.hs#twice@1", "copies repo:x/a.nix#file@1"])}},
+   # the renderer's format mugen (docs/MUGEN-SHAPE.md): the direct session
+   # byte for byte (echoes as mugen's read, edit and shell answer), the
+   # repair's read, edit, diff and reply, each shape's turns, old's count
+   ChkTest{"mugen.bend", False{}, RExact{chk.oks(["direct", "repair", "turns direct", "turns fill", "turns repair", "count"])}},
    # E5 reads ana's output as a transcript less ana's closing newline: a
    # passing last echo is solved (it never was before)
    ChkTest{"agent-eval.bend", False{}, RExact{chk.oks(["a passing last echo is solved", "read with the closing newline it is not (the bug)",

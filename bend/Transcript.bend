@@ -4,6 +4,7 @@ import ./Tokenizer.bend as Tk
 import ./Nul.bend as Ns
 import ./Units.bend as U
 import ./Sys.bend as S
+import ./Mugen/Diff.bend as D
 
 # transcripts: the checked units (bend-check LANG) rendered as the
 # coding-agent documents of docs/TRANSCRIPT-FORMAT.md.
@@ -35,6 +36,12 @@ import ./Sys.bend as S
 # C1 and C2; below, "Format 2"): the Term is only ever the original, and a
 # term given to the assistant (a mutant, the hole, a term to judge) is an
 # `## Attempt`; COPIES (2) transcripts a unit, each a different presentation.
+#
+# TRANSCRIPT_FORMAT=mugen renders a Bend unit as a session with mugen (below,
+# "Format mugen"; docs/MUGEN-SHAPE.md): read, edit and shell calls with
+# their echoes as mugen's tools print them. It reads BASE (the first lines
+# of `bend base`, from `bend-transcript base RESULTS.nul BASE [BEND]`) and
+# writes every presentation's size to SIZES.
 
 # Bytes -------------------------------------------------------------------------
 
@@ -530,6 +537,632 @@ def all.fmt.if(chains: Bool, +fmt: Nat, +b: Tk.Bpe, +limit: Nat, rs: List<&2, Ns
 def all.fmt(+fmt: Nat, +b: Tk.Bpe, +limit: Nat, rs: List<&2, Ns.Doc>) -> List<&2, Ns.Doc>:
   all.fmt.if(Nat.is_eq(fmt, chain.fmt()), fmt, b, limit, rs)
 
+# Format mugen (TRANSCRIPT_FORMAT=mugen) --------------------------------------------
+#
+# A unit as a session with mugen (docs/MUGEN-SHAPE.md): the user's ask, ana's
+# tool calls, each answered by its echo exactly as mugen's own tools print it
+# (mugen's bend/Tools.bend; its edits' diffs by Mugen/Diff.bend, mugen's
+# copy), then ana's reply. The work dir is the unit's tree (BEND_SRC: the
+# path in the id), and the file is the unit's file as the checker checked it
+# (Check/Bend.bend: the head, the declaration's first part, the variant; the
+# tail left out), so every echo is the checker's own output or text cut from
+# that file:
+#
+#   ## user    the ask
+#   ## read    PATH FROM LIMIT                        a call
+#   ## edit    PATH, then the old lines (`-` each),   a call: whole lines,
+#              then the new (`+` each)                old found once
+#   ## shell   a command line                         a call
+#   ## echo    the call's answer, fenced              the tool's (weight 0)
+#   ## mugen   ana's reply to the user
+#
+# Echoes: a read's lines then `[lines A-B of N]`; an edit's unified diff; a
+# shell's output then `(exit N)` (mugen also says how long it ran: `(exit N
+# in 0.4 s)`, which no corpus can give). Mugen pages a text past 30,000
+# characters and the checker kept 100 lines of output: no unit that fits a
+# window comes near either.
+#
+# Bend units only (another language's unit gives none). Shapes:
+#
+#   direct     the file without the declaration; the ask gives its signature
+#              and doc: read the file's last 24 lines, look the names up, add
+#              it, check, reply
+#   fill       its body is `?goal`: check (the goal and its context), look
+#              up, fill, check, reply
+#   repair-M   its body is mutant M: check (its error), read the
+#              declaration, look up, fix, check, reply
+#
+# The look-ups are the checker's Context (a name's header: the file's own
+# `def NAME(`/`law NAME:` line, else the first line of `bend base NAME` when
+# it opens a def, law or type), as two calls: `grep -nE '^(def|law)
+# (A|B)[(:]' PATH` for the names the head defines, and `bend base A | head
+# -1` (a loop for more) for the others Base defines. Their first lines come
+# from BASE (lines NAME TAB LINE: tools/corpus-v2/mugen-base.sh runs `bend
+# base` under the corpus's Bend), which must give back every unit's Context.
+#
+# Every presentation is rendered: OUTPUT gets those that fit the window,
+# SIZES (a file, default /dev/null) a line each: ID SHAPE TOKENS F2_TOKENS
+# BYTES F2_BYTES, tab-separated, F2 the format 2 presentation of the same
+# shape (direct, fill, repair with mutant M) for comparison.
+
+def mg.fmt() -> Nat:
+  1000n
+
+type Mgc is Data:
+  Mgc{base: Map<&2, List<&2, U32>>, sizes: String}
+
+def Mgc.base(+c: Mgc) -> Map<&2, List<&2, U32>>:
+  match c:
+    case Mgc{m, s}:
+      m
+
+def Mgc.sizes(+c: Mgc) -> String:
+  match c:
+    case Mgc{m, s}:
+      s
+
+def mg.none() -> Mgc:
+  Mgc{Map.new(&2, List<&2, U32>), "/dev/null"}
+
+# bytes as a String of one Chr a byte, and back (Mugen/Diff.bend's lines only
+# split at the newline byte, so the diff of the bytes is the diff of the text)
+def mg.str(xs: List<&2, U32>) -> String:
+  match xs:
+    case Nil{}:
+      SNil{}
+    case h <> t:
+      SCon{Chr{h}, mg.str(t)}
+
+def mg.bytes(s: String) -> List<&2, U32>:
+  match s:
+    case SNil{}:
+      Nil{}
+    case SCon{Chr{c}, t}:
+      c <> mg.bytes(t)
+
+def mg.n(+k: Nat) -> List<&2, U32>:
+  U.b(Nat.show(k))
+
+# xs after its first c (none: empty), and before it (none: all of xs)
+def mg.after.go(xs: List<&2, U32>, +c: U32, at: Bool) -> List<&2, U32>:
+  match xs at:
+    case h <> t True{}:
+      t
+    case h <> +t False{}:
+      mg.after.go(t, c, head.is(t, c))
+    case _ _:
+      Nil{}
+
+def mg.after(+xs: List<&2, U32>, +c: U32) -> List<&2, U32>:
+  mg.after.go(xs, c, head.is(xs, c))
+
+def mg.upto.go(xs: List<&2, U32>, +c: U32, at: Bool) -> List<&2, U32>:
+  match xs at:
+    case h <> +t False{}:
+      h <> mg.upto.go(t, c, head.is(t, c))
+    case _ _:
+      Nil{}
+
+def mg.upto(+xs: List<&2, U32>, +c: U32) -> List<&2, U32>:
+  mg.upto.go(xs, c, head.is(xs, c))
+
+# the file's path in its tree: the id after its class, before `#NAME@LINE`
+def mg.path(+id: List<&2, U32>) -> List<&2, U32>:
+  mg.upto(mg.after(id, 58), 35)
+
+def mg.chomp.r(r: List<&2, U32>) -> List<&2, U32>:
+  match r:
+    case +h <> +t:
+      Bool.pick(List<&2, U32>, U32.is_eq(h, 10), t, h <> t)
+    case Nil{}:
+      Nil{}
+
+# the last newline gone (mugen's tl.chomp)
+def mg.chomp(+xs: List<&2, U32>) -> List<&2, U32>:
+  List.reverse(&2, U32, mg.chomp.r(List.reverse(&2, U32, xs)))
+
+def mg.join(ls: List<&2, List<&2, U32>>, +sep: List<&2, U32>) -> List<&2, U32>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case x <> Nil{}:
+      x
+    case x <> +t:
+      cat([x, sep, mg.join(t, sep)])
+
+def mg.nls(xs: List<&2, U32>) -> Nat:
+  match xs:
+    case Nil{}:
+      0n
+    case h <> t:
+      Nat.add(Bool.pick(Nat, U32.is_eq(h, 10), 1n, 0n), mg.nls(t))
+
+# a file's lines as mugen's read counts them (the text less its last newline,
+# split at every newline)
+def mg.rows(+f: List<&2, U32>) -> List<&2, List<&2, U32>>:
+  split(mg.chomp(f), 10)
+
+def mg.keep.on(keep: Bool, +n: List<&2, U32>, rest: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match keep:
+    case True{}:
+      n <> rest
+    case False{}:
+      rest
+
+def mg.words.go(ws: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match ws:
+    case Nil{}:
+      Nil{}
+    case +w <> t:
+      mg.keep.on(Bool.not(empty(w)), w, mg.words.go(t))
+
+def mg.words(+xs: List<&2, U32>) -> List<&2, List<&2, U32>>:
+  mg.words.go(split(xs, 32))
+
+# Echoes ---------------------------------------------------------------------------
+
+# Machine.read: the lines from `from`, `limit` of them
+def mg.read.echo(+f: List<&2, U32>, +from: Nat, +limit: Nat) -> List<&2, U32>:
+  +ls = mg.rows(f)
+  +rows = List.take(&2, List<&2, U32>, List.drop(&2, List<&2, U32>, ls, Nat.sub(from, 1n)), limit)
+  +k = List.length(&2, List<&2, U32>, rows)
+  cat([mg.chomp(mg.join(rows, nl())), U.b("\n[lines "), mg.n(from), U.b("-"), mg.n(Nat.sub(Nat.add(from, k), 1n)), U.b(" of "),
+    mg.n(List.length(&2, List<&2, U32>, ls)), U.b("]")])
+
+# a shell's answer, less its time
+def mg.shell.echo(+out: List<&2, U32>, +code: List<&2, U32>) -> List<&2, U32>:
+  +body = mg.chomp(out)
+  cat([Bool.pick(List<&2, U32>, empty(body), Nil{}, U.append(body, nl())), U.b("(exit "), code, U.b(")")])
+
+def mg.echo(+text: List<&2, U32>) -> List<&2, U32>:
+  turn(U.b("echo"), fence(Nil{}, text))
+
+def mg.shell(+cmd: List<&2, U32>, +echo: List<&2, U32>) -> List<&2, U32>:
+  U.append(turn(U.b("shell"), U.append(cmd, nl())), mg.echo(echo))
+
+def mg.read(+path: List<&2, U32>, +f: List<&2, U32>, +from: Nat, +limit: Nat) -> List<&2, U32>:
+  U.append(turn(U.b("read"), cat([path, U.b(" "), mg.n(from), U.b(" "), mg.n(limit), nl()])), mg.echo(mg.read.echo(f, from, limit)))
+
+# the checker run on the file, and its answer (c a check: status, 0x1F, output)
+def mg.check(+path: List<&2, U32>, +c: List<&2, U32>) -> List<&2, U32>:
+  +k = check.of(c)
+  mg.shell(cat([U.b("bend "), path, U.b(" --check-only")]), mg.shell.echo(check.out(k), check.status(k)))
+
+# Edits ----------------------------------------------------------------------------
+
+def mg.heads.eq(+a: List<&2, List<&2, U32>>, +b: List<&2, List<&2, U32>>) -> Bool:
+  match a b:
+    case x <> s y <> t:
+      U.eq(x, y)
+    case _ _:
+      False{}
+
+def mg.common.go(a: List<&2, List<&2, U32>>, b: List<&2, List<&2, U32>>, +n: Nat, same: Bool) -> Nat:
+  match a b same:
+    case x <> +ta y <> +tb True{}:
+      mg.common.go(ta, tb, 1n+n, mg.heads.eq(ta, tb))
+    case _ _ _:
+      n
+
+# how many lines two lists of lines open with in common
+def mg.common(+a: List<&2, List<&2, U32>>, +b: List<&2, List<&2, U32>>) -> Nat:
+  mg.common.go(a, b, 0n, mg.heads.eq(a, b))
+
+def mg.slice(+ls: List<&2, List<&2, U32>>, +a: Nat, +e: Nat) -> List<&2, List<&2, U32>>:
+  List.take(&2, List<&2, U32>, List.drop(&2, List<&2, U32>, ls, a), Nat.sub(e, a))
+
+# how many times old occurs in xs, apart, as mugen's edit splits on it (2: two or more)
+# (stop: two found)
+def mg.count.go(fuel: Nat, xs: List<&2, U32>, +old: List<&2, U32>, +k: Nat, +n: Nat, hit: Bool, stop: Bool) -> Nat:
+  match fuel xs hit stop:
+    case 1n+f h <> t True{} False{}:
+      +rest = List.drop(&2, U32, h <> t, k)
+      mg.count.go(f, rest, old, k, 1n+n, U.prefix(rest, old), Nat.is_le(1n, n))
+    case 1n+f h <> +t False{} False{}:
+      mg.count.go(f, t, old, k, n, U.prefix(t, old), False{})
+    case _ _ _ _:
+      n
+
+def mg.count(+xs: List<&2, U32>, +old: List<&2, U32>) -> Nat:
+  mg.count.go(1n+U.len(xs), xs, old, U.len(old), 0n, U.prefix(xs, old), False{})
+
+# the lines an edit replaces: [p, n0 - s) of the old file, grown (a line up,
+# else down) until they are some text that occurs there once
+type Rg is Data:
+  Rg{p: Nat, s: Nat}
+
+def mg.grow.ok(+l0: List<&2, List<&2, U32>>, +f0: List<&2, U32>, +n0: Nat, +p: Nat, +s: Nat) -> Bool:
+  +old = U.concat(mg.slice(l0, p, Nat.sub(n0, s)))
+  Bool.and(Bool.not(empty(old)), Nat.is_eq(mg.count(f0, old), 1n))
+
+def mg.grow.go(fuel: Nat, ok: Bool, +l0: List<&2, List<&2, U32>>, +f0: List<&2, U32>, +n0: Nat, +p: Nat, +s: Nat) -> Rg:
+  match fuel ok:
+    case 1n+f False{}:
+      +up = Nat.is_lt(0n, p)
+      +p2 = Bool.pick(Nat, up, Nat.sub(p, 1n), p)
+      +s2 = Bool.pick(Nat, up, s, Nat.sub(s, 1n))
+      mg.grow.go(f, mg.grow.ok(l0, f0, n0, p2, s2), l0, f0, n0, p2, s2)
+    case _ _:
+      Rg{p, s}
+
+def mg.grow(fuel: Nat, +l0: List<&2, List<&2, U32>>, +f0: List<&2, U32>, +n0: Nat, +p: Nat, +s: Nat) -> Rg:
+  mg.grow.go(fuel, mg.grow.ok(l0, f0, n0, p, s), l0, f0, n0, p, s)
+
+def mg.end.nl(+l: List<&2, U32>) -> List<&2, U32>:
+  Bool.pick(List<&2, U32>, U.suffix(l, nl()), l, U.append(l, nl()))
+
+def mg.marked(+sign: U32, ls: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case l <> t:
+      cat([[sign], mg.end.nl(l), mg.marked(sign, t)])
+
+def mg.diff(+path: List<&2, U32>, +f0: List<&2, U32>, +f1: List<&2, U32>) -> List<&2, U32>:
+  mg.bytes(D.df.diff(mg.str(path), mg.str(f0), mg.str(f1)))
+
+def mg.edit.at(r: Rg, +path: List<&2, U32>, +f0: List<&2, U32>, +f1: List<&2, U32>, +l0: List<&2, List<&2, U32>>, +l1: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  match r:
+    case Rg{+a, +z}:
+      +old = mg.slice(l0, a, Nat.sub(List.length(&2, List<&2, U32>, l0), z))
+      +new = mg.slice(l1, a, Nat.sub(List.length(&2, List<&2, U32>, l1), z))
+      U.append(turn(U.b("edit"), cat([path, nl(), mg.marked(45, old), mg.marked(43, new)])), mg.echo(mg.diff(path, f0, f1)))
+
+# the edit that makes f1 of f0, and mugen's answer
+def mg.edit(+path: List<&2, U32>, +f0: List<&2, U32>, +f1: List<&2, U32>) -> List<&2, U32>:
+  +l0 = U.lines(f0)
+  +l1 = U.lines(f1)
+  +n0 = List.length(&2, List<&2, U32>, l0)
+  +n1 = List.length(&2, List<&2, U32>, l1)
+  +p = mg.common(l0, l1)
+  +s = Nat.min(mg.common(List.reverse(&2, List<&2, U32>, l0), List.reverse(&2, List<&2, U32>, l1)), Nat.min(Nat.sub(n0, p), Nat.sub(n1, p)))
+  mg.edit.at(mg.grow(Nat.add(n0, 2n), l0, f0, n0, p, s), path, f0, f1, l0, l1)
+
+# Look-ups -------------------------------------------------------------------------
+
+# `^(def|law) NAME[(:]` (Check/Bend.bend's sig.line)
+def mg.sig.line(+name: List<&2, U32>, +l: List<&2, U32>) -> Bool:
+  +d = U.append(U.b("def "), name)
+  +w = U.append(U.b("law "), name)
+  Bool.or(Bool.or(U.prefix(l, U.append(d, [40])), U.prefix(l, U.append(d, [58]))),
+    Bool.or(U.prefix(l, U.append(w, [40])), U.prefix(l, U.append(w, [58]))))
+
+def mg.sig.any(ls: List<&2, List<&2, U32>>, +name: List<&2, U32>) -> Bool:
+  match ls:
+    case Nil{}:
+      False{}
+    case +l <> more:
+      Bool.or(mg.sig.line(name, l), mg.sig.any(more, name))
+
+def mg.sig.some(ns: List<&2, List<&2, U32>>, +l: List<&2, U32>) -> Bool:
+  match ns:
+    case Nil{}:
+      False{}
+    case +n <> more:
+      Bool.or(mg.sig.line(n, l), mg.sig.some(more, l))
+
+# the names the head defines (want), or those it does not
+def mg.keep(ns: List<&2, List<&2, U32>>, +hls: List<&2, List<&2, U32>>, +want: Bool) -> List<&2, List<&2, U32>>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case +n <> more:
+      mg.keep.on(Bool.not(Bool.xor(mg.sig.any(hls, n), want)), n, mg.keep(more, hls, want))
+
+# grep -n's lines: each line of the file a header of the names opens
+def mg.grep.on(hit: Bool, +l: List<&2, U32>, +k: Nat, rest: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match hit:
+    case True{}:
+      cat([mg.n(k), [58], l]) <> rest
+    case False{}:
+      rest
+
+def mg.grep.go(ls: List<&2, List<&2, U32>>, +ns: List<&2, List<&2, U32>>, +k: Nat) -> List<&2, List<&2, U32>>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> more:
+      mg.grep.on(mg.sig.some(ns, l), l, k, mg.grep.go(more, ns, 1n+k))
+
+# a name in an extended regex: its dots escaped
+def mg.re(xs: List<&2, U32>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +h <> t:
+      U.append(Bool.pick(List<&2, U32>, U32.is_eq(h, 46), [92, 46], [h]), mg.re(t))
+
+def mg.res(ns: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case n <> t:
+      mg.re(n) <> mg.res(t)
+
+def mg.grep.if(some: Bool, +path: List<&2, U32>, +f0: List<&2, U32>, +ns: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  match some:
+    case True{}:
+      +hits = mg.grep.go(split(f0, 10), ns, 1n)
+      mg.shell(cat([U.b("grep -nE '^(def|law) ("), mg.join(mg.res(ns), [124]), U.b(")[(:]' "), path]),
+        mg.shell.echo(mg.join(hits, nl()), Bool.pick(List<&2, U32>, Nat.is_eq(List.length(&2, List<&2, U32>, hits), 0n), U.b("1"), U.b("0"))))
+    case False{}:
+      Nil{}
+
+type Bl is Data:
+  Bl{name: List<&2, U32>, line: List<&2, U32>}
+
+def Bl.name(+b: Bl) -> List<&2, U32>:
+  match b:
+    case Bl{n, l}:
+      n
+
+def Bl.line(+b: Bl) -> List<&2, U32>:
+  match b:
+    case Bl{n, l}:
+      l
+
+def mg.got(r: Map<&2, List<&2, U32>> & List<&2, U32>) -> List<&2, U32>:
+  match r:
+    case (m, v):
+      v
+
+def mg.based.on(ok: Bool, +n: List<&2, U32>, +l: List<&2, U32>, rest: List<&2, Bl>) -> List<&2, Bl>:
+  match ok:
+    case True{}:
+      Bl{n, l} <> rest
+    case False{}:
+      rest
+
+# the names Base gives a def, law or type, with its first line
+def mg.based(ns: List<&2, List<&2, U32>>, +base: Map<&2, List<&2, U32>>) -> List<&2, Bl>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case +n <> more:
+      +l = mg.got(Map.get(List<&2, U32>, Nil{}, base, mg.str(n)))
+      mg.based.on(Bool.not(empty(l)), n, l, mg.based(more, base))
+
+def mg.bl.names(bs: List<&2, Bl>) -> List<&2, List<&2, U32>>:
+  match bs:
+    case Nil{}:
+      Nil{}
+    case +b <> t:
+      Bl.name(b) <> mg.bl.names(t)
+
+def mg.bl.lines(bs: List<&2, Bl>) -> List<&2, List<&2, U32>>:
+  match bs:
+    case Nil{}:
+      Nil{}
+    case +b <> t:
+      Bl.line(b) <> mg.bl.lines(t)
+
+def mg.base.cmd(+ns: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  Bool.pick(List<&2, U32>, Nat.is_eq(List.length(&2, List<&2, U32>, ns), 1n), cat([U.b("bend base "), mg.join(ns, [32]), U.b(" | head -1")]),
+    cat([U.b("for n in "), mg.join(ns, [32]), U.b("; do bend base $n | head -1; done")]))
+
+def mg.base.if(some: Bool, +bs: List<&2, Bl>) -> List<&2, U32>:
+  match some:
+    case True{}:
+      mg.shell(mg.base.cmd(mg.bl.names(bs)), mg.shell.echo(mg.join(mg.bl.lines(bs), nl()), U.b("0")))
+    case False{}:
+      Nil{}
+
+# the Context as calls: grep for the names the head defines, bend base for Base's
+def mg.looks(+path: List<&2, U32>, +f0: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +base: Map<&2, List<&2, U32>>) -> List<&2, U32>:
+  +ns = mg.words(field(fs, 9n))
+  +hls = split(field(fs, 5n), 10)
+  +inf = mg.keep(ns, hls, True{})
+  +bs = mg.based(mg.keep(ns, hls, False{}), base)
+  U.append(mg.grep.if(Bool.not(Nat.is_eq(List.length(&2, List<&2, U32>, inf), 0n)), path, f0, inf),
+    mg.base.if(Bool.not(Nat.is_eq(List.length(&2, Bl, bs), 0n)), bs))
+
+# The asks and replies -------------------------------------------------------------
+
+def mg.user(+text: List<&2, U32>) -> List<&2, U32>:
+  turn(U.b("user"), U.append(text, nl()))
+
+def mg.reply(+text: List<&2, U32>) -> List<&2, U32>:
+  turn(U.b("mugen"), U.append(text, nl()))
+
+def mg.doc(+fs: List<&2, List<&2, U32>>, +line: List<&2, U32>) -> List<&2, U32>:
+  +doc = tidy(field(fs, 3n))
+  Bool.pick(List<&2, U32>, empty(doc), line, cat([line, U.b("\n\n"), doc]))
+
+def mg.prop(+fs: List<&2, List<&2, U32>>) -> Bool:
+  U.eq(field(fs, 1n), U.b("proposition"))
+
+def mg.ask.direct(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2, U32>:
+  +name = code(field(fs, 2n))
+  +line = Bool.pick(List<&2, U32>, mg.prop(fs), cat([U.b("Prove "), name, U.b(" in "), path, U.b(".")]), cat([U.b("Add "), name, U.b(" to "), path, U.b(".")]))
+  cat([mg.doc(fs, line), U.b("\n\n"), mg.chomp(fence(U.b("bend"), tidy(field(fs, 4n))))])
+
+def mg.ask.fill(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2, U32>:
+  mg.doc(fs, cat([U.b("Fill the hole (`?goal`) in "), code(field(fs, 2n)), U.b(" in "), path, U.b(".")]))
+
+def mg.ask.repair(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2, U32>:
+  mg.doc(fs, cat([code(field(fs, 2n)), U.b(" in "), path, U.b(" fails bend check. Fix it.")]))
+
+def mg.find.hit(+ls: List<&2, List<&2, U32>>, +p: List<&2, U32>) -> Bool:
+  match ls:
+    case l <> t:
+      U.prefix(l, p)
+    case Nil{}:
+      False{}
+
+def mg.find.go(ls: List<&2, List<&2, U32>>, +p: List<&2, U32>, hit: Bool) -> List<&2, U32>:
+  match ls hit:
+    case l <> more True{}:
+      l
+    case l <> +more False{}:
+      mg.find.go(more, p, mg.find.hit(more, p))
+    case _ _:
+      Nil{}
+
+# the first line that opens with p (none: empty)
+def mg.find(+ls: List<&2, List<&2, U32>>, +p: List<&2, U32>) -> List<&2, U32>:
+  mg.find.go(ls, p, mg.find.hit(ls, p))
+
+def mg.loc.hit(+ls: List<&2, List<&2, U32>>) -> Bool:
+  match ls:
+    case l <> t:
+      U.infix(l, U.b(">|"))
+    case Nil{}:
+      False{}
+
+def mg.loc.go(ls: List<&2, List<&2, U32>>, hit: Bool) -> List<&2, U32>:
+  match ls hit:
+    case l <> more True{}:
+      U.trim.right(U.trim.left(mg.upto(l, 62)))
+    case l <> +more False{}:
+      mg.loc.go(more, mg.loc.hit(more))
+    case _ _:
+      Nil{}
+
+# the line the error points at (`263>|`): its number
+def mg.loc(+ls: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  mg.loc.go(ls, mg.loc.hit(ls))
+
+def mg.val(+l: List<&2, U32>) -> List<&2, U32>:
+  U.trim.right(U.trim.left(mg.after(l, 58)))
+
+# what the checker said, from its output: `: bend check said WHAT at line N`
+def mg.why(+out: List<&2, U32>) -> List<&2, U32>:
+  +ls = split(out, 10)
+  +msg = mg.find(ls, U.b("- message"))
+  +exp = mg.find(ls, U.b("- expected"))
+  +obs = mg.find(ls, U.b("- observed"))
+  +loc = mg.loc(ls)
+  +seen = Bool.pick(List<&2, U32>, empty(obs), Nil{}, U.append(U.b(", observed "), mg.val(obs)))
+  +what = Bool.pick(List<&2, U32>, Bool.not(empty(msg)), mg.val(msg), Bool.pick(List<&2, U32>, Bool.not(empty(exp)), cat([U.b("expected "), mg.val(exp), seen]), Nil{}))
+  +at = Bool.pick(List<&2, U32>, empty(loc), Nil{}, U.append(U.b(" at line "), loc))
+  Bool.pick(List<&2, U32>, empty(what), Nil{}, cat([U.b(": bend check said "), what, at]))
+
+def mg.reply.direct(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2, U32>:
+  +name = code(field(fs, 2n))
+  Bool.pick(List<&2, U32>, mg.prop(fs), cat([U.b("Proved "), name, U.b(" in "), path, U.b("; bend check passes.")]),
+    cat([U.b("Added "), name, U.b(" to "), path, U.b("; bend check passes.")]))
+
+# The sessions ---------------------------------------------------------------------
+
+def mg.head(+fs: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  field(fs, 5n)
+
+def mg.with(+fs: List<&2, List<&2, U32>>, +body: List<&2, U32>) -> List<&2, U32>:
+  cat([field(fs, 5n), field(fs, 6n), body])
+
+def mg.direct(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>) -> List<&2, U32>:
+  +f0 = mg.head(fs)
+  +f1 = mg.with(fs, field(fs, 7n))
+  +n = List.length(&2, List<&2, U32>, mg.rows(f0))
+  +from = Bool.pick(Nat, Nat.is_lt(n, 25n), 1n, Nat.sub(n, 23n))
+  cat([mg.user(mg.ask.direct(fs, path)), mg.read(path, f0, from, Nat.sub(Nat.add(n, 1n), from)), mg.looks(path, f0, fs, base),
+    mg.edit(path, f0, f1), mg.check(path, field(fs, 11n)), mg.reply(mg.reply.direct(fs, path))])
+
+def mg.fill(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>) -> List<&2, U32>:
+  +f0 = mg.with(fs, field(fs, 10n))
+  +f1 = mg.with(fs, field(fs, 7n))
+  cat([mg.user(mg.ask.fill(fs, path)), mg.check(path, field(fs, 13n)), mg.looks(path, f0, fs, base),
+    mg.edit(path, f0, f1), mg.check(path, field(fs, 11n)),
+    mg.reply(cat([U.b("Filled the hole in "), code(field(fs, 2n)), U.b(" ("), path, U.b("); bend check passes.")]))])
+
+def mg.repair(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>, +m: Nat) -> List<&2, U32>:
+  +mut = mutant(fs, m)
+  +f0 = mg.with(fs, mut)
+  +f1 = mg.with(fs, field(fs, 7n))
+  +from = Nat.add(1n, mg.nls(mg.head(fs)))
+  +rows = List.length(&2, List<&2, U32>, U.lines(U.append(field(fs, 6n), mut)))
+  cat([mg.user(mg.ask.repair(fs, path)), mg.check(path, mutant.check(fs, m)), mg.read(path, f0, from, rows), mg.looks(path, f0, fs, base),
+    mg.edit(path, f0, f1), mg.check(path, field(fs, 11n)),
+    mg.reply(cat([U.b("Fixed "), code(field(fs, 2n)), U.b(" in "), path, mg.why(check.out(check.of(mutant.check(fs, m)))), U.b(". It passes now.")]))])
+
+# Presentations, their sizes -------------------------------------------------------
+
+type Mg is Data:
+  Mg{doc: Ns.Doc, line: List<&2, U32>, fits: Bool}
+
+def mg.one(+b: Tk.Bpe, +limit: Nat, +id: List<&2, U32>, +shape: List<&2, U32>, +text: List<&2, U32>, +f2: List<&2, U32>) -> Mg:
+  +n = List.length(&2, U32, Tk.Bpe.encode(b, text))
+  +n2 = List.length(&2, U32, Tk.Bpe.encode(b, f2))
+  +did = cat([id, U.b("/mugen-"), shape])
+  Mg{Ns.Doc{did, text}, cat([did, [9], shape, [9], mg.n(n), [9], mg.n(n2), [9], mg.n(U.len(text)), [9], mg.n(U.len(f2)), nl()]),
+    Nat.is_le(Nat.add(n, 2n), limit)}
+
+# k presentations repair-M, M from m on
+def mg.repairs(k: Nat, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +m: Nat, rest: List<&2, Mg>) -> List<&2, Mg>:
+  match k:
+    case 0n:
+      rest
+    case 1n+j:
+      mg.one(b, limit, id, U.append(U.b("repair-"), mg.n(m)), mg.repair(fs, path, base, m), render2(1n, fs, m))
+        <> mg.repairs(j, b, limit, base, id, fs, path, 1n+m, rest)
+
+def mg.fill.if(some: Bool, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, rest: List<&2, Mg>) -> List<&2, Mg>:
+  match some:
+    case True{}:
+      mg.one(b, limit, id, U.b("fill"), mg.fill(fs, path, base), render2(3n, fs, 0n)) <> rest
+    case False{}:
+      rest
+
+def mg.unit.if(bend: Bool, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, rest: List<&2, Mg>) -> List<&2, Mg>:
+  match bend:
+    case True{}:
+      +path = mg.path(id)
+      mg.one(b, limit, id, U.b("direct"), mg.direct(fs, path, base), render2(0n, fs, 0n))
+        <> mg.fill.if(Bool.not(empty(field(fs, 13n))), b, limit, base, id, fs, path, mg.repairs(mutant.count(fs), b, limit, base, id, fs, path, 0n, rest))
+    case False{}:
+      rest
+
+def mg.all(+b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, rs: List<&2, Ns.Doc>) -> List<&2, Mg>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case Ns.Doc{+i, +t} <> more:
+      +fs = split(t, 30)
+      mg.unit.if(U.eq(field(fs, 0n), U.b("bend")), b, limit, base, i, fs, mg.all(b, limit, base, more))
+
+def mg.docs(ms: List<&2, Mg>) -> List<&2, Ns.Doc>:
+  match ms:
+    case Nil{}:
+      Nil{}
+    case Mg{d, l, True{}} <> t:
+      d <> mg.docs(t)
+    case Mg{d, l, False{}} <> t:
+      mg.docs(t)
+
+def mg.lines(ms: List<&2, Mg>) -> List<&2, U32>:
+  match ms:
+    case Nil{}:
+      Nil{}
+    case Mg{d, l, f} <> t:
+      U.append(l, mg.lines(t))
+
+# BASE's lines: NAME TAB LINE, those whose LINE opens a def, law or type
+def mg.base.put(ok: Bool, m: Map<&2, List<&2, U32>>, +k: List<&2, U32>, +v: List<&2, U32>) -> Map<&2, List<&2, U32>>:
+  match ok:
+    case True{}:
+      Map.set(&2, List<&2, U32>, m, mg.str(k), v)
+    case False{}:
+      m
+
+def mg.base.of(ls: List<&2, List<&2, U32>>, m: Map<&2, List<&2, U32>>) -> Map<&2, List<&2, U32>>:
+  match ls:
+    case Nil{}:
+      m
+    case +l <> more:
+      +v = mg.after(l, 9)
+      +ok = Bool.or(Bool.or(U.prefix(v, U.b("def ")), U.prefix(v, U.b("law "))), U.prefix(v, U.b("type ")))
+      mg.base.of(more, mg.base.put(ok, m, mg.upto(l, 9), v))
+
+def mg.base.read.on(none: Bool, +p: String) -> IO(List<&2, U32>):
+  match none:
+    case True{}:
+      IO.pure(List<&2, U32>, Nil{})
+    case False{}:
+      S.read(p)
+
+def mg.cfg(+bx: List<&2, U32>, +sizes: String) -> Mgc:
+  Mgc{mg.base.of(split(bx, 10), Map.new(&2, List<&2, U32>)), sizes}
+
 # Main ---------------------------------------------------------------------------
 
 # The input streams a unit at a time (Sys.Rd: memory is a chunk plus the
@@ -593,27 +1226,39 @@ def bt.go(fuel: Nat, b: Bt) -> IO(Bt):
 type Ps is Type:
   Ps{rd: S.Rd, n: Nat, m: Nat, eof: Bool}
 
-def ps.batch(+fmt: Nat, +out: String, +b: Tk.Bpe, +limit: Nat, +n: Nat, +m: Nat, bt: Bt) -> IO(Ps):
-  match bt:
-    case Bt{rd, us, e}:
-      +rs = List.reverse(&2, Ns.Doc, us)
+# a batch's transcripts (format mugen: also their sizes) written
+def ps.write(mugen: Bool, +fmt: Nat, +out: String, +b: Tk.Bpe, +limit: Nat, +cf: Mgc, +rs: List<&2, Ns.Doc>, +n: Nat, +m: Nat, rd: S.Rd, e: Bool) -> IO(Ps):
+  match mugen:
+    case True{}:
+      +ms = mg.all(b, limit, Mgc.base(cf), rs)
+      +ts = mg.docs(ms)
+      do IO<Ps>:
+        S.add(out, Ns.put(ts, Nil{}))
+        S.add(Mgc.sizes(cf), mg.lines(ms))
+        return Ps{rd, Nat.add(n, List.length(&2, Ns.Doc, rs)), Nat.add(m, List.length(&2, Ns.Doc, ts)), e}
+    case False{}:
       +ts = all.fmt(fmt, b, limit, rs)
       do IO<Ps>:
         S.add(out, Ns.put(ts, Nil{}))
         return Ps{rd, Nat.add(n, List.length(&2, Ns.Doc, rs)), Nat.add(m, List.length(&2, Ns.Doc, ts)), e}
 
-def ps.step(+fmt: Nat, +out: String, +b: Tk.Bpe, +limit: Nat, p: Ps) -> IO(Ps):
+def ps.batch(+fmt: Nat, +out: String, +b: Tk.Bpe, +limit: Nat, +cf: Mgc, +n: Nat, +m: Nat, bt: Bt) -> IO(Ps):
+  match bt:
+    case Bt{rd, us, e}:
+      ps.write(Nat.is_eq(fmt, mg.fmt()), fmt, out, b, limit, cf, List.reverse(&2, Ns.Doc, us), n, m, rd, e)
+
+def ps.step(+fmt: Nat, +out: String, +b: Tk.Bpe, +limit: Nat, +cf: Mgc, p: Ps) -> IO(Ps):
   match p:
     case Ps{rd, +n, +m, e}:
       do IO<Ps>:
         bt : Bt <- bt.go(batch(), Bt{rd, Nil{}, False{}})
-        ps.batch(fmt, out, b, limit, n, m, bt)
+        ps.batch(fmt, out, b, limit, cf, n, m, bt)
 
 # batches until the stream ends
-def ps.go(fuel: Nat, +fmt: Nat, +out: String, +b: Tk.Bpe, +limit: Nat, p: Ps) -> IO(Ps):
+def ps.go(fuel: Nat, +fmt: Nat, +out: String, +b: Tk.Bpe, +limit: Nat, +cf: Mgc, p: Ps) -> IO(Ps):
   match fuel p:
     case 1n+q Ps{rd, n, m, False{}}:
-      IO.bind(Ps, Ps, ps.step(fmt, out, b, limit, Ps{rd, n, m, False{}}), ps.go(q, fmt, out, b, limit))
+      IO.bind(Ps, Ps, ps.step(fmt, out, b, limit, cf, Ps{rd, n, m, False{}}), ps.go(q, fmt, out, b, limit, cf))
     case _ Ps{rd, n, m, e}:
       IO.pure(Ps, Ps{rd, n, m, e})
 
@@ -628,7 +1273,98 @@ def done(p: Ps) -> IO(Unit):
         S.Rd.close(rd)
         IO.die(Unit, 1, "transcript: out of fuel before the input ended (a bug)")
 
-def tokenizer(+fmt: Nat, +inp: String, +out: String, +limit: Nat, m: Maybe<&2, Tk.Bpe>) -> IO(Unit):
+# BASE for format mugen: `bend-transcript base RESULTS.nul BASE [BEND]` runs
+# `BEND base NAME` (BEND: bend) once for each name a Bend unit's body uses
+# that its head does not define, and writes NAME, a tab, its output's first
+# line, a line each (the renderer keeps those that open a def, law or type:
+# Check/Bend.bend's Context, which they must give back)
+
+type Sn is Data:
+  Sn{seen: Map<&2, Unit>, names: List<&2, String>}
+
+def sn.add.on(had: Bool, m: Map<&2, Unit>, +k: String, ns: List<&2, String>) -> Sn:
+  match had:
+    case True{}:
+      Sn{m, ns}
+    case False{}:
+      Sn{Map.set(&2, Unit, m, k, Unit{}), k <> ns}
+
+def sn.add.got(r: Map<&2, Unit> & Bool, +k: String, ns: List<&2, String>) -> Sn:
+  match r:
+    case (m, b):
+      sn.add.on(b, m, k, ns)
+
+def sn.add(xs: List<&2, List<&2, U32>>, s: Sn) -> Sn:
+  match xs s:
+    case +x <> t Sn{m, ns}:
+      +k = S.str(x)
+      sn.add(t, sn.add.got(Map.has(&2, Unit, m, k), k, ns))
+    case _ s:
+      s
+
+def sn.unit(bend: Bool, +fs: List<&2, List<&2, U32>>, s: Sn) -> Sn:
+  match bend:
+    case True{}:
+      sn.add(mg.keep(mg.words(field(fs, 9n)), split(field(fs, 5n), 10), False{}), s)
+    case False{}:
+      s
+
+def sn.docs(ds: List<&2, Ns.Doc>, s: Sn) -> Sn:
+  match ds:
+    case Nil{}:
+      s
+    case Ns.Doc{i, +t} <> more:
+      +fs = split(t, 30)
+      sn.docs(more, sn.unit(U.eq(field(fs, 0n), U.b("bend")), fs, s))
+
+type Bn is Type:
+  Bn{rd: S.Rd, s: Sn, eof: Bool}
+
+def bn.of(bt: Bt, s: Sn) -> Bn:
+  match bt:
+    case Bt{rd, us, e}:
+      Bn{rd, sn.docs(List.reverse(&2, Ns.Doc, us), s), e}
+
+def bn.step(b: Bn) -> IO(Bn):
+  match b:
+    case Bn{rd, s, e}:
+      do IO<Bn>:
+        bt : Bt <- bt.go(batch(), Bt{rd, Nil{}, False{}})
+        return bn.of(bt, s)
+
+def bn.go(fuel: Nat, b: Bn) -> IO(Bn):
+  match fuel b:
+    case 1n+q Bn{rd, s, False{}}:
+      IO.bind(Bn, Bn, bn.step(Bn{rd, s, False{}}), bn.go(q))
+    case _ Bn{rd, s, e}:
+      IO.pure(Bn, Bn{rd, s, e})
+
+def bn.look(ns: List<&2, String>, +bend: String, +out: String, +k: Nat) -> IO(Nat):
+  match ns:
+    case Nil{}:
+      IO.pure(Nat, k)
+    case +n <> t:
+      do IO<Nat>:
+        +o : S.Out <- S.run.quiet(".", [], 60, bend, ["base", n], Nil{})
+        S.add(out, cat([U.b(n), [9], S.lines.first(S.Out.text(o)), nl()]))
+        bn.look(t, bend, out, 1n+k)
+
+def bn.done(b: Bn, +bend: String, +out: String) -> IO(Unit):
+  match b:
+    case Bn{rd, Sn{m, ns}, e}:
+      do IO<Unit>:
+        S.Rd.close(rd)
+        S.write(out, Nil{})
+        +k : Nat <- bn.look(List.reverse(&2, String, ns), bend, out, 0n)
+        IO.print("transcript base: " ++ Nat.show(k) ++ " names")
+
+def base.run(inp: String, +out: String, +bend: String) -> IO(Unit):
+  do IO<Unit>:
+    rd : S.Rd <- S.Rd.open(inp)
+    b : Bn <- bn.go(big(), Bn{rd, Sn{Map.new(&2, Unit), Nil{}}, False{}})
+    bn.done(b, bend, out)
+
+def tokenizer(+fmt: Nat, +inp: String, +out: String, +limit: Nat, +cf: Mgc, m: Maybe<&2, Tk.Bpe>) -> IO(Unit):
   match m:
     case None{}:
       IO.die(Unit, 1, "transcript: the tokenizer did not parse")
@@ -636,20 +1372,24 @@ def tokenizer(+fmt: Nat, +inp: String, +out: String, +limit: Nat, m: Maybe<&2, T
       do IO<Unit>:
         rd : S.Rd <- S.Rd.open(inp)
         S.write(out, Nil{})
-        p : Ps <- ps.go(big(), fmt, out, b, limit, Ps{rd, 0n, 0n, False{}})
+        S.write(Mgc.sizes(cf), Nil{})
+        p : Ps <- ps.go(big(), fmt, out, b, limit, cf, Ps{rd, 0n, 0n, False{}})
         done(p)
 
-# TRANSCRIPT_FORMAT (1, 2 or chain) and, for format 2, COPIES (2, at least 1):
+# TRANSCRIPT_FORMAT (1, 2, chain or mugen) and, for format 2, COPIES (2, at least 1):
 # all.fmt's fmt
 def fmt.of(+f: String, +k: Nat) -> Nat:
-  Bool.pick(Nat, String.eq(f, "chain"), chain.fmt(), Bool.pick(Nat, String.eq(f, "2"), Bool.pick(Nat, Nat.is_eq(Nat.min(k, 998n), 0n), 1n, Nat.min(k, 998n)), 0n))
+  Bool.pick(Nat, String.eq(f, "mugen"), mg.fmt(), Bool.pick(Nat, String.eq(f, "chain"), chain.fmt(), Bool.pick(Nat, String.eq(f, "2"), Bool.pick(Nat, Nat.is_eq(Nat.min(k, 998n), 0n), 1n, Nat.min(k, 998n)), 0n)))
 
 def run(tok: String, inp: String, +out: String, +window: Nat) -> IO(Unit):
   do IO<Unit>:
     tx : List<&2, U32> <- B.Bytes.read_all(tok)
     +f : String <- S.env("TRANSCRIPT_FORMAT", "1")
     +k : Nat <- S.env.nat("COPIES", 2n)
-    tokenizer(fmt.of(f, k), inp, out, Nat.sub(window, 64n), Tk.Bpe.parse(tx))
+    +bp : String <- S.env("BASE", "")
+    +sz : String <- S.env("SIZES", "/dev/null")
+    bx : List<&2, U32> <- mg.base.read.on(String.eq(bp, ""), bp)
+    tokenizer(fmt.of(f, k), inp, out, Nat.sub(window, 64n), mg.cfg(bx, sz), Tk.Bpe.parse(tx))
 
 def window.of(xs: List<String>) -> Nat:
   match xs:
@@ -658,12 +1398,30 @@ def window.of(xs: List<String>) -> Nat:
     case x <> t:
       Maybe.default(&2, Nat, Nat.read(x), 2048n)
 
+def args.base(xs: List<String>) -> IO(Unit):
+  match xs:
+    case b <> inp <> out <> Nil{}:
+      base.run(inp, out, "bend")
+    case b <> inp <> out <> bend <> more:
+      base.run(inp, out, bend)
+    case _:
+      IO.die(Unit, 2, "usage: bend-transcript base RESULTS.nul BASE [BEND]")
+
+def args.go(base: Bool, xs: List<String>) -> IO(Unit):
+  match base xs:
+    case True{} xs:
+      args.base(xs)
+    case False{} tok <> inp <> out <> more:
+      run(tok, inp, out, window.of(more))
+    case _ _:
+      IO.die(Unit, 2, "usage: bend-transcript TOKENIZER RESULTS.nul OUTPUT.nul [WINDOW], or bend-transcript base RESULTS.nul BASE [BEND]")
+
 def args(xs: List<String>) -> IO(Unit):
   match xs:
-    case tok <> inp <> out <> more:
-      run(tok, inp, out, window.of(more))
-    case _:
-      IO.die(Unit, 2, "usage: bend-transcript TOKENIZER RESULTS.nul OUTPUT.nul [WINDOW]")
+    case +x <> t:
+      args.go(String.eq(x, "base"), x <> t)
+    case Nil{}:
+      args.go(False{}, Nil{})
 
 def main() -> IO(Unit):
   do IO<Unit>:
