@@ -34,11 +34,14 @@ L=$A/run/a2b/ev-nu/requeue.log
 mkdir -p $U $T/bend
 # requeue.sh logs "[time] KEY: exit N" when KEY's emit ends
 while ! grep -q "] $K: exit" $L 2>/dev/null; do
-  systemctl --user is-active -q a2b-requeue5747 || { say "$N: a2b-requeue5747 is not running and $K's emit has not ended"; exit 1; }
+  # stdlib's emit runs again in a2b-stdlib2 (agda2bend ev-nu/stdlib2.sh, 12b7ca7, 2026-10-30)
+  systemctl --user is-active -q a2b-requeue5747 a2b-stdlib2 || { say "$N: a2b-requeue5747 and a2b-stdlib2 are not running and $K's emit has not ended"; exit 1; }
   sleep 300
 done
 for u in $PREV; do while systemctl --user is-active -q $u; do sleep 300; done; done
-grep -q "] $K: exit 0" $L || { say "$N: $C did not end well: $(grep "] $K: exit" $L)"; exit 1; }
+# "KEY: keep": an emit stopped by hand whose modules done are taken (stdlib2, 2026-11-02: stuck in
+# Winl on Categories.Category.Instance.Properties.Setoids.LCCC, 723 of 1657 modules)
+grep -q "] $K: exit 0\|] $K: keep" $L || { say "$N: $C did not end well: $(grep "] $K: exit" $L)"; exit 1; }
 say "$N: $C ended: $(tail -n 1 $A/run/a2b/$C.log | cut -c1-200)"
 if [ ! -s $U/all.jsonl ]; then
   (cd $A && run/a2b/bin/agda2bend-O0-v3c4d28c corpus /home/hhefesto/src/ana/$U/all.jsonl run/a2b/$X run/a2b/$C) > $U/corpus.log 2>&1 || { say "$N corpus FAILED"; exit 1; }
@@ -137,7 +140,8 @@ if [ ! -e $T/bend/units.nul ]; then
 fi
 if [ ! -e $T/bend/units.nul.full ]; then
   mv $T/bend/units.nul $T/bend/units.nul.full
-  python3 -I run/v5/clean/trim-mutants.py $T/bend/units.nul.full $T/bend/units.nul > $T/trim.log 2>&1 || { say "trim FAILED"; exit 1; }
+  # 4 in-check mutants a unit (2026-11-02): the mix keeps 4 repairs a unit since 10-29 (the user: cap 4)
+  python3 -I run/v5/clean/trim-mutants.py $T/bend/units.nul.full $T/bend/units.nul 4 > $T/trim.log 2>&1 || { say "trim FAILED"; exit 1; }
 fi
 say "$N check+render"
 env $E TRANSCRIPT_FORMAT=2 COPIES=4 CHECK_PROCS=${CHECK_PROCS:-6} CHECK_JOBS=1 CHUNK=25 UNIT_JOBS=4 $D transcripts all bend > $T/all.log 2>&1 || { say "all FAILED"; exit 1; }
