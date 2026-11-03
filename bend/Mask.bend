@@ -15,28 +15,35 @@ import ./Agent/Spec.bend as A
 # the agreement on every transcript of the corpus.
 #
 # A window is token ids, BOS (0) and EOS (1) between documents.  A document
-# that opens with the User heading is a transcript and is read; any other
+# that opens with the User heading (format 2's `## User`, or the mugen
+# shape's `## user`: docs/MUGEN-SHAPE.md) is a transcript and is read; any other
 # (raw code, filler, a document cut by the window's start) is given.  BOS is
 # given; an EOS ends ana's turn after a transcript (act) and is given after
 # anything else: both weigh 1.
 
 type Ids is Data:
-  Ids{nl: U32, hds: List<&2, A.Hd>, user: List<&2, U32>}
+  Ids{nl: U32, hds: List<&2, A.Hd>, user: List<&2, U32>, muser: List<&2, U32>}
 
 def ms.nl(+ids: Ids) -> U32:
   match ids:
-    case Ids{n, h, u}:
+    case Ids{n, h, u, m}:
       n
 
 def ms.hds(+ids: Ids) -> List<&2, A.Hd>:
   match ids:
-    case Ids{n, h, u}:
+    case Ids{n, h, u, m}:
       h
 
 def ms.user(+ids: Ids) -> List<&2, U32>:
   match ids:
-    case Ids{n, h, u}:
+    case Ids{n, h, u, m}:
       u
+
+# the mugen shape's user heading
+def ms.muser(+ids: Ids) -> List<&2, U32>:
+  match ids:
+    case Ids{n, h, u, m}:
+      m
 
 def ms.hds.go(+b: Tk.Bpe, hs: List<&2, A.Hd>) -> List<&2, A.Hd>:
   match hs:
@@ -54,7 +61,7 @@ def ms.first(+xs: List<&2, U32>) -> U32:
 
 # the reader's symbols under a tokenizer
 def ms.ids(+b: Tk.Bpe) -> Ids:
-  Ids{ms.first(Tk.Bpe.encode(b, [10])), ms.hds.go(b, A.ag.hds.bytes()), Tk.Bpe.encode(b, A.ag.ascii("## User\n"))}
+  Ids{ms.first(Tk.Bpe.encode(b, [10])), ms.hds.go(b, A.ag.hds.bytes()), Tk.Bpe.encode(b, A.ag.ascii("## User\n")), Tk.Bpe.encode(b, A.ag.ascii("## user\n"))}
 
 # whether the encoded newline is one token (the reader needs it)
 def ms.ids.ok(+b: Tk.Bpe) -> Bool:
@@ -65,7 +72,7 @@ def ms.read(+ids: Ids, +xs: List<&2, U32>) -> List<&2, A.Turn>:
   A.ag.read(ms.nl(ids), ms.hds(ids), xs)
 
 def ms.is.transcript(+ids: Ids, +seg: List<&2, U32>) -> Bool:
-  A.ag.prefix(seg, ms.user(ids))
+  Bool.or(A.ag.prefix(seg, ms.user(ids)), A.ag.prefix(seg, ms.muser(ids)))
 
 def ms.seg.if(tr: Bool, +ids: Ids, +seg: List<&2, U32>) -> List<&2, A.Role>:
   match tr:

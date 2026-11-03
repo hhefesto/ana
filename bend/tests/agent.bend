@@ -8,7 +8,9 @@ import ../Bytes.bend as B
 # (bend/Transcript.bend `render2`): reading gives each turn the role the
 # shape means, reading never changes the text, every echo answers a call,
 # the weights are 0 exactly on attempts and echoes, and the loop's unfold
-# lets only the tool write an echo.  Each line prints `ok NAME` or
+# lets only the tool write an echo; the mugen shape's turns (2026-11-03): a
+# call with the `## echo` line after it, its echo, the reply as the act, and
+# their weights in a window.  Each line prints `ok NAME` or
 # `FAIL NAME`.  The corpus-scale laws (every transcript of run/v2, and the
 # token reading against the byte reading) are `bend-agent laws`.
 
@@ -110,6 +112,34 @@ def drift() -> String:
 def trap() -> String:
   user("Define `g`.") ++ "## Term\n\n```bend\ndef g() -> Nat:\n## Term\n  0n\n```\n\n" ++ "## bend\n\n```\nAll terms check.\n[exit 0]\n```\n\n"
 
+# The mugen shape (docs/MUGEN-SHAPE.md): tests/mugen.bend's direct session,
+# the renderer's bytes (that test holds them to bend/Transcript.bend's
+# mg.direct): user, then each call with the `## echo` line after it (ana's:
+# she stops there, mugen writes the echo), the echo, and ana's reply.
+def mg.direct() -> String:
+  "## user\n\nAdd `twice` to demo/Two.bend.\n\nn twice.\n\n```bend\ndef twice(n: Nat) -> Nat:\n```\n\n## read\n\ndemo/Two.bend 1 3\n\n## echo\n\n```\nimport Base\n\n# n twice.\n[lines 1-3 of 3]\n```\n\n## shell\n\nbend base Nat.add | head -1\n\n## echo\n\n```\ndef Nat.add(a: Nat, b: Nat) -> Nat:\n(exit 0)\n```\n\n## edit\n\ndemo/Two.bend\n-# n twice.\n+# n twice.\n+def twice(n: Nat) -> Nat:\n+  Nat.add(n, n)\n\n## echo\n\n```\n--- demo/Two.bend\n+++ demo/Two.bend\n@@ -1,3 +1,5 @@\n import Base\n \n # n twice.\n+def twice(n: Nat) -> Nat:\n+  Nat.add(n, n)\n```\n\n## shell\n\nbend demo/Two.bend --check-only\n\n## echo\n\n```\nALL PROOFS CHECK\n(exit 0)\n```\n\n## mugen\n\nAdded `twice` to demo/Two.bend; bend check passes.\n\n"
+
+# a session cut after a call's `## echo` line: where ana stops at inference
+def mg.stopped() -> String:
+  "## user\n\nFix `twice` in demo/Two.bend.\n\n## shell\n\nbend demo/Two.bend --check-only\n\n## echo\n"
+
+# an echo with no call before it reads as a call line and its echo (as a tool's turn)
+def mg.lone() -> String:
+  "## user\n\nWhat does bend say?\n\n## echo\n\n```\nALL PROOFS CHECK\n(exit 0)\n```\n\n## mugen\n\nIt checks.\n\n"
+
+# the call turns' bytes: the call's turn and the echo's heading line
+def mg.calls.ok(e: List<&2, A.Turn>) -> Bool:
+  match e:
+    case Nil{}:
+      True{}
+    case A.Turn{+r, +x} <> t:
+      +c = A.ag.role.code(r)
+      +ok = Bool.pick(Bool, Nat.is_eq(c, 4n), A.ag.ends.with(x, b("\n\n## echo\n")), Bool.pick(Bool, Nat.is_eq(c, 5n), A.ag.prefix(x, b("\n```\n")), True{}))
+      Bool.and(ok, mg.calls.ok(t))
+
+def mg.calls(+name: String, +text: String) -> String:
+  verdict(name, mg.calls.ok(A.ag.read.bytes(b(text))))
+
 def shape(+name: String, +text: String, +want: List<&2, Nat>) -> String:
   +xs = b(text)
   +e = A.ag.read.bytes(xs)
@@ -180,10 +210,10 @@ def window.test(m: Maybe<&2, Tk.Bpe>) -> String:
       +ids = Ms.ms.ids(tb)
       +fill = Tk.Bpe.encode(tb, b("go :: Int\n## ghc\ngo = 0\n"))
       +w = List.concat(&2, U32, [[0], fill, [1], Tk.Bpe.encode(tb, b(direct())), [1], Tk.Bpe.encode(tb, b(repair())), [1],
-        Tk.Bpe.encode(tb, b(chain.repair())), [1]])
+        Tk.Bpe.encode(tb, b(chain.repair())), [1], Tk.Bpe.encode(tb, b(mg.direct())), [1]])
       +ws = Ms.ms.weights(ids, w)
-      +want = Nat.add(Nat.add(zeros.of(tb, A.ag.read.bytes(b(direct()))), zeros.of(tb, A.ag.read.bytes(b(repair())))),
-        zeros.of(tb, A.ag.read.bytes(b(chain.repair()))))
+      +want = Nat.add(Nat.add(Nat.add(zeros.of(tb, A.ag.read.bytes(b(direct()))), zeros.of(tb, A.ag.read.bytes(b(repair())))),
+        zeros.of(tb, A.ag.read.bytes(b(chain.repair())))), zeros.of(tb, A.ag.read.bytes(b(mg.direct()))))
       verdict("window (" ++ Nat.show(count.zero(ws)) ++ " of " ++ Nat.show(List.length(&2, F32, ws)) ++ " targets weigh 0)",
         Bool.and(Nat.is_eq(List.length(&2, F32, ws), Nat.sub(List.length(&2, U32, w), 1n)), Nat.is_eq(count.zero(ws), want)))
 
@@ -207,6 +237,11 @@ def main() -> IO(Unit):
     IO.print(v1("v1 verify", verify()))
     IO.print(v1("v1 trap", trap()))
     IO.print(verdicts())
+    IO.print(shape("mugen direct", mg.direct(), [0n, 4n, 5n, 4n, 5n, 4n, 5n, 4n, 5n, 3n]))
+    IO.print(weights("weights mugen direct", mg.direct()))
+    IO.print(mg.calls("mugen calls end with their echo line", mg.direct()))
+    IO.print(shape("mugen stopped", mg.stopped(), [0n, 4n]))
+    IO.print(shape("mugen lone echo", mg.lone(), [0n, 4n, 5n, 3n]))
     tx : List<&2, U32> <- B.Bytes.read_all("weights/code32k.bpe")
     IO.print(window.test(Tk.Bpe.parse(tx)))
     return Unit{}

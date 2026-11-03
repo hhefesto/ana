@@ -14,7 +14,9 @@ import ../Transcript.bend as Tr
 #   calls      every echo answers a call, every call is answered
 #   shape      the roles its shape means: one act (none for verify), the
 #              Term (term-to-type: the Type); one attempt for repair, fill
-#              and verify, none for direct and term-to-type; the User first
+#              and verify, none for direct and term-to-type; the User first.
+#              The mugen shape (`## user` first): one act, the `## mugen`
+#              reply, no attempt, no try
 #   tokens     the tokens read back to the same tokens, as a transcript
 #   agree      each token's role is the role of every one of its bytes
 #
@@ -92,6 +94,17 @@ def la.shape.ok(+s: List<&2, U32>, +e: List<&2, A.Turn>) -> Bool:
   +label = Bool.or(verify, A.ag.prefix(la.act.text(e), A.ag.ascii(Bool.pick(String, t2t, "## Type\n", "## Term\n"))))
   Bool.and(Bool.and(Bool.and(acts, atts), tries), Bool.and(label, la.first.user(e)))
 
+# the mugen shape (docs/MUGEN-SHAPE.md, 2026-11-03), a text opening with
+# `## user`: one act, ana's `## mugen` reply; no attempt (a repair's wrong
+# text is a read's echo) and no try; the user first
+def la.is.mugen(+text: List<&2, U32>) -> Bool:
+  A.ag.prefix(text, A.ag.ascii("## user\n"))
+
+def la.mugen.ok(+e: List<&2, A.Turn>) -> Bool:
+  +acts = Nat.is_eq(A.ag.count(e, 3n), 1n)
+  +none = Bool.and(Nat.is_eq(A.ag.count(e, 2n), 0n), Nat.is_eq(A.ag.count(e, 6n), 0n))
+  Bool.and(Bool.and(acts, none), Bool.and(A.ag.prefix(la.act.text(e), A.ag.ascii("## mugen\n")), la.first.user(e)))
+
 def la.codes(rs: List<&2, A.Role>) -> List<&2, Nat>:
   match rs:
     case Nil{}:
@@ -132,7 +145,7 @@ def la.doc(+b: Tk.Bpe, +ids: Ms.Ids, +id: List<&2, U32>, +text: List<&2, U32>) -
   +agree = la.nats.eq(la.expand(ts, A.ag.roles(te), b), la.codes(A.ag.roles(e)))
   la.if(A.ag.law.roundtrip(10, A.ag.hds.bytes(), text), "roundtrip",
     la.if(A.ag.law.calls(e), "calls",
-      la.if(la.shape.ok(la.shape(id), e), "shape",
+      la.if(Bool.pick(Bool, la.is.mugen(text), la.mugen.ok(e), la.shape.ok(la.shape(id), e)), "shape",
         la.if(tok, "tokens",
           la.if(agree, "agree", Nil{})))))
 

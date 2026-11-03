@@ -118,12 +118,22 @@ bare Term). Where the tokens go (fitting presentations):
 
 Echoes are 62% of the tokens (weight 0); ana's own turns 30%; the user's 8%.
 
+## How training reads it (2026-11-03)
+
+Agent/Spec.bend's reader (the trainer's masks, Mask.bend) knows the six
+headings: `user` is the user (weight 1); `read`, `edit` and `shell` are
+ana's calls (1); `## echo` is the tool's turn, but its heading line goes
+with the call before it, since ana writes it and stops there (mugen runs
+the call and writes the rest); the rest of the echo weighs 0; `mugen` is
+ana's answer (1). A document opening with `## user` is a transcript, as one
+opening with `## User` is. bend/tests/agent.bend holds the roles, the
+weights and a code32k window with a mugen session in it.
+`bend-agent-laws` on all 48,767 of own5's presentations (run/v6/mugen/own5):
+roundtrip, calls, shape (one act, the `## mugen` reply, no attempt, no try,
+the user first), tokens and agree all hold, 0 failed.
+
 ## Not yet
 
-- Agent/Spec.bend's reader knows format 2's headings only: the new ones
-  (`user`, `read`, `edit`, `shell`, `echo`, `mugen`) need their roles (calls
-  and replies 1, echoes 0) and the laws in bend/tests/agent.bend, before
-  training reads this shape.
 - Other languages (their checker's command, file and look-ups).
 - ana as a mugen back end: mugen runs ana's calls with the same tools it
   gives Claude, and feeds the echoes back, until ana writes `## mugen`.

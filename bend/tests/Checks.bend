@@ -478,11 +478,13 @@ def chk.tests() -> List<&2, ChkTest>:
    # ana's episodes (Agent/Spec.bend): each shape's roles, reading's round
    # trip, every call answered, weight 0 exactly on attempts, tries and
    # echoes, the loop's unfold, multi-turn chains (every rejected Term a
-   # try), the reader before tries agreeing on every format-2 shape, and a
-   # code32k window's weights (compiled: the interpreter's stack is too
-   # small for the tokenizer's parse)
+   # try), the reader before tries agreeing on every format-2 shape, the
+   # mugen shape's turns (a call and its `## echo` line, the echo, the reply;
+   # 2026-11-03), and a code32k window's weights, a mugen session in it
+   # (compiled: the interpreter's stack is too small for the tokenizer's parse)
    ChkTest{"agent.bend", True{}, RHead{chk.oks(["direct", "repair", "term-to-type", "verify", "trap", "weights direct", "weights repair", "unfold",
-     "chain", "chain-repair", "label drift", "tries weigh 0", "v1 direct", "v1 repair", "v1 term-to-type", "v1 verify", "v1 trap", "verdict"]), "ok window"}},
+     "chain", "chain-repair", "label drift", "tries weigh 0", "v1 direct", "v1 repair", "v1 term-to-type", "v1 verify", "v1 trap", "verdict",
+     "mugen direct", "weights mugen direct", "mugen calls end with their echo line", "mugen stopped", "mugen lone echo"]), "ok window"}},
    # bend-ops' primitives (bend/Box): its parsers on run 3's files
    # (chain.log, the sha256 listings, a trainer's log) and on vastai's --raw
    # JSON, the lint's rules and flake bodies, st.f.floor, and the processes
@@ -561,7 +563,7 @@ def chk.tests() -> List<&2, ChkTest>:
    # by reason, held-out units gone, copies and derived transcripts, key order, a second run the same
    # bytes, dry; cap=2, ratio=2, share=50, fill=repair; files-jsonl, raw-drop and port-fix (`bend` on
    # the PATH, weights/code32k.bpe); compiled (the interpreter's stack does not hold the reader)
-   ChkTest{"ratio.bend", True{}, ROks{55n}},
+   ChkTest{"ratio.bend", True{}, ROks{56n}},
    # bend-corpus-v2 port's renames (bend/CorpusV2/PortOps.bend, 2026-10-16): declarations and the
    # header as the loader reads them, import paths through a sibling link, fresh names; the own,
    # alias and binder renames on modules written here (strings and comments untouched, an importer
