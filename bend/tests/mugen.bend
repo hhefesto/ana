@@ -2,6 +2,7 @@ import Base
 import ../Units.bend as U
 import ../Transcript.bend as T
 import ../Sys.bend as S
+import ../Nul.bend as Ns
 
 # bend-transcript's format mugen (docs/MUGEN-SHAPE.md) on a hand-made Bend
 # unit: the direct session byte for byte (every echo as mugen's read, edit
@@ -57,6 +58,16 @@ def count() -> String:
     Bool.and(Nat.is_eq(T.mg.count(U.b("xyz"), U.b("q")), 0n), Nat.is_eq(T.mg.count(U.b("  acc\n    acc\n"), U.b("  acc\n")), 2n)))
   Bool.pick(String, ok, "ok count", "MISMATCH count")
 
+# MUGEN_ONLY: "" keeps every shape, `repair` the repair-M ones (by the id's
+# last segment, not a path's)
+def only() -> String:
+  +ds = {[Ns.Doc{U.b("own:a/mugen-repair/X.bend#f@1/mugen-direct"), U.b("d")}, Ns.Doc{U.b("own:a/X.bend#f@1/mugen-repair-0"), U.b("r0")},
+    Ns.Doc{U.b("own:a/X.bend#f@1/mugen-fill"), U.b("f")}, Ns.Doc{U.b("own:a/X.bend#f@1/mugen-repair-1"), U.b("r1")}] : List<&2, Ns.Doc>}
+  +ok = Bool.and(Nat.is_eq(List.length(&2, Ns.Doc, T.mg.docs.only("", ds)), 4n),
+    Bool.and(Nat.is_eq(List.length(&2, Ns.Doc, T.mg.docs.only("repair", ds)), 2n),
+      Bool.and(T.mg.only.ok("repair", U.b("own:a/X.bend#f@1/mugen-repair-0")), Bool.not(T.mg.only.ok("repair", U.b("own:a/mugen-repair/X.bend#f@1/mugen-direct"))))))
+  Bool.pick(String, ok, "ok only", "MISMATCH only")
+
 def main() -> IO(Unit):
   do IO<Unit>:
     IO.print(direct())
@@ -65,3 +76,4 @@ def main() -> IO(Unit):
     IO.print(turns("fill", T.mg.fill(two(), path(), base()), "## user\n## shell\n## echo\n## shell\n## echo\n## edit\n## echo\n## shell\n## echo\n## mugen\n"))
     IO.print(turns("repair", T.mg.repair(two(), path(), base(), 0n), "## user\n## shell\n## echo\n## read\n## echo\n## shell\n## echo\n## edit\n## echo\n## shell\n## echo\n## mugen\n"))
     IO.print(count())
+    IO.print(only())

@@ -37,8 +37,12 @@ import ../Clock.bend as Ck
 # last).  The stage before's raw last that such a stage does not load is scored
 # and pulled at the end, as the chain's very last is (a branch's end).
 #
-# Stages may be appended while the chain runs: at the end of the list it waits
-# WAIT seconds (7200) for another line, and a stage whose PLAN is not on the box
+# A line `end` (its first word; 2026-11-03, run 4's TODO: after CTL the chain
+# waited WAIT, two hours of a billed box, for a stage that never came) closes
+# STAGES: the lines after it are not read, and at the end of the list the
+# chain goes on to the scores at once.  Without one, stages may be appended
+# while the chain runs: at the end of the list it waits
+# WAIT seconds (7200) for another line (or an `end`), and a stage whose PLAN is not on the box
 # yet waits WAIT for it (both polled every WAIT_POLL, 60 s).  Every POLL seconds
 # (120) it looks at the running stage (its log's size, the trainers named
 # BINARY, the log's tail), pulls the saves whose step is a multiple of EVERY
@@ -262,13 +266,29 @@ def chn.stage.line(+l: List<&2, U32>) -> Bool:
   +r = chn.lstrip(l, chn.space(Lc.lcl.at(l, 0n)))
   Bool.and(Nat.is_ne(S.len(r), 0n), Bool.not(S.head.is(r, 35)))
 
+# an end line: its first word is `end` (nothing after it is a stage)
+def chn.stage.end(+l: List<&2, U32>) -> Bool:
+  S.eq(Lc.lcl.nth(Lc.lcl.words(l), 0n), S.b("end"))
+
+# the stage lines, up to an end line
 def chn.stage.lines(ls: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
   match ls:
     case Nil{}:
       Nil{}
     case +l <> t:
       +rest = chn.stage.lines(t)
-      Bool.pick(List<&2, List<&2, U32>>, chn.stage.line(l), l <> rest, rest)
+      Bool.pick(List<&2, List<&2, U32>>, chn.stage.end(l), Nil{}, Bool.pick(List<&2, List<&2, U32>>, chn.stage.line(l), l <> rest, rest))
+
+def chn.ends(ls: List<&2, List<&2, U32>>) -> Bool:
+  match ls:
+    case Nil{}:
+      False{}
+    case +l <> t:
+      Bool.or(chn.stage.end(l), chn.ends(t))
+
+# whether STAGES has an end line: no stage will be appended
+def chn.ended(+text: List<&2, U32>) -> Bool:
+  chn.ends(S.split.lines(text))
 
 # the k-th stage line (k from 1), None past the end
 def chn.stage.at(+text: List<&2, U32>, +k: Nat) -> Maybe<&2, List<&2, U32>>:
@@ -912,7 +932,7 @@ def chn.wait.stage.step(+c: ChnCfg, +k: Nat, +u: Nat) -> IO(ChnW):
     +txt : List<&2, U32> <- S.read(chn.stages(c))
     +now : Nat <- Lc.lcl.now()
     +m : Maybe<&2, List<&2, U32>> = chn.stage.at(txt, k)
-    chn.wait.after(Maybe.is_some(&2, List<&2, U32>, m), Nat.is_le(u, now), c, u, m)
+    chn.wait.after(Maybe.is_some(&2, List<&2, U32>, m), Bool.or(Nat.is_le(u, now), chn.ended(txt)), c, u, m)
 
 def chn.wait.stage.go(fuel: Nat, +c: ChnCfg, +k: Nat, w: ChnW) -> IO(Maybe<&2, List<&2, U32>>):
   match fuel w:
@@ -1248,11 +1268,15 @@ def chn.stage.waited(m: Maybe<&2, List<&2, U32>>, +c: ChnCfg, +r: ChnRun) -> IO(
     case None{}:
       chn.stop(c, r, "no more stages")
 
-def chn.stage.have(m: Maybe<&2, List<&2, U32>>, +c: ChnCfg, +r: ChnRun) -> IO(ChnRun):
-  match m:
-    case Some{+l}:
+def chn.stage.have(m: Maybe<&2, List<&2, U32>>, ended: Bool, +c: ChnCfg, +r: ChnRun) -> IO(ChnRun):
+  match m ended:
+    case Some{+l} _:
       chn.stage.got(c, r, chn.stage.of(l))
-    case None{}:
+    case None{} True{}:
+      do IO<ChnRun>:
+        chn.log(c, "STAGES ends after stage " ++ Nat.show(Nat.sub(chn.r.k(r), 1n)) ++ " (its end line); not waiting")
+        chn.stop(c, r, "no more stages")
+    case None{} False{}:
       do IO<ChnRun>:
         chn.log(c, "no stage " ++ Nat.show(chn.r.k(r)) ++ " yet; waiting up to " ++ Nat.show(chn.wait(c)) ++ " s for one to be appended to " ++ chn.stages(c))
         m2 : Maybe<&2, List<&2, U32>> <- chn.wait.stage(c, chn.r.k(r))
@@ -1261,8 +1285,8 @@ def chn.stage.have(m: Maybe<&2, List<&2, U32>>, +c: ChnCfg, +r: ChnRun) -> IO(Ch
 # one stage: read STAGES afresh (a stage appended while the chain runs is taken up)
 def chn.stage.step(+c: ChnCfg, +r: ChnRun) -> IO(ChnRun):
   do IO<ChnRun>:
-    txt : List<&2, U32> <- S.read(chn.stages(c))
-    chn.stage.have(chn.stage.at(txt, chn.r.k(r)), c, r)
+    +txt : List<&2, U32> <- S.read(chn.stages(c))
+    chn.stage.have(chn.stage.at(txt, chn.r.k(r)), chn.ended(txt), c, r)
 
 def chn.stages.go(fuel: Nat, +c: ChnCfg, r: ChnRun) -> IO(ChnRun):
   match fuel r:

@@ -41,7 +41,8 @@ import ./Mugen/Diff.bend as D
 # "Format mugen"; docs/MUGEN-SHAPE.md): read, edit and shell calls with
 # their echoes as mugen's tools print them. It reads BASE (the first lines
 # of `bend base`, from `bend-transcript base RESULTS.nul BASE [BEND]`) and
-# writes every presentation's size to SIZES.
+# writes every presentation's size to SIZES; MUGEN_ONLY=repair writes only
+# the repair-M presentations to OUTPUT (a history stream's).
 
 # Bytes -------------------------------------------------------------------------
 
@@ -588,21 +589,29 @@ def all.fmt(+fmt: Nat, +b: Tk.Bpe, +limit: Nat, rs: List<&2, Ns.Doc>) -> List<&2
 def mg.fmt() -> Nat:
   1000n
 
+# only: MUGEN_ONLY (2026-11-03), "" for every shape, else OUTPUT gets only the
+# presentations whose shape starts with it (`repair`: a history stream's
+# repairs, whose units' other shapes their own stream already has)
 type Mgc is Data:
-  Mgc{base: Map<&2, List<&2, U32>>, sizes: String}
+  Mgc{base: Map<&2, List<&2, U32>>, sizes: String, only: String}
 
 def Mgc.base(+c: Mgc) -> Map<&2, List<&2, U32>>:
   match c:
-    case Mgc{m, s}:
+    case Mgc{m, s, o}:
       m
 
 def Mgc.sizes(+c: Mgc) -> String:
   match c:
-    case Mgc{m, s}:
+    case Mgc{m, s, o}:
       s
 
+def Mgc.only(+c: Mgc) -> String:
+  match c:
+    case Mgc{m, s, o}:
+      o
+
 def mg.none() -> Mgc:
-  Mgc{Map.new(&2, List<&2, U32>), "/dev/null"}
+  Mgc{Map.new(&2, List<&2, U32>), "/dev/null", ""}
 
 # bytes as a String of one Chr a byte, and back (Mugen/Diff.bend's lines only
 # split at the newline byte, so the diff of the bytes is the diff of the text)
@@ -1129,6 +1138,29 @@ def mg.docs(ms: List<&2, Mg>) -> List<&2, Ns.Doc>:
     case Mg{d, l, False{}} <> t:
       mg.docs(t)
 
+def mg.seg.go(xs: List<&2, U32>, +cur: List<&2, U32>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      List.reverse(&2, U32, cur)
+    case +h <> t:
+      mg.seg.go(t, Bool.pick(List<&2, U32>, U32.is_eq(h, 47), Nil{}, h <> cur))
+
+# a presentation's shape: its id after the last /
+def mg.shape.of(+id: List<&2, U32>) -> List<&2, U32>:
+  mg.seg.go(id, Nil{})
+
+def mg.only.ok(+only: String, +id: List<&2, U32>) -> Bool:
+  Bool.or(String.is_empty(only), S.prefix(mg.shape.of(id), S.b("mugen-" ++ only)))
+
+# the presentations MUGEN_ONLY keeps
+def mg.docs.only(+only: String, ds: List<&2, Ns.Doc>) -> List<&2, Ns.Doc>:
+  match ds:
+    case Nil{}:
+      Nil{}
+    case Ns.Doc{+i, +t} <> rest:
+      +r = mg.docs.only(only, rest)
+      Bool.pick(List<&2, Ns.Doc>, mg.only.ok(only, i), Ns.Doc{i, t} <> r, r)
+
 def mg.lines(ms: List<&2, Mg>) -> List<&2, U32>:
   match ms:
     case Nil{}:
@@ -1161,7 +1193,10 @@ def mg.base.read.on(none: Bool, +p: String) -> IO(List<&2, U32>):
       S.read(p)
 
 def mg.cfg(+bx: List<&2, U32>, +sizes: String) -> Mgc:
-  Mgc{mg.base.of(split(bx, 10), Map.new(&2, List<&2, U32>)), sizes}
+  Mgc{mg.base.of(split(bx, 10), Map.new(&2, List<&2, U32>)), sizes, ""}
+
+def mg.cfg.only(+bx: List<&2, U32>, +sizes: String, +only: String) -> Mgc:
+  Mgc{mg.base.of(split(bx, 10), Map.new(&2, List<&2, U32>)), sizes, only}
 
 # Main ---------------------------------------------------------------------------
 
@@ -1231,7 +1266,7 @@ def ps.write(mugen: Bool, +fmt: Nat, +out: String, +b: Tk.Bpe, +limit: Nat, +cf:
   match mugen:
     case True{}:
       +ms = mg.all(b, limit, Mgc.base(cf), rs)
-      +ts = mg.docs(ms)
+      +ts = mg.docs.only(Mgc.only(cf), mg.docs(ms))
       do IO<Ps>:
         S.add(out, Ns.put(ts, Nil{}))
         S.add(Mgc.sizes(cf), mg.lines(ms))
@@ -1388,8 +1423,9 @@ def run(tok: String, inp: String, +out: String, +window: Nat) -> IO(Unit):
     +k : Nat <- S.env.nat("COPIES", 2n)
     +bp : String <- S.env("BASE", "")
     +sz : String <- S.env("SIZES", "/dev/null")
+    +on : String <- S.env("MUGEN_ONLY", "")
     bx : List<&2, U32> <- mg.base.read.on(String.eq(bp, ""), bp)
-    tokenizer(fmt.of(f, k), inp, out, Nat.sub(window, 64n), mg.cfg(bx, sz), Tk.Bpe.parse(tx))
+    tokenizer(fmt.of(f, k), inp, out, Nat.sub(window, 64n), mg.cfg.only(bx, sz, on), Tk.Bpe.parse(tx))
 
 def window.of(xs: List<String>) -> Nat:
   match xs:

@@ -8,7 +8,7 @@
 # IN.nul: NUL pairs (transcript id, text).  UNITS: unit ids, a line each.  A transcript's unit is
 # repair-mix's: its id less a leading `mut:`, less its last `/` segment (the shape), less a
 # trailing `+N`.  Dropped: a transcript of a listed unit that is mutate's (`mut:`) or whose shape
-# is `repair`.  The rest is copied in order.  ALL=1: every transcript of a listed unit is dropped
+# is `repair` (format mugen's `mugen-repair-M` too, 2026-11-03).  The rest is copied in order.  ALL=1: every transcript of a listed unit is dropped
 # (recheck.py's stale units: today's Bend rejects them, so none of their tool outputs is true).
 import sys, os, re, collections
 ALL = os.environ.get('ALL') == '1'
@@ -27,7 +27,7 @@ with open(src, 'rb') as f, open(out, 'wb') as o:
         u, _, shape = x.rpartition(b'/')
         u = plus.sub(b'', u)
         c['in'] += 1
-        if u in U and (ALL or m or shape == b'repair'):
+        if u in U and (ALL or m or shape == b'repair' or shape.startswith(b'mugen-repair-')):
             c['dropped'] += 1; continue
         o.write(tid + b'\0' + d[i + 1] + b'\0')
         c['out'] += 1

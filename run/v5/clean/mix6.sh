@@ -8,12 +8,27 @@
 # (run/v5/act5: ana's own wrong programs and her fixes, not deduced from a correct one) pass
 # whole (free=).  A stream that is not there yet is left out, and said.
 #   mix6.sh OUT [dry]     OUT e.g. run/v6/mix/bend; dry: OUT.stats and the summary only
+#   MG=1: the streams mugen6.sh rendered in the mugen shape, those instead of format 2's
 cd /home/hhefesto/src/ana || exit 1
 OUT=${1:?usage: mix6.sh OUT [dry]}
 DRY=${2:-}
 CV=run/v5/clean/bend-corpus-v2
 args=()
-add() { if [ -s "$2" ]; then args+=("$1=$2"); else echo "mix6: not there: $2" >&2; fi; }
+# MG=1 (2026-11-03, the user 35718: "a step closer to mugen as an interface (turn wise)"): a
+# stream mugen6.sh rendered in the mugen shape (run/v6/mugen/NAME/DONE) goes in that shape, the
+# rest in format 2 (said); mutate's, the port's and the nights' have no mugen render
+mg() { local f=$1 n
+  case $f in
+    run/v2/transcripts-nv/bend/transcripts.train.nul) n=v2 ;;
+    run/v*/transcripts-*/bend/transcripts.train.nul) n=${f#run/v*/transcripts-}; n=${n%/bend/transcripts.train.nul} ;;
+    *) echo "$f"; return ;;
+  esac
+  if [ "${MG:-0}" = 1 ]; then
+    if [ -e run/v6/mugen/$n/DONE ]; then echo run/v6/mugen/$n/transcripts.train.nul; return; fi
+    [ -s "$f" ] && echo "mix6: $n is not in the mugen shape yet (run/v6/mugen/$n/DONE): format 2" >&2
+  fi
+  echo "$f"; }
+add() { local f; f=$(mg "$2"); if [ -s "$f" ]; then args+=("$1=$f"); else echo "mix6: not there: $f" >&2; fi; }
 # first-time transcripts and their check-mutant repairs, by source
 # a stream whose units got real history repairs (hist5.sh, 10-28): those repairs, and the stream
 # and its mutate run less those units' made-up repairs (such a unit keeps its real repairs only)
@@ -24,8 +39,11 @@ fresh() { local r=run/v6/recheck-$1 f=$2 o; if [ -e $r/DONE ] && [ -s "$f" ]; th
   if [ ! -s $o ] || [ $o -ot "$f" ] || [ $o -ot $r/stale.ids ]; then
     mkdir -p $r/streams; ALL=1 python3 -I tools/corpus-v2/hist/hist-drop.py "$f" $o.tmp $r/stale.ids >&2 && mv $o.tmp $o; fi
   echo $o; else [ -e $r/DONE ] || echo "mix6: $1 not rechecked on today's Bend ($r/DONE)" >&2; echo "$f"; fi; }
-hist() { local h=run/v6/hist-$1; if [ -e $h/DONE ]; then add in $(fresh $1 $h/$1.train.nul); add in $h/repairs.train.nul; else
-  echo "mix6: no history repairs for $1 ($h/DONE)" >&2; add in $(fresh $1 $2); fi; }
+hist() { local h=run/v6/hist-$1 m=run/v6/mugen/hist-$1; if [ -e $h/DONE ]; then
+  if [ "${MG:-0}" = 1 ] && [ -e $m/DONE ] && [ -s $m/$1.train.nul ]; then add in $(fresh $1 $m/$1.train.nul); add in $m/transcripts.train.nul
+  else [ "${MG:-0}" = 1 ] && echo "mix6: hist-$1 is not in the mugen shape yet ($m/DONE): format 2" >&2
+    add in $(fresh $1 $h/$1.train.nul); add in $h/repairs.train.nul; fi
+  else echo "mix6: no history repairs for $1 ($h/DONE)" >&2; add in $(fresh $1 $(mg $2)); fi; }
 histmut() { local h=run/v6/hist-$1; if [ -e $h/DONE ]; then add in $(fresh $1 $h/mut-$1.train.nul); else add in $(fresh $1 $2); fi; }
 hist v2 run/v2/transcripts-nv/bend/transcripts.train.nul
 hist collect5 run/v5/transcripts-collect5/bend/transcripts.train.nul

@@ -6,7 +6,7 @@ import ./Local.bend as Lc
 # Scenario: the chain and the watch against a box in a sandbox, without a
 # box, a GPU or money (2026-10-14, the plan's Phase 1a verification).
 #
-#   bend-ops sim N DIR            scenario N (1..10) in DIR/sN-box (BOX_DRIVER ./bend-box) and, for 1, 2,
+#   bend-ops sim N DIR            scenario N (1..12) in DIR/sN-box (BOX_DRIVER ./bend-box) and, for 1, 2,
 #                                 4 and 7, DIR/sN-fp (./fp.sh) and DIR/sN-old (the old scripts), each
 #                                 wiped first; `ok`/`FAIL` lines, exit 1 on a FAIL
 #   bend-ops sim all DIR          every scenario, one after the other
@@ -189,8 +189,23 @@ def scn.s10() -> Scn:
      ExLog{"no log on the box after the start", False{}}, ExMark{"DESTROYED", True{}}, ExMark{"REFUSED", False{}},
      ExOut{List.append(&2, String, scn.cks("s1", [10n, 20n, 30n]), scn.cks("s2", [40n, 50n, 60n, 70n, 80n, 90n]))}]}
 
+def scn.s11() -> Scn:
+  Scn{"11", "an end line in STAGES from the start (2026-11-03, run 4's two billed hours): at the end of the list no wait (WAIT 3600), the scores, the pull, the destroy",
+    "s1 traind 10\nend\n", ["30", "", ""], Nil{}, Nil{}, ["WAIT=3600"], False{},
+    Nil{},
+    [ExRc{"0"}, ExMark{"DESTROYED", True{}}, ExMark{"REFUSED", False{}}, ExLog{"] STAGES ends after stage 1 (its end line); not waiting\n", True{}},
+     ExLog{"] no more stages\n", True{}}, ExLog{"waiting up to", False{}}, ExLog{"] finished\n", True{}}, ExOut{scn.cks("s1", [10n, 20n, 30n])}, ExStarts{1n}]}
+
+def scn.s12() -> Scn:
+  Scn{"12", "a stage and then the end line appended while the chain waits (WAIT 3600, as the hand-over's end yes writes them): the stage runs, then no second wait",
+    "s1 traind 10\n", ["30", "30", ""], Nil{}, Nil{}, ["WAIT=3600"], False{},
+    [scn.at("no stage 2 yet", AcAppend{"s2 traind-next 10 run/sim/S2/plan-sim.tsv run/sim/S2 sim\nend"})],
+    [ExRc{"0"}, ExMark{"DESTROYED", True{}}, ExLog{"] STAGES ends after stage 2 (its end line); not waiting\n", True{}},
+     ExLog{"no stage 3 yet", False{}}, ExLog{"] finished\n", True{}},
+     ExOut{List.append(&2, String, scn.cks("s1", [10n, 20n, 30n]), scn.cks("s2", [40n, 50n, 60n]))}, ExStarts{2n}]}
+
 def scn.all() -> List<&2, Scn>:
-  [scn.s1(), scn.s2(), scn.s3(), scn.s4(), scn.s5(), scn.s6(), scn.s7(), scn.s8(), scn.s9(), scn.s10()]
+  [scn.s1(), scn.s2(), scn.s3(), scn.s4(), scn.s5(), scn.s6(), scn.s7(), scn.s8(), scn.s9(), scn.s10(), scn.s11(), scn.s12()]
 
 def scn.find(ss: List<&2, Scn>, +id: String) -> Maybe<&2, Scn>:
   match ss:
@@ -1009,7 +1024,7 @@ def scn.soak(+t: ScnTools, +base: String, +secs: Nat) -> IO(Unit):
 # The command -------------------------------------------------------------------------------------------
 
 def scn.usage() -> String:
-  "usage: bend-ops sim N DIR | sim all DIR | sim soak DIR SECONDS   (N: 1..10; BEND_SIM, BEND_BOX, SIM_REPO, SIM_CV2)"
+  "usage: bend-ops sim N DIR | sim all DIR | sim soak DIR SECONDS   (N: 1..12; BEND_SIM, BEND_BOX, SIM_REPO, SIM_CV2)"
 
 def scn.need(m: Maybe<&2, String>, +what: String) -> IO(String):
   match m:

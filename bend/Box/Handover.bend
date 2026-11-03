@@ -67,6 +67,13 @@ import ../CorpusV2/AgentAct.bend as Aa
 # from the boundary's save, not S2's (bend/Box/Chain.bend's from=); its plan,
 # stage.env and FROM must be on the box before anything is appended.
 #
+# New for run 5 (2026-11-03; run 4's TODO: after CTL the chain waited WAIT, two
+# hours of a billed box, for a stage that never came): end yes appends the
+# chain's end line after its stages, in the same write, so the chain scores,
+# pulls and destroys as soon as the last of them is done [no].  A STAGES that
+# already has an end line stops the hand-over before anything runs: a line
+# appended after it would never be read.
+#
 # Every command sent is a fixed line without control flow (Remote.bend's ssh,
 # retried on a dropped link); every answer is parsed here.  Log lines are
 # `[stamp UTC-6] handover: ...` in DEST/chain.log and on stderr, with the box's
@@ -106,6 +113,11 @@ def hov.self(+c: HovCx) -> String:
   match c:
     case HovCx{b, a, k, f, s}:
       s
+
+def hov.cfg(+c: HovCx) -> String:
+  match c:
+    case HovCx{b, a, k, f, s}:
+      f
 
 def hov.k(+c: HovCx, +key: String, +d: String) -> String:
   Rc.rcf.get(hov.kvs(c), key, d)
@@ -363,6 +375,10 @@ def hov.nonempty(+st: Rm.RmtStat) -> Bool:
       Nat.is_lt(0n, Lc.lcl.st.size(s))
     case _:
       False{}
+
+# what is appended: S2's line, the control's (none: ""), the end line (end yes)
+def hov.lines.of(+line: String, +ctl: String, +fin: Bool) -> String:
+  Bool.pick(String, String.is_empty(ctl), line, line ++ "\n" ++ ctl) ++ Bool.pick(String, fin, "\nend", "")
 
 # The text to append to STAGES: on a line of its own
 def hov.append.text(+stages: List<&2, U32>, +line: String) -> List<&2, U32>:
@@ -624,9 +640,11 @@ def hov.append.go(has: Bool, +c: HovCx, +st: List<&2, U32>, +line: String, +ctl:
       hov.fail(c, "a stage " ++ which ++ " is already in " ++ hov.stages(c) ++ "; not appending")
     case False{}:
       do IO<Unit>:
-        S.add(hov.stages(c), hov.append.text(st, Bool.pick(String, String.is_empty(ctl), line, line ++ "\n" ++ ctl)))
+        +fin : Bool = Rc.rcf.yes(hov.kvs(c), "end", False{})
+        S.add(hov.stages(c), hov.append.text(st, hov.lines.of(line, ctl, fin)))
         hov.log(c, "appended to " ++ hov.stages(c) ++ ": " ++ line)
         hov.say.if(Bool.not(String.is_empty(ctl)), c, "appended to " ++ hov.stages(c) ++ ": " ++ ctl)
+        hov.say.if(fin, c, "appended to " ++ hov.stages(c) ++ ": end")
 
 def hov.append(+c: HovCx, +from: String) -> IO(Unit):
   +line = hov.stage.line(hov.stage(c), hov.every(c), hov.s2rel(c))
@@ -735,18 +753,20 @@ def hov.wait(+c: HovCx) -> IO(Unit):
     w : HovW <- hov.wait.go(U32.to_nat(100000000), c, w0)
     hov.after(w, c)
 
-def hov.go(has: Bool, +c: HovCx) -> IO(Unit):
-  match has:
-    case True{}:
+def hov.go(has: Bool, ended: Bool, +c: HovCx) -> IO(Unit):
+  match has ended:
+    case True{} _:
       hov.log(c, "a stage " ++ hov.stage(c) ++ " is already in " ++ hov.stages(c) ++ "; nothing to do")
-    case False{}:
+    case False{} True{}:
+      hov.fail(c, hov.stages(c) ++ " has an end line: a stage appended after it would not be read (remove it; end yes in " ++ hov.cfg(c) ++ " appends one after the hand-over's)")
+    case False{} False{}:
       hov.wait(c)
 
 def hov.run(+cfg: String) -> IO(Unit):
   do IO<Unit>:
     +c : HovCx <- hov.cx(cfg)
     +st : List<&2, U32> <- S.read(hov.stages(c))
-    hov.go(Gd.grd.has.stage(st, hov.stage(c)), c)
+    hov.go(Gd.grd.has.stage(st, hov.stage(c)), Ch.chn.ended(st), c)
 
 def hov.main(xs: List<String>) -> IO(Unit):
   match xs:

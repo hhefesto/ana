@@ -446,8 +446,9 @@ def chk.tests() -> List<&2, ChkTest>:
    ChkTest{"transcript.bend", False{}, RExact{chk.oks(["direct", "turns 0", "turns 1", "turns 2", "turns 3", "turns 4", "turns 5", "terms", "copies repo:x/A.hs#twice@1", "copies repo:x/a.nix#file@1"])}},
    # the renderer's format mugen (docs/MUGEN-SHAPE.md): the direct session
    # byte for byte (echoes as mugen's read, edit and shell answer), the
-   # repair's read, edit, diff and reply, each shape's turns, old's count
-   ChkTest{"mugen.bend", False{}, RExact{chk.oks(["direct", "repair", "turns direct", "turns fill", "turns repair", "count"])}},
+   # repair's read, edit, diff and reply, each shape's turns, old's count,
+   # MUGEN_ONLY's shapes (2026-11-03)
+   ChkTest{"mugen.bend", False{}, RExact{chk.oks(["direct", "repair", "turns direct", "turns fill", "turns repair", "count", "only"])}},
    # E5 reads ana's output as a transcript less ana's closing newline: a
    # passing last echo is solved (it never was before)
    ChkTest{"agent-eval.bend", False{}, RExact{chk.oks(["a passing last echo is solved", "read with the closing newline it is not (the bug)",
@@ -511,8 +512,9 @@ def chk.tests() -> List<&2, ChkTest>:
    # decisions on run 3's chain.log, s2.log and sha256 listings (the per-poll
    # line and the eval line byte for byte), follow, verify, HOLD, the watch's
    # due/silent/safe; bend-sim's ssh reading and the scenarios' event lines; from= (run 4:
-   # its parse, the saves the prune keeps, what a start leaves to delete or to pull)
-   ChkTest{"chain.bend", False{}, ROks{59n}},
+   # its parse, the saves the prune keeps, what a start leaves to delete or to pull); the end
+   # line (2026-11-03: nothing after it is read, the chain does not wait past it)
+   ChkTest{"chain.bend", False{}, ROks{60n}},
    # the act round's pure parts (bend/Box/Act.bend, ActBox.bend, CorpusV2/AgentAct.bend,
    # bend-episode langs) against act-box.sh, agent-act.sh, s2-driver.sh and move.sh: PROCS
    # under a cgroup quota, the check's verdict on run 3's check.txt, the per-language table on
@@ -524,9 +526,9 @@ def chk.tests() -> List<&2, ChkTest>:
    # against run 3's boot-guard.sh, s2-driver.sh and move.sh: the config, the systemd-run
    # line and its record, what the guard starts, the hand-over's counts, stage line and
    # stage.env checks on run 3's s2-driver.out, the move's save, push and STAGES rewrite on
-   # run 3's files; run 4's plan-base wait and control line; reads fixtures/drive and
-   # fixtures/ops/chain.log
-   ChkTest{"drive.bend", False{}, ROks{66n}},
+   # run 3's files; run 4's plan-base wait and control line; the hand-over's end yes
+   # (2026-11-03); reads fixtures/drive and fixtures/ops/chain.log
+   ChkTest{"drive.bend", False{}, ROks{67n}},
    # bend-corpus-v2 unused (bend/CorpusV2/Unused.bend, run 4): a line's id as J.first.at reads it,
    # hex and twelve-digit numbers in sort's order, POOL=OUT... SEEN... arguments, and the whole tool
    # (spools, `LC_ALL=C sort`, the merge; two pools in one call) against the set difference on

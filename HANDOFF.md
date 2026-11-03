@@ -68,7 +68,7 @@ export PATH=$PWD/run/gcroot-bend-ops/bin:$PWD/run/v2/gcroot-bend-corpus-v2/bin:$
    - `stage push` sends the shards, checks their sha256, then sends the plan last and writes STAGED.
    - `stage raw` takes `mix`, `mixnew FILE.jsonl...`, `build K` or `push K root@IP PORT`.
    - `stage restage` puts a run on a new box: the C, bend-box, CKPT and the stages.
-2. **Start the chain and the watch** (bend/Box/Chain.bend, bend/Box/Watch.bend) once the first stage trains. STAGES holds one stage a line, `NAME BINARY EVERY [PLAN RUN_DIR SHARD_SIZE]`. Its first line is the running stage, for example `s1 traind 5000`, and you may append lines at any time. DEST, here run/v4/run4, gets chain.log (UTC-6 stamps), the markers and out/ with the pulled checkpoints.
+2. **Start the chain and the watch** (bend/Box/Chain.bend, bend/Box/Watch.bend) once the first stage trains. STAGES holds one stage a line, `NAME BINARY EVERY [PLAN RUN_DIR SHARD_SIZE]`. Its first line is the running stage, for example `s1 traind 5000`, and you may append lines at any time. A line `end` closes it (2026-11-03): nothing after it is read, and the chain goes on to the scores as soon as the last stage is done, instead of waiting WAIT (2 h, billed: run 4's end) for another; write it last, after the hand-over's or feed's lines (the hand-over's `end yes` does that). DEST, here run/v4/run4, gets chain.log (UTC-6 stamps), the markers and out/ with the pulled checkpoints.
    ```sh
    mkdir -p run/v4/run4
    systemd-run --user --unit=ft-chain-run4 -p MemoryMax=2G -p OOMPolicy=continue --working-directory=$PWD \
@@ -161,6 +161,7 @@ bend-ops guard tools/runs/run4.cfg              # starts chain, watch and handov
   - It builds S2 on the box with `corpus-v2 s2` and appends its line to STAGES.
   - It exits 1 and leaves STAGES alone if S1 died or s2 failed.
   - It exits at once if STAGES already has the stage.
+  - With `end yes` (run 5's TEMPLATE.cfg) it appends the chain's end line after its stages, in the same write; a STAGES that already has an end line stops it before anything runs.
 - **`bend-ops move CFG STEP`** (bend/Box/Move.bend) takes a run from a failing box to a new one, step by step: `old-stop`, `old-pull`, `restage`, `resume`, `watch`, `act`, `old-check`.
   - old-stop checks the save before stopping anything.
   - resume rewrites the stage's STAGES line and keeps the old one as STAGES.OLD_INSTANCE.
