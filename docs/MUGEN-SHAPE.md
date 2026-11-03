@@ -132,8 +132,55 @@ weights and a code32k window with a mugen session in it.
 roundtrip, calls, shape (one act, the `## mugen` reply, no attempt, no try,
 the user first), tokens and agree all hold, 0 failed.
 
+## ana in the loop: agent-mugen and its evaluation (2026-11-03)
+
+`ana --agent` (Agent/Loop.bend) calls its tool when ana ends a line `## echo`
+after an empty line, as it does on a format-2 tool's heading; the tool's name
+is then `echo`. `bend-corpus-v2 agent-mugen TASK echo < EPISODE`
+(bend/CorpusV2/AgentMugen.bend) is mugen for a held-out unit: it starts
+from the file the shape gives (direct: the head; fill: `?goal` for the body;
+repair-M: mutant M), replays ana's earlier edits, runs her last call and
+prints its echo as the renderer writes one. read, edit and the grep
+look-up run on the file; `bend PATH --check-only` runs Bend on it in the
+unit's tree (the repository copied once under AGENT_WORK, the file as
+Unit.bend beside the original, as bend-check writes a variant); `bend base`
+runs Bend; any other command is refused (exit 127 in its echo). A failed
+edit answers with mugen's own refusal (`Edit 1 (P): old was not found. No
+file was changed.`). Exit 0, solved: the call was the check, it passed,
+and the file still opens with the unit's head and declaration with a body
+after them.
+
+Held to the renderer: given each of gen5's sessions up to a call's `## echo`,
+the tool prints the session's own echo, byte for byte, and exits 0 only on
+the last check (tools/corpus-v2/mugen/agent-mugen-law.py: 31 calls of 6 sessions, direct, fill and
+repair; then 266 calls of a sample of 60 sessions, all the same). bend/tests/agentmugen.bend
+holds the read, edit and grep echoes, the refusals, the look-up parsing,
+`done`, the reference session and the loop's call on `## echo`.
+
+`bend-corpus-v2 agent-mugen-eval CKPT DIR [K]` runs ana on the units every
+run held out (AGENT_RESULTS, run/v2/results/bend.holdout.nul: 84 Bend units)
+in each shape a unit has. Each task's reference session (the ask, the edit
+to the unit's own body, the check) goes through the tool first, and a task
+it does not solve under today's Bend is left out (stale); `selftest` in place
+of CKPT stops there (2026-11-03: of the 84 units' 223 tasks, 176 pass
+their reference session under Bend 2.0.39 and 47 are stale; /tmp/bx/am/st84).
+Then each task is an episode (TEMPERATURE 0, TOKENS 512
+a stretch, AGENT_CALLS 8, AGENT_BIN the agent loop's bend-generate). The
+report: solved, by shape.
+
+Run 4's c2-step72491 has never seen this shape: on the first unit it writes
+format 2's `## bend` heading, or Nix, and solves none (0/2; /tmp/bx/am/ev1).
+On 112 of gen5's sessions (40 units) it scores 0.718 bits a byte against
+0.552 on the same units' format-2 transcripts (every target weighed: a packed
+corpus's windows past a document's first read as given text, so EVAL_MASK
+does not apply there). Two training steps from it on 300 mugen sessions (149
+windows, batch 1, CPU, TRAIN_MASK=kinds) run and save: gradient
+norm 11.6 and 13.9, clipped, validation 1.715 (0.886 bits a byte) before the
+first.
+
 ## Not yet
 
 - Other languages (their checker's command, file and look-ups).
 - ana as a mugen back end: mugen runs ana's calls with the same tools it
   gives Claude, and feeds the echoes back, until ana writes `## mugen`.
+  agent-mugen is that loop's other half, for the evaluation.

@@ -449,6 +449,11 @@ def chk.tests() -> List<&2, ChkTest>:
    # repair's read, edit, diff and reply, each shape's turns, old's count,
    # MUGEN_ONLY's shapes (2026-11-03)
    ChkTest{"mugen.bend", False{}, RExact{chk.oks(["direct", "repair", "turns direct", "turns fill", "turns repair", "count", "only"])}},
+   # agent-mugen, the loop's mugen in the mugen shape: each shape's read,
+   # edit and grep echoes as the renderer's, mugen's refusals, the bend base
+   # asks, when a file is done, the reference session, the loop's call on
+   # `## echo` (2026-11-03)
+   ChkTest{"agentmugen.bend", False{}, RExact{chk.oks(["echoes direct", "echoes fill", "echoes repair", "refuse", "names", "done", "ref", "call"])}},
    # E5 reads ana's output as a transcript less ana's closing newline: a
    # passing last echo is solved (it never was before)
    ChkTest{"agent-eval.bend", False{}, RExact{chk.oks(["a passing last echo is solved", "read with the closing newline it is not (the bug)",

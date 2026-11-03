@@ -72,13 +72,16 @@ def al.line.of(xs: List<&2, U32>, +l: AlLine) -> AlLine:
     case +c <> t:
       al.line.of(t, al.line.byte(l, c))
 
-# the tool a newline would call here: the current line's heading class 5,
-# after an empty line (empty: no call)
+# the tool a newline would call here: the current line's heading class 5
+# (a format-2 tool), or 7 (the mugen shape's `## echo`: ana ends her call
+# with it, and mugen answers; the tool's name is then `echo`), after an
+# empty line (empty: no call)
 def al.call.at(+hs: List<&2, A.Hd>, +l: AlLine) -> List<&2, U32>:
   match l:
     case AlLine{+line, +pe}:
       +full = List.reverse(&2, U32, 10 <> line)
-      Bool.pick(List<&2, U32>, Bool.and(pe, Nat.is_eq(A.ag.class(hs, full), 5n)),
+      +k = A.ag.class(hs, full)
+      Bool.pick(List<&2, U32>, Bool.and(pe, Bool.or(Nat.is_eq(k, 5n), Nat.is_eq(k, 7n))),
         List.drop(&2, U32, List.reverse(&2, U32, line), 3n), Nil{})
 
 def al.first(+xs: List<&2, U32>) -> U32:

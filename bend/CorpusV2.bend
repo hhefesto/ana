@@ -9,6 +9,7 @@ import ./CorpusV2/Combine.bend as Cb
 import ./CorpusV2/Eval.bend as Ev
 import ./CorpusV2/Steps.bend as St
 import ./CorpusV2/Agent.bend as Ea
+import ./CorpusV2/AgentMugen.bend as Am
 import ./CorpusV2/Stats.bend as As
 import ./CorpusV2/Behaviour.bend as Bh
 import ./CorpusV2/Collect.bend as Co
@@ -52,6 +53,7 @@ import ./CorpusV2/Trim.bend as Tm
 #   vault-sample SRC DST            the run scripts' steps   (CorpusV2/Steps.bend)
 #   agent-tool TASK  agent-eval CKPT DIR FORMAT [K]   the tool loop's checker; E5, agent-act   (CorpusV2/Agent.bend)
 #   agent-act CKPT DIR [K]          ana's own episodes on train units, accepted and fixed   (CorpusV2/AgentAct.bend)
+#   agent-mugen TASK TOOL  agent-mugen-eval CKPT|selftest DIR [K]   the loop's mugen; ana on held-out units in the mugen shape   (CorpusV2/AgentMugen.bend)
 #   agent-stats DIR [DIR2]  compare A B   E5's statistics; E1 or behaviour paired by prompt   (CorpusV2/Stats.bend)
 #   behaviour tasks [--check] [LANG...] | run CKPT|REF TAG [LANG...] | selftest [LANG...]
 #                                   the behaviour test   (CorpusV2/Behaviour.bend)
@@ -264,6 +266,10 @@ def c2.args(xs: List<String>) -> IO(Unit):
   match xs:
     case "agent-act" <> more:
       Aa.aac.main(more)
+    case "agent-mugen" <> more:
+      Am.am.tool(more)
+    case "agent-mugen-eval" <> more:
+      Am.am.eval(more)
     case "keyed-order" <> more:
       Ko.kor.main(more)
     case "s2" <> more:
