@@ -5,7 +5,8 @@
 # unit (bend-corpus-v2 trim-mutants, d976edf: the user's cap of 4 repairs a unit; no unit of col8
 # has more, so OUT is the same bytes), then Bend's check and format 2's render, as col7.sh's last
 # steps (no history repairs this run: no Python).  CHECK_PROCS 6: ana's half of the CPUs (0-3,
-# 8-11), two left for the other streams.  mix6.sh adds run/v8/transcripts-col8/bend/transcripts.train.nul.
+# 8-11), two left for the other streams (11-03 06:56: six under a 10G cap were OOM-killed after
+# 21 minutes; run again at 07:21 with CHECK_PROCS=5 under 14G).  mix6.sh adds run/v8/transcripts-col8/bend/transcripts.train.nul.
 cd /home/hhefesto/src/ana || exit 1
 export BEND_NO_TELEMETRY=1
 say() { echo "$(date '+%F %T') $*"; }
