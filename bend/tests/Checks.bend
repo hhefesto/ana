@@ -548,6 +548,11 @@ def chk.tests() -> List<&2, ChkTest>:
    # held declaration, a seen one, a duplicate): OUT exactly the kept pairs, OUT.dropped, the stats; a
    # cap=PREFIX:N (every stride-th unit of a capped file, the first N), cap words, sel's spread
    ChkTest{"decl.bend", False{}, ROks{20n}},
+   # bend-corpus-v2 trim-mutants (bend/CorpusV2/Trim.bend, 2026-11-03): at most K mutants a unit from
+   # the start its id's cksum picks, wrapping; a unit with K or fewer byte for byte, K = 0, a short
+   # record, the counts; the tool on three units: OUT, OUT.stats, a second run the same bytes (the
+   # tool prints its summary, so only the ok count is held)
+   ChkTest{"trim.bend", False{}, RLayout{12n}},
    # bend-corpus-v2 repair-mix (bend/CorpusV2/Ratio.bend, 2026-10-22, the user's rule: four times the
    # program correct from the start for each repair) and run 5's intake (bend/CorpusV2/Intake.bend):
    # units, tags and classes by the trainer's reader, a repair less its attempt is the direct
