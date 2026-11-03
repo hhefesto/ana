@@ -92,6 +92,8 @@ add in run/v7/transcripts-col7/bend/transcripts.train.nul
 add in run/v8/transcripts-col8/bend/transcripts.train.nul
 # agda-unimath again with agda2bend 7adf6f3 -O2 (umemit12): only declarations no earlier run has (a2bum12.sh, 11-03)
 add in run/v6/transcripts-a2bum12/bend/transcripts.train.nul
+# the 5747eec emits a2bv.sh never took (PLFA, agda-algebras, agda2hs-base, agda-prelude), against their src/ trees (a2bsrc.sh, 11-03)
+for s in a2bplfa5 a2baa4 a2bhs2 a2bpre2; do add in run/v6/transcripts-$s/bend/transcripts.train.nul; done
 # mutate's repairs (deduced from a correct unit)
 histmut v2 run/v5/mut/accepted/bend-mut/transcripts.train.nul
 histmut collect5 run/v5/mut-collect5/accepted/bend-mut/transcripts.train.nul

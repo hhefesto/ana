@@ -5,10 +5,14 @@
 # defs, against corpus-um's 874 and 5,025), into transcripts (2026-11-03; the user's goal 34718:
 # close the Bend generation, bring in what is cheap; the plan 34760: "umemit12: let it finish.
 # Then one small stream adds only the definitions earlier streams lack").  No Python (the user
-# 10-14): the corpus copies are the tree's mods/ as they are (a2bum.sh's tree, where every unit
-# file's text was its corpus copy's), the JSON lines bend-corpus-v2 files-jsonl's (ids
-# a2b:mods/PATH, as a2bum's); decl-new sees every earlier a2b stream's train units (a2bum's
-# too), so only declarations no earlier run has become units.  Then a2bv.sh's steps (cap, trim
+# 10-14).  The units are the corpus copies' (corpus/, as files-jsonl's JSON lines, ids
+# a2b:mods/PATH, as a2bum's); the tree is the emit's own modules (src/), since a corpus copy
+# leaves out the items wider than A2B_CORPUS_LINE and "checks against the same imports"
+# (agda2bend's HANDOFF): a tree of corpus copies misses those items, so a module importing one
+# fails (a2bum.sh's tree was the copies: 4,410 of its 4,901 units failed; 11 of 12 sampled
+# foundation modules fail against the copies and all 12 pass against src/).  decl-new sees every
+# earlier a2b stream's train units (a2bum's too), so only declarations no earlier run has become
+# units.  Then a2bv.sh's steps (cap, trim
 # in Bend, check, render).  agda-unimath's held-out directory (finite-algebra) is in neither
 # corpus.  mix6.sh adds run/v6/transcripts-a2bum12/bend/transcripts.train.nul.
 cd /home/hhefesto/src/ana || exit 1
@@ -24,11 +28,11 @@ mkdir -p $T/bend
 grep -q 'emit exit 0' $A/run/a2b/ev-um/umemit12.log || { say "$N: umemit12 did not end well"; exit 1; }
 if [ ! -d $SRC ]; then
   rm -rf $SRC.tmp; mkdir -p $SRC.tmp
-  cp -a $C/corpus $SRC.tmp/mods || { say "$N tree FAILED"; exit 1; }
+  cp -a $C/src $SRC.tmp/mods || { say "$N tree FAILED"; exit 1; }
   mv $SRC.tmp $SRC
 fi
 if [ ! -s $T/$N.jsonl ]; then
-  $CV files-jsonl a2b:mods $SRC/mods $T/$N.jsonl > $T/files.log 2>&1 || { say "$N files-jsonl FAILED"; exit 1; }
+  $CV files-jsonl a2b:mods $C/corpus $T/$N.jsonl > $T/files.log 2>&1 || { say "$N files-jsonl FAILED"; exit 1; }
   cat $T/$N.jsonl.stats
 fi
 E="CORPUS=$T/$N.jsonl OUT=$T BEND=$B BEND_SRC=$SRC MAX=100000 MAX_HI=100000 HOLDOUT_PCT=0"
