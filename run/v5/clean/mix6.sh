@@ -88,6 +88,10 @@ add in run/v6/transcripts-sub6/bend/transcripts.train.nul
 add in run/v6/transcripts-brf6/bend/transcripts.train.nul
 # run 7: the Bend 2 repositories code search does not index (col7.sh, 10-28; after the night run)
 add in run/v7/transcripts-col7/bend/transcripts.train.nul
+# run 8: runs 6-7's repositories' growth, BendHub, Bend's upstream, 20 new Bend 2 repositories (col8.sh, col8b.sh, 11-02/03)
+add in run/v8/transcripts-col8/bend/transcripts.train.nul
+# agda-unimath again with agda2bend 7adf6f3 -O2 (umemit12): only declarations no earlier run has (a2bum12.sh, 11-03)
+add in run/v6/transcripts-a2bum12/bend/transcripts.train.nul
 # mutate's repairs (deduced from a correct unit)
 histmut v2 run/v5/mut/accepted/bend-mut/transcripts.train.nul
 histmut collect5 run/v5/mut-collect5/accepted/bend-mut/transcripts.train.nul
