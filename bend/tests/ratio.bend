@@ -280,6 +280,11 @@ def rt.pure() -> List<&2, RtCk>:
       R.rto.extras(R.rto.cfg0(), S.b("u"), R.RtU{3n, 1n, [R.RtR{"k", "i"}]}, 2n), R.rto.extras(R.rto.cfg0(), S.b("u"), R.RtU{5n, 1n, [R.RtR{"k", "i"}]}, 0n)],
      [3n, 1n, 0n, 0n, 0n])}]
 
+# a mugen-shape session (tests/mugen.bend's direct, shortened): user, calls
+# and their echoes, the reply; no attempt
+def rt.mg.direct() -> List<&2, U32>:
+  S.b("## user\n\nAdd `twice` to demo/Two.bend.\n\n## read\n\ndemo/Two.bend 1 3\n\n## echo\n\n```\nimport Base\n[lines 1-1 of 1]\n```\n\n## edit\n\ndemo/Two.bend\n-import Base\n+import Base\n+def twice(n: Nat) -> Nat:\n+  Nat.add(n, n)\n\n## echo\n\n```\n--- demo/Two.bend\n+++ demo/Two.bend\n```\n\n## shell\n\nbend demo/Two.bend --check-only\n\n## echo\n\n```\nALL PROOFS CHECK\n(exit 0)\n```\n\n## mugen\n\nAdded `twice`.\n\n")
+
 # the classes and the derived transcript, on the fixtures' own texts
 def rt.texts(+base: List<&2, RtP>, +mut: List<&2, RtP>, +chain: List<&2, RtP>, +t2t: List<&2, RtP>, +port: List<&2, RtP>) -> List<&2, RtCk>:
   +dir = rt.text.or(rt.text(base, rt.ua() ++ "/direct"))
@@ -299,6 +304,10 @@ def rt.texts(+base: List<&2, RtP>, +mut: List<&2, RtP>, +chain: List<&2, RtP>, +
      Nat.is_eq(R.rto.class(False{}, S.b(rt.ua() ++ "+2/fill"), fill), 2n), Nat.is_eq(R.rto.class(True{}, S.b(rt.ua() ++ "+2/fill"), fill), 1n)),
      Nat.is_eq(R.rto.class(False{}, S.b(rt.ua() ++ "+4/verify"), dir), 3n))},
    RtCk{"class: a term-to-type transcript is first-time", Nat.is_eq(R.rto.class(False{}, rt.p.id(rt.head.or(t2t)), rt.p.t(rt.head.or(t2t))), 0n)},
+   RtCk{"class: the mugen shape's direct is first-time, its repair-M a repair, its fill a fill; their unit the format-2 unit", Bool.and(Bool.and(
+     Nat.is_eq(R.rto.class(False{}, S.b(rt.ua() ++ "/mugen-direct"), rt.mg.direct()), 0n), Nat.is_eq(R.rto.class(False{}, S.b(rt.ua() ++ "/mugen-repair-1"), rt.mg.direct()), 1n)),
+     Bool.and(Bool.and(Nat.is_eq(R.rto.class(False{}, S.b(rt.ua() ++ "/mugen-fill"), rt.mg.direct()), 2n), Nat.is_eq(R.rto.class(True{}, S.b(rt.ua() ++ "/mugen-fill"), rt.mg.direct()), 1n)),
+       Bool.and(rt.is(R.rto.unit(S.b(rt.ua() ++ "/mugen-repair-1")), rt.ua()), rt.is(R.rto.tag(S.b(rt.ua() ++ "/mugen-repair-1")), "mugen-repair"))))},
    RtCk{"derive: format 2's two repairs less their attempts are the unit's direct transcript, byte for byte", Bool.and(S.eq(R.rto.derive(rep1), dir), S.eq(R.rto.derive(rep3), dir))},
    RtCk{"derive: a mutation repair less its attempt is the unit's direct transcript up to the pass (the locked compiler words its pass anew)", Bool.and(S.eq(rt.upto(R.rto.derive(m1)), rt.upto(d1)), Bool.not(Nat.is_eq(S.len(rt.upto(d1)), 0n)))},
    RtCk{"derive: a chain less its tries is the unit's direct transcript, byte for byte", S.eq(R.rto.derive(ch), dir)},

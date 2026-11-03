@@ -156,18 +156,26 @@ def rto.class.roles(+e: List<&2, A.Turn>) -> Nat:
   +act = A.ag.count(e, 3n)
   Bool.pick(Nat, Nat.is_eq(act, 0n), 2n, Bool.pick(Nat, Nat.is_eq(bad, 0n), 0n, 1n))
 
-# shape 0 by the roles, 1 a fill, 2 a verify
+# shape 0 by the roles, 1 a fill, 2 a verify, 3 a repair by its shape
 def rto.class.of(shape: Nat, +fillrep: Bool, +text: List<&2, U32>) -> Nat:
   match shape:
     case 0n:
       rto.class.roles(A.ag.read.bytes(text))
     case 1n:
       Bool.pick(Nat, fillrep, 1n, 2n)
-    case _:
+    case 2n:
       3n
+    case _:
+      1n
 
+# The mugen shape (docs/MUGEN-SHAPE.md, 2026-11-03; ids UNIT/mugen-SHAPE): a
+# repair hands nothing over as an attempt (the wrong text is the read's and
+# the check's echo, weight 0, and ana's turns are the fix), so its roles
+# read as first-time: mugen-repair-M is a repair by its shape, mugen-fill a
+# fill, mugen-direct by the roles (first-time).
 def rto.shape(+tag: List<&2, U32>) -> Nat:
-  Bool.pick(Nat, S.eq(tag, S.b("verify")), 2n, Bool.pick(Nat, S.eq(tag, S.b("fill")), 1n, 0n))
+  Bool.pick(Nat, S.eq(tag, S.b("verify")), 2n, Bool.pick(Nat, Bool.or(S.eq(tag, S.b("fill")), S.eq(tag, S.b("mugen-fill"))), 1n,
+    Bool.pick(Nat, S.eq(tag, S.b("mugen-repair")), 3n, 0n)))
 
 def rto.class(+fillrep: Bool, +id: List<&2, U32>, +text: List<&2, U32>) -> Nat:
   rto.class.of(rto.shape(rto.tag(id)), fillrep, text)
