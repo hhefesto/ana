@@ -37,6 +37,13 @@ $V show instances --raw
 A contract end date past the run matters as much as the price. Put the ssh host, port and the instance id in
 `tools/runs/run5.cfg`. Never stop the box: destroy it; the chain does.
 
+The image has no rsync and no clang, and the trainer needs clang 19 or newer (its C holds `#embed` for NVRTC; a
+binary with a bang is a clang 19 build, and Ubuntu 22.04's own clang stops at 15):
+
+```sh
+ssh -p PORT root@IP 'apt-get update -qq && apt-get install -y -qq rsync wget lsb-release gnupg software-properties-common && wget -qO- https://apt.llvm.org/llvm.sh | bash -s -- 19 && clang-19 --version | head -1'
+```
+
 ## 3. Stage (from here, about 15 minutes)
 
 ```sh
@@ -51,12 +58,19 @@ The last line makes the chain's second score (eval-next.log) the mugen shape on 
 ## 4. Start (on the box)
 
 ```sh
-cd ana && ./bend-box gate && ./bend-box time
+cd ana && ./bend-box gate
+PLAN=run/v6/R5/plan-fp100m-b16-windows.tsv RUN=run/v6/R5 ./bend-box time
 NLR=1e-4 NWARM=300 ./bend-box again out/c2-step72491.checkpoint run/v6/R5/plan-fp100m-b16-windows.tsv run/v6/R5 fp100m r5
 ```
 
-`gate` must say PASS. `time` should say about 2,150 ms a step and the plan's hours. `r5.log` should open with
+`gate` must say PASS, with `bend profile: gemm N calls (0 as loops)`. `time` needs PLAN and RUN (its defaults are
+run 1's) and should say about 2,150 ms a step and the plan's hours. `r5.log` should open with
 `loaded ... c2-step72491` and `from step 72491`, its held-out loss near run 4's 1.715 on the mugen shape.
+
+Nothing has trained on a GPU since Bend moved from the fork to upstream (97ca093, 10-22): the bulk ops' GPU path
+has compiled (clang 19 against CUDA's headers, the device program through NVRTC for sm_120) but never run. If the
+steps are slower than run 4's, look first at `KEEP_WORDS`: a GPU program's host keeps 256 words of freed cells a
+lane, where the fork's kept 32,768.
 
 ## 5. Leave it (from here)
 
@@ -78,3 +92,16 @@ AGENT_DEPLOY=... AGENT_BIN=... bend-corpus-v2 agent-mugen-eval run/v6/run5/out/r
 
 Run 4's baseline is 0/176 (direct 0/67, fill 0/67, repair 0/42; `/tmp/bx/am/ev2`). `eval-next.log` gives bits a
 byte on the held-out mugen sessions; run 4's own figure on them is measured before renting, below.
+
+## 7. Give her to mugen
+
+```sh
+ln -sfn $PWD/run/v6/run5/out/r5-stepN.checkpoint ~/.mugen/ana.checkpoint
+nix profile add .#ana-mugen
+```
+
+Then, in mugen 0.13.0 or later, `/ana TASK` runs her on the task in the directory mugen runs in (`/stop !` cuts it).
+On the CPU she takes about 84 s to load and about a second a token, so an episode of 8 calls of 512 tokens can
+take an hour; `AGENT_CALLS` and `WIKI_TOKENS` shorten it. She gets read, edit and the shell commands her sessions
+make, nothing else (bend/CorpusV2/AgentMugen.bend, "The live tool"); a checker still runs what its file asks at
+check time (Template Haskell, Lean's `#eval`), so use her on files you would check yourself.

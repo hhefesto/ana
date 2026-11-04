@@ -89,6 +89,27 @@ def refuse() -> String:
     Bool.and(U.eq(c, U.b("Edit 1 (demo/Two.bend): old matches more than once; give more context, or all. No file was changed.")), U.infix(d, U.b("def one() -> Nat:\n  2n\n"))))
   Bool.pick(String, ok, "ok refuse", "MISMATCH refuse")
 
+# the live tool's other languages: the calls the sessions make, as argv; the
+# paths and commands it refuses (run for real by hand, 2026-11-03)
+def bs(xs: List<String>) -> List<&2, List<&2, U32>>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case x <> t:
+      U.b(x) <> bs(t)
+
+def argv.is(+cmd: String, want: List<String>) -> Bool:
+  U.eq(T.mg.join(M.am.live.argv(U.b(cmd)), [0]), T.mg.join(bs(want), [0]))
+
+def live() -> String:
+  +ok = Bool.and(Bool.and(argv.is("ghc -fno-code -w a/B.hs", ["ghc", "-fno-code", "-w", "a/B.hs"]), argv.is("agda a/B.agda", ["agda", "a/B.agda"])),
+    Bool.and(Bool.and(argv.is("lake env lean a/B.lean", ["lake", "env", "lean", "a/B.lean"]), argv.is("nix-instantiate --eval --strict a.nix", ["nix-instantiate", "--eval", "--strict", "a.nix"])),
+      Bool.and(argv.is("ana-goal a/B.agda", ["ana-goal", "a/B.agda"]), argv.is("ana-type a/B.hs f '<$>' \"a'\"", ["ana-type", "a/B.hs", "f", "<$>", "a'"]))))
+  +no = Bool.and(Bool.and(argv.is("agda /etc/passwd", []), argv.is("ana-goal ../B.agda", [])),
+    Bool.and(Bool.and(argv.is("ana-type /x f", []), argv.is("rm -rf a", [])),
+      Bool.and(argv.is("agda a b", []), argv.is("ana-type a.hs f\n:!rm a", []))))
+  Bool.pick(String, Bool.and(ok, no), "ok live", "MISMATCH live")
+
 # the names a bend base command asks for, both forms the renderer writes
 def names() -> String:
   +a = M.am.base.names(U.b("bend base Nat.add | head -1"))
@@ -133,3 +154,4 @@ def main() -> IO(Unit):
     IO.print(done())
     IO.print(ref())
     IO.print(call())
+    IO.print(live())

@@ -23,7 +23,10 @@ deploy prepare weights/code32k.bpe run/v6/evalm/bend.packed.nul run/eval/v2-muge
 
 # 4. The mixes.  The user's rule everywhere: at least 4 first-time sessions a repair.  Other languages one
 #    repair a unit on half the units; Bend 4 a unit (the user, 10-29) on the share the hours take.
-CV repair-mix run/v6/mix/LANG in=run/v6/mugen/LANG/transcripts.train.nul derive=whole ratio=4 cap=1 share=50
+bend-lean-statement run/v6/mugen/lean/transcripts.train.nul run/v6/mugen/lean/sizes.tsv run/v6/mugen/lean/statements.nul     # Lean first: the source's split at the first := cut 19% of the direct prompts inside the statement; those get the whole statement, their fills go
+SHARD=0 SHARDS=1 bend-agent-laws weights/code32k.bpe run/v6/mugen/lean/statements.nul.rewritten     # 0 failed
+CV repair-mix run/v6/mix/LANG in=run/v6/mugen/LANG/transcripts.train.nul derive=whole ratio=4 cap=1 share=50     # haskell, agda; lean with in=run/v6/mugen/lean/statements.nul
+CV repair-mix run/v6/mix/nix free=run/v6/mugen/nix/transcripts.train.nul     # no first-time shape: its repairs, at most 4 a unit, outside the rule
 MG=1 FF=1 run/v5/clean/mix6.sh run/v6/mix/dry-final dry
 MG=1 FF=1 SHARE=S run/v5/clean/mix6.sh run/v6/mix/bend
 

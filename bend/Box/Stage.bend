@@ -191,11 +191,22 @@ def stg.emit1(+bend: String, +src: String, +out: String) -> IO(Unit):
 
 # traind.c (TrainDense.bend, which has TRAIN_NEXT, so also traind-next.c),
 # dense.c (the gate) and box.c (bend-box) into tmp
+# A C with no bang ignores `+RTS --gpu` and trains on the CPU (Dense/Run.bend, gpu.on)
+def stg.no.bang(+c: List<&2, U32>) -> Bool:
+  Bool.or(S.infix(c, S.b("#define BANGS 0\n")), S.infix(c, S.b("#define BANGS   0\n")))
+
+def stg.bang.need(+f: String) -> IO(Unit):
+  do IO<Unit>:
+    +c : List<&2, U32> <- S.read(f)
+    stg.ok(Bool.not(stg.no.bang(c)), f ++ " has a bang (without one it would train on the CPU)")
+
 def stg.emit(+tmp: String) -> IO(Unit):
   do IO<Unit>:
     +bend : String <- S.env("BEND", "bend")
     stg.emit1(bend, "TrainDense.bend", tmp ++ "/traind.c")
+    stg.bang.need(tmp ++ "/traind.c")
     stg.emit1(bend, "tests/dense.bend", tmp ++ "/dense.c")
+    stg.bang.need(tmp ++ "/dense.c")
     stg.emit1(bend, "Box/BoxMain.bend", tmp ++ "/box.c")
     o : List<&2, U32> <- S.must("cp traind.c", "cp", [tmp ++ "/traind.c", tmp ++ "/traind-next.c"])
     return Unit{}

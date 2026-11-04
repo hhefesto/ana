@@ -201,10 +201,21 @@ input ':' at line 229`. Bend's sessions stay byte for byte (cmp on 300 of own5's
 units). bend-agent-laws holds on the first 200 units of each: 668 Haskell,
 946 Agda, 913 Lean, 505 Nix presentations, 0 failed. tests/mugen.bend `other`.
 
+Lean's source records split a theorem at its first `:=`, which for a statement
+with a `let` is inside the statement: 38 of 199 direct prompts stopped at
+`let x : R`, and those units' fill sessions had their hole in the statement.
+The sessions keep what the records hold; `bend-lean-statement`
+(bend/LeanStatement.bend) goes over them before repair-mix, giving such a prompt
+the whole statement and leaving out its fill, so the eval corpora still hold the
+cut ones. A prompt that could pass the renderer's size whole goes with its fill
+(2 of the 38). The other languages' prompts hold the whole signature (all of the
+sample's: 200 Haskell, 196 Agda, 300 Bend).
+
 ## Not yet
 
-- `ana-type` and `ana-goal` for the other languages in `agent-mugen-live` and
-  `agent-mugen` (the sessions call them; the evaluation is Bend's only).
+- `ana-type` and `ana-goal` for the other languages in `agent-mugen`, the
+  evaluation's tool (the evaluation is Bend's only). `agent-mugen-live` has
+  them, and each language's check (bend/Look.bend; tests/agentmugen.bend `live`).
 - ana as a mugen back end: mugen runs ana's calls with the same tools it
   gives Claude, and feeds the echoes back, until ana writes `## mugen`.
   agent-mugen is that loop's other half, for the evaluation.

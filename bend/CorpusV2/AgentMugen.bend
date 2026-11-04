@@ -447,9 +447,17 @@ def am.tool(xs: List<String>) -> IO(Unit):
 #         edit PATH -old +new    written when the old lines occur once in the
 #                                file; the echo is mugen's diff, else its refusal
 #         shell bend PATH --check-only, grep -nE '^(def|law) (A|B)[(:]' PATH,
-#                                bend base A | head -1 (the evaluation's three)
+#                                bend base A | head -1 (the evaluation's three);
+#                                the other languages' calls her sessions make
+#                                (docs/MUGEN-SHAPE.md): ghc -fno-code -w PATH,
+#                                agda PATH, lake env lean PATH, nix-instantiate
+#                                --eval --strict PATH, ana-type PATH NAME...,
+#                                ana-goal PATH (bend/Look.bend)
 #       A PATH that starts with `/` or holds `..` is refused, as is any other
-#       command (exit 127 in its echo): ana gets no general shell.  After its
+#       command (exit 127 in its echo): ana gets no general shell, and a call's
+#       words reach the program as its arguments, through no shell.  A checker
+#       still runs what its file asks it to at check time (Template Haskell,
+#       Lean's #eval): `/ana` is for files you would check yourself.  After its
 #       echo the tool exits 1, so ana goes on until she reports (`## mugen`)
 #       and ends, or spends her calls; 2 when the episode does not read.
 
@@ -465,7 +473,7 @@ def am.live.open(ok: Bool, +path: List<&2, U32>) -> IO(Maybe<&2, List<&2, U32>>)
       IO.pure(Maybe<&2, List<&2, U32>>, None{})
 
 def am.live.refuse() -> AmO:
-  AmO{T.mg.shell.echo(S.b("mugen (ana's tool): this shell runs only `bend PATH --check-only`, `grep -nE` and `bend base`, on paths under its directory"), S.b("127")), False{}}
+  AmO{T.mg.shell.echo(S.b("mugen (ana's tool): this shell runs only the checker on a path under its directory (`bend PATH --check-only`, `ghc -fno-code -w PATH`, `agda PATH`, `lake env lean PATH`, `nix-instantiate --eval --strict PATH`), `ana-type PATH NAME...`, `ana-goal PATH`, `grep -nE` and `bend base`"), S.b("127")), False{}}
 
 def am.live.enoent(+path: List<&2, U32>) -> List<&2, U32>:
   T.cat([S.b("ENOENT: no such file or directory, open '"), path, S.b("'")])
@@ -549,12 +557,63 @@ def am.live.grep(+cmd: List<&2, U32>) -> IO(AmO):
     m : Maybe<&2, List<&2, U32>> <- am.live.open(am.live.ok(path), path)
     return am.live.grep.got(m, ns, path)
 
+# The other languages' calls: cmd's words (the program's name first, a quoted
+# name unquoted) when it is one of them on a path under the directory, else none
+def am.live.argv.one(+cmd: List<&2, U32>, +p: List<&2, U32>) -> List<&2, List<&2, U32>>:
+  +path = S.strip(cmd, p)
+  Bool.pick(List<&2, List<&2, U32>>, Bool.and(am.live.ok(path), Bool.not(S.infix(path, [32]))), T.mg.words(cmd), Nil{})
+
+def am.live.unq(+n: List<&2, U32>) -> List<&2, U32>:
+  Bool.pick(List<&2, U32>, Bool.or(S.head.is(n, 39), S.head.is(n, 34)), List.take(&2, U32, List.drop(&2, U32, n, 1n), Nat.sub(S.len(n), 2n)), n)
+
+def am.live.unqs(ns: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case +n <> t:
+      am.live.unq(n) <> am.live.unqs(t)
+
+def am.live.argv.type(+cmd: List<&2, U32>) -> List<&2, List<&2, U32>>:
+  +ws = T.mg.words(cmd)
+  Bool.pick(List<&2, List<&2, U32>>, am.live.ok(T.field(ws, 1n)), am.live.unqs(ws), Nil{})
+
+def am.live.argv.lean(+cmd: List<&2, U32>) -> List<&2, List<&2, U32>>:
+  +nix = S.b("nix-instantiate --eval --strict ")
+  Bool.pick(List<&2, List<&2, U32>>, S.prefix(cmd, S.b("lake env lean ")), am.live.argv.one(cmd, S.b("lake env lean ")),
+    Bool.pick(List<&2, List<&2, U32>>, S.prefix(cmd, nix), am.live.argv.one(cmd, nix), Nil{}))
+
+def am.live.argv.at(+cmd: List<&2, U32>) -> List<&2, List<&2, U32>>:
+  +ghc = S.b("ghc -fno-code -w ")
+  Bool.pick(List<&2, List<&2, U32>>, S.prefix(cmd, ghc), am.live.argv.one(cmd, ghc),
+    Bool.pick(List<&2, List<&2, U32>>, S.prefix(cmd, S.b("agda ")), am.live.argv.one(cmd, S.b("agda ")),
+      Bool.pick(List<&2, List<&2, U32>>, S.prefix(cmd, S.b("ana-goal ")), am.live.argv.one(cmd, S.b("ana-goal ")),
+        Bool.pick(List<&2, List<&2, U32>>, S.prefix(cmd, S.b("ana-type ")), am.live.argv.type(cmd), am.live.argv.lean(cmd)))))
+
+def am.live.argv(+cmd: List<&2, U32>) -> List<&2, List<&2, U32>>:
+  Bool.pick(List<&2, List<&2, U32>>, S.infix(cmd, [10]), Nil{}, am.live.argv.at(cmd))
+
+def am.live.strs(xs: List<&2, List<&2, U32>>) -> List<String>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +x <> t:
+      S.str(x) <> am.live.strs(t)
+
+def am.live.lang(xs: List<&2, List<&2, U32>>) -> IO(AmO):
+  match xs:
+    case Nil{}:
+      IO.pure(AmO, am.live.refuse())
+    case +prog <> args:
+      do IO<AmO>:
+        +o : S.Out <- S.run(".", ["BEND_NO_TELEMETRY=1"], 300, S.str(prog), am.live.strs(args), Nil{})
+        return AmO{T.mg.shell.echo(S.chomp(S.lines.take(S.Out.text(o), 100n)), S.b(U32.show(S.Out.status(o)))), False{}}
+
 def am.live.base(bs: Bool, +cmd: List<&2, U32>, +bend: String) -> IO(AmO):
   match bs:
     case True{}:
       am.base(cmd, bend)
     case False{}:
-      IO.pure(AmO, am.live.refuse())
+      am.live.lang(am.live.argv(cmd))
 
 def am.live.shell.grep(gr: Bool, +cmd: List<&2, U32>, +bend: String) -> IO(AmO):
   match gr:

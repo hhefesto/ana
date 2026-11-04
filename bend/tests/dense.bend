@@ -209,6 +209,7 @@ def main() -> IO(Unit):
   +tgrad = K.Weights.flat(O.W.scale(0.5, LG.w(tg)))
   +flat = K.Weights.flat(w)
   do IO<Unit>:
+    R.gpu.on()
     IO.print("tree loss  " ++ F32.show(tl))
     r1 : Bool <- report("chunk 64 (one per window)", c, 64, flat, ws, tgrad)
     r2 : Bool <- report("chunk 16 (four per window)", c, 16, flat, ws, tgrad)

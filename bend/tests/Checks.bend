@@ -448,12 +448,12 @@ def chk.tests() -> List<&2, ChkTest>:
    # byte for byte (echoes as mugen's read, edit and shell answer), the
    # repair's read, edit, diff and reply, each shape's turns, old's count,
    # MUGEN_ONLY's shapes (2026-11-03)
-   ChkTest{"mugen.bend", False{}, RExact{chk.oks(["direct", "repair", "turns direct", "turns fill", "turns repair", "count", "only"])}},
+   ChkTest{"mugen.bend", False{}, RExact{chk.oks(["other", "direct", "repair", "turns direct", "turns fill", "turns repair", "count", "only"])}},
    # agent-mugen, the loop's mugen in the mugen shape: each shape's read,
    # edit and grep echoes as the renderer's, mugen's refusals, the bend base
    # asks, when a file is done, the reference session, the loop's call on
    # `## echo` (2026-11-03)
-   ChkTest{"agentmugen.bend", False{}, RExact{chk.oks(["echoes direct", "echoes fill", "echoes repair", "refuse", "names", "done", "ref", "call"])}},
+   ChkTest{"agentmugen.bend", False{}, RExact{chk.oks(["echoes direct", "echoes fill", "echoes repair", "refuse", "names", "done", "ref", "call", "live"])}},
    # E5 reads ana's output as a transcript less ana's closing newline: a
    # passing last echo is solved (it never was before)
    ChkTest{"agent-eval.bend", False{}, RExact{chk.oks(["a passing last echo is solved", "read with the closing newline it is not (the bug)",
@@ -571,6 +571,9 @@ def chk.tests() -> List<&2, ChkTest>:
    # bytes, dry; cap=2, ratio=2, share=50, fill=repair; files-jsonl, raw-drop and port-fix (`bend` on
    # the PATH, weights/code32k.bpe); compiled (the interpreter's stack does not hold the reader)
    ChkTest{"ratio.bend", True{}, ROks{56n}},
+   # bend-lean-statement (bend/LeanStatement.bend, 2026-11-03): where a statement stops, a direct session cut
+   # inside it against one that is not, the tool on sessions written here; compiled (the reader)
+   ChkTest{"leanstatement.bend", True{}, ROks{27n}},
    # bend-corpus-v2 port's renames (bend/CorpusV2/PortOps.bend, 2026-10-16): declarations and the
    # header as the loader reads them, import paths through a sibling link, fresh names; the own,
    # alias and binder renames on modules written here (strings and comments untouched, an importer

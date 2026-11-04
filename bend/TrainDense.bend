@@ -1177,6 +1177,7 @@ def main.pick(hot: Bool, +init: String, +plan_p: String, +corpus: String, +tokf:
 
 def main() -> IO(Unit):
   do IO<Unit>:
+    R.gpu.on()
     +init : String <- Tr.env("TRAIN_INIT", "")
     +plan_p : String <- Tr.env("PLAN", "")
     +corpus : String <- Tr.env("CORPUS", "README.md")

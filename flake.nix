@@ -151,6 +151,8 @@
           bend-agent-tool = bendBinary pkgs "bend-agent-tool" "Agent/Tools.bend";
           bend-episode = bendBinary pkgs "bend-episode" "Agent/EpTool.bend";
           bend-agent-laws = bendBinary pkgs "bend-agent-laws" "Agent/Laws.bend";
+          # Lean's first-time sessions with the whole statement, before repair-mix (run 5)
+          bend-lean-statement = bendBinary pkgs "bend-lean-statement" "LeanStatement.bend";
           # bend-ops (bend/Box/, 2026-10-14: all logic in Bend, shell a thin
           # shim): the box operations from this machine, and `bend-ops lint`.
           # The programs it drives are on its PATH, as ana's wrapper does for
@@ -255,10 +257,20 @@
           # `ana-mugen TASK...`: ana as mugen's worker (mugen's /ana, 0.13.0):
           # the ask as mugen's `## user` turn (AGENT_SHAPE=mugen), her calls
           # run for real under the current directory by `bend-corpus-v2
-          # agent-mugen-live` (read, edit, and only the evaluation's three shell
-          # commands), greedy, 8 calls of 512 tokens. Give the checkpoint with
-          # --checkpoint PATH (or WIKI_CHECKPOINT); every setting may be
-          # overridden from the environment.
+          # agent-mugen-live` (read, edit, and only the shell commands her
+          # sessions make), greedy, 8 calls of 512 tokens. Give the checkpoint with
+          # --checkpoint PATH (or WIKI_CHECKPOINT); by default it is
+          # ~/.mugen/ana.checkpoint, a link to the one you want her to run. Every
+          # setting may be overridden from the environment.
+          # `ana-type PATH NAME...`, `ana-goal PATH` (`ana-look type`, `ana-look
+          # goal`): the look-ups ana's sessions call on Haskell, Agda and Lean,
+          # as real commands (bend/Look.bend, docs/MUGEN-SHAPE.md).
+          ana-look = pkgs.runCommand "ana-look" { nativeBuildInputs = [ pkgs.makeWrapper ]; } ''
+            makeWrapper ${bendBinary pkgs "bend-look" "Look.bend"}/bin/bend-look $out/bin/ana-look \
+              --prefix PATH : ${pkgs.lib.makeBinPath [ (ghcHarness pkgs) (agdaFor pkgs) pkgs.elan ]}
+            makeWrapper $out/bin/ana-look $out/bin/ana-type --add-flags type
+            makeWrapper $out/bin/ana-look $out/bin/ana-goal --add-flags goal
+          '';
           ana-mugen = pkgs.runCommand "ana-mugen" { nativeBuildInputs = [ pkgs.makeWrapper ]; } ''
             makeWrapper ${self.packages.${system}.bend-generate}/bin/bend-generate $out/bin/ana-mugen \
               --add-flags --agent \
@@ -268,7 +280,9 @@
               --set-default WIKI_TOKENS 512 \
               --set-default TEMPERATURE 0 \
               --set-default BEND_NO_TELEMETRY 1 \
-              --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.findutils self.packages.${system}.bend-corpus-v2 (bendFor pkgs) ]}
+              --set-default WIKI_TOKENIZER ${./weights/code32k.bpe} \
+              --run 'export WIKI_CHECKPOINT=''${WIKI_CHECKPOINT:-$HOME/.mugen/ana.checkpoint}' \
+              --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.findutils self.packages.${system}.bend-corpus-v2 self.packages.${system}.ana-look (bendFor pkgs) (ghcHarness pkgs) (agdaFor pkgs) pkgs.elan pkgs.nix ]}
           '';
           default = self.packages.${system}.bend;
         }
