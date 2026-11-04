@@ -138,10 +138,11 @@ def agent(+path: String, +prompt: String, +tokens: String, +pinned: String, +t0:
     +calls : String <- D.dc.env("AGENT_CALLS", "4")
     +log : String <- D.dc.env("AGENT_LOG", "")
     +meta : String <- D.dc.env("AGENT_META", "")
+    +shape : String <- D.dc.env("AGENT_SHAPE", "")
     +st : D.Settings = D.dc.settings(temp, topk, topp)
     IO.print_err("agent: temperature=" ++ temp ++ " top_k=" ++ topk ++ " top_p=" ++ topp ++ " seed=" ++ seed ++ "; tool `" ++ tool ++ "`, at most " ++ calls ++ " calls")
     me : D.Model & D.En <- D.dc.load(path, pinned)
-    agent.go(tool, D.dc.nat.or(U32.read(calls), 4n), D.dc.nat.or(U32.read(tokens), 128n), st, seed, prompt, t0, log,
+    agent.go(tool, D.dc.nat.or(U32.read(calls), 4n), D.dc.nat.or(U32.read(tokens), 128n), st, seed, L.al.ask(shape, prompt), t0, log,
       meta ++ "temperature=" ++ temp ++ "\ntop_p=" ++ topp ++ "\ncalls=" ++ calls ++ "\ntokens=" ++ tokens ++ "\n", me)
 
 # Command line -----------------------------------------------------------

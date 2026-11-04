@@ -144,8 +144,16 @@ def call() -> String:
   +ok = Bool.and(Bool.and(U.eq(a, U.b("echo")), U.eq(b, U.b("bend"))), Bool.and(T.empty(c), T.empty(d)))
   Bool.pick(String, ok, "ok call", "MISMATCH call")
 
+# /ana's bare task is mugen's `## user` turn when the wrapper says so, the bytes
+# the sessions and the eval's prompts open with; any other prompt stays whole
+def ask() -> String:
+  +a = U.eq(U.b(Lp.al.ask("mugen", "Fix `f`.")), T.mg.user(U.b("Fix `f`.")))
+  +b = U.eq(U.b(Lp.al.ask("", "## user\n\nFix `f`.\n\n")), T.mg.user(U.b("Fix `f`.")))
+  Bool.pick(String, Bool.and(a, b), "ok ask", "MISMATCH ask")
+
 def main() -> IO(Unit):
   do IO<Unit>:
+    IO.print(ask())
     IO.print(echoes("direct", "direct", T.mg.direct(two(), path(), base()), 3n))
     IO.print(echoes("fill", "fill", T.mg.fill(two(), path(), base()), 2n))
     IO.print(echoes("repair", "repair-0", T.mg.repair(two(), path(), base(), 0n), 3n))

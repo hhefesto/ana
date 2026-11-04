@@ -292,6 +292,14 @@ def al.round(+fuel: Nat, +m: AlM, +cmd: String, +budget: Nat, s: AlS, +ep: AlEp)
         IO.write(al.str(echo))
         return al.ep.fin(al.ep.echo(ep, 1, echo), "calls")
 
+# The ask as her sessions open it.  AGENT_SHAPE=mugen (the ana-mugen wrapper,
+# mugen's /ana) makes a bare task mugen's `## user` turn, T.mg.user's bytes
+# (tests/agentmugen.bend); any other caller's prompt is whole already.  Until
+# 11-04 nothing read AGENT_SHAPE: /ana fed her the bare task, and a checkpoint
+# that plays the loop on the eval's prompts wrote comments instead.
+def al.ask(+shape: String, +prompt: String) -> String:
+  Bool.pick(String, String.eq(shape, "mugen"), "## user\n\n" ++ prompt ++ "\n\n", prompt)
+
 # An episode from a prompt on an engine with empty states: BOS and the
 # prompt fed, then the loop.  The prompt is written to standard output
 # first, then everything ana and the tools write, as it comes: the
