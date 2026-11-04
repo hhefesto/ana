@@ -7,6 +7,9 @@ well with mugen."
 - **Start:** run 4's `run/v4/run4/out/c2-step72491.checkpoint`, hot start (`bend-box again`).
 - **Data:** `run/v6/R5` (`tools/runs/run5-build.txt`): every language's sessions in the mugen shape
   (`docs/MUGEN-SHAPE.md`), the user's 4:1 rule, Bend at most 4 repairs a unit.
+  `run/v6/R5b` (`run/v6/run5b.sh`, 11-04) is the same with the chains and ana's own mistakes as multi-edit sessions
+  (`docs/MUGEN-SHAPE.md` "Chains"): use it once `tail run/v6/run5b.log` ends `end: run/v6/R5b is ready`, writing R5b for R5
+  below. The trainer must be built from c847d84 or later, whose reader weighs a chain's wrong edits 0; on R5 it changes no mask.
 - **Box:** 2 days of an RTX 5090 (the user, 11-03). Run 4's box took 2.15 s a step and the 11-03 rehearsal's 2.30 (14,230 tok/s), so 46 h is
   about 72,000 steps. The plan is sized to fit.
 - **The number to beat:** `agent-mugen-eval` on the 176 held-out tasks: run 4's checkpoint solves 0.
