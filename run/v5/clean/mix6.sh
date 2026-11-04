@@ -9,12 +9,15 @@
 # whole (free=).  A stream that is not there yet is left out, and said.
 #   mix6.sh OUT [dry]     OUT e.g. run/v6/mix/bend; dry: OUT.stats and the summary only
 #   MG=1: the streams mugen6.sh rendered in the mugen shape, those instead of format 2's
+#   CH=1 (11-04, docs/MUGEN-SHAPE.md "Chains"): with MG=1, each stream's chains (chain6.sh) as repairs under the
+#   rule, less those of units a recheck dropped or with real history repairs, and the nights in the mugen shape
+#   CV: the bend-corpus-v2 to use (CH=1 needs one whose reader knows a chain's try: run/v6/mugen/chain/gcroot-bend-corpus-v2)
 cd /home/hhefesto/src/ana || exit 1
 OUT=${1:?usage: mix6.sh OUT [dry]}
 DRY=${2:-}
 # 11-03: not run/v5/clean/bend-corpus-v2 (the copy of 10-28): its repair-mix reads a mugen session as
 # "other", so no copies and no cap; 0ed92bd classes them.  run/v5/gcroot-bend-corpus-v2-run5 is today's.
-CV=run/v5/gcroot-bend-corpus-v2-run5/bin/bend-corpus-v2
+CV=${CV:-run/v5/gcroot-bend-corpus-v2-run5/bin/bend-corpus-v2}
 args=()
 # MG=1 (2026-11-03, the user 35718: "a step closer to mugen as an interface (turn wise)"): a
 # stream mugen6.sh rendered in the mugen shape (run/v6/mugen/NAME/DONE) goes in that shape, the
@@ -127,9 +130,33 @@ histmut own5 run/v5/mut-own5/accepted/bend-mut/transcripts.train.nul
 fi
 add in run/v5/port/transcripts.train.nul
 # ana's own mistakes and fixes (night runs; whole)
+if [ "${CH:-0}" = 1 ] && [ -e run/v6/mugen/chain/night/DONE ]; then add free run/v6/mugen/chain/night/transcripts.train.nul
+else
 for d in run/v5/act5/ws/night*/accepted/bend-fix run/v5/act5/ws/night*/accepted/bend-act; do
   add free $d/transcripts.train.nul
 done
+fi
+# the chains of the mugen streams in the mix (CH=1).  A unit with real history repairs keeps those and none
+# of its made-up ones, so a history stream's chains go less hist5's units (ALL=1: a chain is all made up).
+if [ "${CH:-0}" = 1 ]; then
+  C=run/v6/mugen/chain
+  chain_of() { local n=$1 f=$C/$1/transcripts.train.nul o=$C/$1/kept.train.nul
+    [ -e $C/$n/DONE ] || { echo "mix6: no chains for $n ($C/$n/DONE)" >&2; return; }
+    if [ -e run/v6/hist-$n/DONE ] && [ -s run/v6/hist-$n/units.kept ]; then
+      if [ ! -s $o ] || [ $o -ot $f ]; then ALL=1 run/v5/gcroot-bend-corpus-v2-hd/bin/bend-corpus-v2 hist-drop $f $o.tmp run/v6/hist-$n/units.kept >&2 && mv $o.tmp $o; fi
+      f=$o
+    fi
+    add in "$(fresh $n $f)"; }
+  chains=()
+  for a in "${args[@]}"; do
+    case $a in
+      in=run/v6/mugen/*/transcripts.train.nul) n=${a#in=run/v6/mugen/}; chains+=("${n%/transcripts.train.nul}") ;;
+      in=run/v6/recheck-*/streams/run_v6_mugen_hist-*) n=${a#in=run/v6/recheck-}; chains+=("${n%%/*}") ;;
+    esac
+  done
+  case " ${chains[*]} " in *" own5 "*) ;; *) [ -e run/v6/hist-own5/DONE ] && chains+=(own5) ;; esac
+  for n in "${chains[@]}"; do case $n in hist-*) ;; *) chain_of "$n" ;; esac; done
+fi
 # wrong on purpose: units of gavel's and knot's mutants/ files that differ from every def beside
 # them (tools/corpus-v2/hist/mutheld.py, 10-28: 106 of run 2's and col6's 118 such units)
 add held run/v6/held-mutants.txt
