@@ -2450,7 +2450,8 @@ def st.fu.dirs.of(xs: List<&2, String>) -> List<&2, String>:
     case Nil{}:
       Nil{}
     case +x <> +more:
-      Bool.pick(List<&2, String>, Bool.or(st.fu.is.held(x), st.fu.is.copies(x)), st.fu.dirs.of(more), x <> st.fu.dirs.of(more))
+      +r = st.fu.dirs.of(more)
+      Bool.pick(List<&2, String>, Bool.or(st.fu.is.held(x), st.fu.is.copies(x)), r, x <> r)
 
 def st.fu.copies.of(xs: List<&2, String>) -> Nat:
   match xs:

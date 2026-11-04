@@ -386,7 +386,9 @@ def ep.nums.go(xs: List<&2, U32>, +cur: List<&2, U32>) -> List<&2, Maybe<&2, Nat
     case Nil{}:
       [ep.nat(List.reverse(&2, U32, cur))]
     case +h <> +t:
-      Bool.pick(List<&2, Maybe<&2, Nat>>, U32.is_eq(h, 32), ep.nat(List.reverse(&2, U32, cur)) <> ep.nums.go(t, Nil{}), ep.nums.go(t, h <> cur))
+      +sp = U32.is_eq(h, 32)
+      +r = ep.nums.go(t, Bool.pick(List<&2, U32>, sp, Nil{}, h <> cur))
+      Bool.pick(List<&2, Maybe<&2, Nat>>, sp, ep.nat(List.reverse(&2, U32, cur)) <> r, r)
 
 def ep.all(ms: List<&2, Maybe<&2, Nat>>) -> Maybe<&2, List<&2, Nat>>:
   match ms:

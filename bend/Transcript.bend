@@ -1502,7 +1502,9 @@ def nt.uniq(ns: List<&2, Nt>, +prev: List<&2, U32>) -> List<&2, Nt>:
     case Nil{}:
       Nil{}
     case Nt{+b, +c} <> +t:
-      Bool.pick(List<&2, Nt>, U.eq(b, prev), nt.uniq(t, prev), Nt{b, c} <> nt.uniq(t, b))
+      +same = U.eq(b, prev)
+      +r = nt.uniq(t, Bool.pick(List<&2, U32>, same, prev, b))
+      Bool.pick(List<&2, Nt>, same, r, Nt{b, c} <> r)
 
 def nt.edits(ns: List<&2, Nt>, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +f0: List<&2, U32>) -> List<&2, U32>:
   match ns:

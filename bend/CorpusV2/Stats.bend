@@ -52,7 +52,8 @@ def as.terms(e: List<&2, A.Turn>) -> List<&2, List<&2, U32>>:
       +c = A.ag.role.code(r)
       +term = Bool.and(Bool.or(Nat.is_eq(c, 1n), Bool.or(Nat.is_eq(c, 3n), Nat.is_eq(c, 6n))),
         Bool.or(A.ag.prefix(x, A.ag.ascii("## Term\n")), A.ag.prefix(x, A.ag.ascii("## Type\n"))))
-      Bool.pick(List<&2, List<&2, U32>>, term, x <> as.terms(t), as.terms(t))
+      +r = as.terms(t)
+      Bool.pick(List<&2, List<&2, U32>>, term, x <> r, r)
 
 # copies and drifts among the Terms after the first (each follows a failing
 # echo: a pass ends the episode)
