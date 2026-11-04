@@ -5,7 +5,8 @@
 # session as "other" in repair-mix, so no copies and no cap.
 
 # 1. Every Bend stream's check and format 2 render (their scripts in run/v5/clean): col8b.sh (with
-#    CHECK_PROCS=10 since 11-03 18:34), a2bum12.sh, a2bsrc.sh all.
+#    CHECK_PROCS=10 since 11-03 18:34), a2bum12.sh, a2bsrc.sh all, own9.sh (11-04: our repositories at HEAD,
+#    2,068 units own5 did not have, 7,714 format 2 sessions; bend-frp and mugen-web for the first time).
 
 # 2. Every language's sessions.  Bend: mugen6.sh, mugen6q.sh (workers), mugen6q.sh move, then
 #    mugen6.sh hist-v2 hist-collect5 hist-own5.  The other four (bend-transcript at this commit):
