@@ -30,14 +30,17 @@ CV repair-mix run/v6/mix/nix free=run/v6/mugen/nix/transcripts.train.nul     # n
 MG=1 FF=1 run/v5/clean/mix6.sh run/v6/mix/dry-final dry
 MG=1 FF=1 SHARE=S run/v5/clean/mix6.sh run/v6/mix/bend
 
-# 5. Bend's filler: every stream's files, each id once, none holding a held-out unit, K copies (a window needs
-#    a filler file of its own in its shard, and sessions fill about two a window), in keyed order, so that
-#    each shard's slice has every size.
-CV filler-union run/v6/R5src/bend.tmp run/v2/transcripts/bend run/v[5-8]/transcripts-*/bend held=run/v2/results/bend.holdout.nul copies=K
+# 5. Bend's filler: every stream's files, each id once, none holding a held-out unit, in keyed order, so that each
+#    shard's slice has every size.  A window needs a filler file of its own in its shard, and sessions fill about two
+#    a window, so plan-windows reads them K times (FILLER_COPIES, step 7; 11-03: filler-union's copies=K wrote 14 GB
+#    first, about 3 hours on one core for what one pass does).
+CV filler-union run/v6/R5src/bend.tmp run/v2/transcripts/bend run/v[5-8]/transcripts-*/bend held=run/v2/results/bend.holdout.nul
 CV keyed-order nul "run 5 filler" ALL.nul run/v6/R5src/bend/files-hi.nul
 
 # 6. run/v6/R5src/LANG links transcripts.train.nul to the mix, and for the other four files-hi/lo to
 #    run/v2/transcripts/LANG, results.holdout to run/v2/results/LANG.holdout.nul.
 
-# 7. The plan: windows of 2,046 tokens in shards of 8,000 sessions, the languages interleaved by their counts.
-env OUT=run/v6/R5src SHARD=8000 JOBS=8 TOKENIZER=weights/code32k.bpe deploy plan-windows run/v6/R5 fp100m 16 bend:B haskell:H lean:L agda:A nix:N
+# 7. The plan: windows of 2,046 tokens in shards of 8,000 sessions, the languages interleaved by their counts.  The
+#    mixes go NUL to NUL since 11-03 (the same bytes, checked on 1.28 GB: 5.6 minutes where JSON took 82), K = sessions
+#    * 0.55 / 43,000 + 1, and bend-prepare takes 1.6 GB and 104 s on a filler slice of 46 MB, so JOBS=8 is 13 GB.
+env FILLER_COPIES=bend:K OUT=run/v6/R5src SHARD=8000 JOBS=8 TOKENIZER=weights/code32k.bpe bend-plan-windows run/v6/R5 fp100m 16 bend:B haskell:H lean:L agda:A nix:N

@@ -50,6 +50,7 @@ ssh -p PORT root@IP 'apt-get update -qq && apt-get install -y -qq rsync wget lsb
 export PATH=$PWD/run/gcroot-bend-ops/bin:$PATH
 BOX_ENV=bend/gpu/v5-box.env bend-ops stage box root@IP PORT
 rsync -e 'ssh -p PORT' --partial run/v4/run4/out/c2-step72491.checkpoint root@IP:ana/out/
+mkdir -p run/v6/run5/out && ln run/v4/run4/out/c2-step72491.checkpoint run/v6/run5/out/     # the chain holds every checkpoint on the box to a copy here, and without this one never destroys it (seen 11-03)
 ssh -p PORT root@IP 'cd ana && cp run/eval/v2-mugen.corpus run/eval/transcript-next.corpus'
 ```
 

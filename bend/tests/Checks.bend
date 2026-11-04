@@ -513,6 +513,9 @@ def chk.tests() -> List<&2, ChkTest>:
    # one named twice gives its pairs then the same texts with /e2 after each id, no id
    # twice; named once, cat's bytes) (reads fixtures/box, fixtures/recipes)
    ChkTest{"recipes.bend", False{}, ROks{57n}},
+   # bend-plan-windows' direct road: NUL pairs in bend-mix's rounds, FILLER_COPIES, the
+   # holdout's files left out, a part written as it is read
+   ChkTest{"planwin.bend", False{}, ROks{10n}},
    # bend-ops chain and watch (bend/Box/Chain.bend, Watch.bend): their
    # decisions on run 3's chain.log, s2.log and sha256 listings (the per-poll
    # line and the eval line byte for byte), follow, verify, HOLD, the watch's

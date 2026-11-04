@@ -2,6 +2,7 @@ import Base
 import ./Sys.bend as S
 import ./Json.bend as J
 import ./Clock.bend as Ck
+import ./Mix.bend as M
 
 # bend-plan-windows: the transcript corpus as training shards and a run
 # plan: the languages' train transcripts interleaved, packed whole into
@@ -33,7 +34,7 @@ import ./Clock.bend as Ck
 # `segment` line per shard.  What exists is kept: a rerun resumes.
 #
 # Environment: OUT, TOKENIZER (weights/code32k.bpe), CAPACITY, SHARD, FILL,
-# JOBS, and the tools BEND_MIX, BEND_PREPARE, BEND_WINDOWS,
+# JOBS, FILLER_COPIES (LANG:K), and the tools BEND_MIX, BEND_PREPARE, BEND_WINDOWS,
 # BEND_PLAN_SEGMENT (default: bend-mix, bend-prepare, bend-windows,
 # bend-plan-segment on PATH).
 
@@ -74,6 +75,16 @@ def spec(+s: String) -> Spec:
   +xs = S.b(s)
   +r = after(xs, 58)
   Spec{S.str(upto(xs, 58)), S.str(upto(r, 58)), S.str(after(r, 58))}
+
+def Spec.lang(+s: Spec) -> String:
+  match s:
+    case Spec{l, p, r}:
+      l
+
+def Spec.per(+s: Spec) -> String:
+  match s:
+    case Spec{l, p, r}:
+      p
 
 def specs(xs: List<String>) -> List<&2, Spec>:
   match xs:
@@ -285,87 +296,321 @@ def mixed(+dir: String, +name: String, +bm: String, args: List<String>) -> IO(Un
     S.rm(j)
     say(name ++ ": " ++ Nat.show(n) ++ " documents")
 
+def mix.json(+dir: String, +out: String, +bm: String, +ss: List<&2, Spec>) -> IO(Unit):
+  do IO<Unit>:
+    S.mkdir(dir ++ "/src")
+    tr : List<String> <- mix.tr.srcs(out, dir ++ "/src", ss)
+    mixed(dir, "mix", bm, tr)
+    fl : List<String> <- mix.fl.srcs(out, dir ++ "/src", ss)
+    mixed(dir, "filler", bm, fl)
+    S.rm(dir ++ "/src")
+
+# The mixes, directly (2026-11-03): run 5's 2.6M sessions and K copies of Bend's
+# files through JSON took about 20 hours on one core (0.5 MB/s out of bend-mix's
+# JSON, 2026-11-03 21:36-22:58 for 1.28 GB).  NUL pairs interleaved as they are:
+# the same rounds as bend-mix for sources that neither repeat nor cycle (each
+# round PER documents of every language in the order given, a language that
+# runs dry leaves the rounds), and the same bytes as the JSON road: checked on
+# the 1.28 GB of /tmp/bx/r5mini.  A spec with :cycle still takes the JSON road.
+
+# a language in the rounds: the reader, the paths still to read, the passes over
+# its files before this one (FILLER_COPIES, below), the ids left out, PER, its
+# name, the documents and bytes it gave
+type NmS is Type:
+  NmS{rd: S.Rd, more: List<&2, String>, at: Nat, excl: Set(), per: Nat, name: String, n: Nat, b: Nat}
+
+# a turn: left documents to go; dry: the language has run out
+type NmT is Type:
+  NmT{s: NmS, o: File, ids: File, left: Nat, dry: Bool}
+
+# a copy's id: filler-union's, #c<pass> after the first
+def nm.id.at(+at: Nat, +id: List<&2, U32>) -> List<&2, U32>:
+  Bool.pick(List<&2, U32>, Nat.is_lt(at, 2n), id, S.append(id, S.b("#c" ++ Nat.show(Nat.div(at, 2n)))))
+
+def nm.keep(rd: S.Rd, more: List<&2, String>, +at: Nat, +per: Nat, +name: String, +n: Nat, +b: Nat, o: File, ids: File, +left: Nat, +id: List<&2, U32>, +t: List<&2, U32>, r: Set() & Bool) -> IO(NmT):
+  (excl, out) = r
+  match out:
+    case True{}:
+      IO.pure(NmT, NmT{NmS{rd, more, at, excl, per, name, n, b}, o, ids, left, False{}})
+    case False{}:
+      +idc = nm.id.at(at, id)
+      do IO<NmT>:
+        o2 : File <- S.emit(o, S.append(idc, 0 <> S.append(t, [0])))
+        ids2 : File <- S.emit(ids, S.append(idc, [10]))
+        return NmT{NmS{rd, more, at, excl, per, name, 1n+n, Nat.add(b, S.len(t))}, o2, ids2, Nat.sub(left, 1n), False{}}
+
+def nm.text(more: List<&2, String>, +at: Nat, excl: Set(), +per: Nat, +name: String, +n: Nat, +b: Nat, o: File, ids: File, +left: Nat, +id: List<&2, U32>, r: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(NmT):
+  (rd, m) = r
+  match m:
+    case None{}:
+      do IO<NmT>:
+        S.Rd.close(rd)
+        File.close(o)
+        File.close(ids)
+        IO.die(NmT, 1, "plan-windows: a NUL stream of " ++ name ++ " ends after an id")
+    case Some{+t}:
+      nm.keep(rd, more, at, per, name, n, b, o, ids, left, id, t, Set.has(excl, S.str(id)))
+
+# the language's next file, or dry
+def nm.next(rd: S.Rd, more: List<&2, String>, +at: Nat, excl: Set(), +per: Nat, +name: String, +n: Nat, +b: Nat, o: File, ids: File, +left: Nat) -> IO(NmT):
+  match more:
+    case Nil{}:
+      IO.pure(NmT, NmT{NmS{rd, Nil{}, at, excl, per, name, n, b}, o, ids, left, True{}})
+    case +p <> rest:
+      do IO<NmT>:
+        S.Rd.close(rd)
+        rd2 : S.Rd <- S.Rd.open(p)
+        return NmT{NmS{rd2, rest, 1n+at, excl, per, name, n, b}, o, ids, left, False{}}
+
+def nm.id(more: List<&2, String>, +at: Nat, excl: Set(), +per: Nat, +name: String, +n: Nat, +b: Nat, o: File, ids: File, +left: Nat, r: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(NmT):
+  (rd, m) = r
+  match m:
+    case None{}:
+      nm.next(rd, more, at, excl, per, name, n, b, o, ids, left)
+    case Some{+id}:
+      do IO<NmT>:
+        r2 : S.Rd & Maybe<&2, List<&2, U32>> <- S.Rd.next(rd)
+        nm.text(more, at, excl, per, name, n, b, o, ids, left, id, r2)
+
+def nm.step(t: NmT) -> IO(NmT):
+  match t:
+    case NmT{NmS{rd, more, +at, excl, +per, +name, +n, +b}, o, ids, +left, d}:
+      do IO<NmT>:
+        r : S.Rd & Maybe<&2, List<&2, U32>> <- S.Rd.next(rd)
+        nm.id(more, at, excl, per, name, n, b, o, ids, left, r)
+
+def nm.take(fuel: Nat, t: NmT) -> IO(NmT):
+  match fuel t:
+    case 1n+f NmT{s, o, ids, 1n+l, False{}}:
+      IO.bind(NmT, NmT, nm.step(NmT{s, o, ids, 1n+l, False{}}), nm.take(f))
+    case _ t2:
+      IO.pure(NmT, t2)
+
+def nm.turn.of(s: NmS, o: File, ids: File) -> NmT:
+  match s:
+    case NmS{rd, more, at, excl, +per, name, n, b}:
+      NmT{NmS{rd, more, at, excl, per, name, n, b}, o, ids, per, False{}}
+
+def nm.rev(xs: List<NmS>, acc: List<NmS>) -> List<NmS>:
+  match xs:
+    case Nil{}:
+      acc
+    case x <> more:
+      nm.rev(more, x <> acc)
+
+# the languages this round has yet to take, those it has taken (newest first),
+# the summary's lines so far
+type NmQ is Type:
+  NmQ{now: List<NmS>, nx: List<NmS>, o: File, ids: File, said: List<&2, String>, total: Nat, go: Bool}
+
+def nm.line(+name: String, +n: Nat, +b: Nat) -> String:
+  "  " ++ name ++ ": " ++ Nat.show(n) ++ " documents, " ++ Nat.show(b) ++ " bytes of text"
+
+def nm.after(t: NmT, now: List<NmS>, nx: List<NmS>, said: List<&2, String>, +total: Nat) -> IO(NmQ):
+  match t:
+    case NmT{NmS{rd, more, at, excl, per, +name, +n, +b}, o, ids, l, True{}}:
+      do IO<NmQ>:
+        S.Rd.close(rd)
+        return NmQ{now, nx, o, ids, nm.line(name, n, b) <> said, Nat.add(total, n), True{}}
+    case NmT{s, o, ids, l, False{}}:
+      IO.pure(NmQ, NmQ{now, s <> nx, o, ids, said, total, True{}})
+
+def nm.round.end(nx: List<NmS>, o: File, ids: File, said: List<&2, String>, +total: Nat) -> NmQ:
+  match nx:
+    case Nil{}:
+      NmQ{Nil{}, Nil{}, o, ids, said, total, False{}}
+    case x <> more:
+      NmQ{nm.rev(x <> more, Nil{}), Nil{}, o, ids, said, total, True{}}
+
+def nm.q.step(q: NmQ) -> IO(NmQ):
+  match q:
+    case NmQ{Nil{}, nx, o, ids, said, +total, g}:
+      IO.pure(NmQ, nm.round.end(nx, o, ids, said, total))
+    case NmQ{s <> rest, nx, o, ids, said, +total, g}:
+      do IO<NmQ>:
+        t : NmT <- nm.take(big(), nm.turn.of(s, o, ids))
+        nm.after(t, rest, nx, said, total)
+
+def nm.q.end(q: NmQ) -> IO(List<&2, String> & Nat):
+  match q:
+    case NmQ{now, nx, o, ids, +said, +total, g}:
+      do IO<List<&2, String> & Nat>:
+        File.close(o)
+        File.close(ids)
+        return (said, total)
+
+def nm.q.go(fuel: Nat, q: NmQ) -> IO(List<&2, String> & Nat):
+  match fuel q:
+    case 1n+f NmQ{now, nx, o, ids, said, total, True{}}:
+      IO.bind(NmQ, List<&2, String> & Nat, nm.q.step(NmQ{now, nx, o, ids, said, total, True{}}), nm.q.go(f))
+    case _ q2:
+      nm.q.end(q2)
+
+def nm.said(ls: List<&2, String>) -> IO(Unit):
+  match ls:
+    case Nil{}:
+      IO.pure(Unit, Unit{})
+    case +l <> more:
+      do IO<Unit>:
+        say(l)
+        nm.said(more)
+
+def nm.per(+s: String) -> Nat:
+  Maybe.default(&2, Nat, Nat.read(s), 0n)
+
+# every language's reader, in the order given
+def nm.open.tr(+out: String, ss: List<&2, Spec>) -> IO(List<NmS>):
+  match ss:
+    case Nil{}:
+      IO.pure(List<NmS>, Nil{})
+    case Spec{+l, +per, +rest} <> more:
+      do IO<List<NmS>>:
+        rd : S.Rd <- S.Rd.open(out ++ "/" ++ l ++ "/transcripts.train.nul")
+        xs : List<NmS> <- nm.open.tr(out, more)
+        return NmS{rd, Nil{}, 0n, Set.new(), nm.per(per), l, 0n, 0n} <> xs
+
+# FILLER_COPIES=LANG:K: LANG's files K times over, read again rather than written
+# K times (the ids #c1, #c2, ...: filler-union's copies=K, without its 14 GB of
+# disk and its 3 hours on one core for run 5's 34 copies).  K passes over
+# files-hi then files-lo: the paths after the first, the first file's left out.
+def nm.paths(n: Nat, +hi: String, +lo: String) -> List<&2, String>:
+  match n:
+    case 0n:
+      Nil{}
+    case 1n+k:
+      hi <> lo <> nm.paths(k, hi, lo)
+
+def nm.copies(+l: String, +word: String) -> Nat:
+  +sp = spec(word)
+  Bool.pick(Nat, String.eq(l, Spec.lang(sp)), Nat.max(nm.per(Spec.per(sp)), 1n), 1n)
+
+def nm.open.fl(+copies: String, +out: String, ss: List<&2, Spec>) -> IO(List<NmS>):
+  match ss:
+    case Nil{}:
+      IO.pure(List<NmS>, Nil{})
+    case Spec{+l, +per, +rest} <> more:
+      +hi = out ++ "/" ++ l ++ "/files-hi.nul"
+      +lo = out ++ "/" ++ l ++ "/files-lo.nul"
+      do IO<List<NmS>>:
+        +ex : Set() <- held(out ++ "/" ++ l ++ "/results.holdout.nul")
+        say(l ++ ": " ++ Nat.show(Set.size(ex)) ++ " holdout files left out")
+        rd : S.Rd <- S.Rd.open(hi)
+        xs : List<NmS> <- nm.open.fl(copies, out, more)
+        return NmS{rd, lo <> nm.paths(Nat.sub(nm.copies(l, copies), 1n), hi, lo), 0n, ex, nm.per(per), l, 0n, 0n} <> xs
+
+def nm.mix.end(r: List<&2, String> & Nat, +work: String, +out: String, +name: String) -> IO(Unit):
+  (said, +total) = r
+  do IO<Unit>:
+    nm.said(List.reverse(&2, String, said))
+    M.check.ids(True{}, work)
+    S.rm(work)
+    S.mv(out ++ ".tmp", out)
+    S.write(out ++ ".count", S.b(Nat.show(total)))
+    say(name ++ ": " ++ Nat.show(total) ++ " documents")
+
+# LC_ALL=C sort over the ids and uniq -d (bend-mix's check); then the rename
+def nm.mix(+dir: String, +name: String, srcs: List<NmS>) -> IO(Unit):
+  +work = dir ++ "/" ++ name ++ ".ck"
+  +out = dir ++ "/" ++ name ++ ".nul"
+  do IO<Unit>:
+    S.mkdir(work)
+    o : File <- IO.try(File, File.open(out ++ ".tmp", "w"))
+    ids : File <- IO.try(File, File.open(work ++ "/ids", "w"))
+    r : List<&2, String> & Nat <- nm.q.go(big(), NmQ{srcs, Nil{}, o, ids, Nil{}, 0n, True{}})
+    nm.mix.end(r, work, out, name)
+
+def nm.direct(+dir: String, +out: String, +ss: List<&2, Spec>) -> IO(Unit):
+  do IO<Unit>:
+    tr : List<NmS> <- nm.open.tr(out, ss)
+    nm.mix(dir, "mix", tr)
+    +copies : String <- S.env("FILLER_COPIES", "")
+    fl : List<NmS> <- nm.open.fl(copies, out, ss)
+    nm.mix(dir, "filler", fl)
+
+def any.cycle(ss: List<&2, Spec>) -> Bool:
+  match ss:
+    case Nil{}:
+      False{}
+    case Spec{l, p, +r} <> more:
+      Bool.or(Bool.not(String.is_empty(r)), any.cycle(more))
+
 def mix.if(done: Bool, +dir: String, +out: String, +bm: String, +ss: List<&2, Spec>) -> IO(Unit):
   match done:
     case True{}:
       say("the mixes exist")
     case False{}:
-      do IO<Unit>:
-        S.mkdir(dir ++ "/src")
-        tr : List<String> <- mix.tr.srcs(out, dir ++ "/src", ss)
-        mixed(dir, "mix", bm, tr)
-        fl : List<String> <- mix.fl.srcs(out, dir ++ "/src", ss)
-        mixed(dir, "filler", bm, fl)
-        S.rm(dir ++ "/src")
+      Bool.pick(IO(Unit), any.cycle(ss), mix.json(dir, out, bm, ss), nm.direct(dir, out, ss))
 
 # Parts: the pairs of a NUL file cut into files of n pairs ---------------------
 
+# A part's pairs go straight to its file.  (Until 11-03 they gathered in a list
+# first: 24 bytes a byte of text, so a 1.28 GB filler over 3 shards was killed at
+# 4 GB, /tmp/bx/r5mini.)
 type Sp is Type:
-  Sp{rd: S.Rd, k: Nat, i: Nat, acc: List<&2, List<&2, U32>>, paths: List<&2, String>, go: Bool}
+  Sp{rd: S.Rd, o: File, k: Nat, i: Nat, go: Bool}
 
-def nul.all(fs: List<&2, List<&2, U32>>) -> List<&2, U32>:
-  match fs:
-    case Nil{}:
-      Nil{}
-    case f <> more:
-      List.append(&2, U32, f, 0 <> nul.all(more))
+def sp.path(+pre: String, +k: Nat) -> String:
+  pre ++ "-" ++ pad6(k) ++ ".nul"
 
-def sp.flush(+pre: String, +k: Nat, acc: List<&2, List<&2, U32>>, paths: List<&2, String>) -> IO(List<&2, String>):
-  +path = pre ++ "-" ++ pad6(k) ++ ".nul"
-  do IO<List<&2, String>>:
-    S.write(path, nul.all(List.reverse(&2, List<&2, U32>, acc)))
-    return path <> paths
+def sp.open(+pre: String, +k: Nat) -> IO(File):
+  IO.try(File, File.open(sp.path(pre, k), "w"))
 
-def sp.put(full: Bool, +pre: String, rd: S.Rd, +k: Nat, +i: Nat, acc: List<&2, List<&2, U32>>, paths: List<&2, String>) -> IO(Sp):
+def sp.put(full: Bool, +pre: String, rd: S.Rd, o: File, +k: Nat, +i: Nat) -> IO(Sp):
   match full:
     case True{}:
       do IO<Sp>:
-        ps : List<&2, String> <- sp.flush(pre, k, acc, paths)
-        return Sp{rd, 1n+k, 0n, Nil{}, ps, True{}}
+        File.close(o)
+        o2 : File <- sp.open(pre, 1n+k)
+        return Sp{rd, o2, 1n+k, 0n, True{}}
     case False{}:
-      IO.pure(Sp, Sp{rd, k, i, acc, paths, True{}})
+      IO.pure(Sp, Sp{rd, o, k, i, True{}})
 
-def sp.end(+pre: String, rd: S.Rd, +k: Nat, i: Nat, acc: List<&2, List<&2, U32>>, paths: List<&2, String>) -> IO(Sp):
-  match i:
-    case 0n:
-      IO.pure(Sp, Sp{rd, k, 0n, Nil{}, paths, False{}})
-    case 1n+j:
-      do IO<Sp>:
-        ps : List<&2, String> <- sp.flush(pre, k, acc, paths)
-        return Sp{rd, 1n+k, 0n, Nil{}, ps, False{}}
-
-def sp.got(+n: Nat, +pre: String, rd: S.Rd, +k: Nat, +i: Nat, acc: List<&2, List<&2, U32>>, paths: List<&2, String>, m: Maybe<&2, List<&2, U32>>) -> IO(Sp):
+def sp.got(+n: Nat, +pre: String, rd: S.Rd, o: File, +k: Nat, +i: Nat, m: Maybe<&2, List<&2, U32>>) -> IO(Sp):
   match m:
     case None{}:
-      sp.end(pre, rd, k, i, acc, paths)
-    case Some{f}:
-      sp.put(Nat.is_eq(1n+i, Nat.mul(2n, n)), pre, rd, k, 1n+i, f <> acc, paths)
+      IO.pure(Sp, Sp{rd, o, k, i, False{}})
+    case Some{+f}:
+      do IO<Sp>:
+        o2 : File <- S.emit(o, S.append(f, [0]))
+        sp.put(Nat.is_eq(1n+i, Nat.mul(2n, n)), pre, rd, o2, k, 1n+i)
 
-def sp.pair(+n: Nat, +pre: String, +k: Nat, +i: Nat, acc: List<&2, List<&2, U32>>, paths: List<&2, String>, r: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(Sp):
+def sp.pair(+n: Nat, +pre: String, o: File, +k: Nat, +i: Nat, r: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(Sp):
   (rd, m) = r
-  sp.got(n, pre, rd, k, i, acc, paths, m)
+  sp.got(n, pre, rd, o, k, i, m)
 
 def sp.step(+n: Nat, +pre: String, s: Sp) -> IO(Sp):
   match s:
-    case Sp{rd, +k, +i, acc, paths, g}:
+    case Sp{rd, o, +k, +i, g}:
       do IO<Sp>:
         r : S.Rd & Maybe<&2, List<&2, U32>> <- S.Rd.next(rd)
-        sp.pair(n, pre, k, i, acc, paths, r)
+        sp.pair(n, pre, o, k, i, r)
+
+# the end: the file opened for a part that never began goes
+def sp.end(+pre: String, +k: Nat, i: Nat) -> IO(Nat):
+  match i:
+    case 0n:
+      do IO<Nat>:
+        S.rm(sp.path(pre, k))
+        return k
+    case 1n+j:
+      IO.pure(Nat, 1n+k)
 
 def sp.go(fuel: Nat, +n: Nat, +pre: String, s: Sp) -> IO(Nat):
   match fuel s:
-    case 1n+p Sp{rd, k, i, acc, paths, True{}}:
-      IO.bind(Sp, Nat, sp.step(n, pre, Sp{rd, k, i, acc, paths, True{}}), sp.go(p, n, pre))
-    case _ Sp{rd, k, i, acc, paths, g}:
+    case 1n+p Sp{rd, o, k, i, True{}}:
+      IO.bind(Sp, Nat, sp.step(n, pre, Sp{rd, o, k, i, True{}}), sp.go(p, n, pre))
+    case _ Sp{rd, o, +k, +i, g}:
       do IO<Nat>:
         S.Rd.close(rd)
-        return k
+        File.close(o)
+        sp.end(pre, k, i)
 
 # the files written (named pre-000000.nul, ...)
 def split(+path: String, +n: Nat, +pre: String) -> IO(Nat):
   do IO<Nat>:
     rd : S.Rd <- S.Rd.open(path)
-    sp.go(big(), n, pre, Sp{rd, 0n, 0n, Nil{}, Nil{}, True{}})
+    o : File <- sp.open(pre, 0n)
+    sp.go(big(), n, pre, Sp{rd, o, 0n, 0n, True{}})
 
 type Pt is Data:
   Pt{shards: Nat, fills: Nat}
@@ -423,6 +668,21 @@ def nth(xs: List<&2, List<&2, U32>>, n: Nat) -> List<&2, U32>:
 def nat.of(+xs: List<&2, U32>) -> Nat:
   Maybe.default(&2, Nat, Nat.read(S.str(xs)), 0n)
 
+# the direct road wrote how many; reading 15 GB to count them takes most of an hour
+def count.got(there: Bool, +path: String) -> IO(Nat):
+  match there:
+    case True{}:
+      do IO<Nat>:
+        xs : List<&2, U32> <- S.read(path ++ ".count")
+        return nat.of(xs)
+    case False{}:
+      count(path)
+
+def count.of(+path: String) -> IO(Nat):
+  do IO<Nat>:
+    +there : Bool <- S.exists(path ++ ".count")
+    count.got(there, path)
+
 def parts.if(done: Bool, +dir: String, +shard: Nat, +fill: Nat) -> IO(Pt):
   match done:
     case True{}:
@@ -434,7 +694,7 @@ def parts.if(done: Bool, +dir: String, +shard: Nat, +fill: Nat) -> IO(Pt):
       do IO<Pt>:
         S.mkdir(dir ++ "/parts")
         +k : Nat <- split(dir ++ "/mix.nul", shard, dir ++ "/parts/part")
-        +total : Nat <- count(dir ++ "/filler.nul")
+        +total : Nat <- count.of(dir ++ "/filler.nul")
         +each : Nat = share(fill, total, k)
         +f : Nat <- split(dir ++ "/filler.nul", each, dir ++ "/parts/fill")
         S.write(dir ++ "/parts/done", S.b(Nat.show(k) ++ " " ++ Nat.show(f) ++ "\n"))
