@@ -39,7 +39,7 @@ add() { local f; f=$(mg "$2"); if [ -s "$f" ]; then args+=("$1=$f"); else echo "
 fresh() { local r=run/v6/recheck-$1 f=$2 o; if [ -e $r/DONE ] && [ -s "$f" ]; then
   o=$r/streams/$(echo "$f" | tr '/' '_')
   if [ ! -s $o ] || [ $o -ot "$f" ] || [ $o -ot $r/stale.ids ]; then
-    mkdir -p $r/streams; ALL=1 python3 -I tools/corpus-v2/hist/hist-drop.py "$f" $o.tmp $r/stale.ids >&2 && mv $o.tmp $o; fi
+    mkdir -p $r/streams; ALL=1 run/v5/gcroot-bend-corpus-v2-hd/bin/bend-corpus-v2 hist-drop "$f" $o.tmp $r/stale.ids >&2 && mv $o.tmp $o; fi
   echo $o; else [ -e $r/DONE ] || echo "mix6: $1 not rechecked on today's Bend ($r/DONE)" >&2; echo "$f"; fi; }
 hist() { local h=run/v6/hist-$1 m=run/v6/mugen/hist-$1; if [ -e $h/DONE ]; then
   if [ "${MG:-0}" = 1 ] && [ -e $m/DONE ] && [ -s $m/$1.train.nul ]; then add in $(fresh $1 $m/$1.train.nul); add in $m/transcripts.train.nul

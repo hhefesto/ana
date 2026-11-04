@@ -76,7 +76,7 @@ for S in v2 collect5 own5; do
   ONLY=repair one hist-$S $M/hist-$S $h/*/bend/results.train.nul || { bad=$((bad + 1)); continue; }
   [ -e $M/$S/DONE ] || { say "hist-$S: $M/$S not DONE"; bad=$((bad + 1)); continue; }
   if [ ! -s $M/hist-$S/$S.train.nul ] || [ $M/hist-$S/$S.train.nul -ot $M/$S/DONE ]; then
-    python3 -I $H/hist-drop.py $M/$S/transcripts.train.nul $M/hist-$S/$S.train.nul.tmp $h/units.kept > $M/hist-$S/drop.log 2>&1 \
+    run/v5/gcroot-bend-corpus-v2-hd/bin/bend-corpus-v2 hist-drop $M/$S/transcripts.train.nul $M/hist-$S/$S.train.nul.tmp $h/units.kept > $M/hist-$S/drop.log 2>&1 \
       && mv $M/hist-$S/$S.train.nul.tmp $M/hist-$S/$S.train.nul || { say "hist-$S: drop FAILED"; bad=$((bad + 1)); continue; }
     cat $M/hist-$S/drop.log
   fi
