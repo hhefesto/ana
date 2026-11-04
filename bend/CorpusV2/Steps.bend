@@ -27,7 +27,7 @@ import ./Lib.bend as L
 #                                 made, the counts on stderr
 #   specs-next REPLAY L:C...      next-stage's per-round specs
 #   replay-filler D SRC NEW...    SRC's files-hi/lo.nul into D less the ids NEW's hold
-#   filler-union OUT DIR...       every DIR's files-hi/lo.nul into OUT, each id once
+#   filler-union OUT DIR... [held=RES] [copies=K]   every DIR's files-hi/lo.nul into OUT, each id once, no file holding a held-out unit
 #   drop-repos VAULT.tsv SRC DST  SRC's lines whose repository is not in the vault
 #   insert-stage STAGES LOG AFTER LINE...
 #                                 LINE into STAGES after the first AFTER there, never behind
@@ -2223,54 +2223,176 @@ def st.replay.filler(xs: List<String>) -> IO(Unit):
 # filler-union --------------------------------------------------------------------------
 #
 # Run 5's Bend filler (2026-11-03): every stream's source files, each id once.
-# filler-union OUT DIR...: each DIR's files-hi.nul into OUT/files-hi.nul, then
-# each DIR's files-lo.nul into OUT/files-lo.nul, a record whose id an earlier
-# one had left out (the first version wins: bend-mix refuses a duplicate id).
+# filler-union OUT DIR... [held=RESULTS.nul]: each DIR's files-hi.nul into
+# OUT/files-hi.nul, then each DIR's files-lo.nul into OUT/files-lo.nul, a record
+# whose id an earlier one had left out (the first version wins: bend-mix refuses
+# a duplicate id).  held=: a file that holds a held-out unit's declaration and
+# body, byte for byte, is left out and named (a fork's copy under another id:
+# plan-windows goes by id only; 12 of run 2's 84 held-out Bend units were in
+# the filler so, 2026-11-03).  copies=K: every file K times, the copies after
+# the first with `#cN` after the id.  A window takes a filler file of its own
+# in its shard, and run 5's sessions (about two a window, not four as format 2's)
+# want about a million windows from 43,000 Bend files; a file comes back in
+# later shards only, at its end, with another window's gap.
 
-def st.fu.put(r: StRd, o: File, s: Set(), +k: Nat, +i: List<&2, U32>, t: List<&2, U32>, has: Bool) -> IO(StRf):
-  match has:
+# a held-out unit: its declaration's first line, and the text to find
+type StHd is Data:
+  StHd{first: List<&2, U32>, key: List<&2, U32>}
+
+# what a file goes through: the held-out units, the copies
+type StFc is Data:
+  StFc{hs: List<&2, StHd>, n: Nat}
+
+type StHr is Type:
+  StHr{r: StRd, hs: List<&2, StHd>, more: Bool}
+
+def st.hd.add(+t: List<&2, U32>, +hs: List<&2, StHd>) -> List<&2, StHd>:
+  +fs = S.split(t, 30)
+  +key = L.v2.concat([L.v2.nth(fs, 6n), L.v2.nth(fs, 7n)])
+  Bool.pick(List<&2, StHd>, Nat.is_lt(List.length(&2, U32, key), 40n), hs, StHd{S.lines.first(key), key} <> hs)
+
+def st.hd.rec(r: StRd, hs: List<&2, StHd>, m: Maybe<&2, StPair>) -> StHr:
+  match m:
+    case None{}:
+      StHr{r, hs, False{}}
+    case Some{StPair{i, t}}:
+      StHr{r, st.hd.add(t, hs), True{}}
+
+def st.hd.got(hs: List<&2, StHd>, x: StRd & Maybe<&2, StPair>) -> IO(StHr):
+  (r, m) = x
+  IO.pure(StHr, st.hd.rec(r, hs, m))
+
+def st.hd.go(fuel: Nat, z: StHr) -> IO(StHr):
+  match fuel z:
+    case 1n+f StHr{r, hs, True{}}:
+      IO.bind(StHr, StHr, IO.bind(StRd & Maybe<&2, StPair>, StHr, st.rd.pair(r), st.hd.got(hs)), st.hd.go(f))
+    case _ z2:
+      IO.pure(StHr, z2)
+
+def st.hd.fin(z: StHr) -> IO(List<&2, StHd>):
+  match z:
+    case StHr{r, hs, m}:
+      do IO<List<&2, StHd>>:
+        st.rd.close(r)
+        return hs
+
+def st.hd.read(+path: String) -> IO(List<&2, StHd>):
+  do IO<List<&2, StHd>>:
+    r : StRd <- st.rd.open(path, 0)
+    z : StHr <- st.hd.go(st.fuel(), StHr{r, Nil{}, True{}})
+    st.hd.fin(z)
+
+# whether a held-out unit's declaration is in a text: its lines are looked up in the
+# set (a first line's key is the line after a byte 1; a file's ids have no such byte),
+# and only a file with such a line is searched
+def st.hd.key(+l: List<&2, U32>) -> String:
+  st.key(1 <> l)
+
+def st.hd.step2(hit: Bool, y: Set() & Bool) -> Set() & Bool:
+  (s, b) = y
+  (s, Bool.or(hit, b))
+
+def st.hd.step(z: Set() & Bool, +l: List<&2, U32>) -> Set() & Bool:
+  (s, hit) = z
+  st.hd.step2(hit, Set.has(s, st.hd.key(l)))
+
+def st.hd.seen(ls: List<&2, List<&2, U32>>, z: Set() & Bool) -> Set() & Bool:
+  match ls:
+    case Nil{}:
+      z
+    case +l <> more:
+      st.hd.seen(more, st.hd.step(z, l))
+
+def st.hd.found(hs: List<&2, StHd>, +t: List<&2, U32>) -> Bool:
+  match hs:
+    case Nil{}:
+      False{}
+    case StHd{f, +k} <> more:
+      Bool.or(Maybe.is_some(&2, Nat, st.find(t, k, 0n)), st.hd.found(more, t))
+
+def st.hd.firsts(hs: List<&2, StHd>, s: Set()) -> Set():
+  match hs:
+    case Nil{}:
+      s
+    case StHd{+f, k} <> more:
+      st.hd.firsts(more, Set.add(s, st.hd.key(f)))
+
+def st.fu.id(+at: Nat, +i: List<&2, U32>) -> List<&2, U32>:
+  Bool.pick(List<&2, U32>, Nat.is_eq(at, 0n), i, L.v2.concat([i, S.b("#c"), S.b(Nat.show(at))]))
+
+def st.fu.emit(c: Nat, o: File, +at: Nat, +i: List<&2, U32>, +t: List<&2, U32>) -> IO(File):
+  match c:
+    case 0n:
+      IO.pure(File, o)
+    case 1n+q:
+      do IO<File>:
+        o2 : File <- S.emit(o, L.v2.concat([st.fu.id(at, i), [0], t, [0]]))
+        st.fu.emit(q, o2, 1n+at, i, t)
+
+def st.fu.keep(r: StRd, o: File, s: Set(), +k: Nat, +n: Nat, +i: List<&2, U32>, +t: List<&2, U32>, leak: Bool) -> IO(StRf):
+  match leak:
     case True{}:
-      IO.pure(StRf, StRf{r, o, s, k, True{}})
+      do IO<StRf>:
+        IO.print("held: " ++ S.str(i))
+        return StRf{r, o, s, k, True{}}
     case False{}:
       do IO<StRf>:
-        o2 : File <- S.emit(o, L.v2.concat([i, [0], t, [0]]))
+        o2 : File <- st.fu.emit(n, o, 0n, i, t)
         return StRf{r, o2, Set.add(s, st.key(i)), 1n+k, True{}}
 
-def st.fu.has(r: StRd, o: File, +k: Nat, +i: List<&2, U32>, t: List<&2, U32>, sh: Set() & Bool) -> IO(StRf):
-  (s2, has) = sh
-  st.fu.put(r, o, s2, k, i, t, has)
+def st.fu.leak(hit: Bool, r: StRd, o: File, s: Set(), +k: Nat, +hs: List<&2, StHd>, +n: Nat, +i: List<&2, U32>, +t: List<&2, U32>) -> IO(StRf):
+  match hit:
+    case True{}:
+      st.fu.keep(r, o, s, k, n, i, t, st.hd.found(hs, t))
+    case False{}:
+      st.fu.keep(r, o, s, k, n, i, t, False{})
 
-def st.fu.rec(r: StRd, o: File, s: Set(), +k: Nat, m: Maybe<&2, StPair>) -> IO(StRf):
+def st.fu.leak.got(r: StRd, o: File, +k: Nat, +hs: List<&2, StHd>, +n: Nat, +i: List<&2, U32>, +t: List<&2, U32>, x: Set() & Bool) -> IO(StRf):
+  (s, hit) = x
+  st.fu.leak(hit, r, o, s, k, hs, n, i, t)
+
+def st.fu.put(r: StRd, o: File, s: Set(), +k: Nat, has: Bool, +c: StFc, +i: List<&2, U32>, +t: List<&2, U32>) -> IO(StRf):
+  match has c:
+    case True{} _:
+      IO.pure(StRf, StRf{r, o, s, k, True{}})
+    case False{} StFc{+hs, +n}:
+      st.fu.leak.got(r, o, k, hs, n, i, t, st.hd.seen(S.split.lines(t), (s, False{})))
+
+def st.fu.has(r: StRd, o: File, +k: Nat, +hs: StFc, +i: List<&2, U32>, t: List<&2, U32>, sh: Set() & Bool) -> IO(StRf):
+  (s2, has) = sh
+  st.fu.put(r, o, s2, k, has, hs, i, t)
+
+def st.fu.rec(r: StRd, o: File, s: Set(), +k: Nat, +hs: StFc, m: Maybe<&2, StPair>) -> IO(StRf):
   match m:
     case None{}:
       IO.pure(StRf, StRf{r, o, s, k, False{}})
     case Some{StPair{+i, t}}:
-      st.fu.has(r, o, k, i, t, Set.has(s, st.key(i)))
+      st.fu.has(r, o, k, hs, i, t, Set.has(s, st.key(i)))
 
-def st.fu.got(o: File, s: Set(), +k: Nat, x: StRd & Maybe<&2, StPair>) -> IO(StRf):
+def st.fu.got(o: File, s: Set(), +k: Nat, +hs: StFc, x: StRd & Maybe<&2, StPair>) -> IO(StRf):
   (r, m) = x
-  st.fu.rec(r, o, s, k, m)
+  st.fu.rec(r, o, s, k, hs, m)
 
-def st.fu.step(z: StRf) -> IO(StRf):
+def st.fu.step(+hs: StFc, z: StRf) -> IO(StRf):
   match z:
     case StRf{r, o, s, k, m}:
-      IO.bind(StRd & Maybe<&2, StPair>, StRf, st.rd.pair(r), st.fu.got(o, s, k))
+      IO.bind(StRd & Maybe<&2, StPair>, StRf, st.rd.pair(r), st.fu.got(o, s, k, hs))
 
-def st.fu.go(fuel: Nat, z: StRf) -> IO(StRf):
+def st.fu.go(fuel: Nat, +hs: StFc, z: StRf) -> IO(StRf):
   match fuel z:
     case 1n+f StRf{r, o, s, k, True{}}:
-      IO.bind(StRf, StRf, st.fu.step(StRf{r, o, s, k, True{}}), st.fu.go(f))
+      IO.bind(StRf, StRf, st.fu.step(hs, StRf{r, o, s, k, True{}}), st.fu.go(f, hs))
     case _ z2:
       IO.pure(StRf, z2)
 
-def st.fu.run(path: String, o: File, s: Set(), ex: Bool) -> IO(StRo):
+def st.fu.run(path: String, +hs: StFc, o: File, s: Set(), ex: Bool) -> IO(StRo):
   match ex:
     case False{}:
       IO.pure(StRo, StRo{o, s, 0n})
     case True{}:
       do IO<StRo>:
         r : StRd <- st.rd.open(path, 0)
-        z : StRf <- st.fu.go(st.fuel(), StRf{r, o, s, 0n, True{}})
+        z : StRf <- st.fu.go(st.fuel(), hs, StRf{r, o, s, 0n, True{}})
         st.rf.fin(z)
 
 def st.fu.said(+d: String, +f: String, z: StRo) -> IO(StRo):
@@ -2280,16 +2402,16 @@ def st.fu.said(+d: String, +f: String, z: StRo) -> IO(StRo):
         IO.print(d ++ " " ++ f ++ " " ++ Nat.show(k) ++ " files")
         return StRo{o, s, 0n}
 
-def st.fu.dirs(ds: List<&2, String>, +f: String, z: StRo) -> IO(StRo):
+def st.fu.dirs(ds: List<&2, String>, +f: String, +hs: StFc, z: StRo) -> IO(StRo):
   match ds z:
     case Nil{} z2:
       IO.pure(StRo, z2)
     case +d <> more StRo{o, s, k}:
       do IO<StRo>:
         ex : Bool <- S.exists(d ++ "/" ++ f)
-        z1 : StRo <- st.fu.run(d ++ "/" ++ f, o, s, ex)
+        z1 : StRo <- st.fu.run(d ++ "/" ++ f, hs, o, s, ex)
         z2 : StRo <- st.fu.said(d, f, z1)
-        st.fu.dirs(more, f, z2)
+        st.fu.dirs(more, f, hs, z2)
 
 def st.fu.close(z: StRo) -> IO(Set()):
   match z:
@@ -2298,25 +2420,63 @@ def st.fu.close(z: StRo) -> IO(Set()):
         File.close(o)
         return s
 
-def st.fu.file(+out: String, ds: List<&2, String>, +f: String, s: Set()) -> IO(Set()):
+def st.fu.file(+out: String, ds: List<&2, String>, +f: String, +hs: StFc, s: Set()) -> IO(Set()):
   do IO<Set()>:
     o : File <- st.open(out ++ "/" ++ f, "w")
-    z : StRo <- st.fu.dirs(ds, f, StRo{o, s, 0n})
+    z : StRo <- st.fu.dirs(ds, f, hs, StRo{o, s, 0n})
     st.fu.close(z)
 
-def st.fu.all(+out: String, +ds: List<&2, String>) -> IO(Unit):
+def st.fu.firsts.of(+c: StFc) -> Set():
+  match c:
+    case StFc{hs, n}:
+      st.hd.firsts(hs, Set.new())
+
+def st.fu.all(+out: String, +ds: List<&2, String>, +hs: StFc) -> IO(Unit):
   do IO<Unit>:
     S.mkdir(out)
-    s1 : Set() <- st.fu.file(out, ds, "files-hi.nul", Set.new())
-    s2 : Set() <- st.fu.file(out, ds, "files-lo.nul", s1)
+    s1 : Set() <- st.fu.file(out, ds, "files-hi.nul", hs, st.fu.firsts.of(hs))
+    s2 : Set() <- st.fu.file(out, ds, "files-lo.nul", hs, s1)
     return Unit{}
+
+# the words held=PATH and copies=K, and the rest
+def st.fu.is.held(+w: String) -> Bool:
+  S.prefix(S.b(w), S.b("held="))
+
+def st.fu.is.copies(+w: String) -> Bool:
+  S.prefix(S.b(w), S.b("copies="))
+
+def st.fu.dirs.of(xs: List<&2, String>) -> List<&2, String>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +x <> +more:
+      Bool.pick(List<&2, String>, Bool.or(st.fu.is.held(x), st.fu.is.copies(x)), st.fu.dirs.of(more), x <> st.fu.dirs.of(more))
+
+def st.fu.copies.of(xs: List<&2, String>) -> Nat:
+  match xs:
+    case Nil{}:
+      1n
+    case +x <> +more:
+      Bool.pick(Nat, st.fu.is.copies(x), Maybe.default(&2, Nat, Nat.read(S.str(List.drop(&2, U32, S.b(x), 7n))), 1n), st.fu.copies.of(more))
+
+def st.fu.held.of(xs: List<&2, String>) -> IO(List<&2, StHd>):
+  match xs:
+    case Nil{}:
+      IO.pure(List<&2, StHd>, Nil{})
+    case +x <> +more:
+      Bool.pick(IO(List<&2, StHd>), st.fu.is.held(x), st.hd.read(S.str(List.drop(&2, U32, S.b(x), 5n))), st.fu.held.of(more))
+
+def st.fu.main(+out: String, +ws: List<&2, String>) -> IO(Unit):
+  do IO<Unit>:
+    hs : List<&2, StHd> <- st.fu.held.of(ws)
+    st.fu.all(out, st.fu.dirs.of(ws), StFc{hs, st.fu.copies.of(ws)})
 
 def st.filler.union(xs: List<String>) -> IO(Unit):
   match xs:
     case out <> ds:
-      st.fu.all(out, st.strs(ds))
+      st.fu.main(out, st.strs(ds))
     case _:
-      st.usage("filler-union OUT DIR...")
+      st.usage("filler-union OUT DIR... [held=RESULTS.nul] [copies=K]")
 
 # drop-repos ------------------------------------------------------------------------------
 #

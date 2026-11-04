@@ -1,0 +1,40 @@
+# Run 5's data (2026-11-03; the goal: the only thing missing is the rented box), the commands in order, from
+# the repository root.  run/v6/run5-final.sh (untracked, like the run's other drivers' logs) ran steps 3 to 7
+# unattended under unit ana-run5-final; its log is run/v6/run5-final.log.  CV is bend-corpus-v2 at this
+# commit (run/v5/gcroot-bend-corpus-v2-run5): run/v5/clean/bend-corpus-v2, the copy of 10-28, reads a mugen
+# session as "other" in repair-mix, so no copies and no cap.
+
+# 1. Every Bend stream's check and format 2 render (their scripts in run/v5/clean): col8b.sh (with
+#    CHECK_PROCS=10 since 11-03 18:34), a2bum12.sh, a2bsrc.sh all.
+
+# 2. Every language's sessions.  Bend: mugen6.sh, mugen6q.sh (workers), mugen6q.sh move, then
+#    mugen6.sh hist-v2 hist-collect5 hist-own5.  The other four (bend-transcript at this commit):
+env TRANSCRIPT_FORMAT=mugen SIZES=run/v6/mugen/LANG/sizes.part bend-transcript weights/code32k.bpe run/v2/results/LANG.train.nul run/v6/mugen/LANG/part.nul 2048
+SHARD=0 SHARDS=1 bend-agent-laws weights/code32k.bpe run/v6/mugen/LANG/transcripts.train.nul     # 0 failed
+
+# 3. The eval corpora in the mugen shape, on what every run held out (run/v6/evalm; done 11-03 18:43):
+#    all of Bend's 84 units (342 sessions), the first 500 sessions of each other language.
+bend-transcript base run/v2/results/bend.holdout.nul run/v6/evalm/base.tsv BEND
+env TRANSCRIPT_FORMAT=mugen BASE=run/v6/evalm/base.tsv bend-transcript weights/code32k.bpe run/v2/results/LANG.holdout.nul run/v6/evalm/LANG.nul 2048
+deploy pack run/v6/evalm/all.nul run/v6/evalm/all.packed.nul --target 131072 --prefix mugen --stats
+deploy prepare weights/code32k.bpe run/v6/evalm/all.packed.nul run/eval/v2-mugen.corpus
+deploy pack run/v6/evalm/bend.nul run/v6/evalm/bend.packed.nul --target 131072 --prefix mugen-bend --stats
+deploy prepare weights/code32k.bpe run/v6/evalm/bend.packed.nul run/eval/v2-mugen-bend.corpus
+
+# 4. The mixes.  The user's rule everywhere: at least 4 first-time sessions a repair.  Other languages one
+#    repair a unit on half the units; Bend 4 a unit (the user, 10-29) on the share the hours take.
+CV repair-mix run/v6/mix/LANG in=run/v6/mugen/LANG/transcripts.train.nul derive=whole ratio=4 cap=1 share=50
+MG=1 FF=1 run/v5/clean/mix6.sh run/v6/mix/dry-final dry
+MG=1 FF=1 SHARE=S run/v5/clean/mix6.sh run/v6/mix/bend
+
+# 5. Bend's filler: every stream's files, each id once, none holding a held-out unit, K copies (a window needs
+#    a filler file of its own in its shard, and sessions fill about two a window), in keyed order, so that
+#    each shard's slice has every size.
+CV filler-union run/v6/R5src/bend.tmp run/v2/transcripts/bend run/v[5-8]/transcripts-*/bend held=run/v2/results/bend.holdout.nul copies=K
+CV keyed-order nul "run 5 filler" ALL.nul run/v6/R5src/bend/files-hi.nul
+
+# 6. run/v6/R5src/LANG links transcripts.train.nul to the mix, and for the other four files-hi/lo to
+#    run/v2/transcripts/LANG, results.holdout to run/v2/results/LANG.holdout.nul.
+
+# 7. The plan: windows of 2,046 tokens in shards of 8,000 sessions, the languages interleaved by their counts.
+env OUT=run/v6/R5src SHARD=8000 JOBS=8 TOKENIZER=weights/code32k.bpe deploy plan-windows run/v6/R5 fp100m 16 bend:B haskell:H lean:L agda:A nix:N

@@ -12,7 +12,9 @@
 cd /home/hhefesto/src/ana || exit 1
 OUT=${1:?usage: mix6.sh OUT [dry]}
 DRY=${2:-}
-CV=run/v5/clean/bend-corpus-v2
+# 11-03: not run/v5/clean/bend-corpus-v2 (the copy of 10-28): its repair-mix reads a mugen session as
+# "other", so no copies and no cap; 0ed92bd classes them.  run/v5/gcroot-bend-corpus-v2-run5 is today's.
+CV=run/v5/gcroot-bend-corpus-v2-run5/bin/bend-corpus-v2
 args=()
 # MG=1 (2026-11-03, the user 35718: "a step closer to mugen as an interface (turn wise)"): a
 # stream mugen6.sh rendered in the mugen shape (run/v6/mugen/NAME/DONE) goes in that shape, the
@@ -112,11 +114,15 @@ add in run/v8/transcripts-col8/bend/transcripts.train.nul
 add in run/v6/transcripts-a2bum12/bend/transcripts.train.nul
 # the 5747eec emits a2bv.sh never took (PLFA, agda-algebras, agda2hs-base, agda-prelude), against their src/ trees (a2bsrc.sh, 11-03)
 for s in a2bplfa5 a2baa4 a2bhs2 a2bpre2; do add in run/v6/transcripts-$s/bend/transcripts.train.nul; done
-# mutate's repairs (deduced from a correct unit)
+# mutate's repairs (deduced from a correct unit).  MG=1 (11-03): left out.  They are format 2's text
+# (mutate has no mugen render), and the mugen renders hold every check-mutant, 2.4 repairs a unit on
+# own5, already past what the budget takes.
+if [ "${MG:-0}" = 1 ]; then echo "mix6: MG=1: mutate's format 2 repairs left out" >&2; else
 histmut v2 run/v5/mut/accepted/bend-mut/transcripts.train.nul
 histmut collect5 run/v5/mut-collect5/accepted/bend-mut/transcripts.train.nul
 add in run/v5/mut-py2bend/accepted/bend-mut/transcripts.train.nul
 histmut own5 run/v5/mut-own5/accepted/bend-mut/transcripts.train.nul
+fi
 add in run/v5/port/transcripts.train.nul
 # ana's own mistakes and fixes (night runs; whole)
 for d in run/v5/act5/ws/night*/accepted/bend-fix run/v5/act5/ws/night*/accepted/bend-act; do
@@ -129,4 +135,5 @@ add held run/v5/leak/v2train/units.decl.nul.dropped
 add held run/v5/leak/port/units.decl.nul.dropped
 mkdir -p "$(dirname "$OUT")"
 echo "mix6: ${#args[@]} streams" >&2
-exec $CV repair-mix "$OUT" "${args[@]}" derive=whole ratio=4 cap=4 ${DRY:+dry}
+# SHARE (11-03): repair-mix's share=, the percent of units that keep repairs (what the run's hours take)
+exec $CV repair-mix "$OUT" "${args[@]}" derive=whole ratio=4 cap=4 ${SHARE:+share=$SHARE} ${DRY:+dry}

@@ -1287,13 +1287,27 @@ def mg.unit(+b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2
   mg.direct.if(Bool.not(mg.is.nix(fs)), b, limit, base, id, fs, path,
     mg.fill.if(Bool.not(empty(field(fs, 13n))), b, limit, base, id, fs, path, mg.repairs(mutant.count(fs), b, limit, base, id, fs, path, 0n, rest)))
 
+# Another language's file past 64 KB gives no session: mugen's edit and diff run over
+# the whole file (one Alex table of GHC's, 448 KB, stopped a render for half an hour
+# with 49 MB written; 43 of the 104,484 Haskell, Agda and Lean train units).  Bend's
+# stay as they were rendered.
+def mg.small(+fs: List<&2, List<&2, U32>>) -> Bool:
+  Bool.or(mg.is.bend(fs), Nat.is_lt(Nat.add(U.len(field(fs, 5n)), Nat.add(U.len(field(fs, 6n)), U.len(field(fs, 7n)))), 65536n))
+
+def mg.unit.if(ok: Bool, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, rest: List<&2, Mg>) -> List<&2, Mg>:
+  match ok:
+    case True{}:
+      mg.unit(b, limit, base, id, fs, rest)
+    case False{}:
+      rest
+
 def mg.all(+b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, rs: List<&2, Ns.Doc>) -> List<&2, Mg>:
   match rs:
     case Nil{}:
       Nil{}
     case Ns.Doc{+i, +t} <> more:
       +fs = split(t, 30)
-      mg.unit(b, limit, base, i, fs, mg.all(b, limit, base, more))
+      mg.unit.if(mg.small(fs), b, limit, base, i, fs, mg.all(b, limit, base, more))
 
 def mg.docs(ms: List<&2, Mg>) -> List<&2, Ns.Doc>:
   match ms:
