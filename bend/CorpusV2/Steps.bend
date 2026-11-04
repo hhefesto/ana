@@ -27,6 +27,7 @@ import ./Lib.bend as L
 #                                 made, the counts on stderr
 #   specs-next REPLAY L:C...      next-stage's per-round specs
 #   replay-filler D SRC NEW...    SRC's files-hi/lo.nul into D less the ids NEW's hold
+#   filler-union OUT DIR...       every DIR's files-hi/lo.nul into OUT, each id once
 #   drop-repos VAULT.tsv SRC DST  SRC's lines whose repository is not in the vault
 #   insert-stage STAGES LOG AFTER LINE...
 #                                 LINE into STAGES after the first AFTER there, never behind
@@ -2218,6 +2219,104 @@ def st.replay.filler(xs: List<String>) -> IO(Unit):
       st.rf.all(d, src, st.strs(news))
     case _:
       st.usage("replay-filler DIR SRC NEWDIR...")
+
+# filler-union --------------------------------------------------------------------------
+#
+# Run 5's Bend filler (2026-11-03): every stream's source files, each id once.
+# filler-union OUT DIR...: each DIR's files-hi.nul into OUT/files-hi.nul, then
+# each DIR's files-lo.nul into OUT/files-lo.nul, a record whose id an earlier
+# one had left out (the first version wins: bend-mix refuses a duplicate id).
+
+def st.fu.put(r: StRd, o: File, s: Set(), +k: Nat, +i: List<&2, U32>, t: List<&2, U32>, has: Bool) -> IO(StRf):
+  match has:
+    case True{}:
+      IO.pure(StRf, StRf{r, o, s, k, True{}})
+    case False{}:
+      do IO<StRf>:
+        o2 : File <- S.emit(o, L.v2.concat([i, [0], t, [0]]))
+        return StRf{r, o2, Set.add(s, st.key(i)), 1n+k, True{}}
+
+def st.fu.has(r: StRd, o: File, +k: Nat, +i: List<&2, U32>, t: List<&2, U32>, sh: Set() & Bool) -> IO(StRf):
+  (s2, has) = sh
+  st.fu.put(r, o, s2, k, i, t, has)
+
+def st.fu.rec(r: StRd, o: File, s: Set(), +k: Nat, m: Maybe<&2, StPair>) -> IO(StRf):
+  match m:
+    case None{}:
+      IO.pure(StRf, StRf{r, o, s, k, False{}})
+    case Some{StPair{+i, t}}:
+      st.fu.has(r, o, k, i, t, Set.has(s, st.key(i)))
+
+def st.fu.got(o: File, s: Set(), +k: Nat, x: StRd & Maybe<&2, StPair>) -> IO(StRf):
+  (r, m) = x
+  st.fu.rec(r, o, s, k, m)
+
+def st.fu.step(z: StRf) -> IO(StRf):
+  match z:
+    case StRf{r, o, s, k, m}:
+      IO.bind(StRd & Maybe<&2, StPair>, StRf, st.rd.pair(r), st.fu.got(o, s, k))
+
+def st.fu.go(fuel: Nat, z: StRf) -> IO(StRf):
+  match fuel z:
+    case 1n+f StRf{r, o, s, k, True{}}:
+      IO.bind(StRf, StRf, st.fu.step(StRf{r, o, s, k, True{}}), st.fu.go(f))
+    case _ z2:
+      IO.pure(StRf, z2)
+
+def st.fu.run(path: String, o: File, s: Set(), ex: Bool) -> IO(StRo):
+  match ex:
+    case False{}:
+      IO.pure(StRo, StRo{o, s, 0n})
+    case True{}:
+      do IO<StRo>:
+        r : StRd <- st.rd.open(path, 0)
+        z : StRf <- st.fu.go(st.fuel(), StRf{r, o, s, 0n, True{}})
+        st.rf.fin(z)
+
+def st.fu.said(+d: String, +f: String, z: StRo) -> IO(StRo):
+  match z:
+    case StRo{o, s, k}:
+      do IO<StRo>:
+        IO.print(d ++ " " ++ f ++ " " ++ Nat.show(k) ++ " files")
+        return StRo{o, s, 0n}
+
+def st.fu.dirs(ds: List<&2, String>, +f: String, z: StRo) -> IO(StRo):
+  match ds z:
+    case Nil{} z2:
+      IO.pure(StRo, z2)
+    case +d <> more StRo{o, s, k}:
+      do IO<StRo>:
+        ex : Bool <- S.exists(d ++ "/" ++ f)
+        z1 : StRo <- st.fu.run(d ++ "/" ++ f, o, s, ex)
+        z2 : StRo <- st.fu.said(d, f, z1)
+        st.fu.dirs(more, f, z2)
+
+def st.fu.close(z: StRo) -> IO(Set()):
+  match z:
+    case StRo{o, s, k}:
+      do IO<Set()>:
+        File.close(o)
+        return s
+
+def st.fu.file(+out: String, ds: List<&2, String>, +f: String, s: Set()) -> IO(Set()):
+  do IO<Set()>:
+    o : File <- st.open(out ++ "/" ++ f, "w")
+    z : StRo <- st.fu.dirs(ds, f, StRo{o, s, 0n})
+    st.fu.close(z)
+
+def st.fu.all(+out: String, +ds: List<&2, String>) -> IO(Unit):
+  do IO<Unit>:
+    S.mkdir(out)
+    s1 : Set() <- st.fu.file(out, ds, "files-hi.nul", Set.new())
+    s2 : Set() <- st.fu.file(out, ds, "files-lo.nul", s1)
+    return Unit{}
+
+def st.filler.union(xs: List<String>) -> IO(Unit):
+  match xs:
+    case out <> ds:
+      st.fu.all(out, st.strs(ds))
+    case _:
+      st.usage("filler-union OUT DIR...")
 
 # drop-repos ------------------------------------------------------------------------------
 #

@@ -563,7 +563,7 @@ def all.fmt(+fmt: Nat, +b: Tk.Bpe, +limit: Nat, rs: List<&2, Ns.Doc>) -> List<&2
 # characters and the checker kept 100 lines of output: no unit that fits a
 # window comes near either.
 #
-# Bend units only (another language's unit gives none). Shapes:
+# Every language (2026-11-03; Bend's first). Shapes:
 #
 #   direct     the file without the declaration; the ask gives its signature
 #              and doc: read the file's last 24 lines, look the names up, add
@@ -580,6 +580,17 @@ def all.fmt(+fmt: Nat, +b: Tk.Bpe, +limit: Nat, rs: List<&2, Ns.Doc>) -> List<&2
 # -1` (a loop for more) for the others Base defines. Their first lines come
 # from BASE (lines NAME TAB LINE: tools/corpus-v2/mugen-base.sh runs `bend
 # base` under the corpus's Bend), which must give back every unit's Context.
+#
+# Another language's unit is the same session with its checker's call (the
+# command bend/Check/*.bend runs, on the file: `ghc -fno-code -w PATH`, `agda
+# PATH`, `lake env lean PATH`, `nix-instantiate --eval --strict PATH`) and its
+# output, the checker's Unit.EXT written as the file's path and this machine's
+# run/ directory left out. Its look-ups are one call, `ana-type PATH NAME...`,
+# answered by the unit's recorded Context (GHCi's `:type`, Agda's
+# Cmd_infer_toplevel, Lean's `#check`; a name it cannot type is left out). An
+# Agda hole's check is `ana-goal PATH`, Cmd_goal_type_context's display, since
+# `agda` alone does not print it. Nix has no direct shape (a whole file from
+# nothing is unanswerable, docs/CORPUS-V2.md C2), no look-ups and no holes.
 #
 # Every presentation is rendered: OUTPUT gets those that fit the window,
 # SIZES (a file, default /dev/null) a line each: ID SHAPE TOKENS F2_TOKENS
@@ -736,6 +747,107 @@ def mg.read(+path: List<&2, U32>, +f: List<&2, U32>, +from: Nat, +limit: Nat) ->
 def mg.check(+path: List<&2, U32>, +c: List<&2, U32>) -> List<&2, U32>:
   +k = check.of(c)
   mg.shell(cat([U.b("bend "), path, U.b(" --check-only")]), mg.shell.echo(check.out(k), check.status(k)))
+
+# Other languages ------------------------------------------------------------------
+
+def mg.is.bend(+fs: List<&2, List<&2, U32>>) -> Bool:
+  U.eq(field(fs, 0n), U.b("bend"))
+
+def mg.is.nix(+fs: List<&2, List<&2, U32>>) -> Bool:
+  U.eq(field(fs, 0n), U.b("nix"))
+
+def mg.is.agda(+fs: List<&2, List<&2, U32>>) -> Bool:
+  U.eq(field(fs, 0n), U.b("agda"))
+
+def mg.lang.at(+lang: List<&2, U32>, +xs: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  U.nth(xs, U.lang.code.go(U.lang.names(), lang, 0n))
+
+# xs with every old as new
+def mg.swap.go(fuel: Nat, xs: List<&2, U32>, +old: List<&2, U32>, +new: List<&2, U32>, +k: Nat, hit: Bool) -> List<&2, U32>:
+  match fuel xs hit:
+    case 1n+f h <> t True{}:
+      +rest = List.drop(&2, U32, h <> t, k)
+      U.append(new, mg.swap.go(f, rest, old, new, k, U.prefix(rest, old)))
+    case 1n+f h <> +t False{}:
+      h <> mg.swap.go(f, t, old, new, k, U.prefix(t, old))
+    case _ xs2 _:
+      xs2
+
+def mg.swap(+xs: List<&2, U32>, +old: List<&2, U32>, +new: List<&2, U32>) -> List<&2, U32>:
+  mg.swap.go(1n+U.len(xs), xs, old, new, U.len(old), U.prefix(xs, old))
+
+def mg.unit.name(+lang: List<&2, U32>) -> List<&2, U32>:
+  mg.lang.at(lang, [U.b("Unit.hs"), U.b("Unit.agda"), U.b("Unit.lean"), U.b("Unit.bend"), U.b("Unit.nix")])
+
+# a checker's output as if it ran on the file here
+def mg.out(+lang: List<&2, U32>, +path: List<&2, U32>, +text: List<&2, U32>) -> List<&2, U32>:
+  mg.swap(mg.swap(text, mg.unit.name(lang), path), U.b("/home/hhefesto/src/formalTransformer/run/"), Nil{})
+
+def mg.cmd(+lang: List<&2, U32>, +path: List<&2, U32>) -> List<&2, U32>:
+  mg.lang.at(lang, [cat([U.b("ghc -fno-code -w "), path]), cat([U.b("agda "), path]), cat([U.b("lake env lean "), path]),
+    cat([U.b("bend "), path, U.b(" --check-only")]), cat([U.b("nix-instantiate --eval --strict "), path])])
+
+# a failed variant's recorded status `-` (GHC, Agda: the first error, no exit) is a failure
+def mg.status(+s: List<&2, U32>) -> List<&2, U32>:
+  Bool.pick(List<&2, U32>, U.eq(s, U.b("-")), U.b("1"), s)
+
+def mg.check.other(+lang: List<&2, U32>, +path: List<&2, U32>, +c: List<&2, U32>) -> List<&2, U32>:
+  +k = check.of(c)
+  mg.shell(mg.cmd(lang, path), mg.shell.echo(mg.out(lang, path, check.out(k)), mg.status(check.status(k))))
+
+def mg.check.on(bend: Bool, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +c: List<&2, U32>) -> List<&2, U32>:
+  match bend:
+    case True{}:
+      mg.check(path, c)
+    case False{}:
+      mg.check.other(field(fs, 0n), path, c)
+
+def mg.check.in(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +c: List<&2, U32>) -> List<&2, U32>:
+  mg.check.on(mg.is.bend(fs), fs, path, c)
+
+# a hole's check: Agda's is its goal display, which answers (exit 0)
+def mg.check.goal(agda: Bool, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +c: List<&2, U32>) -> List<&2, U32>:
+  match agda:
+    case True{}:
+      mg.shell(cat([U.b("ana-goal "), path]), mg.shell.echo(mg.out(field(fs, 0n), path, check.out(check.of(c))), U.b("0")))
+    case False{}:
+      mg.check.in(fs, path, c)
+
+def mg.check.hole(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +c: List<&2, U32>) -> List<&2, U32>:
+  mg.check.goal(mg.is.agda(fs), fs, path, c)
+
+# a name as a shell word
+def mg.q.safe(+c: U32) -> Bool:
+  Bool.or(U32.is_lt(126, c), Bool.or(Bool.and(U32.is_lt(96, c), U32.is_lt(c, 123)), Bool.or(Bool.and(U32.is_lt(64, c), U32.is_lt(c, 91)),
+    Bool.or(Bool.and(U32.is_lt(47, c), U32.is_lt(c, 58)), Bool.or(U32.is_eq(c, 95), Bool.or(U32.is_eq(c, 46), U32.is_eq(c, 45)))))))
+
+def mg.q.all(xs: List<&2, U32>) -> Bool:
+  match xs:
+    case Nil{}:
+      True{}
+    case +h <> t:
+      Bool.and(mg.q.safe(h), mg.q.all(t))
+
+def mg.q(+n: List<&2, U32>) -> List<&2, U32>:
+  Bool.pick(List<&2, U32>, mg.q.all(n), n, Bool.pick(List<&2, U32>, U.has(n, 39), cat([[34], n, [34]]), cat([[39], n, [39]])))
+
+def mg.qs(ns: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case +n <> t:
+      mg.q(n) <> mg.qs(t)
+
+def mg.type.if(some: Bool, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2, U32>:
+  match some:
+    case True{}:
+      mg.shell(cat([U.b("ana-type "), path, [32], mg.join(mg.qs(mg.words(field(fs, 9n))), [32])]),
+        mg.shell.echo(mg.out(field(fs, 0n), path, field(fs, 12n)), U.b("0")))
+    case False{}:
+      Nil{}
+
+def mg.looks.other(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2, U32>:
+  mg.type.if(Bool.and(Bool.not(empty(field(fs, 12n))), Bool.not(empty(mg.chomp(field(fs, 9n))))), fs, path)
 
 # Edits ----------------------------------------------------------------------------
 
@@ -957,13 +1069,23 @@ def mg.base.if(some: Bool, +bs: List<&2, Bl>) -> List<&2, U32>:
       Nil{}
 
 # the Context as calls: grep for the names the head defines, bend base for Base's
-def mg.looks(+path: List<&2, U32>, +f0: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +base: Map<&2, List<&2, U32>>) -> List<&2, U32>:
+def mg.looks.bend(+path: List<&2, U32>, +f0: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +base: Map<&2, List<&2, U32>>) -> List<&2, U32>:
   +ns = mg.words(field(fs, 9n))
   +hls = split(field(fs, 5n), 10)
   +inf = mg.keep(ns, hls, True{})
   +bs = mg.based(mg.keep(ns, hls, False{}), base)
   U.append(mg.grep.if(Bool.not(Nat.is_eq(List.length(&2, List<&2, U32>, inf), 0n)), path, f0, inf),
     mg.base.if(Bool.not(Nat.is_eq(List.length(&2, Bl, bs), 0n)), bs))
+
+def mg.looks.on(bend: Bool, +path: List<&2, U32>, +f0: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +base: Map<&2, List<&2, U32>>) -> List<&2, U32>:
+  match bend:
+    case True{}:
+      mg.looks.bend(path, f0, fs, base)
+    case False{}:
+      mg.looks.other(fs, path)
+
+def mg.looks(+path: List<&2, U32>, +f0: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +base: Map<&2, List<&2, U32>>) -> List<&2, U32>:
+  mg.looks.on(mg.is.bend(fs), path, f0, fs, base)
 
 # The asks and replies -------------------------------------------------------------
 
@@ -983,13 +1105,20 @@ def mg.prop(+fs: List<&2, List<&2, U32>>) -> Bool:
 def mg.ask.direct(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2, U32>:
   +name = code(field(fs, 2n))
   +line = Bool.pick(List<&2, U32>, mg.prop(fs), cat([U.b("Prove "), name, U.b(" in "), path, U.b(".")]), cat([U.b("Add "), name, U.b(" to "), path, U.b(".")]))
-  cat([mg.doc(fs, line), U.b("\n\n"), mg.chomp(fence(U.b("bend"), tidy(field(fs, 4n))))])
+  cat([mg.doc(fs, line), U.b("\n\n"), mg.chomp(fence(field(fs, 0n), tidy(field(fs, 4n))))])
+
+# how the checker is named in a sentence
+def mg.said(+fs: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  mg.lang.at(field(fs, 0n), [U.b("ghc"), U.b("agda"), U.b("lean"), U.b("bend check"), U.b("nix")])
+
+def mg.mark(+fs: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  mg.lang.at(field(fs, 0n), [U.b("_"), U.b("?"), U.b("_"), U.b("?goal"), U.b("?")])
 
 def mg.ask.fill(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2, U32>:
-  mg.doc(fs, cat([U.b("Fill the hole (`?goal`) in "), code(field(fs, 2n)), U.b(" in "), path, U.b(".")]))
+  mg.doc(fs, cat([U.b("Fill the hole ("), code(mg.mark(fs)), U.b(") in "), code(field(fs, 2n)), U.b(" in "), path, U.b(".")]))
 
 def mg.ask.repair(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2, U32>:
-  mg.doc(fs, cat([code(field(fs, 2n)), U.b(" in "), path, U.b(" fails bend check. Fix it.")]))
+  mg.doc(fs, cat([code(field(fs, 2n)), U.b(" in "), path, U.b(" fails "), mg.said(fs), U.b(". Fix it.")]))
 
 def mg.find.hit(+ls: List<&2, List<&2, U32>>, +p: List<&2, U32>) -> Bool:
   match ls:
@@ -1046,10 +1175,44 @@ def mg.why(+out: List<&2, U32>) -> List<&2, U32>:
   +at = Bool.pick(List<&2, U32>, empty(loc), Nil{}, U.append(U.b(" at line "), loc))
   Bool.pick(List<&2, U32>, empty(what), Nil{}, cat([U.b(": bend check said "), what, at]))
 
+# what another checker said: the first line naming an error, after its `error...:`,
+# and the line after the checker's `Unit.EXT:`
+def mg.first.go(ls: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> t:
+      Bool.pick(List<&2, U32>, U.infix(l, U.b("error")), l, mg.first.go(t))
+
+def mg.past(+xs: List<&2, U32>, +p: List<&2, U32>) -> List<&2, U32>:
+  List.drop(&2, U32, xs, Nat.add(U.find(xs, p, 0n), U.len(p)))
+
+def mg.digits(xs: List<&2, U32>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +h <> t:
+      Bool.pick(List<&2, U32>, Bool.and(U32.is_lt(47, h), U32.is_lt(h, 58)), h <> mg.digits(t), Nil{})
+
+def mg.why.other(+fs: List<&2, List<&2, U32>>, +out: List<&2, U32>) -> List<&2, U32>:
+  +line = mg.first.go(split(out, 10))
+  +what = List.take(&2, U32, U.trim.right(U.trim.left(mg.after(mg.past(line, U.b("error")), 58))), 120n)
+  +nums = mg.digits(mg.past(out, U.append(mg.unit.name(field(fs, 0n)), [58])))
+  +at = Bool.pick(List<&2, U32>, empty(nums), Nil{}, U.append(U.b(" at line "), nums))
+  Bool.pick(List<&2, U32>, empty(what), Nil{}, cat([U.b(": "), mg.said(fs), U.b(" said "), what, at]))
+
+def mg.why.on(bend: Bool, +fs: List<&2, List<&2, U32>>, +out: List<&2, U32>) -> List<&2, U32>:
+  match bend:
+    case True{}:
+      mg.why(out)
+    case False{}:
+      mg.why.other(fs, out)
+
 def mg.reply.direct(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2, U32>:
   +name = code(field(fs, 2n))
-  Bool.pick(List<&2, U32>, mg.prop(fs), cat([U.b("Proved "), name, U.b(" in "), path, U.b("; bend check passes.")]),
-    cat([U.b("Added "), name, U.b(" to "), path, U.b("; bend check passes.")]))
+  +ok = cat([U.b("; "), mg.said(fs), U.b(" passes.")])
+  Bool.pick(List<&2, U32>, mg.prop(fs), cat([U.b("Proved "), name, U.b(" in "), path, ok]),
+    cat([U.b("Added "), name, U.b(" to "), path, ok]))
 
 # The sessions ---------------------------------------------------------------------
 
@@ -1065,14 +1228,14 @@ def mg.direct(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2,
   +n = List.length(&2, List<&2, U32>, mg.rows(f0))
   +from = Bool.pick(Nat, Nat.is_lt(n, 25n), 1n, Nat.sub(n, 23n))
   cat([mg.user(mg.ask.direct(fs, path)), mg.read(path, f0, from, Nat.sub(Nat.add(n, 1n), from)), mg.looks(path, f0, fs, base),
-    mg.edit(path, f0, f1), mg.check(path, field(fs, 11n)), mg.reply(mg.reply.direct(fs, path))])
+    mg.edit(path, f0, f1), mg.check.in(fs, path, field(fs, 11n)), mg.reply(mg.reply.direct(fs, path))])
 
 def mg.fill(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>) -> List<&2, U32>:
   +f0 = mg.with(fs, field(fs, 10n))
   +f1 = mg.with(fs, field(fs, 7n))
-  cat([mg.user(mg.ask.fill(fs, path)), mg.check(path, field(fs, 13n)), mg.looks(path, f0, fs, base),
-    mg.edit(path, f0, f1), mg.check(path, field(fs, 11n)),
-    mg.reply(cat([U.b("Filled the hole in "), code(field(fs, 2n)), U.b(" ("), path, U.b("); bend check passes.")]))])
+  cat([mg.user(mg.ask.fill(fs, path)), mg.check.hole(fs, path, field(fs, 13n)), mg.looks(path, f0, fs, base),
+    mg.edit(path, f0, f1), mg.check.in(fs, path, field(fs, 11n)),
+    mg.reply(cat([U.b("Filled the hole in "), code(field(fs, 2n)), U.b(" ("), path, U.b("); "), mg.said(fs), U.b(" passes.")]))])
 
 def mg.repair(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>, +m: Nat) -> List<&2, U32>:
   +mut = mutant(fs, m)
@@ -1080,9 +1243,9 @@ def mg.repair(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2,
   +f1 = mg.with(fs, field(fs, 7n))
   +from = Nat.add(1n, mg.nls(mg.head(fs)))
   +rows = List.length(&2, List<&2, U32>, U.lines(U.append(field(fs, 6n), mut)))
-  cat([mg.user(mg.ask.repair(fs, path)), mg.check(path, mutant.check(fs, m)), mg.read(path, f0, from, rows), mg.looks(path, f0, fs, base),
-    mg.edit(path, f0, f1), mg.check(path, field(fs, 11n)),
-    mg.reply(cat([U.b("Fixed "), code(field(fs, 2n)), U.b(" in "), path, mg.why(check.out(check.of(mutant.check(fs, m)))), U.b(". It passes now.")]))])
+  cat([mg.user(mg.ask.repair(fs, path)), mg.check.in(fs, path, mutant.check(fs, m)), mg.read(path, f0, from, rows), mg.looks(path, f0, fs, base),
+    mg.edit(path, f0, f1), mg.check.in(fs, path, field(fs, 11n)),
+    mg.reply(cat([U.b("Fixed "), code(field(fs, 2n)), U.b(" in "), path, mg.why.on(mg.is.bend(fs), fs, check.out(check.of(mutant.check(fs, m)))), U.b(". It passes now.")]))])
 
 # Presentations, their sizes -------------------------------------------------------
 
@@ -1112,14 +1275,17 @@ def mg.fill.if(some: Bool, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>
     case False{}:
       rest
 
-def mg.unit.if(bend: Bool, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, rest: List<&2, Mg>) -> List<&2, Mg>:
-  match bend:
+def mg.direct.if(some: Bool, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, rest: List<&2, Mg>) -> List<&2, Mg>:
+  match some:
     case True{}:
-      +path = mg.path(id)
-      mg.one(b, limit, id, U.b("direct"), mg.direct(fs, path, base), render2(0n, fs, 0n))
-        <> mg.fill.if(Bool.not(empty(field(fs, 13n))), b, limit, base, id, fs, path, mg.repairs(mutant.count(fs), b, limit, base, id, fs, path, 0n, rest))
+      mg.one(b, limit, id, U.b("direct"), mg.direct(fs, path, base), render2(0n, fs, 0n)) <> rest
     case False{}:
       rest
+
+def mg.unit(+b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, rest: List<&2, Mg>) -> List<&2, Mg>:
+  +path = mg.path(id)
+  mg.direct.if(Bool.not(mg.is.nix(fs)), b, limit, base, id, fs, path,
+    mg.fill.if(Bool.not(empty(field(fs, 13n))), b, limit, base, id, fs, path, mg.repairs(mutant.count(fs), b, limit, base, id, fs, path, 0n, rest)))
 
 def mg.all(+b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, rs: List<&2, Ns.Doc>) -> List<&2, Mg>:
   match rs:
@@ -1127,7 +1293,7 @@ def mg.all(+b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, rs: List<&2, 
       Nil{}
     case Ns.Doc{+i, +t} <> more:
       +fs = split(t, 30)
-      mg.unit.if(U.eq(field(fs, 0n), U.b("bend")), b, limit, base, i, fs, mg.all(b, limit, base, more))
+      mg.unit(b, limit, base, i, fs, mg.all(b, limit, base, more))
 
 def mg.docs(ms: List<&2, Mg>) -> List<&2, Ns.Doc>:
   match ms:

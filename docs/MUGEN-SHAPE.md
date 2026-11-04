@@ -178,9 +178,33 @@ windows, batch 1, CPU, TRAIN_MASK=kinds) run and save: gradient
 norm 11.6 and 13.9, clipped, validation 1.715 (0.886 bits a byte) before the
 first.
 
+## The other languages (2026-11-03)
+
+`bend-transcript` renders every language's unit in this shape. Run 5 spends
+about a fifth of its tokens on them, so ana learns the same calls on Haskell,
+Agda, Lean and Nix instead of format 2's. The file, the shapes and the turns
+are Bend's. What changes:
+
+| | check | look-ups | hole |
+|---|---|---|---|
+| Haskell | `ghc -fno-code -w PATH` | `ana-type PATH NAME...` (GHCi's `:type`) | `_`, its check's output |
+| Agda | `agda PATH` | `ana-type` (Cmd_infer_toplevel) | `?`, `ana-goal PATH` (Cmd_goal_type_context) |
+| Lean | `lake env lean PATH` | `ana-type` (`#check`) | `_`, its check's output |
+| Nix | `nix-instantiate --eval --strict PATH` | none | none, and no direct shape (docs/CORPUS-V2.md C2) |
+
+Each echo is the unit's recorded output with the checker's `Unit.EXT` written
+as the file's path, and this machine's `/home/.../run/` left out; a variant's
+recorded status `-` is written `(exit 1)`. `ana-type` asks for every name the
+body uses, and a name the checker cannot type is left out, as in the
+Context. The reply names the checker: `ghc said [GHC-58481] parse error on
+input ':' at line 229`. Bend's sessions stay byte for byte (cmp on 300 of own5's
+units). bend-agent-laws holds on the first 200 units of each: 668 Haskell,
+946 Agda, 913 Lean, 505 Nix presentations, 0 failed. tests/mugen.bend `other`.
+
 ## Not yet
 
-- Other languages (their checker's command, file and look-ups).
+- `ana-type` and `ana-goal` for the other languages in `agent-mugen-live` and
+  `agent-mugen` (the sessions call them; the evaluation is Bend's only).
 - ana as a mugen back end: mugen runs ana's calls with the same tools it
   gives Claude, and feeds the echoes back, until ana writes `## mugen`.
   agent-mugen is that loop's other half, for the evaluation.

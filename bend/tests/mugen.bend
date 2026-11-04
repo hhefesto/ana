@@ -68,8 +68,31 @@ def only() -> String:
       Bool.and(T.mg.only.ok("repair", U.b("own:a/X.bend#f@1/mugen-repair-0")), Bool.not(T.mg.only.ok("repair", U.b("own:a/mugen-repair/X.bend#f@1/mugen-direct"))))))
   Bool.pick(String, ok, "ok only", "MISMATCH only")
 
+# another language's unit (2026-11-03): its checker's command and output, Unit.EXT as
+# the file's path, the look-ups one `ana-type`, the reply naming the checker
+def hs() -> List<&2, List<&2, U32>>:
+  [U.b("haskell"), U.b("type"), U.b("twice"), Nil{}, U.b("twice :: Int -> Int"), U.b("module Two where\n\n"),
+   U.b("twice :: Int -> Int\n"), U.b("twice n = n + n\n"), Nil{}, U.b("n <$> f'"), U.b("twice n = _\n"),
+   ck("0", "[1 of 1] Compiling Unit ( Unit.hs, nothing )\n"), U.b("(<$>) :: Int\n"),
+   ck("-", "Unit.hs:4:11: error: [GHC-88464]\n    Found hole: _ :: Int\n"), ck("-", ""),
+   U.b("twice n = n + m\n"), ck("-", "Unit.hs:4:15: error: [GHC-88464]\n    Variable not in scope: m\n/home/hhefesto/src/formalTransformer/run/code-sources/a\n")]
+
+def hs.path() -> List<&2, U32>:
+  T.mg.path(U.b("own:demo/Two.hs#twice@3"))
+
+def other() -> String:
+  +r = T.mg.repair(hs(), hs.path(), base(), 0n)
+  +d = T.mg.direct(hs(), hs.path(), base())
+  +f = T.mg.fill(hs(), hs.path(), base())
+  +ok = Bool.and(Bool.and(has(r, "## shell\n\nghc -fno-code -w demo/Two.hs\n\n## echo\n\n```\ndemo/Two.hs:4:15: error: [GHC-88464]\n    Variable not in scope: m\ncode-sources/a\n(exit 1)\n```\n"),
+      has(r, "## mugen\n\nFixed `twice` in demo/Two.hs: ghc said [GHC-88464] at line 4. It passes now.\n")),
+    Bool.and(Bool.and(has(d, "```haskell\ntwice :: Int -> Int\n```"), has(d, "## shell\n\nana-type demo/Two.hs n '<$>' \"f'\"\n\n## echo\n\n```\n(<$>) :: Int\n(exit 0)\n```")),
+      Bool.and(has(d, "## mugen\n\nAdded `twice` to demo/Two.hs; ghc passes.\n"), has(f, "Fill the hole (`_`) in `twice` in demo/Two.hs."))))
+  Bool.pick(String, ok, "ok other", "MISMATCH other")
+
 def main() -> IO(Unit):
   do IO<Unit>:
+    IO.print(other())
     IO.print(direct())
     IO.print(repair())
     IO.print(turns("direct", T.mg.direct(two(), path(), base()), "## user\n## read\n## echo\n## shell\n## echo\n## edit\n## echo\n## shell\n## echo\n## mugen\n"))

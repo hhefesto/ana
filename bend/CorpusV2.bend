@@ -50,6 +50,7 @@ import ./CorpusV2/Trim.bend as Tm
 #   credit [MIN]  credit-ok STAGES CREDIT CUR ADD  split-lang SRC OUT  nul-jsonl SRC DST
 #   per N TOP  specs-mixnew OUT FILE...  specs-next REPLAY LABEL:COUNT...
 #   replay-filler DIR SRC NEW...  drop-repos VAULT SRC DST  insert-stage STAGES LOG AFTER LINE...
+#   filler-union OUT DIR...       every DIR's files-hi/lo.nul into OUT, each id once (run 5's Bend filler)
 #   vault-sample SRC DST            the run scripts' steps   (CorpusV2/Steps.bend)
 #   agent-tool TASK  agent-eval CKPT DIR FORMAT [K]   the tool loop's checker; E5, agent-act   (CorpusV2/Agent.bend)
 #   agent-act CKPT DIR [K]          ana's own episodes on train units, accepted and fixed   (CorpusV2/AgentAct.bend)
@@ -273,6 +274,8 @@ def c2.args(xs: List<String>) -> IO(Unit):
       Am.am.eval(more)
     case "agent-mugen-live" <> more:
       Am.am.live(more)
+    case "filler-union" <> more:
+      St.st.filler.union(more)
     case "keyed-order" <> more:
       Ko.kor.main(more)
     case "s2" <> more:
