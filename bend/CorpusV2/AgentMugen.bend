@@ -111,7 +111,7 @@ def am.calls(bs: List<&2, A.Blk>) -> List<&2, List<&2, U32>>:
     case Nil{}:
       Nil{}
     case A.Blk{+c, +x} <> t:
-      am.keep.on(Nat.is_eq(c, 6n), x, am.calls(t))
+      am.keep.on(A.ag.is.call(c), x, am.calls(t))
 
 def am.lead.go(xs: List<&2, U32>, nl: Bool) -> List<&2, U32>:
   match xs nl:
@@ -872,7 +872,7 @@ def am.ncalls(bs: List<&2, A.Blk>) -> Nat:
     case Nil{}:
       0n
     case A.Blk{+c, x} <> t:
-      Nat.add(Bool.pick(Nat, Nat.is_eq(c, 6n), 1n, 0n), am.ncalls(t))
+      Nat.add(Bool.pick(Nat, A.ag.is.call(c), 1n, 0n), am.ncalls(t))
 
 def am.one(+count: Nat, +dir: String, +q: AmQ, r: C.CbRes) -> IO(AmR):
   match q r:

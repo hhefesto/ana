@@ -448,7 +448,7 @@ def chk.tests() -> List<&2, ChkTest>:
    # byte for byte (echoes as mugen's read, edit and shell answer), the
    # repair's read, edit, diff and reply, each shape's turns, old's count,
    # MUGEN_ONLY's shapes (2026-11-03)
-   ChkTest{"mugen.bend", False{}, RExact{chk.oks(["other", "direct", "repair", "turns direct", "turns fill", "turns repair", "count", "only"])}},
+   ChkTest{"mugen.bend", False{}, RExact{chk.oks(["other", "direct", "repair", "turns direct", "turns fill", "turns chain, direct", "turns chain, fill", "turns chain, repair", "a chain's tries change the body", "chain's edits and checks", "night", "turns repair", "count", "only"])}},
    # agent-mugen, the loop's mugen in the mugen shape: each shape's read,
    # edit and grep echoes as the renderer's, mugen's refusals, the bend base
    # asks, when a file is done, the reference session, the loop's call on
@@ -490,7 +490,7 @@ def chk.tests() -> List<&2, ChkTest>:
    # (compiled: the interpreter's stack is too small for the tokenizer's parse)
    ChkTest{"agent.bend", True{}, RHead{chk.oks(["direct", "repair", "term-to-type", "verify", "trap", "weights direct", "weights repair", "unfold",
      "chain", "chain-repair", "label drift", "tries weigh 0", "v1 direct", "v1 repair", "v1 term-to-type", "v1 verify", "v1 trap", "verdict",
-     "mugen direct", "weights mugen direct", "mugen calls end with their echo line", "mugen stopped", "mugen lone echo"]), "ok window"}},
+     "mugen direct", "weights mugen direct", "mugen calls end with their echo line", "mugen chain", "weights mugen chain", "mugen stopped", "mugen lone echo"]), "ok window"}},
    # bend-ops' primitives (bend/Box): its parsers on run 3's files
    # (chain.log, the sha256 listings, a trainer's log) and on vastai's --raw
    # JSON, the lint's rules and flake bodies, st.f.floor, and the processes
@@ -577,7 +577,7 @@ def chk.tests() -> List<&2, ChkTest>:
    # by reason, held-out units gone, copies and derived transcripts, key order, a second run the same
    # bytes, dry; cap=2, ratio=2, share=50, fill=repair; files-jsonl, raw-drop and port-fix (`bend` on
    # the PATH, weights/code32k.bpe); compiled (the interpreter's stack does not hold the reader)
-   ChkTest{"ratio.bend", True{}, ROks{56n}},
+   ChkTest{"ratio.bend", True{}, ROks{57n}},
    # bend-lean-statement (bend/LeanStatement.bend, 2026-11-03): where a statement stops, a direct session cut
    # inside it against one that is not, the tool on sessions written here; compiled (the reader)
    ChkTest{"leanstatement.bend", True{}, ROks{27n}},

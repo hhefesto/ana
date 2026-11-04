@@ -183,7 +183,8 @@ type Hd is Data:
 # heading classes
 #   1 User, 2 Context, 3 Attempt, 4 Term or Type, 5 a tool; 0 not a heading
 #   the mugen shape (docs/MUGEN-SHAPE.md, 2026-11-03): 1 user too, 6 a call
-#   (read, edit, shell: the whole turn is ana's), 7 echo, 8 mugen (ana's reply)
+#   (read, shell: the whole turn is ana's), 9 an edit (a call too, and a try
+#   when a later edit follows it), 7 echo, 8 mugen (ana's reply)
 def ag.ascii(s: String) -> List<&2, U32>:
   match s:
     case SNil{}:
@@ -199,7 +200,7 @@ def ag.hd(+label: String, +k: Nat) -> Hd:
 def ag.hds.bytes() -> List<&2, Hd>:
   [ag.hd("User", 1n), ag.hd("Context", 2n), ag.hd("Attempt", 3n), ag.hd("Term", 4n), ag.hd("Type", 4n),
    ag.hd("ghc", 5n), ag.hd("agda", 5n), ag.hd("lean", 5n), ag.hd("bend", 5n), ag.hd("nix", 5n),
-   ag.hd("user", 1n), ag.hd("read", 6n), ag.hd("edit", 6n), ag.hd("shell", 6n), ag.hd("echo", 7n), ag.hd("mugen", 8n)]
+   ag.hd("user", 1n), ag.hd("read", 6n), ag.hd("edit", 9n), ag.hd("shell", 6n), ag.hd("echo", 7n), ag.hd("mugen", 8n)]
 
 def ag.eq(xs: List<&2, U32>, ys: List<&2, U32>) -> Bool:
   match xs ys:
@@ -337,6 +338,8 @@ def ag.turns.blk(+nl: U32, +c: Nat, +act: Bool, +tried: Bool, +x: List<&2, U32>,
       Turn{RoCall{}, ag.line1(nl, x)} <> ag.nonempty(RoEcho{}, ag.after1(nl, x), rest)
     case 6n:
       Turn{RoCall{}, x} <> rest
+    case 9n:
+      Turn{RoCall{}, x} <> rest
     case 7n:
       Turn{RoCall{}, ag.line1(nl, x)} <> ag.nonempty(RoEcho{}, ag.after1(nl, x), rest)
     case 8n:
@@ -357,30 +360,52 @@ def ag.tried(+nl: U32, +x: List<&2, U32>, t: List<&2, Blk>) -> Bool:
     case _:
       False{}
 
-# whether the blocks open with a mugen call and its echo (classes 6 then 7)
+# whether a block's class is a mugen call
+def ag.is.call(+c: Nat) -> Bool:
+  Bool.or(Nat.is_eq(c, 6n), Nat.is_eq(c, 9n))
+
+# whether the blocks open with a mugen call and its echo
 def ag.pair(bs: List<&2, Blk>) -> Bool:
   match bs:
-    case Blk{c, x} <> Blk{d, y} <> r:
-      Bool.and(Nat.is_eq(c, 6n), Nat.is_eq(d, 7n))
+    case Blk{+c, x} <> Blk{d, y} <> r:
+      Bool.and(ag.is.call(c), Nat.is_eq(d, 7n))
     case _:
       False{}
+
+# A mugen session's wrong edit (2026-11-04; docs/MUGEN-SHAPE.md "Chains"): an
+# edit with a later edit in its session is a try, weight 0, as a Term the tool
+# rejected is.  The user (10-22): "I don't want ana to train on answering wrong
+# on the first try, I want ana to learn how to correct her mistakes if they
+# occur."  The sessions the corpus renders have one edit, or are chains and
+# ana's own sessions, whose every edit but the last the checker refused.  Only
+# its turn: its `## echo` heading line stays hers, as a try's `## bend` does.
+def ag.call.tried(+c: Nat, +i: Nat, +le: Nat) -> Bool:
+  Bool.and(Nat.is_eq(c, 9n), Nat.is_lt(1n+i, le))
 
 # A mugen call and the echo after it: the echo's heading line is the call's
 # (ana writes `## echo` and stops; mugen runs the call and writes the rest),
 # the rest of the echo's turn the echo.  Every other block as ag.turns.blk.
-def ag.turns.go(bs: List<&2, Blk>, +nl: U32, +act: Nat, +i: Nat, pair: Bool) -> List<&2, Turn>:
+# le: 1 + the index of the session's last edit (0: none).
+def ag.turns.pair(tried: Bool, +x: List<&2, U32>, +head: List<&2, U32>, rest: List<&2, Turn>) -> List<&2, Turn>:
+  match tried:
+    case True{}:
+      Turn{RoTry{}, x} <> (Turn{RoCall{}, head} <> rest)
+    case False{}:
+      Turn{RoCall{}, List.append(&2, U32, x, head)} <> rest
+
+def ag.turns.go(bs: List<&2, Blk>, +nl: U32, +act: Nat, +i: Nat, +le: Nat, pair: Bool) -> List<&2, Turn>:
   match bs pair:
     case Nil{} _:
       Nil{}
-    case Blk{c, +x} <> Blk{d, +y} <> +r True{}:
-      Turn{RoCall{}, List.append(&2, U32, x, ag.line1(nl, y))} <> ag.nonempty(RoEcho{}, ag.after1(nl, y), ag.turns.go(r, nl, act, 2n+i, ag.pair(r)))
+    case Blk{+c, +x} <> Blk{d, +y} <> +r True{}:
+      ag.turns.pair(ag.call.tried(c, i, le), x, ag.line1(nl, y), ag.nonempty(RoEcho{}, ag.after1(nl, y), ag.turns.go(r, nl, act, 2n+i, le, ag.pair(r))))
     case Blk{+c, +x} <> +t _:
-      ag.turns.blk(nl, c, Nat.is_eq(act, 1n+i), ag.tried(nl, x, t), x, ag.turns.go(t, nl, act, 1n+i, ag.pair(t)))
+      ag.turns.blk(nl, c, Nat.is_eq(act, 1n+i), ag.tried(nl, x, t), x, ag.turns.go(t, nl, act, 1n+i, le, ag.pair(t)))
 
 # the episode a text denotes, over the alphabet (nl, hs)
 def ag.read(+nl: U32, +hs: List<&2, Hd>, +xs: List<&2, U32>) -> List<&2, Turn>:
   +bs = ag.blocks(nl, hs, xs)
-  ag.turns.go(bs, nl, ag.answer(bs, ag.last(bs, 3n, 0n, 0n), 0n, 0n), 0n, ag.pair(bs))
+  ag.turns.go(bs, nl, ag.answer(bs, ag.last(bs, 3n, 0n, 0n), 0n, 0n), 0n, ag.last(bs, 9n, 0n, 0n), ag.pair(bs))
 
 # The reader before tries (2026-10-07): every Term or Type but the act is
 # given.  bend-agent-laws v1 holds `ag.read` to it on every transcript of the

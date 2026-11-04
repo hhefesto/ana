@@ -132,6 +132,45 @@ weights and a code32k window with a mugen session in it.
 roundtrip, calls, shape (one act, the `## mugen` reply, no attempt, no try,
 the user first), tokens and agree all hold, 0 failed.
 
+## Chains (2026-11-04)
+
+Every session the first render made has one edit, so ana never saw a failed
+fix followed by another try. The rehearsal's checkpoint showed it (run/v6's
+r5-step72729 on the 176 episodes, /tmp/bx/am/ev3): after a failed check on her
+own edit she ran the same check again 158 times of 195, and 89 episodes ran out
+of calls.
+
+`MUGEN_ONLY=chain` renders one more session a unit, its own stream
+(`run/v6/mugen/chain/NAME`, chain6.sh), with no new checker runs:
+
+| shape | starts as | then |
+|---|---|---|
+| `mugen-chain-J` | direct | J wrong edits, each followed by its check's recorded error, then the fix and the pass |
+| `mugen-chain-fill-J` | fill | the same |
+| `mugen-chain-repair-J` | repair (mutant m handed over) | the same, the tries from mutant m + 1 |
+
+J is format chain's choice (1, 2 or 3 by the unit's hash, 55/30/15, at most the
+mutants there are). 30 in 100 units with two mutants or more start from a
+repair (Nix: all, it is never asked directly); half the rest with a hole start
+from the fill. A mutant that repeats the body before it gives no chain.
+
+**Weights (the user, 10-22: "I don't want ana to train on answering wrong on the
+first try, I want ana to learn how to correct her mistakes if they occur"):**
+Agent/Spec.bend's reader takes an `edit` with a later `edit` in its session as
+a try, weight 0, as it takes a Term the tool rejected. Her check after it, and
+the fix, weigh 1. `edit` got its own heading class for that (9, `ag.is.call`
+covers it); a session with one edit reads as before (own9's first 2,763
+sessions pass the laws, no try in them). repair-mix classes a chain as a repair
+by those roles, so the 4:1 rule and the cap count it.
+
+**Her own mistakes (`MUGEN_ONLY=night`, `NIGHT=FILE`):** run/v5/act5's night
+transcripts, the only ones with her real failed attempts, were format 2. On
+own5's results they render as direct sessions with her Terms as the edits,
+`mugen-night-fixed-J` and `mugen-night-episode-J`, J her wrong edits after a
+repeat of the Term before is left out (she repeated herself in most). The
+bytes of each check are the recorded ones, the Terms back under the def's
+indent. 5,645 transcripts, 4,628 fit the window.
+
 ## ana in the loop: agent-mugen and its evaluation (2026-11-03)
 
 `ana --agent` (Agent/Loop.bend) calls its tool when ana ends a line `## echo`

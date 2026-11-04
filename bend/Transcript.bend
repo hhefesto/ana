@@ -5,6 +5,7 @@ import ./Nul.bend as Ns
 import ./Units.bend as U
 import ./Sys.bend as S
 import ./Mugen/Diff.bend as D
+import ./Agent/Spec.bend as A
 
 # transcripts: the checked units (bend-check LANG) rendered as the
 # coding-agent documents of docs/TRANSCRIPT-FORMAT.md.
@@ -602,27 +603,35 @@ def mg.fmt() -> Nat:
 
 # only: MUGEN_ONLY (2026-11-03), "" for every shape, else OUTPUT gets only the
 # presentations whose shape starts with it (`repair`: a history stream's
-# repairs, whose units' other shapes their own stream already has)
+# repairs, whose units' other shapes their own stream already has; `chain`,
+# 2026-11-04: renders the chains, which "" does not, and nothing else;
+# `night`: renders the units NIGHT holds, from ana's own tries).  night: NIGHT's
+# transcripts by unit, each its shape, a NUL and its text.
 type Mgc is Data:
-  Mgc{base: Map<&2, List<&2, U32>>, sizes: String, only: String}
+  Mgc{base: Map<&2, List<&2, U32>>, sizes: String, only: String, night: Map<&2, List<&2, U32>>}
 
 def Mgc.base(+c: Mgc) -> Map<&2, List<&2, U32>>:
   match c:
-    case Mgc{m, s, o}:
+    case Mgc{m, s, o, n}:
       m
 
 def Mgc.sizes(+c: Mgc) -> String:
   match c:
-    case Mgc{m, s, o}:
+    case Mgc{m, s, o, n}:
       s
 
 def Mgc.only(+c: Mgc) -> String:
   match c:
-    case Mgc{m, s, o}:
+    case Mgc{m, s, o, n}:
       o
 
+def Mgc.night(+c: Mgc) -> Map<&2, List<&2, U32>>:
+  match c:
+    case Mgc{m, s, o, n}:
+      n
+
 def mg.none() -> Mgc:
-  Mgc{Map.new(&2, List<&2, U32>), "/dev/null", ""}
+  Mgc{Map.new(&2, List<&2, U32>), "/dev/null", "", Map.new(&2, List<&2, U32>)}
 
 # bytes as a String of one Chr a byte, and back (Mugen/Diff.bend's lines only
 # split at the newline byte, so the diff of the bytes is the diff of the text)
@@ -1256,30 +1265,57 @@ def mg.head(+fs: List<&2, List<&2, U32>>) -> List<&2, U32>:
 def mg.with(+fs: List<&2, List<&2, U32>>, +body: List<&2, U32>) -> List<&2, U32>:
   cat([field(fs, 5n), field(fs, 6n), body])
 
-def mg.direct(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>) -> List<&2, U32>:
+# A chain (2026-11-04; docs/MUGEN-SHAPE.md "Chains"): j wrong edits, the
+# mutants from m on, each answered by its recorded check, then the edit that
+# makes the original and its pass.  j = 0 is the session's one edit.
+def mg.tries(j: Nat, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +f0: List<&2, U32>, +m: Nat, +nm: Nat) -> List<&2, U32>:
+  match j:
+    case 0n:
+      cat([mg.edit(path, f0, mg.with(fs, field(fs, 7n))), mg.check.in(fs, path, field(fs, 11n))])
+    case 1n+p:
+      +f1 = mg.with(fs, mutant(fs, m))
+      cat([mg.edit(path, f0, f1), mg.check.in(fs, path, mutant.check(fs, m)), mg.tries(p, fs, path, f1, next.m(m, 1n, nm), nm)])
+
+# whether each of those edits changes the body before it (a mutant can repeat one)
+def mg.tries.ok(j: Nat, +fs: List<&2, List<&2, U32>>, +prev: List<&2, U32>, +m: Nat, +nm: Nat) -> Bool:
+  match j:
+    case 0n:
+      Bool.not(U.eq(prev, field(fs, 7n)))
+    case 1n+p:
+      +x = mutant(fs, m)
+      Bool.and(Bool.not(U.eq(prev, x)), mg.tries.ok(p, fs, x, next.m(m, 1n, nm), nm))
+
+def mg.direct.j(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>, +j: Nat, +m: Nat, +nm: Nat) -> List<&2, U32>:
   +f0 = mg.head(fs)
-  +f1 = mg.with(fs, field(fs, 7n))
   +n = List.length(&2, List<&2, U32>, mg.rows(f0))
   +from = Bool.pick(Nat, Nat.is_lt(n, 25n), 1n, Nat.sub(n, 23n))
   cat([mg.user(mg.ask.direct(fs, path)), mg.read(path, f0, from, Nat.sub(Nat.add(n, 1n), from)), mg.looks(path, f0, fs, base),
-    mg.edit(path, f0, f1), mg.check.in(fs, path, field(fs, 11n)), mg.reply(mg.reply.direct(fs, path))])
+    mg.tries(j, fs, path, f0, m, nm), mg.reply(mg.reply.direct(fs, path))])
 
-def mg.fill(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>) -> List<&2, U32>:
+def mg.direct(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>) -> List<&2, U32>:
+  mg.direct.j(fs, path, base, 0n, 0n, 0n)
+
+def mg.fill.j(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>, +j: Nat, +m: Nat, +nm: Nat) -> List<&2, U32>:
   +f0 = mg.with(fs, field(fs, 10n))
-  +f1 = mg.with(fs, field(fs, 7n))
   cat([mg.user(mg.ask.fill(fs, path)), mg.check.hole(fs, path, field(fs, 13n)), mg.looks(path, f0, fs, base),
-    mg.edit(path, f0, f1), mg.check.in(fs, path, field(fs, 11n)),
+    mg.tries(j, fs, path, f0, m, nm),
     mg.reply(cat([U.b("Filled the hole in "), code(field(fs, 2n)), U.b(" ("), path, U.b("); "), mg.said(fs), U.b(" passes.")]))])
 
-def mg.repair(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>, +m: Nat) -> List<&2, U32>:
+def mg.fill(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>) -> List<&2, U32>:
+  mg.fill.j(fs, path, base, 0n, 0n, 0n)
+
+# mutant m handed over, then j wrong edits from the next mutant on
+def mg.repair.j(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>, +m: Nat, +j: Nat, +nm: Nat) -> List<&2, U32>:
   +mut = mutant(fs, m)
   +f0 = mg.with(fs, mut)
-  +f1 = mg.with(fs, field(fs, 7n))
   +from = Nat.add(1n, mg.nls(mg.head(fs)))
   +rows = List.length(&2, List<&2, U32>, U.lines(U.append(field(fs, 6n), mut)))
   cat([mg.user(mg.ask.repair(fs, path)), mg.check.in(fs, path, mutant.check(fs, m)), mg.read(path, f0, from, rows), mg.looks(path, f0, fs, base),
-    mg.edit(path, f0, f1), mg.check.in(fs, path, field(fs, 11n)),
+    mg.tries(j, fs, path, f0, next.m(m, 1n, nm), nm),
     mg.reply(cat([U.b("Fixed "), code(field(fs, 2n)), U.b(" in "), path, mg.why.on(mg.is.bend(fs), fs, check.out(check.of(mutant.check(fs, m)))), U.b(". It passes now.")]))])
+
+def mg.repair(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>, +m: Nat) -> List<&2, U32>:
+  mg.repair.j(fs, path, base, m, 0n, 1n)
 
 # Presentations, their sizes -------------------------------------------------------
 
@@ -1335,6 +1371,63 @@ def mg.unit.if(ok: Bool, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>,
     case False{}:
       rest
 
+# One chain a unit, as format chain chooses (chain.unit): J wrong edits by the
+# unit's hash, 30 in 100 units with two mutants or more from a repair (Nix:
+# always, it is never asked directly), the rest from a fill (half of those
+# with a hole) or the direct ask.  Rendered only under MUGEN_ONLY=chain, so a
+# stream's own render keeps its bytes and the chains are a stream of their own.
+def mg.one.keep(ok: Bool, +b: Tk.Bpe, +limit: Nat, +id: List<&2, U32>, +shape: List<&2, U32>, +text: List<&2, U32>, rest: List<&2, Mg>) -> List<&2, Mg>:
+  match ok:
+    case True{}:
+      mg.one(b, limit, id, shape, text, Nil{}) <> rest
+    case False{}:
+      rest
+
+def mg.one.if(ok: Bool, +b: Tk.Bpe, +limit: Nat, +id: List<&2, U32>, +shape: String, +j: Nat, +text: List<&2, U32>, rest: List<&2, Mg>) -> List<&2, Mg>:
+  mg.one.keep(ok, b, limit, id, U.append(U.b(shape), mg.n(j)), text, rest)
+
+def mg.chain.at(repair: Bool, hole: Bool, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +j: Nat, +m: Nat, +nm: Nat, rest: List<&2, Mg>) -> List<&2, Mg>:
+  match repair hole:
+    case True{} _:
+      mg.one.if(mg.tries.ok(j, fs, mutant(fs, m), next.m(m, 1n, nm), nm), b, limit, id, "chain-repair-", j, mg.repair.j(fs, path, base, m, j, nm), rest)
+    case False{} True{}:
+      mg.one.if(mg.tries.ok(j, fs, field(fs, 10n), m, nm), b, limit, id, "chain-fill-", j, mg.fill.j(fs, path, base, j, m, nm), rest)
+    case False{} False{}:
+      mg.one.if(mg.tries.ok(j, fs, Nil{}, m, nm), b, limit, id, "chain-", j, mg.direct.j(fs, path, base, j, m, nm), rest)
+
+def mg.chain.if(some: Bool, +repair: Bool, +hole: Bool, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +j: Nat, +nm: Nat, rest: List<&2, Mg>) -> List<&2, Mg>:
+  match some:
+    case True{}:
+      mg.chain.at(repair, hole, b, limit, base, id, fs, mg.path(id), j, roll(id, 9n, nm), nm, rest)
+    case False{}:
+      rest
+
+def mg.chain.unit(+b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, rest: List<&2, Mg>) -> List<&2, Mg>:
+  +nm = mutant.count(fs)
+  +nix = mg.is.nix(fs)
+  +repair = Bool.and(Nat.is_lt(1n, nm), Bool.or(nix, Nat.is_lt(roll(id, 12n, 100n), 30n)))
+  +r = roll(id, 11n, 100n)
+  +want = Bool.pick(Nat, Nat.is_lt(r, 55n), 1n, Bool.pick(Nat, Nat.is_lt(r, 85n), 2n, 3n))
+  +left = Bool.pick(Nat, repair, Nat.sub(nm, 1n), nm)
+  +j = Nat.min(want, Nat.min(left, Nat.sub(chain.k(), 1n)))
+  +hole = Bool.and(Bool.not(empty(field(fs, 13n))), Nat.is_lt(roll(id, 14n, 100n), 50n))
+  mg.chain.if(Bool.and(Nat.is_lt(0n, j), Bool.or(repair, Bool.not(nix))), repair, hole, b, limit, base, id, fs, j, nm, rest)
+
+def mg.chain.unit.if(ok: Bool, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, rest: List<&2, Mg>) -> List<&2, Mg>:
+  match ok:
+    case True{}:
+      mg.chain.unit(b, limit, base, id, fs, rest)
+    case False{}:
+      rest
+
+def mg.all.chain(+b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, rs: List<&2, Ns.Doc>) -> List<&2, Mg>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case Ns.Doc{+i, +t} <> more:
+      +fs = split(t, 30)
+      mg.chain.unit.if(mg.small(fs), b, limit, base, i, fs, mg.all.chain(b, limit, base, more))
+
 def mg.all(+b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, rs: List<&2, Ns.Doc>) -> List<&2, Mg>:
   match rs:
     case Nil{}:
@@ -1342,6 +1435,134 @@ def mg.all(+b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, rs: List<&2, 
     case Ns.Doc{+i, +t} <> more:
       +fs = split(t, 30)
       mg.unit.if(mg.small(fs), b, limit, base, i, fs, mg.all(b, limit, base, more))
+
+# Ana's own mistakes in the shape (2026-11-04; docs/MUGEN-SHAPE.md "Chains"):
+# the nights' transcripts (run/v5/act5, format 2: her Terms, each with the check
+# it got, the last the pass) as a direct session on the file, each Term an edit
+# of the one before.  A repeat of the Term before it is left out (mugen refuses
+# an edit that changes nothing; she made 3 of the same in many).  Her Term is
+# tidy.term's, so its lines go back under the def's indent; the checks are as
+# they were recorded, no checker run.
+type Nt is Data:
+  Nt{body: List<&2, U32>, check: List<&2, U32>}
+
+def nt.fence.drop(ls: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> +t:
+      Bool.pick(List<&2, List<&2, U32>>, U.eq(l, U.b("```\n")), t, nt.fence.drop(t))
+
+# a turn's fenced lines: after its heading, empty line and opening fence, up
+# to its last fence
+def nt.inner(+x: List<&2, U32>) -> List<&2, List<&2, U32>>:
+  List.reverse(&2, List<&2, U32>, nt.fence.drop(List.reverse(&2, List<&2, U32>, List.drop(&2, List<&2, U32>, A.ag.lines(10, x), 3n))))
+
+def nt.indent(ls: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> t:
+      U.append(Bool.pick(List<&2, U32>, U.eq(l, nl()), l, U.append(U.b("  "), l)), nt.indent(t))
+
+def nt.is.exit(+l: List<&2, U32>) -> Bool:
+  U.prefix(l, U.b("[exit "))
+
+# a checker's turn, back to a check: the status of its last line, and the rest
+def nt.check.of(+ls: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  +rs = List.reverse(&2, List<&2, U32>, ls)
+  +last = Maybe.default(&2, List<&2, U32>, List.head(&2, List<&2, U32>, rs), Nil{})
+  +has = nt.is.exit(last)
+  +status = Bool.pick(List<&2, U32>, has, List.take(&2, U32, List.drop(&2, U32, last, 6n), Nat.sub(U.len(last), 8n)), U.b("1"))
+  +rest = Bool.pick(List<&2, List<&2, U32>>, has, List.reverse(&2, List<&2, U32>, List.drop(&2, List<&2, U32>, rs, 1n)), ls)
+  cat([status, [31], U.concat(rest)])
+
+def nt.term.at(bs: List<&2, A.Blk>) -> Bool:
+  match bs:
+    case A.Blk{+c, +x} <> t:
+      Bool.and(Nat.is_eq(c, 4n), U.prefix(x, U.b("## Term\n")))
+    case _:
+      False{}
+
+def nt.go(bs: List<&2, A.Blk>, hit: Bool) -> List<&2, Nt>:
+  match bs hit:
+    case Nil{} _:
+      Nil{}
+    case A.Blk{c, +x} <> A.Blk{d, +y} <> +r True{}:
+      Nt{nt.indent(nt.inner(x)), nt.check.of(nt.inner(y))} <> nt.go(r, nt.term.at(r))
+    case A.Blk{c, x} <> +t _:
+      nt.go(t, nt.term.at(t))
+
+# a transcript's Terms and their checks
+def nt.of(+bs: List<&2, A.Blk>) -> List<&2, Nt>:
+  nt.go(bs, nt.term.at(bs))
+
+def nt.uniq(ns: List<&2, Nt>, +prev: List<&2, U32>) -> List<&2, Nt>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case Nt{+b, +c} <> +t:
+      Bool.pick(List<&2, Nt>, U.eq(b, prev), nt.uniq(t, prev), Nt{b, c} <> nt.uniq(t, b))
+
+def nt.edits(ns: List<&2, Nt>, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +f0: List<&2, U32>) -> List<&2, U32>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case Nt{+b, +c} <> t:
+      +f1 = mg.with(fs, b)
+      cat([mg.edit(path, f0, f1), mg.check.in(fs, path, c), nt.edits(t, fs, path, f1)])
+
+def nt.last.passed(ns: List<&2, Nt>) -> Bool:
+  match ns:
+    case Nil{}:
+      False{}
+    case Nt{b, c} <> Nil{}:
+      U.eq(check.status(check.of(c)), U.b("0"))
+    case Nt{b, c} <> t:
+      nt.last.passed(t)
+
+def nt.session(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>, +ns: List<&2, Nt>) -> List<&2, U32>:
+  +f0 = mg.head(fs)
+  +n = List.length(&2, List<&2, U32>, mg.rows(f0))
+  +from = Bool.pick(Nat, Nat.is_lt(n, 25n), 1n, Nat.sub(n, 23n))
+  cat([mg.user(mg.ask.direct(fs, path)), mg.read(path, f0, from, Nat.sub(Nat.add(n, 1n), from)), mg.looks(path, f0, fs, base),
+    nt.edits(ns, fs, path, f0), mg.reply(mg.reply.direct(fs, path))])
+
+# a unit's night transcript, its shape up to the last `-`: mugen-night-fixed-J,
+# mugen-night-episode-J, J her wrong edits
+def nt.shape(+sh: List<&2, U32>, +j: Nat) -> List<&2, U32>:
+  cat([U.b("night-"), List.take(&2, U32, sh, U.find(sh, [45], 0n)), [45], mg.n(j)])
+
+def nt.unit.on(some: Bool, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +v: List<&2, U32>, rest: List<&2, Mg>) -> List<&2, Mg>:
+  match some:
+    case True{}:
+      +k = U.find(v, [0], 0n)
+      +ns = nt.uniq(nt.of(A.ag.blocks(10, A.ag.hds.bytes(), List.drop(&2, U32, v, 1n+k))), Nil{})
+      +j = Nat.sub(List.length(&2, Nt, ns), 1n)
+      mg.one.keep(nt.last.passed(ns), b, limit, id, nt.shape(List.take(&2, U32, v, k), j), nt.session(fs, mg.path(id), base, ns), rest)
+    case False{}:
+      rest
+
+def mg.all.night(+b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +night: Map<&2, List<&2, U32>>, rs: List<&2, Ns.Doc>) -> List<&2, Mg>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case Ns.Doc{+i, +t} <> more:
+      +v = mg.got(Map.get(List<&2, U32>, Nil{}, night, mg.str(i)))
+      nt.unit.on(Bool.not(empty(v)), b, limit, base, i, split(t, 30), v, mg.all.night(b, limit, base, night, more))
+
+# the units a render takes: the chains, the night's, or every shape
+def mg.all.on(chain: Bool, night: Bool, +b: Tk.Bpe, +limit: Nat, +cf: Mgc, rs: List<&2, Ns.Doc>) -> List<&2, Mg>:
+  match chain night:
+    case True{} _:
+      mg.all.chain(b, limit, Mgc.base(cf), rs)
+    case False{} True{}:
+      mg.all.night(b, limit, Mgc.base(cf), Mgc.night(cf), rs)
+    case False{} False{}:
+      mg.all(b, limit, Mgc.base(cf), rs)
+
+def mg.all.of(+only: String, +b: Tk.Bpe, +limit: Nat, +cf: Mgc, rs: List<&2, Ns.Doc>) -> List<&2, Mg>:
+  mg.all.on(String.eq(only, "chain"), String.eq(only, "night"), b, limit, cf, rs)
 
 def mg.docs(ms: List<&2, Mg>) -> List<&2, Ns.Doc>:
   match ms:
@@ -1407,10 +1628,23 @@ def mg.base.read.on(none: Bool, +p: String) -> IO(List<&2, U32>):
       S.read(p)
 
 def mg.cfg(+bx: List<&2, U32>, +sizes: String) -> Mgc:
-  Mgc{mg.base.of(split(bx, 10), Map.new(&2, List<&2, U32>)), sizes, ""}
+  Mgc{mg.base.of(split(bx, 10), Map.new(&2, List<&2, U32>)), sizes, "", Map.new(&2, List<&2, U32>)}
 
 def mg.cfg.only(+bx: List<&2, U32>, +sizes: String, +only: String) -> Mgc:
-  Mgc{mg.base.of(split(bx, 10), Map.new(&2, List<&2, U32>)), sizes, only}
+  Mgc{mg.base.of(split(bx, 10), Map.new(&2, List<&2, U32>)), sizes, only, Map.new(&2, List<&2, U32>)}
+
+# NIGHT's pairs (id NUL text NUL ...) by unit: the id less its last segment
+def mg.night.of(xs: List<&2, List<&2, U32>>, m: Map<&2, List<&2, U32>>) -> Map<&2, List<&2, U32>>:
+  match xs:
+    case +i <> +t <> more:
+      +sh = mg.shape.of(i)
+      +u = List.take(&2, U32, i, Nat.sub(U.len(i), Nat.add(U.len(sh), 1n)))
+      mg.night.of(more, Map.set(&2, List<&2, U32>, m, mg.str(u), cat([sh, [0], t])))
+    case _:
+      m
+
+def mg.cfg.night(+bx: List<&2, U32>, +sizes: String, +only: String, +nx: List<&2, U32>) -> Mgc:
+  Mgc{mg.base.of(split(bx, 10), Map.new(&2, List<&2, U32>)), sizes, only, mg.night.of(split(nx, 0), Map.new(&2, List<&2, U32>))}
 
 # Main ---------------------------------------------------------------------------
 
@@ -1479,7 +1713,7 @@ type Ps is Type:
 def ps.write(mugen: Bool, +fmt: Nat, +out: String, +b: Tk.Bpe, +limit: Nat, +cf: Mgc, +rs: List<&2, Ns.Doc>, +n: Nat, +m: Nat, rd: S.Rd, e: Bool) -> IO(Ps):
   match mugen:
     case True{}:
-      +ms = mg.all(b, limit, Mgc.base(cf), rs)
+      +ms = mg.all.of(Mgc.only(cf), b, limit, cf, rs)
       +ts = mg.docs.only(Mgc.only(cf), mg.docs(ms))
       do IO<Ps>:
         S.add(out, Ns.put(ts, Nil{}))
@@ -1638,8 +1872,10 @@ def run(tok: String, inp: String, +out: String, +window: Nat) -> IO(Unit):
     +bp : String <- S.env("BASE", "")
     +sz : String <- S.env("SIZES", "/dev/null")
     +on : String <- S.env("MUGEN_ONLY", "")
+    +np : String <- S.env("NIGHT", "")
     bx : List<&2, U32> <- mg.base.read.on(String.eq(bp, ""), bp)
-    tokenizer(fmt.of(f, k), inp, out, Nat.sub(window, 64n), mg.cfg.only(bx, sz, on), Tk.Bpe.parse(tx))
+    nx : List<&2, U32> <- mg.base.read.on(String.eq(np, ""), np)
+    tokenizer(fmt.of(f, k), inp, out, Nat.sub(window, 64n), mg.cfg.night(bx, sz, on, nx), Tk.Bpe.parse(tx))
 
 def window.of(xs: List<String>) -> Nat:
   match xs:

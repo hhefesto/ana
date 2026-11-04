@@ -3,6 +3,7 @@ import ../Units.bend as U
 import ../Transcript.bend as T
 import ../Sys.bend as S
 import ../Nul.bend as Ns
+import ../Agent/Spec.bend as A
 
 # bend-transcript's format mugen (docs/MUGEN-SHAPE.md) on a hand-made Bend
 # unit: the direct session byte for byte (every echo as mugen's read, edit
@@ -21,6 +22,10 @@ def two() -> List<&2, List<&2, U32>>:
    ck("0", "ALL PROOFS CHECK\n"), U.b("def Nat.add(a: Nat, b: Nat) -> Nat"),
    ck("1", "SOME PROOFS FAIL\nError:\n- expected : Nat\n- observed : ?goal\nContext:\n- n : Nat\nLocation: twice\n4 | def twice(n: Nat) -> Nat:\n5>|   ?goal\n"), Nil{},
    U.b("  Nat.add(n, m)\n"), ck("1", "SOME PROOFS FAIL\nError:\n- expected : a defined name\n- observed : m\nLocation: twice\n5>|   Nat.add(n, m)\n")]
+
+# the same unit with a second mutant (a chain's second wrong edit)
+def two2() -> List<&2, List<&2, U32>>:
+  List.append(&2, List<&2, U32>, two(), [U.b("  Nat.add(n, k)\n"), ck("1", "SOME PROOFS FAIL\nError:\n- expected : a defined name\n- observed : k\nLocation: twice\n5>|   Nat.add(n, k)\n")])
 
 def base() -> Map<&2, List<&2, U32>>:
   T.Mgc.base(T.mg.cfg(U.b("Nat.add\tdef Nat.add(a: Nat, b: Nat) -> Nat:\nn\tbend: Base has no n (see bend --help)\n"), "/dev/null"))
@@ -90,6 +95,30 @@ def other() -> String:
       Bool.and(has(d, "## mugen\n\nAdded `twice` to demo/Two.hs; ghc passes.\n"), has(f, "Fill the hole (`_`) in `twice` in demo/Two.hs."))))
   Bool.pick(String, ok, "ok other", "MISMATCH other")
 
+def ok.if(+name: String, ok: Bool) -> String:
+  Bool.pick(String, ok, "ok " ++ name, "MISMATCH " ++ name)
+
+# a chain's second edit edits what the first left, the wrong edit's check is
+# its mutant's recorded check, and the session ends in the pass and the reply
+def chain.bytes() -> String:
+  +t = T.mg.direct.j(two(), path(), base(), 1n, 0n, 1n)
+  +ok = Bool.and(Bool.and(has(t, "+  Nat.add(n, m)\n\n## echo\n"), has(t, "## edit\n\ndemo/Two.bend\n-  Nat.add(n, m)\n+  Nat.add(n, n)\n\n")),
+    Bool.and(has(t, "- observed : m\n"), has(t, "ALL PROOFS CHECK\n(exit 0)\n```\n\n## mugen\n\nAdded `twice` to demo/Two.bend; bend check passes.\n")))
+  ok.if("chain's edits and checks", ok)
+
+# a night's transcript, her Term twice, then the fix: the repeat left out, her
+# Terms back under the def's indent, the checks as recorded
+def night.text() -> List<&2, U32>:
+  U.b("## User\n\nn twice.\n\n## Type\n\ntype\n```bend\ndef twice(n: Nat) -> Nat:\n```\n\n## Term\n\n```bend\nNat.add(n, m)\n```\n\n## bend\n\n```\nSOME PROOFS FAIL\n[exit 1]\n```\n\n## Term\n\n```bend\nNat.add(n, m)\n```\n\n## bend\n\n```\nSOME PROOFS FAIL\n[exit 1]\n```\n\n## Term\n\n```bend\nmatch n:\n  case 0n:\n\n    0n\n```\n\n## bend\n\n```\nALL PROOFS CHECK\n[exit 0]\n```\n\n")
+
+def night() -> String:
+  +ns = T.nt.uniq(T.nt.of(A.ag.blocks(10, A.ag.hds.bytes(), night.text())), Nil{})
+  +t = T.nt.session(two(), path(), base(), ns)
+  +ok = Bool.and(Bool.and(Nat.is_eq(List.length(&2, T.Nt, ns), 2n), T.nt.last.passed(ns)),
+    Bool.and(has(t, "+  Nat.add(n, m)\n\n## echo\n"), Bool.and(has(t, "```\nSOME PROOFS FAIL\n(exit 1)\n```\n"),
+      Bool.and(has(t, "+  match n:\n+    case 0n:\n+\n+      0n\n"), has(t, "```\nALL PROOFS CHECK\n(exit 0)\n```\n\n## mugen\n")))))
+  ok.if("night", ok)
+
 def main() -> IO(Unit):
   do IO<Unit>:
     IO.print(other())
@@ -97,6 +126,12 @@ def main() -> IO(Unit):
     IO.print(repair())
     IO.print(turns("direct", T.mg.direct(two(), path(), base()), "## user\n## read\n## echo\n## shell\n## echo\n## edit\n## echo\n## shell\n## echo\n## mugen\n"))
     IO.print(turns("fill", T.mg.fill(two(), path(), base()), "## user\n## shell\n## echo\n## shell\n## echo\n## edit\n## echo\n## shell\n## echo\n## mugen\n"))
+    IO.print(turns("chain, direct", T.mg.direct.j(two(), path(), base(), 1n, 0n, 1n), "## user\n## read\n## echo\n## shell\n## echo\n## edit\n## echo\n## shell\n## echo\n## edit\n## echo\n## shell\n## echo\n## mugen\n"))
+    IO.print(turns("chain, fill", T.mg.fill.j(two(), path(), base(), 1n, 0n, 1n), "## user\n## shell\n## echo\n## shell\n## echo\n## edit\n## echo\n## shell\n## echo\n## edit\n## echo\n## shell\n## echo\n## mugen\n"))
+    IO.print(turns("chain, repair", T.mg.repair.j(two2(), path(), base(), 0n, 1n, 2n), "## user\n## shell\n## echo\n## read\n## echo\n## shell\n## echo\n## edit\n## echo\n## shell\n## echo\n## edit\n## echo\n## shell\n## echo\n## mugen\n"))
+    IO.print(ok.if("a chain's tries change the body", Bool.and(T.mg.tries.ok(1n, two2(), Nil{}, 0n, 2n), Bool.not(T.mg.tries.ok(1n, two2(), U.b("  Nat.add(n, m)\n"), 0n, 2n)))))
+    IO.print(chain.bytes())
+    IO.print(night())
     IO.print(turns("repair", T.mg.repair(two(), path(), base(), 0n), "## user\n## shell\n## echo\n## read\n## echo\n## shell\n## echo\n## edit\n## echo\n## shell\n## echo\n## mugen\n"))
     IO.print(count())
     IO.print(only())

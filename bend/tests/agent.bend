@@ -119,6 +119,10 @@ def trap() -> String:
 def mg.direct() -> String:
   "## user\n\nAdd `twice` to demo/Two.bend.\n\nn twice.\n\n```bend\ndef twice(n: Nat) -> Nat:\n```\n\n## read\n\ndemo/Two.bend 1 3\n\n## echo\n\n```\nimport Base\n\n# n twice.\n[lines 1-3 of 3]\n```\n\n## shell\n\nbend base Nat.add | head -1\n\n## echo\n\n```\ndef Nat.add(a: Nat, b: Nat) -> Nat:\n(exit 0)\n```\n\n## edit\n\ndemo/Two.bend\n-# n twice.\n+# n twice.\n+def twice(n: Nat) -> Nat:\n+  Nat.add(n, n)\n\n## echo\n\n```\n--- demo/Two.bend\n+++ demo/Two.bend\n@@ -1,3 +1,5 @@\n import Base\n \n # n twice.\n+def twice(n: Nat) -> Nat:\n+  Nat.add(n, n)\n```\n\n## shell\n\nbend demo/Two.bend --check-only\n\n## echo\n\n```\nALL PROOFS CHECK\n(exit 0)\n```\n\n## mugen\n\nAdded `twice` to demo/Two.bend; bend check passes.\n\n"
 
+# a chain: the wrong edit, its check's error, the fix, the pass (2026-11-04)
+def mg.chain() -> String:
+  "## user\n\nAdd `twice` to demo/Two.bend.\n\n## edit\n\ndemo/Two.bend\n+  Nat.add(n, m)\n\n## echo\n\n```\ndiff\n```\n\n## shell\n\nbend demo/Two.bend --check-only\n\n## echo\n\n```\nSOME PROOFS FAIL\n(exit 1)\n```\n\n## edit\n\ndemo/Two.bend\n-  Nat.add(n, m)\n+  Nat.add(n, n)\n\n## echo\n\n```\ndiff\n```\n\n## shell\n\nbend demo/Two.bend --check-only\n\n## echo\n\n```\nALL PROOFS CHECK\n(exit 0)\n```\n\n## mugen\n\nAdded `twice`.\n\n"
+
 # a session cut after a call's `## echo` line: where ana stops at inference
 def mg.stopped() -> String:
   "## user\n\nFix `twice` in demo/Two.bend.\n\n## shell\n\nbend demo/Two.bend --check-only\n\n## echo\n"
@@ -210,10 +214,10 @@ def window.test(m: Maybe<&2, Tk.Bpe>) -> String:
       +ids = Ms.ms.ids(tb)
       +fill = Tk.Bpe.encode(tb, b("go :: Int\n## ghc\ngo = 0\n"))
       +w = List.concat(&2, U32, [[0], fill, [1], Tk.Bpe.encode(tb, b(direct())), [1], Tk.Bpe.encode(tb, b(repair())), [1],
-        Tk.Bpe.encode(tb, b(chain.repair())), [1], Tk.Bpe.encode(tb, b(mg.direct())), [1]])
+        Tk.Bpe.encode(tb, b(chain.repair())), [1], Tk.Bpe.encode(tb, b(mg.direct())), [1], Tk.Bpe.encode(tb, b(mg.chain())), [1]])
       +ws = Ms.ms.weights(ids, w)
-      +want = Nat.add(Nat.add(Nat.add(zeros.of(tb, A.ag.read.bytes(b(direct()))), zeros.of(tb, A.ag.read.bytes(b(repair())))),
-        zeros.of(tb, A.ag.read.bytes(b(chain.repair())))), zeros.of(tb, A.ag.read.bytes(b(mg.direct()))))
+      +want = Nat.add(Nat.add(Nat.add(Nat.add(zeros.of(tb, A.ag.read.bytes(b(direct()))), zeros.of(tb, A.ag.read.bytes(b(repair())))),
+        zeros.of(tb, A.ag.read.bytes(b(chain.repair())))), zeros.of(tb, A.ag.read.bytes(b(mg.direct())))), zeros.of(tb, A.ag.read.bytes(b(mg.chain()))))
       verdict("window (" ++ Nat.show(count.zero(ws)) ++ " of " ++ Nat.show(List.length(&2, F32, ws)) ++ " targets weigh 0)",
         Bool.and(Nat.is_eq(List.length(&2, F32, ws), Nat.sub(List.length(&2, U32, w), 1n)), Nat.is_eq(count.zero(ws), want)))
 
@@ -240,6 +244,8 @@ def main() -> IO(Unit):
     IO.print(shape("mugen direct", mg.direct(), [0n, 4n, 5n, 4n, 5n, 4n, 5n, 4n, 5n, 3n]))
     IO.print(weights("weights mugen direct", mg.direct()))
     IO.print(mg.calls("mugen calls end with their echo line", mg.direct()))
+    IO.print(shape("mugen chain", mg.chain(), [0n, 6n, 4n, 5n, 4n, 5n, 4n, 5n, 4n, 5n, 3n]))
+    IO.print(weights("weights mugen chain", mg.chain()))
     IO.print(shape("mugen stopped", mg.stopped(), [0n, 4n]))
     IO.print(shape("mugen lone echo", mg.lone(), [0n, 4n, 5n, 3n]))
     tx : List<&2, U32> <- B.Bytes.read_all("weights/code32k.bpe")
