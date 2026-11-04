@@ -151,9 +151,29 @@ def ask() -> String:
   +b = U.eq(U.b(Lp.al.ask("", "## user\n\nFix `f`.\n\n")), T.mg.user(U.b("Fix `f`.")))
   Bool.pick(String, Bool.and(a, b), "ok ask", "MISMATCH ask")
 
+# a tool's output past 30,000: its first 15,000, the number cut, its last 14,936; no
+# character split at either cut (mugen's clip)
+def rep(n: Nat, +xs: List<&2, U32>) -> List<&2, U32>:
+  match n:
+    case 0n:
+      Nil{}
+    case 1n+k:
+      U.append(xs, rep(k, xs))
+
+def clip() -> String:
+  +whole = rep(30000n, U.b("a"))
+  +big = U.append(rep(15000n, U.b("h")), U.append(rep(100n, U.b("m")), rep(14936n, U.b("t"))))
+  +want = U.append(rep(15000n, U.b("h")), U.append(U.b("\n[... 100 characters cut ...]\n"), rep(14936n, U.b("t"))))
+  # a 2-byte character across each cut: gone whole, nothing left of it
+  +two = U.append(rep(14999n, U.b("h")), U.append([195, 169], U.append(rep(100n, U.b("m")), U.append([195, 169], rep(14935n, U.b("t"))))))
+  +want2 = U.append(rep(14999n, U.b("h")), U.append(U.b("\n[... 102 characters cut ...]\n"), rep(14935n, U.b("t"))))
+  +ok = Bool.and(Bool.and(U.eq(M.am.clip(whole), whole), U.eq(M.am.clip(big), want)), U.eq(M.am.clip(two), want2))
+  Bool.pick(String, ok, "ok clip", "MISMATCH clip")
+
 def main() -> IO(Unit):
   do IO<Unit>:
     IO.print(ask())
+    IO.print(clip())
     IO.print(echoes("direct", "direct", T.mg.direct(two(), path(), base()), 3n))
     IO.print(echoes("fill", "fill", T.mg.fill(two(), path(), base()), 2n))
     IO.print(echoes("repair", "repair-0", T.mg.repair(two(), path(), base(), 0n), 3n))

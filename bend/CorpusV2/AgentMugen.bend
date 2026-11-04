@@ -406,12 +406,48 @@ def am.end(s: Bool, +work: String) -> IO(Unit):
     case False{}:
       IO.die(Unit, 1, "agent-mugen: not solved yet")
 
+# What mugen does to a tool's output past 30,000 characters (its Tools.bend tl.clip): the first
+# 15,000, the number cut, the last 14,936.  Here in bytes, no character split at a cut.  A check's
+# error can print a 2.3 MB term (11-04: repair-0 of bend-collections' keypair_if), and feeding that
+# to the decoder took over an hour on the CPU, so one episode held the eval and /ana would hang.
+def am.clip.cont(+c: U32) -> Bool:
+  Bool.and(U32.is_le(128, c), U32.is_le(c, 191))
+
+def am.clip.front(xs: List<&2, U32>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +c <> +t:
+      Bool.pick(List<&2, U32>, am.clip.cont(c), am.clip.front(t), c <> t)
+
+# the end of a head: a last character the cut split goes
+def am.clip.lead(xs: List<&2, U32>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +c <> +t:
+      Bool.pick(List<&2, U32>, U32.is_le(192, c), t, c <> t)
+
+def am.clip.head(+xs: List<&2, U32>) -> List<&2, U32>:
+  List.reverse(&2, U32, am.clip.lead(am.clip.front(List.reverse(&2, U32, List.take(&2, U32, xs, 15000n)))))
+
+def am.clip.big(big: Bool, +xs: List<&2, U32>, +n: Nat) -> List<&2, U32>:
+  match big:
+    case False{}:
+      xs
+    case True{}:
+      S.append(am.clip.head(xs), S.append(S.b("\n[... " ++ Nat.show(Nat.sub(Nat.sub(n, 15000n), 14936n)) ++ " characters cut ...]\n"), am.clip.front(List.drop(&2, U32, xs, Nat.sub(n, 14936n)))))
+
+def am.clip(+xs: List<&2, U32>) -> List<&2, U32>:
+  +n = S.len(xs)
+  am.clip.big(Nat.is_lt(30000n, n), xs, n)
+
 # the echo as the loop appends it: the renderer's echo turn after its heading line
 def am.say(o: AmO, +work: String) -> IO(Unit):
   match o:
     case AmO{+e, s}:
       do IO<Unit>:
-        IO.write(S.str(A.ag.after1(10, T.mg.echo(e))))
+        IO.write(S.str(A.ag.after1(10, T.mg.echo(am.clip(e)))))
         am.end(s, work)
 
 def am.tool.go(t: Maybe<&2, List<&2, U32>>, ep: Maybe<&2, List<&2, U32>>) -> IO(Unit):
@@ -659,7 +695,7 @@ def am.live.say(o: AmO) -> IO(Unit):
   match o:
     case AmO{+e, s}:
       do IO<Unit>:
-        IO.write(S.str(A.ag.after1(10, T.mg.echo(e))))
+        IO.write(S.str(A.ag.after1(10, T.mg.echo(am.clip(e)))))
         IO.die(Unit, 1, "agent-mugen-live: ana goes on")
 
 def am.live.go(ep: Maybe<&2, List<&2, U32>>) -> IO(Unit):

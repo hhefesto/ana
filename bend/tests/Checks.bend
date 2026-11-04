@@ -453,7 +453,7 @@ def chk.tests() -> List<&2, ChkTest>:
    # edit and grep echoes as the renderer's, mugen's refusals, the bend base
    # asks, when a file is done, the reference session, the loop's call on
    # `## echo` (2026-11-03)
-   ChkTest{"agentmugen.bend", False{}, RExact{chk.oks(["ask", "echoes direct", "echoes fill", "echoes repair", "refuse", "names", "done", "ref", "call", "live"])}},
+   ChkTest{"agentmugen.bend", False{}, RExact{chk.oks(["ask", "clip", "echoes direct", "echoes fill", "echoes repair", "refuse", "names", "done", "ref", "call", "live"])}},
    # E5 reads ana's output as a transcript less ana's closing newline: a
    # passing last echo is solved (it never was before)
    ChkTest{"agent-eval.bend", False{}, RExact{chk.oks(["a passing last echo is solved", "read with the closing newline it is not (the bug)",
