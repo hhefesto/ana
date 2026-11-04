@@ -87,11 +87,12 @@ under $1 of credit so the chain can still pull and destroy.
 ## 6. Measure (here, about an hour on the CPU)
 
 ```sh
-nix build --max-jobs 1 .#bend-corpus-v2 .#bend-generate -o run/v6/run5/gcroot
-AGENT_DEPLOY=... AGENT_BIN=... bend-corpus-v2 agent-mugen-eval run/v6/run5/out/r5-stepN.checkpoint run/v6/run5/ev 8
+nix build --max-jobs 1 .#bend-corpus-v2 .#bend-generate .#deploy -o run/v6/run5/gcroot
+AGENT_DEPLOY=$PWD/run/v6/run5/gcroot-2/bin/deploy AGENT_BIN=$PWD/run/v6/run5/gcroot-1/bin/bend-generate BEND=$PWD/run/v5/gcroot-bend-2.0.39/bin/bend \
+  run/v6/run5/gcroot/bin/bend-corpus-v2 agent-mugen-eval run/v6/run5/out/r5-stepN.checkpoint run/v6/run5/ev
 ```
 
-Run 4's baseline is 0/176 (direct 0/67, fill 0/67, repair 0/42; `/tmp/bx/am/ev2`). `eval-next.log` gives bits a
+No K after the directory: a K takes that unit count of the 84 (PROCS 3 at a time, THREADS 5 each, about 9 GB). Run 4's baseline is 0/176 (direct 0/67, fill 0/67, repair 0/42; `/tmp/bx/am/ev2`). `eval-next.log` gives bits a
 byte on the held-out mugen sessions; run 4's own figure on them is measured before renting, below.
 
 ## 7. Give her to mugen

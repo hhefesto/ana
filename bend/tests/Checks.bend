@@ -565,6 +565,10 @@ def chk.tests() -> List<&2, ChkTest>:
    # record, the counts; the tool on three units: OUT, OUT.stats, a second run the same bytes (the
    # tool prints its summary, so only the ok count is held)
    ChkTest{"trim.bend", False{}, RLayout{12n}},
+   # bend-corpus-v2 hist-drop (bend/CorpusV2/HistDrop.bend, 2026-11-04, the Python's bytes): a listed
+   # unit's repairs and mutate's go, its first-time sessions stay, ALL=1 takes them too; the tool
+   # on five sessions, twice
+   ChkTest{"histdrop.bend", False{}, RLayout{9n}},
    # bend-corpus-v2 repair-mix (bend/CorpusV2/Ratio.bend, 2026-10-22, the user's rule: four times the
    # program correct from the start for each repair) and run 5's intake (bend/CorpusV2/Intake.bend):
    # units, tags and classes by the trainer's reader, a repair less its attempt is the direct

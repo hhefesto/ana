@@ -110,6 +110,8 @@ add in run/v6/transcripts-brf6/bend/transcripts.train.nul
 add in run/v7/transcripts-col7/bend/transcripts.train.nul
 # run 8: runs 6-7's repositories' growth, BendHub, Bend's upstream, 20 new Bend 2 repositories (col8.sh, col8b.sh, 11-02/03)
 add in run/v8/transcripts-col8/bend/transcripts.train.nul
+# our own repositories at 11-04's HEAD: what own5 did not have, bend-frp and mugen-web whole (own9.sh)
+add in run/v8/transcripts-own9/bend/transcripts.train.nul
 # agda-unimath again with agda2bend 7adf6f3 -O2 (umemit12): only declarations no earlier run has (a2bum12.sh, 11-03)
 add in run/v6/transcripts-a2bum12/bend/transcripts.train.nul
 # the 5747eec emits a2bv.sh never took (PLFA, agda-algebras, agda2hs-base, agda-prelude), against their src/ trees (a2bsrc.sh, 11-03)

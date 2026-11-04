@@ -26,6 +26,7 @@ import ./CorpusV2/Port.bend as Pt
 import ./CorpusV2/Ratio.bend as Rt
 import ./CorpusV2/Intake.bend as It
 import ./CorpusV2/Trim.bend as Tm
+import ./CorpusV2/HistDrop.bend as Hd
 
 # bend-corpus-v2: corpus v2's tools (docs/CORPUS-V2.md), one subcommand each,
 # ported from the Python they replaced, each byte-identical to it on the
@@ -74,6 +75,8 @@ import ./CorpusV2/Trim.bend as Tm
 #                                   (CorpusV2/Decl.bend)
 #   trim-mutants UNITS OUT [K]      at most K mutants a unit (K: 4), from the start the id picks (cksum, as
 #                                   the checkers), before the check; OUT.stats   (CorpusV2/Trim.bend)
+#   hist-drop IN.nul OUT.nul UNITS  a stream less the listed units' made-up repairs (ALL=1: all their
+#                                   sessions)   (CorpusV2/HistDrop.bend)
 #   port CFG [STEP...]              a collection's loader rejects renamed so the locked compiler loads
 #                                   them (PortOps.bend: own, alias, binder, seg), kept on a pass or the
 #                                   author's own failures, repair transcripts, an inbox for the rest:
@@ -308,6 +311,8 @@ def c2.args(xs: List<String>) -> IO(Unit):
       Dc.dcl.main(more)
     case "trim-mutants" <> more:
       Tm.trm.main(more)
+    case "hist-drop" <> more:
+      Hd.hdr.main(more)
     case "repair-mix" <> more:
       Rt.rto.main(more)
     case "files-jsonl" <> more:
