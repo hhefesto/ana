@@ -21,7 +21,7 @@ B=$PWD/run/v5/gcroot-bend-2.0.39/bin/bend
 T=run/v6/mugen/gcroot-bend-transcript/bin/bend-transcript
 L=run/v6/mugen/gcroot-bend-agent-laws/bin/bend-agent-laws
 H=tools/corpus-v2/hist
-M=run/v6/mugen
+M=${MUGEN_OUT:-run/v6/mugen}   # MUGEN_OUT: mugen6q.sh's workers write elsewhere, then move here
 LAWS=${LAWS:-3}   # bend-agent-laws processes a stream
 # one stream: NAME OUT RESULTS... (ONLY in the environment)
 one() {

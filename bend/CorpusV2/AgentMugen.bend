@@ -437,6 +437,193 @@ def am.tool(xs: List<String>) -> IO(Unit):
     case _:
       IO.die(Unit, 2, "usage: agent-mugen TASK TOOL < EPISODE")
 
+# The live tool -------------------------------------------------------------------------
+#
+#   agent-mugen-live TOOL < EPISODE
+#       mugen's `/ana TASK` (mugen 0.13.0, 2026-11-03): `ana-mugen` runs ana's
+#       loop on the ask with this tool, and her calls run for real, on the
+#       files under the directory it runs in.  The episode's last call:
+#         read PATH FROM LIMIT   the file's lines, as mugen's read
+#         edit PATH -old +new    written when the old lines occur once in the
+#                                file; the echo is mugen's diff, else its refusal
+#         shell bend PATH --check-only, grep -nE '^(def|law) (A|B)[(:]' PATH,
+#                                bend base A | head -1 (the evaluation's three)
+#       A PATH that starts with `/` or holds `..` is refused, as is any other
+#       command (exit 127 in its echo): ana gets no general shell.  After its
+#       echo the tool exits 1, so ana goes on until she reports (`## mugen`)
+#       and ends, or spends her calls; 2 when the episode does not read.
+
+# a path under the directory the tool runs in
+def am.live.ok(+p: List<&2, U32>) -> Bool:
+  Bool.and(Bool.not(T.empty(p)), Bool.and(Bool.not(S.head.is(p, 47)), Bool.not(S.infix(p, S.b("..")))))
+
+def am.live.open(ok: Bool, +path: List<&2, U32>) -> IO(Maybe<&2, List<&2, U32>>):
+  match ok:
+    case True{}:
+      S.slurp(S.str(path))
+    case False{}:
+      IO.pure(Maybe<&2, List<&2, U32>>, None{})
+
+def am.live.refuse() -> AmO:
+  AmO{T.mg.shell.echo(S.b("mugen (ana's tool): this shell runs only `bend PATH --check-only`, `grep -nE` and `bend base`, on paths under its directory"), S.b("127")), False{}}
+
+def am.live.enoent(+path: List<&2, U32>) -> List<&2, U32>:
+  T.cat([S.b("ENOENT: no such file or directory, open '"), path, S.b("'")])
+
+def am.live.read.got(m: Maybe<&2, List<&2, U32>>, +path: List<&2, U32>, +ws: List<&2, List<&2, U32>>) -> AmO:
+  match m:
+    case Some{+f}:
+      AmO{T.mg.read.echo(f, Nat.max(1n, am.nat.or(T.field(ws, 1n), 1n)), am.nat.or(T.field(ws, 2n), 2000n)), False{}}
+    case None{}:
+      AmO{am.live.enoent(path), False{}}
+
+def am.live.read(+body: List<&2, U32>) -> IO(AmO):
+  +ws = T.mg.words(body)
+  +path = T.field(ws, 0n)
+  do IO<AmO>:
+    m : Maybe<&2, List<&2, U32>> <- am.live.open(am.live.ok(path), path)
+    return am.live.read.got(m, path, ws)
+
+# mugen's edit on the file f (Tools.bend tl.edit.apply's reasons)
+def am.live.edit(+path: List<&2, U32>, +f: List<&2, U32>, +rest: List<&2, List<&2, U32>>) -> AmE:
+  +old = am.signed(rest, 45)
+  +new = am.signed(rest, 43)
+  +n = Bool.pick(Nat, T.empty(old), 0n, T.mg.count(f, old))
+  +why = Bool.pick(String, Nat.is_eq(n, 0n), "old was not found",
+    Bool.pick(String, Nat.is_lt(1n, n), "old matches more than once; give more context, or all", ""))
+  Bool.pick(AmE, String.eq(why, ""), AmE{S.replace.first(f, old, new), Nil{}}, AmE{f, am.edit.why(path, why)})
+
+def am.live.edit.if(ok: Bool, +path: List<&2, U32>, +f: List<&2, U32>, +f2: List<&2, U32>, +why: List<&2, U32>) -> IO(AmO):
+  match ok:
+    case True{}:
+      do IO<AmO>:
+        S.write(S.str(path), f2)
+        return AmO{T.mg.diff(path, f, f2), False{}}
+    case False{}:
+      IO.pure(AmO, AmO{why, False{}})
+
+def am.live.edit.put(e: AmE, +path: List<&2, U32>, +f: List<&2, U32>) -> IO(AmO):
+  match e:
+    case AmE{+f2, +why}:
+      am.live.edit.if(T.empty(why), path, f, f2, why)
+
+def am.live.edit.got(m: Maybe<&2, List<&2, U32>>, +path: List<&2, U32>, +rest: List<&2, List<&2, U32>>) -> IO(AmO):
+  match m:
+    case Some{+f}:
+      am.live.edit.put(am.live.edit(path, f, rest), path, f)
+    case None{}:
+      IO.pure(AmO, AmO{am.edit.why(path, "no such file"), False{}})
+
+def am.live.edit.call(+body: List<&2, U32>) -> IO(AmO):
+  +ls = S.split(body, 10)
+  +path = T.field(ls, 0n)
+  +rest = List.drop(&2, List<&2, U32>, ls, 1n)
+  do IO<AmO>:
+    m : Maybe<&2, List<&2, U32>> <- am.live.open(am.live.ok(path), path)
+    am.live.edit.got(m, path, rest)
+
+def am.live.check(ok: Bool, +path: List<&2, U32>, +bend: String) -> IO(AmO):
+  match ok:
+    case True{}:
+      do IO<AmO>:
+        +o : S.Out <- S.run(".", ["BEND_NO_TELEMETRY=1"], 180, bend, [S.str(path), "--check-only"], Nil{})
+        return AmO{T.mg.shell.echo(S.chomp(S.lines.take(S.Out.text(o), 100n)), S.b(U32.show(S.Out.status(o)))), False{}}
+    case False{}:
+      IO.pure(AmO, am.live.refuse())
+
+def am.live.grep.got(m: Maybe<&2, List<&2, U32>>, +ns: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> AmO:
+  match m:
+    case Some{+f}:
+      +hits = T.mg.grep.go(T.split(f, 10), ns, 1n)
+      AmO{T.mg.shell.echo(T.mg.join(hits, [10]), am.code(Bool.not(Nat.is_eq(List.length(&2, List<&2, U32>, hits), 0n)))), False{}}
+    case None{}:
+      AmO{T.mg.shell.echo(T.cat([S.b("grep: "), path, S.b(": No such file or directory")]), S.b("2")), False{}}
+
+# grep -nE '^(def|law) (A|B)[(:]' PATH, on the file
+def am.live.grep(+cmd: List<&2, U32>) -> IO(AmO):
+  +rest = S.strip(cmd, S.b("grep -nE '^(def|law) ("))
+  +ns0 = am.before.str(rest, S.b(")[(:]' "))
+  +path = L.v2.after.str(rest, S.b(")[(:]' "))
+  +ns = am.unesc(S.split(ns0, 124))
+  do IO<AmO>:
+    m : Maybe<&2, List<&2, U32>> <- am.live.open(am.live.ok(path), path)
+    return am.live.grep.got(m, ns, path)
+
+def am.live.base(bs: Bool, +cmd: List<&2, U32>, +bend: String) -> IO(AmO):
+  match bs:
+    case True{}:
+      am.base(cmd, bend)
+    case False{}:
+      IO.pure(AmO, am.live.refuse())
+
+def am.live.shell.grep(gr: Bool, +cmd: List<&2, U32>, +bend: String) -> IO(AmO):
+  match gr:
+    case True{}:
+      am.live.grep(cmd)
+    case False{}:
+      am.live.base(Bool.or(S.prefix(cmd, S.b("bend base ")), Bool.and(S.prefix(cmd, S.b("for n in ")), S.infix(cmd, S.b("bend base $n")))), cmd, bend)
+
+def am.live.shell.check(chk: Bool, +cmd: List<&2, U32>, +bend: String) -> IO(AmO):
+  match chk:
+    case True{}:
+      +path = S.strip(List.take(&2, U32, cmd, Nat.sub(S.len(cmd), 13n)), S.b("bend "))
+      am.live.check(am.live.ok(path), path, bend)
+    case False{}:
+      am.live.shell.grep(S.prefix(cmd, S.b("grep -nE '^(def|law) (")), cmd, bend)
+
+def am.live.shell(+cmd: List<&2, U32>, +bend: String) -> IO(AmO):
+  am.live.shell.check(Bool.and(S.prefix(cmd, S.b("bend ")), S.suffix(cmd, S.b(" --check-only"))), cmd, bend)
+
+def am.live.run.edit(ed: Bool, +body: List<&2, U32>, +bend: String) -> IO(AmO):
+  match ed:
+    case True{}:
+      am.live.edit.call(body)
+    case False{}:
+      am.live.shell(body, bend)
+
+def am.live.run.read(rd: Bool, +lb: List<&2, U32>, +body: List<&2, U32>, +bend: String) -> IO(AmO):
+  match rd:
+    case True{}:
+      am.live.read(body)
+    case False{}:
+      am.live.run.edit(S.eq(lb, S.b("edit")), body, bend)
+
+def am.live.run.if(none: Bool, +x: List<&2, U32>, +bend: String) -> IO(AmO):
+  match none:
+    case True{}:
+      IO.pure(AmO, AmO{S.b("mugen (ana's tool): no call before `## echo`"), False{}})
+    case False{}:
+      am.live.run.read(S.eq(am.label(x), S.b("read")), am.label(x), am.body(x), bend)
+
+# the echo as the loop appends it; exit 1: ana goes on
+def am.live.say(o: AmO) -> IO(Unit):
+  match o:
+    case AmO{+e, s}:
+      do IO<Unit>:
+        IO.write(S.str(A.ag.after1(10, T.mg.echo(e))))
+        IO.die(Unit, 1, "agent-mugen-live: ana goes on")
+
+def am.live.go(ep: Maybe<&2, List<&2, U32>>) -> IO(Unit):
+  match ep:
+    case Some{+ex}:
+      +x = am.last.or(am.calls(A.ag.blocks(10, A.ag.hds.bytes(), ex)))
+      do IO<Unit>:
+        +bend : String <- S.env("BEND", "bend")
+        o : AmO <- am.live.run.if(T.empty(x), x, bend)
+        am.live.say(o)
+    case None{}:
+      IO.die(Unit, 2, "agent-mugen-live: cannot read the episode")
+
+# xs: the arguments after `agent-mugen-live`
+def am.live(xs: List<String>) -> IO(Unit):
+  match xs:
+    case tool <> Nil{}:
+      do IO<Unit>:
+        ep : Maybe<&2, List<&2, U32>> <- S.slurp("/dev/stdin")
+        am.live.go(ep)
+    case _:
+      IO.die(Unit, 2, "usage: agent-mugen-live TOOL < EPISODE")
+
 # The evaluation ------------------------------------------------------------------------
 #
 #   agent-mugen-eval CKPT DIR [K]

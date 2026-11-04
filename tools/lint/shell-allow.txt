@@ -25,3 +25,25 @@ bend/gpu/fp.sh
 # (2026-10-15, Phase 7: the ten flake.nix bodies are off the list; a
 # flake.nix body may hold plain sequential commands, Lint.bend's
 # lnt.stmt.flake, and every one passes)
+
+# Run 5's corpus (2026-11-03): the scripts behind the units still running, and
+# the mix they feed. They hold logic and were tracked without a port; most are
+# one night's run. When run 5's corpus is done, unwire the ones that are dead
+# and port what the next run needs (mix6.sh, mugen6.sh) into Bend.
+run/v5/clean/a2baa2.sh
+run/v5/clean/a2baa.sh
+run/v5/clean/a2bm8.sh
+run/v5/clean/a2bplfa2.sh
+run/v5/clean/a2bplfa3.sh
+run/v5/clean/a2bsrc.sh
+run/v5/clean/a2bum12.sh
+run/v5/clean/a2bum.sh
+run/v5/clean/a2bv.sh
+run/v5/clean/col7.sh
+run/v5/clean/col8b.sh
+run/v5/clean/col8.sh
+run/v5/clean/mix6.sh
+run/v5/clean/mixgo6ff.sh
+run/v5/clean/mixgo6.sh
+run/v5/clean/mugen6.sh
+run/v5/clean/recheck180.sh

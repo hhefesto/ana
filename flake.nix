@@ -252,6 +252,24 @@
               --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.findutils self.packages.${system}.bend-agent-tool (bendFor pkgs) (agdaFor pkgs) ]}
           '';
           ana-bend = self.packages.${system}.ana;
+          # `ana-mugen TASK...`: ana as mugen's worker (mugen's /ana, 0.13.0):
+          # the ask as mugen's `## user` turn (AGENT_SHAPE=mugen), her calls
+          # run for real under the current directory by `bend-corpus-v2
+          # agent-mugen-live` (read, edit, and only the evaluation's three shell
+          # commands), greedy, 8 calls of 512 tokens. Give the checkpoint with
+          # --checkpoint PATH (or WIKI_CHECKPOINT); every setting may be
+          # overridden from the environment.
+          ana-mugen = pkgs.runCommand "ana-mugen" { nativeBuildInputs = [ pkgs.makeWrapper ]; } ''
+            makeWrapper ${self.packages.${system}.bend-generate}/bin/bend-generate $out/bin/ana-mugen \
+              --add-flags --agent \
+              --set-default AGENT_SHAPE mugen \
+              --set-default AGENT_TOOL "bend-corpus-v2 agent-mugen-live" \
+              --set-default AGENT_CALLS 8 \
+              --set-default WIKI_TOKENS 512 \
+              --set-default TEMPERATURE 0 \
+              --set-default BEND_NO_TELEMETRY 1 \
+              --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.findutils self.packages.${system}.bend-corpus-v2 (bendFor pkgs) ]}
+          '';
           default = self.packages.${system}.bend;
         }
       );
