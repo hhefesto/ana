@@ -63,7 +63,7 @@ def walk(bs: List<&2, A.Blk>, +t: M.AmT, +cs: List<&2, List<&2, U32>>) -> Nat & 
   match bs:
     case A.Blk{+c, +x} <> A.Blk{+d, +y} <> +more:
       +cs2 = List.append(&2, List<&2, U32>, cs, [x])
-      Bool.pick(Nat & Nat, Bool.and(Nat.is_eq(c, 6n), Nat.is_eq(d, 7n)), add(same(pure(t, cs2), y), walk(more, t, cs2)), walk(A.Blk{d, y} <> more, t, cs))
+      Bool.pick(Nat & Nat, Bool.and(A.ag.is.call(c), Nat.is_eq(d, 7n)), add(same(pure(t, cs2), y), walk(more, t, cs2)), walk(A.Blk{d, y} <> more, t, cs))
     case _:
       (0n, 0n)
 
