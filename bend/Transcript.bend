@@ -872,29 +872,63 @@ def mg.common(+a: List<&2, List<&2, U32>>, +b: List<&2, List<&2, U32>>) -> Nat:
 def mg.slice(+ls: List<&2, List<&2, U32>>, +a: Nat, +e: Nat) -> List<&2, List<&2, U32>>:
   List.take(&2, List<&2, U32>, List.drop(&2, List<&2, U32>, ls, a), Nat.sub(e, a))
 
+# whether xs opens with p, and xs given back.  U.prefix took a copy of xs at every
+# position and walked p to its end whatever it met: a pass over a 90 KB file with a
+# long p was 3e9 steps (gdb: Units.prefix, term_drop).  This stops at the first
+# difference and copies nothing.
+def mg.rev.onto(xs: List<&2, U32>, ys: List<&2, U32>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      ys
+    case h <> t:
+      mg.rev.onto(t, h <> ys)
+
+def mg.pre(p: List<&2, U32>, xs: List<&2, U32>, acc: List<&2, U32>, ok: Bool) -> Bool & List<&2, U32>:
+  match p xs ok:
+    case _ xs2 False{}:
+      (False{}, mg.rev.onto(acc, xs2))
+    case Nil{} xs2 True{}:
+      (True{}, mg.rev.onto(acc, xs2))
+    case +c <> t +a <> s True{}:
+      mg.pre(t, s, a <> acc, U32.is_eq(a, c))
+    case c <> t Nil{} True{}:
+      (False{}, mg.rev.onto(acc, Nil{}))
+
 # how many times old occurs in xs, apart, as mugen's edit splits on it (2: two or more)
-# (stop: two found)
-def mg.count.go(fuel: Nat, xs: List<&2, U32>, +old: List<&2, U32>, +k: Nat, +n: Nat, hit: Bool, stop: Bool) -> Nat:
-  match fuel xs hit stop:
-    case 1n+f h <> t True{} False{}:
-      +rest = List.drop(&2, U32, h <> t, k)
-      mg.count.go(f, rest, old, k, 1n+n, U.prefix(rest, old), Nat.is_le(1n, n))
-    case 1n+f h <> +t False{} False{}:
-      mg.count.go(f, t, old, k, n, U.prefix(t, old), False{})
-    case _ _ _ _:
+type Mcs is Data:
+  Mcs{go: Bool, xs: List<&2, U32>, n: Nat}
+
+def mg.count.on(r: Bool & List<&2, U32>, +k: Nat, +n: Nat) -> Mcs:
+  (hit, ys) = r
+  match hit ys:
+    case True{} ys2:
+      Mcs{Nat.is_lt(n, 1n), List.drop(&2, U32, ys2, k), 1n+n}
+    case False{} y <> t:
+      Mcs{True{}, t, n}
+    case False{} Nil{}:
+      Mcs{False{}, Nil{}, n}
+
+def mg.count.go(fuel: Nat, +old: List<&2, U32>, +k: Nat, st: Mcs) -> Nat:
+  match fuel st:
+    case 1n+f Mcs{True{}, xs, +n}:
+      mg.count.go(f, old, k, mg.count.on(mg.pre(old, xs, Nil{}, True{}), k, n))
+    case _ Mcs{g, xs, n}:
       n
 
 def mg.count(+xs: List<&2, U32>, +old: List<&2, U32>) -> Nat:
-  mg.count.go(1n+U.len(xs), xs, old, U.len(old), 0n, U.prefix(xs, old), False{})
+  mg.count.go(2n+U.len(xs), old, U.len(old), Mcs{True{}, xs, 0n})
 
 # the lines an edit replaces: [p, n0 - s) of the old file, grown (a line up,
 # else down) until they are some text that occurs there once
 type Rg is Data:
   Rg{p: Nat, s: Nat}
 
+# (32 KB: a text that size is past any window, so the session goes for its size.  Two
+# defs alike for hundreds of lines made this a day's work on one unit: every line up,
+# mg.count over the file; bendo/proof/percent.bend, col7's render stood still 5 hours.)
 def mg.grow.ok(+l0: List<&2, List<&2, U32>>, +f0: List<&2, U32>, +n0: Nat, +p: Nat, +s: Nat) -> Bool:
   +old = U.concat(mg.slice(l0, p, Nat.sub(n0, s)))
-  Bool.and(Bool.not(empty(old)), Nat.is_eq(mg.count(f0, old), 1n))
+  Bool.or(Nat.is_lt(32768n, U.len(old)), Bool.and(Bool.not(empty(old)), Nat.is_eq(mg.count(f0, old), 1n)))
 
 def mg.grow.go(fuel: Nat, ok: Bool, +l0: List<&2, List<&2, U32>>, +f0: List<&2, U32>, +n0: Nat, +p: Nat, +s: Nat) -> Rg:
   match fuel ok:
