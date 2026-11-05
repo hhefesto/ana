@@ -22,7 +22,7 @@ A=/home/hhefesto/src/agda2bend/run/a2b
 # the gate drops assumed from the module on (A2B_AUTOASSUME).  At the deadline an emit still going is stopped; a partial one
 # is still its modules.  The other libraries' emits (11-05, the same binary; the user: "as most good bend code as you can"):
 # the standard library with agda-categories and the rest of agdaPackages, PLFA, agda-algebras, agda2hs-base, agda-prelude, plutus-metatheory, Agda's own test suite, the standard library's README modules (hs23, pre23 add to hs21, pre21 what their fixes freed).
-EMITS="std21 plfa22 aa21 hs21 pre21 pm21 hs23 pre23 at1 rd1"
+EMITS="std21 plfa22 aa21 hs21 pre21 pm21 hs23 pre23 at1 rd1 at2 fl1"
 DL=$(date -d "${DEADLINE:-2026-11-05 21:00}" +%s)
 units() { local u e; for e in um21 $EMITS; do u="$u a2b-$e"; done; echo $u; }
 while active $(units) && [ "$(date +%s)" -lt "$DL" ]; do sleep 120; done
@@ -42,7 +42,8 @@ if [ $UM = um21 ]; then
 fi
 say "agda-unimath: $UM"
 while active ana-col9f; do sleep 120; done
-EMITS="$EMITS $UM"
+# (formal-ledger, the rest of Agda's repository: only if they were emitted)
+E2=; for e in $EMITS; do [ -s $A/corpus-$e/ledger.tsv ] && E2="$E2 $e"; done; EMITS="$E2 $UM"
 A2BS="a2bplfa19"; for e in $EMITS; do A2BS="$A2BS a2b$e"; done
 echo "$A2BS" > run/v8/r5c.a2b
 for e in $EMITS; do c=corpus-$e

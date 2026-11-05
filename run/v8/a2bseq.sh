@@ -7,7 +7,7 @@ export BEND_NO_TELEMETRY=1
 say() { echo "$(date '+%F %T') a2bseq: $*"; }
 DL=$(( $(date -d "${DEADLINE:-2026-11-05 21:00}" +%s) - 600 ))
 A=/home/hhefesto/src/agda2bend/run/a2b
-for e in ${SEQ:-std21 plfa22 aa21 pm21 hs23 pre23 at1 rd1}; do
+for e in ${SEQ:-std21 plfa22 aa21 pm21 hs23 pre23 at1 rd1 at2}; do
   n=a2b$e; grep -q "$n DONE" run/v8/a2bsrc15.log 2>/dev/null && continue
   while systemctl --user is-active -q a2b-$e; do [ "$(date +%s)" -ge "$DL" ] && { say "the deadline, $e still going"; exit 0; }; sleep 60; done
   [ -s $A/corpus-$e/ledger.tsv ] || { say "no corpus-$e"; exit 1; }
