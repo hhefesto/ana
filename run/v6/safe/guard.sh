@@ -14,10 +14,10 @@ while :; do
       systemctl --user stop 'ana-nix-*'
       sleep 15
     # the exports and R5b's fallback mix next: they cost least against the emits' hours (11-05)
-    elif systemctl --user list-units --type=service --state=active --no-legend --plain 'a2b-exp-*' 'a2b-b[0-9]*' 'ana-mix2*' | grep -q .; then
+    elif systemctl --user list-units --type=service --state=active --no-legend --plain 'a2b-exp-*' 'a2b-b[0-9]*' 'ana-mix2*' 'a2b-gh[0-9]*' | grep -q .; then
       say "available ${a}G, swap used ${s}G: stopping the exports, a build, the fallback mix"
-      systemctl --user list-units --type=service --state=active --no-legend --plain 'a2b-exp-*' 'a2b-b[0-9]*' 'ana-mix2*' | awk '{print $1}' >> "$LOG"
-      systemctl --user stop 'a2b-exp-*' 'a2b-b[0-9]*' 'ana-mix2*'
+      systemctl --user list-units --type=service --state=active --no-legend --plain 'a2b-exp-*' 'a2b-b[0-9]*' 'ana-mix2*' 'a2b-gh[0-9]*' | awk '{print $1}' >> "$LOG"
+      systemctl --user stop 'a2b-exp-*' 'a2b-b[0-9]*' 'ana-mix2*' 'a2b-gh[0-9]*'
       sleep 15
     elif systemctl --user is-active -q ana-work.slice; then
       say "available ${a}G, swap used ${s}G: stopping ana-work.slice"

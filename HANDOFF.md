@@ -4,6 +4,12 @@ This file holds everything needed to continue this work from another machine and
 
 ## Run 5 for mugen: the last Bend streams, the mugen shape, ana in mugen's loop (2026-11-03, UTC-6; in progress)
 
+- **11-05, 05:20-06:10:**
+  - **The other GitHub repositories' Agda go through agda2bend (agda2bend's HANDOFF, tools/gh):** shards corpus-ghK, streams a2bghK. run5c.sh takes them at the deadline, 4 at a time; a2bsrc.sh takes each repository's own modules, ids a2bghK:mods/PATH. Permissive licences only.
+  - **a2bseq.sh takes the emits as they end,** not in order: std21's hours held back pre23, at1, at2.
+  - **mugen6q and chain6 are running early** (col9 since 05:20, and they rendered a2bplfa19, a2bhs21, a2bhs23, a2bpre21 with 0 failed: the rehearsal for R5c's tail). run5c.sh waits for ana-mugen6q1/2 and goes on.
+  - **ana-best3 stopped at 06:09** (3.9 G and 4 CPUs while memory is what the emits lack); timer ana-best3-later starts it at 21:05, it passes over what bits.tsv has.
+  - **The guard stops a2b-gh* with the exports,** before ana-work.slice.
 - **11-05, 04:50-05:15:**
   - **a2bsrc.sh checks units through agda2bend's daemons (tools/checkd/units.sh, bendu; BEND for `transcripts all`):** a2bhs23's 535 units in 78 s with the machine at load 40, 534 kept, median check 6 ms; a2bum12's 5,296 had taken 10 hours. The output is byte for byte bend's (compared on a failing file). So agda-unimath's units need about an hour, not most of a day.
   - **fill5c.sh: the newest emits first.** filler-union keeps the first version of an id, and an emit's ids are a2b:mods/PATH, so a2bm5's and a2bum's small modules would have stood in for um21's and std21's.

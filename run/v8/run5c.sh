@@ -24,7 +24,9 @@ A=/home/hhefesto/src/agda2bend/run/a2b
 # the standard library with agda-categories and the rest of agdaPackages, PLFA, agda-algebras, agda2hs-base, agda-prelude, plutus-metatheory, Agda's own test suite, the standard library's README modules (hs23, pre23 add to hs21, pre21 what their fixes freed).
 EMITS="std21 plfa22 aa21 hs21 pre21 pm21 hs23 pre23 at1 rd1 at2 fl1"
 DL=$(date -d "${DEADLINE:-2026-11-05 21:00}" +%s)
-units() { local u e; for e in um21 $EMITS; do u="$u a2b-$e"; done; echo $u; }
+# 11-05: the other GitHub repositories' shards (agda2bend tools/gh; ghsched.sh starts them while the emits run)
+ghs() { (cd $A; ls -d corpus-gh[0-9]* 2>/dev/null | sed 's/corpus-//'); }
+units() { local u e; for e in um21 $EMITS $(ghs); do u="$u a2b-$e"; done; echo $u; }
 while active $(units) && [ "$(date +%s)" -lt "$DL" ]; do sleep 120; done
 UM=um21
 active a2b-um21 && { UM=um16; say "um21 not finished by the deadline: $(cut -f1 $A/corpus-um21/ledger.tsv | sort -u | wc -l) modules"; }
@@ -43,7 +45,7 @@ fi
 say "agda-unimath: $UM"
 while active ana-col9f; do sleep 120; done
 # (formal-ledger, the rest of Agda's repository: only if they were emitted)
-E2=; for e in $EMITS; do [ -s $A/corpus-$e/ledger.tsv ] && E2="$E2 $e"; done; EMITS="$E2 $UM"
+E2=; for e in $EMITS $(ghs); do [ -s $A/corpus-$e/ledger.tsv ] && E2="$E2 $e"; done; EMITS="$E2 $UM"
 A2BS="a2bplfa19"; for e in $EMITS; do A2BS="$A2BS a2b$e"; done
 echo "$A2BS" > run/v8/r5c.a2b
 for e in $EMITS; do c=corpus-$e
@@ -56,8 +58,24 @@ say "units"
 # (run/v8/a2bseq.sh has taken the smaller emits as they ended)
 waitfor ana-a2bseq
 for k in $EMITS; do
+  case $k in gh*) continue ;; esac
   n=a2b$k; grep -q "$n DONE" run/v8/a2bsrc15.log 2>/dev/null && continue
   CHECK_PROCS=${CHECK_PROCS:-10} run/v5/clean/a2bsrc.sh $k >> run/v8/a2bsrc15.log 2>&1 || die "a2bsrc.sh $k (run/v8/a2bsrc15.log)"
+done
+# The GitHub shards together, 4 at a time: decl-new alone is 20 minutes a stream, whatever its size, and they have little to see in each other.
+# (a shard of odd repositories is not worth stopping the night for)
+i=0; for k in $EMITS; do
+  case $k in gh*) ;; *) continue ;; esac
+  n=a2b$k; grep -q "$n DONE" run/v8/a2bsrc15.log 2>/dev/null && continue
+  while [ "$(jobs -rp | wc -l)" -ge 4 ]; do wait -n; done
+  i=$((i + 1))
+  ( CHECK_PROCS=4 CHECKD_N=2 CHECKD_PORT=$((47400 + 4 * i)) run/v5/clean/a2bsrc.sh $k >> run/v8/a2bsrc-$k.log 2>&1 && echo "$(date '+%F %T') $n DONE" >> run/v8/a2bsrc15.log ) &
+done
+wait
+for k in $EMITS; do
+  case $k in gh*) ;; *) continue ;; esac
+  n=a2b$k; grep -q "$n DONE" run/v8/a2bsrc15.log 2>/dev/null && continue
+  say "a2bsrc.sh $k FAILED, left out"; A2BS=${A2BS/ $n/}; echo "$A2BS" > run/v8/r5c.a2b
 done
 
 say "the filler, beside what follows"

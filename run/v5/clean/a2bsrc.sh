@@ -41,6 +41,9 @@ case $K in
   um19)    N=a2bum19;   C=corpus-um19 ;;
   # 11-05's, with the dropped definitions as assumptions (A2B_AUTOASSUME), wide lines broken (A2B_CORPUS_WRAP)
   std21|plfa22|um21|aa21|hs21|pre21|pm21|hs23|pre23|at1|rd1|at2|fl1) N=a2b$K; C=corpus-$K ;;
+  # 11-05's shards of other GitHub repositories (agda2bend tools/gh): each repository's own modules only, under the class a2bghK,
+  # since two shards have modules of the same name
+  gh[0-9]*) N=a2b$K; C=corpus-$K; PFX=a2b$K:mods; OWNL=$A/run/a2b/ev-$K/own.txt ;;
   *) echo "a2bsrc.sh: $K: plfa, aa, hs, prelude or all"; exit 2 ;;
 esac
 C=$A/run/a2b/$C; T=run/v6/transcripts-$N; SRC=run/v5/clean/src/$N
@@ -53,7 +56,9 @@ if [ ! -d $SRC ]; then
   mv $SRC.tmp $SRC
 fi
 if [ ! -s $T/$N.jsonl ]; then
-  $CV files-jsonl a2b:mods $C/corpus $T/$N.jsonl > $T/files.log 2>&1 || { say "$N files-jsonl FAILED"; exit 1; }
+  CD=$C/corpus
+  if [ -n "${OWNL:-}" ]; then rm -rf $C/corpus-own; python3 -I $A/tools/gh/own.py $C/corpus $OWNL $C/corpus-own || { say "$N own FAILED"; exit 1; }; CD=$C/corpus-own; fi
+  $CV files-jsonl ${PFX:-a2b:mods} $CD $T/$N.jsonl > $T/files.log 2>&1 || { say "$N files-jsonl FAILED"; exit 1; }
   cat $T/$N.jsonl.stats
 fi
 E="CORPUS=$T/$N.jsonl OUT=$T BEND=$B BEND_SRC=$SRC MAX=100000 MAX_HI=100000 HOLDOUT_PCT=0"
@@ -62,7 +67,7 @@ if [ ! -e $T/bend/units.all.nul ]; then
   say "$N units"; env $E CHUNK=25 UNIT_JOBS=2 $D transcripts units bend > $T/units.log 2>&1 || { say "units FAILED"; exit 1; }
   mv $T/bend/units.nul $T/bend/units.all.nul
 fi
-SEENX=; for x in a2bm6 a2bm7 a2bm8 a2bm9 a2bm6t a2bm7t a2bplfa a2bplfa2 a2bplfa3 a2bplfa5 a2baa a2baa2 a2baa4 a2bhs2 a2bpre2 a2bum a2bum12 a2bplfa19 a2bstd16 a2bum16 a2bum19 a2bstd21 a2bplfa22 a2bum21 a2baa21 a2bhs21 a2bpre21 a2bpm21 a2bhs23 a2bpre23 a2bat1 a2brd1 a2bat2 a2bfl1; do
+SEENX=; for x in a2bm6 a2bm7 a2bm8 a2bm9 a2bm6t a2bm7t a2bplfa a2bplfa2 a2bplfa3 a2bplfa5 a2baa a2baa2 a2baa4 a2bhs2 a2bpre2 a2bum a2bum12 a2bplfa19 a2bstd16 a2bum16 a2bum19 a2bstd21 a2bplfa22 a2bum21 a2baa21 a2bhs21 a2bpre21 a2bpm21 a2bhs23 a2bpre23 a2bat1 a2brd1 a2bat2 a2bfl1 $(cd run/v6; ls -d transcripts-a2bgh[0-9]* 2>/dev/null | sed "s/transcripts-//"); do
   [ run/v6/transcripts-$x = $T ] && continue
   [ -e run/v6/transcripts-$x/bend/results.train.nul ] && SEENX="$SEENX seen=run/v6/transcripts-$x/bend/results.train.nul"; done
 say "$N: seen also:$SEENX"
