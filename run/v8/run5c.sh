@@ -27,10 +27,19 @@ DL=$(date -d "${DEADLINE:-2026-11-05 21:00}" +%s)
 # 11-05: the other GitHub repositories' shards (agda2bend tools/gh; ghsched.sh starts them while the emits run)
 ghs() { (cd $A; ls -d corpus-gh[0-9]* 2>/dev/null | sed 's/corpus-//'); }
 units() { local u e; for e in um21 $EMITS $(ghs); do u="$u a2b-$e"; done; echo $u; }
-while active $(units) && [ "$(date +%s)" -lt "$DL" ]; do sleep 120; done
+# (11-05: to the deadline itself, not until no emit runs here: at 02:48 that went on early.  The guard can stop an emit, and delfos's shards are not units here.)
+while [ "$(date +%s)" -lt "$DL" ]; do sleep 120; done
+# delfos's shards: fromd.sh stops them 20 minutes before the deadline and copies what they reached (half an hour more, then without what has not arrived)
+while active ana-fromd && [ "$(date +%s)" -lt "$((DL + 1800))" ]; do sleep 60; done
+[ -e run/v8/fromd.done ] && say "delfos's shards here: $(ghs | tr '\n' ' ')" || say "delfos's shards NOT all copied (run/v8/fromd.log), going on with: $(ghs | tr '\n' ' ')"
 UM=um21; UMX=
-# (not finished: um16 by the user's rule, and what um21 reached on top of it, as one more stream: decl-new, after um16, keeps only the declarations um16 does not have; 11-05)
-active a2b-um21 && { UM=um16; UMX=um21; say "um21 not finished by the deadline: $(cut -f1 $A/corpus-um21/ledger.tsv | sort -u | wc -l) modules"; }
+# um21 has finished only if it reached its last module: a unit that is not active may have been stopped (the guard, a restart).  Not finished: um16 by the user's rule.
+# What um21 reached, on top of um16 as one more stream (decl-new, after um16, keeps only the declarations um16 does not have), goes beyond that rule: only with the user's yes.
+UM21_MODS=2934; um21m=$(cut -f1 $A/corpus-um21/ledger.tsv | sort -u | wc -l)
+if active a2b-um21 || [ "$um21m" -lt "$UM21_MODS" ]; then
+  UM=um16; [ -e run/v8/um21-partial.yes ] && UMX=um21
+  say "um21 not finished by the deadline: $um21m of $UM21_MODS modules; partial stream: ${UMX:-no}"
+fi
 systemctl --user stop $(units) 2>/dev/null
 if [ $UM = um21 ]; then
   lost=$(awk -F'\t' 'NR==FNR { a[$1"\t"$2]=$4; next } (($1"\t"$2) in a) && a[$1"\t"$2]=="checked" && $4!="checked" { n++ } END { print n+0 }' $A/corpus-um16/ledger.tsv $A/corpus-um21/ledger.tsv)
@@ -38,10 +47,9 @@ if [ $UM = um21 ]; then
   defs() { (cd "$1/corpus" && find . -name '*.bend' | sort) | comm -12 - <(cd "$2/corpus" && find . -name '*.bend' | sort) | (cd "$1/corpus" && xargs cat) | grep -c '^def '; }
   d16=$(defs $A/corpus-um16 $A/corpus-um21); d21=$(defs $A/corpus-um21 $A/corpus-um16)
   say "um21 against um16, the modules both reached: $lost lost; corpus copies $d21 defs against $d16"
-  # a loss is the user's call, not a fallback that throws the gain away: start again with UM_FORCE=um21 or um16
+  # the user's rule: nothing lost, and the gain holds; else um16.  UM_FORCE=um21 or um16 overrides it.
+  [ "$lost" = 0 ] && [ "$d21" -gt "$d16" ] || UM=um16
   [ -n "${UM_FORCE:-}" ] && UM=$UM_FORCE
-  [ -n "${UM_FORCE:-}" ] || [ "$lost" = 0 ] || die "um21 lost $lost against um16: the user's call (UM_FORCE)"
-  [ -n "${UM_FORCE:-}" ] || [ "$d21" -gt "$d16" ] || UM=um16
 fi
 say "agda-unimath: $UM"
 while active ana-col9f; do sleep 120; done
@@ -113,6 +121,9 @@ if [ ! -e $M3/bend.done ]; then
   say "dry: Bend $fix sessions plus $var copies and repairs, room $room: share $sh"
   [ "$sh" -ge 100 ] && sh=
   R5C=1 MG=1 FF=1 CH=1 SHARE=$sh run/v5/clean/mix6.sh $M3/bend > $M3/bend.log 2>&1 || die "mix6"
+  # (what killed R5b 48 minutes into plan-windows: mix-corpus refuses an id twice)
+  n=$(LC_ALL=C gawk 'BEGIN{RS="\0"} NR%2==1' $M3/bend | LC_ALL=C sort -S 2G -T /tmp/bx | LC_ALL=C uniq -d | wc -l)
+  say "ids twice: $n"; [ "$n" = 0 ] || die "$n ids twice in $M3/bend"
   touch $M3/bend.done
 fi
 bend=$(count $M3/bend); say "bend: $bend sessions"

@@ -11,4 +11,4 @@ MG=1 FF=1 CH=1 SHARE=87 run/v5/clean/mix6.sh $M2/bend > $M2/bend.log 2>&1 || { e
 n=$(gawk 'BEGIN{RS="\0"} NR%2==1' $M2/bend | sort -S 2G -T /tmp/bx | uniq -d | wc -l)
 echo "ids twice: $n"; [ "$n" = 0 ] || exit 1
 touch $M2/bend.done
-systemd-run --user --unit=ana-run5b --collect --slice=ana-work.slice -p WorkingDirectory=$PWD -p StandardOutput=append:$PWD/run/v6/run5b.log -p StandardError=append:$PWD/run/v6/run5b.log bash run/v6/run5b.sh
+systemd-run --user --unit=ana-run5b --collect --slice=ana-work.slice -p CPUWeight=800 -p WorkingDirectory=$PWD -p StandardOutput=append:$PWD/run/v6/run5b.log -p StandardError=append:$PWD/run/v6/run5b.log bash run/v6/run5b.sh

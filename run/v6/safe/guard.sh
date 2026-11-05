@@ -13,7 +13,8 @@ while :; do
       say "available ${a}G, swap used ${s}G: stopping the nix client"
       systemctl --user stop 'ana-nix-*'
       sleep 15
-    # then one group at a time, what costs least to lose first (11-05): the exports and a build; a GitHub shard (short, and what it reached stays); R5b's fallback mix (hours)
+    # then one group at a time, what costs least to lose first (11-05): the exports and a build; a GitHub shard (short, and what it reached stays); the units; the emits;
+    # last R5b's fallback mix (a stopped mix starts over: hours, and it is the plan that can be rented first)
     elif systemctl --user list-units --type=service --state=active --no-legend --plain 'a2b-exp-*' 'a2b-b[0-9]*' | grep -q .; then
       say "available ${a}G, swap used ${s}G: stopping the exports, a build"
       systemctl --user list-units --type=service --state=active --no-legend --plain 'a2b-exp-*' 'a2b-b[0-9]*' | awk '{print $1}' >> "$LOG"
@@ -23,10 +24,6 @@ while :; do
       say "available ${a}G, swap used ${s}G: stopping the GitHub shards"
       systemctl --user list-units --type=service --state=active --no-legend --plain 'a2b-gh[0-9]*' | awk '{print $1}' >> "$LOG"
       systemctl --user stop 'a2b-gh[0-9]*'
-      sleep 15
-    elif systemctl --user list-units --type=service --state=active --no-legend --plain 'ana-mix2*' | grep -q .; then
-      say "available ${a}G, swap used ${s}G: stopping the fallback mix"
-      systemctl --user stop 'ana-mix2*'
       sleep 15
     # what run5c.sh takes up again by itself, before the emits' hours
     elif systemctl --user list-units --type=service --state=active --no-legend --plain 'ana-mugen6q*' 'ana-src-*' 'ana-ghsrc*' 'ana-a2bseq*' | grep -q .; then
@@ -41,6 +38,12 @@ while :; do
       say "available ${a}G, swap used ${s}G: stopping a2b-std21"; systemctl --user stop a2b-std21; sleep 15
     elif systemctl --user is-active -q a2b-fl1; then
       say "available ${a}G, swap used ${s}G: stopping a2b-fl1"; systemctl --user stop a2b-fl1; sleep 15
+    elif systemctl --user is-active -q a2b-tt1; then
+      say "available ${a}G, swap used ${s}G: stopping a2b-tt1"; systemctl --user stop a2b-tt1; sleep 15
+    elif systemctl --user list-units --type=service --state=active --no-legend --plain 'ana-mix2*' | grep -q .; then
+      say "available ${a}G, swap used ${s}G: stopping the fallback mix"
+      systemctl --user stop 'ana-mix2*'
+      sleep 15
     elif systemctl --user is-active -q ana-work.slice; then
       say "available ${a}G, swap used ${s}G: stopping ana-work.slice"
       systemctl --user list-units --type=service --state=active --no-legend --plain 'ana-*' | awk '{print $1}' >> "$LOG"

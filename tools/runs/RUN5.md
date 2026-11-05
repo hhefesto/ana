@@ -80,9 +80,9 @@ NLR=1e-4 NWARM=300 ./bend-box again out/$C.checkpoint $P/plan-fp100m-b16-windows
 run 1's) and should say about 2,150 ms a step and the plan's hours. `r5.log` should open with
 `loaded ... $C` and `from step` its step, its held-out loss near run 4's 1.715 on the mugen shape.
 
-Nothing has trained on a GPU since Bend moved from the fork to upstream (97ca093, 10-22): the bulk ops' GPU path
-has compiled (clang 19 against CUDA's headers, the device program through NVRTC for sm_120) but never run. If the
-steps are slower than run 4's, look first at `KEEP_WORDS`: a GPU program's host keeps 256 words of freed cells a
+Upstream Bend's GPU path has run once since the move from the fork (97ca093, 10-22): the 11-03 rehearsal, 238 steps
+on Vast 59060747, an RTX 5090 (HANDOFF): gate PASS, 588 gemm with 0 as loops, 2,301 ms a step, 14,229 tok/s against
+run 4's 2,150 ms. If the steps are slower than that, look first at `KEEP_WORDS`: a GPU program's host keeps 256 words of freed cells a
 lane, where the fork's kept 32,768.
 
 ## 5. Leave it (from here)
