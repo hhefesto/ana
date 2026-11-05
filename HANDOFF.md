@@ -4,6 +4,7 @@ This file holds everything needed to continue this work from another machine and
 
 ## Run 5 for mugen: the last Bend streams, the mugen shape, ana in mugen's loop (2026-11-03, UTC-6; in progress)
 
+- **11-05 06:15, the user:** "I'm fine with training on GPL code and any public code that has no license", and "Yes" to the GPL and AGPL repositories, TypeTopology included: tt1 is in EMITS and a2bseq's SEQ (on agda2bend k12), and the shards take the whole raw pool (agda2bend's HANDOFF, tools/gh). "restart telomare until 10 am": telomare stays paused till 10:00, then 8 CPUs.
 - **11-05, 05:20-06:10:**
   - **The other GitHub repositories' Agda go through agda2bend (agda2bend's HANDOFF, tools/gh):** shards corpus-ghK, streams a2bghK. run5c.sh takes them at the deadline, 4 at a time; a2bsrc.sh takes each repository's own modules, ids a2bghK:mods/PATH. Permissive licences only.
   - **a2bseq.sh takes the emits as they end,** not in order: std21's hours held back pre23, at1, at2.

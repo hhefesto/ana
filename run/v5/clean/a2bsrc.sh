@@ -40,7 +40,7 @@ case $K in
   um16)    N=a2bum16;   C=corpus-um16 ;;
   um19)    N=a2bum19;   C=corpus-um19 ;;
   # 11-05's, with the dropped definitions as assumptions (A2B_AUTOASSUME), wide lines broken (A2B_CORPUS_WRAP)
-  std21|plfa22|um21|aa21|hs21|pre21|pm21|hs23|pre23|at1|rd1|at2|fl1) N=a2b$K; C=corpus-$K ;;
+  std21|plfa22|um21|aa21|hs21|pre21|pm21|hs23|pre23|at1|rd1|at2|fl1|tt1) N=a2b$K; C=corpus-$K ;;
   # 11-05's shards of other GitHub repositories (agda2bend tools/gh): each repository's own modules only, under the class a2bghK,
   # since two shards have modules of the same name
   gh[0-9]*) N=a2b$K; C=corpus-$K; PFX=a2b$K:mods; OWNL=$A/run/a2b/ev-$K/own.txt ;;

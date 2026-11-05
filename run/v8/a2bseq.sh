@@ -9,7 +9,7 @@ DL=$(( $(date -d "${DEADLINE:-2026-11-05 21:00}" +%s) - 600 ))
 A=/home/hhefesto/src/agda2bend/run/a2b
 # (11-05: whichever has ended, not in order: the hours std21 runs need not hold back those already ended.  decl-new's result
 # is the same set of declarations either way, each in the stream that came first.)
-SEQ=${SEQ:-std21 plfa22 aa21 pm21 hs23 pre23 at1 rd1 at2 fl1}
+SEQ=${SEQ:-std21 plfa22 aa21 pm21 hs23 pre23 at1 rd1 at2 fl1 tt1}
 while :; do
   left=0; took=
   for e in $SEQ; do

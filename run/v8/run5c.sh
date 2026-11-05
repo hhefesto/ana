@@ -22,7 +22,7 @@ A=/home/hhefesto/src/agda2bend/run/a2b
 # the gate drops assumed from the module on (A2B_AUTOASSUME).  At the deadline an emit still going is stopped; a partial one
 # is still its modules.  The other libraries' emits (11-05, the same binary; the user: "as most good bend code as you can"):
 # the standard library with agda-categories and the rest of agdaPackages, PLFA, agda-algebras, agda2hs-base, agda-prelude, plutus-metatheory, Agda's own test suite, the standard library's README modules (hs23, pre23 add to hs21, pre21 what their fixes freed).
-EMITS="std21 plfa22 aa21 hs21 pre21 pm21 hs23 pre23 at1 rd1 at2 fl1"
+EMITS="std21 plfa22 aa21 hs21 pre21 pm21 hs23 pre23 at1 rd1 at2 fl1 tt1"  # (tt1: TypeTopology, GPL-3.0; the user, 11-05: "Yes" to the GPL and AGPL repositories, and any public code with no licence)
 DL=$(date -d "${DEADLINE:-2026-11-05 21:00}" +%s)
 # 11-05: the other GitHub repositories' shards (agda2bend tools/gh; ghsched.sh starts them while the emits run)
 ghs() { (cd $A; ls -d corpus-gh[0-9]* 2>/dev/null | sed 's/corpus-//'); }
