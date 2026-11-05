@@ -4,7 +4,7 @@
 # repair-mix ratio=1 cap=1: a unit with a first-time session needs no copy of it for its one repair, and a repair whose
 # unit has none is dropped (derive=none).  The user's 4:1 then holds over each language, not over each unit:
 # the share is set so that repairs (with the free ones: ana's own) are at most a quarter of the first-time sessions.
-# Nix has no first-time shape and no copies: its mix stays.  The filler is R5b's, read K times as the windows need
+# Nix has no first-time shape and no copies: its mix stays.  The filler is R5c's (col9 and the emits' files in), read K times as the windows need
 # (K from the sessions, as in every plan); it pads a window's end, it is not a session.
 # When R5c's plan has ended (they use the same streams, and two plan-windows at once would pass the memory).
 cd /home/hhefesto/src/ana || exit 1
@@ -53,10 +53,10 @@ bend=$(count $N/bend); oth=0
 for l in haskell agda lean nix; do oth=$((oth + $(count $N/$l))); done
 say "sessions: bend $bend, the other four $oth"
 
-[ -e run/v6/R5src/bend/files.done ] || die "no filler (run/v6/R5src/bend/files.done)"
+[ -e run/v8/R5csrc/bend/files.done ] || die "no filler (run/v8/R5csrc/bend/files.done)"
 S=run/v8/R5nsrc; mkdir -p $S/bend
-docs=$(( (bend + oth) * 55 / 100 / 1000 )); K=$(( docs * 1000 / 43000 + 1 ))
-ln -sfn $PWD/run/v6/R5src/bend/files-hi.nul $S/bend/files-hi.nul; : > $S/bend/files-lo.nul; touch $S/bend/files.done
+docs=$(( (bend + oth) * 55 / 100 / 1000 )); K=$(( docs * 1000 / ($(tr -cd '\0' < run/v8/R5csrc/bend/files-hi.nul | wc -c) / 2) + 1 ))
+ln -sfn $PWD/run/v8/R5csrc/bend/files-hi.nul $S/bend/files-hi.nul; : > $S/bend/files-lo.nul; touch $S/bend/files.done
 ln -sfn $PWD/$N/bend $S/bend/transcripts.train.nul
 ln -sfn $PWD/run/v2/results/bend.holdout.nul $S/bend/results.holdout.nul
 for l in haskell agda lean nix; do mkdir -p $S/$l

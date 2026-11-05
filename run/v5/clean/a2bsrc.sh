@@ -39,6 +39,8 @@ case $K in
   std16)   N=a2bstd16;  C=corpus-std16 ;;
   um16)    N=a2bum16;   C=corpus-um16 ;;
   um19)    N=a2bum19;   C=corpus-um19 ;;
+  # 11-05's, with the dropped definitions as assumptions (A2B_AUTOASSUME), wide lines broken (A2B_CORPUS_WRAP)
+  std21|plfa22|um21|aa21|hs21|pre21) N=a2b$K; C=corpus-$K ;;
   *) echo "a2bsrc.sh: $K: plfa, aa, hs, prelude or all"; exit 2 ;;
 esac
 C=$A/run/a2b/$C; T=run/v6/transcripts-$N; SRC=run/v5/clean/src/$N
@@ -60,7 +62,7 @@ if [ ! -e $T/bend/units.all.nul ]; then
   say "$N units"; env $E CHUNK=25 UNIT_JOBS=2 $D transcripts units bend > $T/units.log 2>&1 || { say "units FAILED"; exit 1; }
   mv $T/bend/units.nul $T/bend/units.all.nul
 fi
-SEENX=; for x in a2bm6 a2bm7 a2bm8 a2bm9 a2bm6t a2bm7t a2bplfa a2bplfa2 a2bplfa3 a2bplfa5 a2baa a2baa2 a2baa4 a2bhs2 a2bpre2 a2bum a2bum12 a2bplfa19 a2bstd16 a2bum16 a2bum19; do
+SEENX=; for x in a2bm6 a2bm7 a2bm8 a2bm9 a2bm6t a2bm7t a2bplfa a2bplfa2 a2bplfa3 a2bplfa5 a2baa a2baa2 a2baa4 a2bhs2 a2bpre2 a2bum a2bum12 a2bplfa19 a2bstd16 a2bum16 a2bum19 a2bstd21 a2bplfa22 a2bum21 a2baa21 a2bhs21 a2bpre21; do
   [ run/v6/transcripts-$x = $T ] && continue
   [ -e run/v6/transcripts-$x/bend/results.train.nul ] && SEENX="$SEENX seen=run/v6/transcripts-$x/bend/results.train.nul"; done
 say "$N: seen also:$SEENX"
