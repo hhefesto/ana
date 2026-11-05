@@ -119,6 +119,11 @@ add in run/v8/transcripts-own9/bend/transcripts.train.nul
 add in run/v6/transcripts-a2bum12/bend/transcripts.train.nul
 # the 5747eec emits a2bv.sh never took (PLFA, agda-algebras, agda2hs-base, agda-prelude), against their src/ trees (a2bsrc.sh, 11-03)
 for s in a2bplfa5 a2baa4 a2bhs2 a2bpre2; do add in run/v6/transcripts-$s/bend/transcripts.train.nul; done
+# R5C=1 (run/v8/run5c.sh, 11-04): the last plan's streams, kept out of R5b's mix: 11-04's emits (a2bsrc.sh) and run 9's collection
+if [ "${R5C:-0}" = 1 ]; then
+  for s in a2bplfa16 a2bstd15 a2bum16; do add in run/v6/transcripts-$s/bend/transcripts.train.nul; done
+  add in run/v8/transcripts-col9/bend/transcripts.train.nul
+fi
 # mutate's repairs (deduced from a correct unit).  MG=1 (11-03): left out.  They are format 2's text
 # (mutate has no mugen render), and the mugen renders hold every check-mutant, 2.4 repairs a unit on
 # own5, already past what the budget takes.

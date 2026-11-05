@@ -16,7 +16,9 @@ waitfor ana-chain1 ana-chain2 ana-chain3 ana-chain4 ana-chain5 ana-chain6 ana-ch
 [ -e run/v6/mugen/chain/night/DONE ] || die "night not DONE"
 grep -h 'FAILED' run/v6/mugen/chain/w*.log && die "a chain stream failed"
 oth=0; for l in haskell agda lean nix; do [ -s $M/$l ] || die "no $M/$l"; oth=$((oth + $(count $M/$l))); done
-if [ ! -s $M2/bend ]; then
+# 11-04: the mix does not need the filler, so `run5b.sh mix` (unit ana-mix2) runs it beside the filler; bend.done says it ended well.
+[ "${1:-}" = mix ] || waitfor ana-mix2
+if [ ! -e $M2/bend.done ]; then
   MG=1 FF=1 CH=1 run/v5/clean/mix6.sh $M2/dry dry > $M2/dry.log 2>&1 || die "dry mix"
   fix=$(awk '$1 ~ /^out-(first|other|free-repair|derived)$/ {s+=$2} END {print s}' $M2/dry.stats)
   var=$(awk '$1 ~ /^out-(copy|repair)$/ {s+=$2} END {print s}' $M2/dry.stats)
@@ -25,8 +27,10 @@ if [ ! -s $M2/bend ]; then
   say "dry: Bend $fix sessions plus $var copies and repairs, room $room: share $sh"
   [ "$sh" -ge 100 ] && sh=
   MG=1 FF=1 CH=1 SHARE=$sh run/v5/clean/mix6.sh $M2/bend > $M2/bend.log 2>&1 || die "mix6"
+  touch $M2/bend.done
 fi
 bend=$(count $M2/bend); say "bend: $bend sessions"
+[ "${1:-}" = mix ] && { say "mix: end"; exit 0; }
 # R5's plan first (its filler is ours; two plan-windows at once would pass the memory)
 waitfor ana-r5own9
 [ -e run/v6/R5src/bend/files.done ] || die "no filler (run/v6/R5src/bend/files.done)"
