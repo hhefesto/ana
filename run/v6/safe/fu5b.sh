@@ -14,4 +14,5 @@ $CV keyed-order nul "run 5 filler" $S/bend.tmp/all.nul $S/bend/files-hi.nul >> $
 rm -rf $S/bend.tmp; : > $S/bend/files-lo.nul; touch $S/bend/files.done
 say "filler done"
 while systemctl --user is-active -q ana-chain7b; do sleep 60; done
-exec bash run/v6/run5b.sh
+# (the filler takes 120 MB and hours, so it stays out of the slice the guard stops; run5b, 14 GB, goes in it)
+exec systemd-run --user --unit=ana-run5b --slice=ana-work.slice --same-dir --collect -p StandardOutput=append:$PWD/run/v6/run5b.log -p StandardError=append:$PWD/run/v6/run5b.log bash run/v6/run5b.sh

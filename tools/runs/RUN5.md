@@ -4,24 +4,32 @@ The goal (the user, 11-02): "close all the bend generation efforts (bring in wha
 then work on getting me to a state where the only thing missing is to rent a gpu box to do training that'll do
 well with mugen."
 
-- **Start:** run 4's `run/v4/run4/out/c2-step72491.checkpoint`, hot start (`bend-box again`).
-- **Data:** `run/v6/R5` (`tools/runs/run5-build.txt`): every language's sessions in the mugen shape
-  (`docs/MUGEN-SHAPE.md`), the user's 4:1 rule, Bend at most 4 repairs a unit.
-  `run/v6/R5b` (`run/v6/run5b.sh`, 11-04) is the same with the chains and ana's own mistakes as multi-edit sessions
-  (`docs/MUGEN-SHAPE.md` "Chains"): use it once `tail run/v6/run5b.log` ends `end: run/v6/R5b is ready`, writing R5b for R5
-  below. The trainer must be built from c847d84 or later, whose reader weighs a chain's wrong edits 0; on R5 it changes no mask.
+- **Start:** the best of three checkpoints, hot start (`bend-box again`): `c2-step72491` (`run/v4/run4/out/`, what the
+  plan assumed), `s2-step56725` (`run/v3/run3/out/`), `c2-step70000` (on Drive, gdrive:olimpo-archive; a copy on delfos,
+  `~/ana-help/best/ckpt`). The measures: `~/ana-help/best/out/bits.tsv` and the behaviour runs there (HANDOFF.md). `C` below is its name.
+- **Data, three plans (the user chooses on Friday; `P` below is its directory, `E` its env file):**
+  | Plan | `P` | `E` | Built by, ready when its log ends `end: ... is ready` | What it is |
+  |---|---|---|---|---|
+  | R5b | `run/v6/R5b` | `bend/gpu/r5b-box.env` | `run/v6/run5b.sh`, `run/v6/run5b.log` | every language in the mugen shape (`docs/MUGEN-SHAPE.md`) with the chains and ana's own mistakes, the user's 4:1 unit by unit, Bend at most 4 repairs a unit |
+  | R5c | `run/v8/R5c` | `bend/gpu/r5c-box.env` | `run/v8/run5c.sh`, `run/v8/run5c.log` | R5b plus col9 and 11-04's agda2bend emits |
+  | R5n | `run/v8/R5n` | `bend/gpu/r5n-box.env` | `run/v8/run5n.sh`, `run/v8/run5n.log` | R5c's streams with **no copies**: each session once, one repair a unit, 4:1 over each language rather than each unit; far fewer steps, so a shorter and cheaper rental |
+
+  The trainer must be built from c847d84 or later, whose reader weighs a chain's wrong edits 0.
 - **Box:** 2 days of an RTX 5090 (the user, 11-03). Run 4's box took 2.15 s a step and the 11-03 rehearsal's 2.30 (14,230 tok/s), so 46 h is
-  about 72,000 steps. The plan is sized to fit.
+  about 72,000 steps. R5b and R5c are sized to fit; R5n takes what its steps take.
 - **The number to beat:** `agent-mugen-eval` on the 176 held-out tasks: run 4's checkpoint solves 0.
 
 ## Before renting
 
-`tail run/v6/run5-final.log` must end `end: run/v6/R5 is ready`. Then:
+Choose the plan and the checkpoint; its log must end `end: ... is ready`. Then:
 
 ```sh
+P=run/v8/R5c E=bend/gpu/r5c-box.env C=c2-step72491 CF=run/v4/run4/out/$C.checkpoint     # for example
 nix build --max-jobs 1 .#bend-ops -o run/gcroot-bend-ops
-head -1 run/v6/R5/plan-fp100m-b16-windows.tsv | cut -d' ' -f3     # the plan's steps
+head -1 $P/plan-fp100m-b16-windows.tsv | cut -d' ' -f3     # the plan's steps
 ```
+
+c2-step70000 is not on this machine: `scp 192.168.3.6:ana-help/best/ckpt/c2-step70000.checkpoint run/v4/run4/out/`.
 
 ## 1. Credit
 
@@ -51,9 +59,9 @@ ssh -p PORT root@IP 'apt-get update -qq && apt-get install -y -qq rsync wget lsb
 
 ```sh
 export PATH=$PWD/run/gcroot-bend-ops/bin:$PATH
-BOX_ENV=bend/gpu/v5-box.env bend-ops stage box root@IP PORT
-rsync -a -e 'ssh -p PORT' --partial run/v4/run4/out/c2-step72491.checkpoint root@IP:ana/out/
-mkdir -p run/v6/run5/out && ln run/v4/run4/out/c2-step72491.checkpoint run/v6/run5/out/     # the chain holds every checkpoint on the box to a copy here, and without this one never destroys it (seen 11-03); -a so that it does not pull it back
+BOX_ENV=$E bend-ops stage box root@IP PORT
+rsync -a -e 'ssh -p PORT' --partial $CF root@IP:ana/out/
+mkdir -p run/v6/run5/out && ln $CF run/v6/run5/out/     # the chain holds every checkpoint on the box to a copy here, and without this one never destroys it (seen 11-03); -a so that it does not pull it back
 ssh -p PORT root@IP 'cd ana && cp run/eval/v2-mugen.corpus run/eval/transcript-next.corpus'
 ```
 
@@ -63,13 +71,14 @@ The last line makes the chain's second score (eval-next.log) the mugen shape on 
 
 ```sh
 cd ana && ./bend-box gate
-PLAN=run/v6/R5/plan-fp100m-b16-windows.tsv RUN=run/v6/R5 ./bend-box time
-NLR=1e-4 NWARM=300 ./bend-box again out/c2-step72491.checkpoint run/v6/R5/plan-fp100m-b16-windows.tsv run/v6/R5 fp100m r5
+P=run/v8/R5c C=c2-step72491     # as you chose above; the box has neither set
+PLAN=$P/plan-fp100m-b16-windows.tsv RUN=$P ./bend-box time
+NLR=1e-4 NWARM=300 ./bend-box again out/$C.checkpoint $P/plan-fp100m-b16-windows.tsv $P fp100m r5
 ```
 
 `gate` must say PASS, with `bend profile: gemm N calls (0 as loops)`. `time` needs PLAN and RUN (its defaults are
 run 1's) and should say about 2,150 ms a step and the plan's hours. `r5.log` should open with
-`loaded ... c2-step72491` and `from step 72491`, its held-out loss near run 4's 1.715 on the mugen shape.
+`loaded ... $C` and `from step` its step, its held-out loss near run 4's 1.715 on the mugen shape.
 
 Nothing has trained on a GPU since Bend moved from the fork to upstream (97ca093, 10-22): the bulk ops' GPU path
 has compiled (clang 19 against CUDA's headers, the device program through NVRTC for sm_120) but never run. If the

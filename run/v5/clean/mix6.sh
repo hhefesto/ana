@@ -170,4 +170,5 @@ add held run/v5/leak/port/units.decl.nul.dropped
 mkdir -p "$(dirname "$OUT")"
 echo "mix6: ${#args[@]} streams" >&2
 # SHARE (11-03): repair-mix's share=, the percent of units that keep repairs (what the run's hours take)
-exec $CV repair-mix "$OUT" "${args[@]}" derive=whole ratio=4 cap=4 ${SHARE:+share=$SHARE} ${DRY:+dry}
+# RATIO, CAP, DERIVE (11-04, run/v8/run5n.sh): ratio=1 cap=1 derive=none is the same streams with no copies
+exec $CV repair-mix "$OUT" "${args[@]}" derive=${DERIVE:-whole} ratio=${RATIO:-4} cap=${CAP:-4} ${SHARE:+share=$SHARE} ${DRY:+dry}
