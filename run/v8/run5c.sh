@@ -13,7 +13,7 @@ active() { local u; for u in "$@"; do systemctl --user is-active -q $u && return
 waitfor() { while active "$@"; do sleep 120; done; }
 M=run/v6/mix; M3=run/v8/mix3; mkdir -p $M3
 count() { tr -cd '\0' < "$1" | wc -c | awk '{print int($1/2)}'; }
-worker() { systemctl --user reset-failed $1 2>/dev/null; systemd-run --user --unit=$1 --slice=ana-work.slice -p WorkingDirectory=$PWD -p MemoryMax=6G -p MemorySwapMax=1G -p OOMPolicy=continue -p StandardOutput=append:$PWD/run/v8/$1.log -p StandardError=append:$PWD/run/v8/$1.log /bin/sh -c "exec $2"; }
+worker() { systemctl --user reset-failed $1 2>/dev/null; systemd-run --user --unit=$1 --slice=ana-work.slice -p WorkingDirectory=$PWD -p MemoryMax=12G -p MemorySwapMax=1G -p OOMPolicy=continue -p StandardOutput=append:$PWD/run/v8/$1.log -p StandardError=append:$PWD/run/v8/$1.log /bin/sh -c "exec $2"; }
 
 say "waiting for the emits and col9"
 A=/home/hhefesto/src/agda2bend/run/a2b
@@ -57,7 +57,7 @@ grep -q 'col9 DONE' run/v8/col9-finish.log || die "col9 is not DONE (run/v8/col9
 
 say "units"
 # (run/v8/a2bseq.sh has taken the smaller emits as they ended)
-waitfor ana-a2bseq
+waitfor ana-a2bseq ana-ghsrc
 for k in $EMITS; do
   case $k in gh*) continue ;; esac
   n=a2b$k; grep -q "$n DONE" run/v8/a2bsrc15.log 2>/dev/null && continue

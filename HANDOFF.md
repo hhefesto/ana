@@ -4,6 +4,11 @@ This file holds everything needed to continue this work from another machine and
 
 ## Run 5 for mugen: the last Bend streams, the mugen shape, ana in mugen's loop (2026-11-03, UTC-6; in progress)
 
+- **11-05 07:25-07:45, what would have stopped R5c at the deadline:**
+  - **col9's mugen render was killed at 06:41 by the worker's own MemoryMax=6G** (run/v5/clean/mugen6q.sh, 880 MB of results, 6 G at 35,513 presentations), so `for s in $A2BS col9 ... DONE || die` would have failed the night. run5c.sh's workers have 12G now; ana-mugen6q1 restarted at 12G at 07:25, col9 first.
+  - **run/v8/ghsrc.sh (unit ana-ghsrc, N=2):** a2bsrc.sh for each GitHub shard as it ends, so the deadline does not start with 30 shards' decl-new at 20 minutes each; run5c.sh waits for it and runs what is left.
+  - **The guard stops one group at a time now:** exports and builds; GitHub shards; R5b's mix; units and the mugen shape; only then the slice (it stopped exports, shards and the mix in one go, for one number).
+  - **BENDRTS="--threads 1" on an emit (measured, 15 minutes, same 26 modules of agda-unimath):** 10% less CPU, about 10% slower than the default of 16 threads; --threads 3 no different from 16. Not worth restarting anything for. 54% of a gate is term_drop and span_fade (matching on shared data), and a module with 108 failed checks prints its whole file 109 times.
 - **um21 will not finish by 21:00 (07:15):** 384 of 2,934 modules, 1.8-2.5 a minute, a module's gate is mostly agda2bend's own work, and one core. By the user's rule run5c.sh takes um16; what um21 reached goes in after it as one more stream (UMX), decl-new keeping only what um16 lacks. Say so if that is not wanted.
 - **11-05 06:15, the user:** "I'm fine with training on GPL code and any public code that has no license", and "Yes" to the GPL and AGPL repositories, TypeTopology included: tt1 is in EMITS and a2bseq's SEQ (on agda2bend k12), and the shards take the whole raw pool (agda2bend's HANDOFF, tools/gh). "restart telomare until 10 am": telomare stays paused till 10:00, then 8 CPUs.
 - **11-05, 05:20-06:10:**
