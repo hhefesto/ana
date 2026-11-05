@@ -21,8 +21,8 @@ A=/home/hhefesto/src/agda2bend/run/a2b
 # in the corpus copy", else corpus-um16 as far as it got.  um21 is that run: um19's 107 assumed lemmas, and every definition
 # the gate drops assumed from the module on (A2B_AUTOASSUME).  At the deadline an emit still going is stopped; a partial one
 # is still its modules.  The other libraries' emits (11-05, the same binary; the user: "as most good bend code as you can"):
-# the standard library with agda-categories and the rest of agdaPackages, PLFA, agda-algebras, agda2hs-base, agda-prelude.
-EMITS="std21 plfa22 aa21 hs21 pre21"
+# the standard library with agda-categories and the rest of agdaPackages, PLFA, agda-algebras, agda2hs-base, agda-prelude, plutus-metatheory.
+EMITS="std21 plfa22 aa21 hs21 pre21 pm21"
 DL=$(date -d "${DEADLINE:-2026-11-05 21:00}" +%s)
 units() { local u e; for e in um21 $EMITS; do u="$u a2b-$e"; done; echo $u; }
 while active $(units) && [ "$(date +%s)" -lt "$DL" ]; do sleep 120; done
