@@ -57,7 +57,9 @@ grep -q 'col9 DONE' run/v8/col9-finish.log || die "col9 is not DONE (run/v8/col9
 
 say "units"
 # (run/v8/a2bseq.sh has taken the smaller emits as they ended)
-waitfor ana-a2bseq ana-ghsrc
+waitfor ana-a2bseq ana-ghsrc ana-src-um16 ana-src-gh1
+# (11-05: um16 went through a2bsrc.sh early, its unit ana-src-um16, for the hour it saves here.  If um21 did win, decl-new must not take um16 for seen.)
+if [ $UM = um21 ] && [ -e run/v6/transcripts-a2bum16 ]; then mv run/v6/transcripts-a2bum16 run/v6/notused-a2bum16; sed -i "/a2bum16 DONE/d" run/v8/a2bsrc15.log; fi
 for k in $EMITS; do
   case $k in gh*) continue ;; esac
   n=a2b$k; grep -q "$n DONE" run/v8/a2bsrc15.log 2>/dev/null && continue
@@ -87,12 +89,17 @@ waitfor ana-mugen6q1 ana-mugen6q2
 worker ana-mugen6q1 run/v5/clean/mugen6q.sh; worker ana-mugen6q2 run/v5/clean/mugen6q.sh
 waitfor ana-mugen6q1 ana-mugen6q2
 run/v5/clean/mugen6q.sh move || die "move"
-for s in $A2BS col9; do [ -e run/v6/mugen/$s/DONE ] || die "run/v6/mugen/$s not DONE"; done
+# (a shard with nothing to render has no stream; it is left out, as a shard whose units failed)
+for s in $A2BS col9; do [ -e run/v6/mugen/$s/DONE ] && continue
+  case $s in a2bgh*) say "$s: no mugen stream, left out"; A2BS=${A2BS/ $s/}; echo "$A2BS" > run/v8/r5c.a2b ;; *) die "run/v6/mugen/$s not DONE" ;; esac
+done
 
 say "the chains"
 worker ana-chain1 run/v5/clean/chain6.sh; worker ana-chain2 run/v5/clean/chain6.sh
 waitfor ana-chain1 ana-chain2
-for s in $A2BS col9; do [ -e run/v6/mugen/chain/$s/DONE ] || die "run/v6/mugen/chain/$s not DONE"; done
+for s in $A2BS col9; do [ -e run/v6/mugen/chain/$s/DONE ] && continue
+  case $s in a2bgh*) say "$s: no chains, left out"; A2BS=${A2BS/ $s/}; echo "$A2BS" > run/v8/r5c.a2b ;; *) die "run/v6/mugen/chain/$s not DONE" ;; esac
+done
 
 waitfor ana-mix2
 export CV=$PWD/run/v6/mugen/chain/gcroot-bend-corpus-v2/bin/bend-corpus-v2
