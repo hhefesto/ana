@@ -35,8 +35,8 @@ case $K in
   prelude) N=a2bpre2;  C=corpus5v ;;
   # 11-04's emits, through tools/checkd, for the last plan (run/v8/run5c.sh): PLFA's cone, the standard library and
   # agda-categories, agda-unimath with the assumptions as inputs
-  plfa16)  N=a2bplfa16; C=corpus-plfa16 ;;
-  std15)   N=a2bstd15;  C=corpus-std15 ;;
+  plfa17)  N=a2bplfa17; C=corpus-plfa17 ;;
+  std16)   N=a2bstd16;  C=corpus-std16 ;;
   um16)    N=a2bum16;   C=corpus-um16 ;;
   *) echo "a2bsrc.sh: $K: plfa, aa, hs, prelude or all"; exit 2 ;;
 esac
@@ -59,7 +59,7 @@ if [ ! -e $T/bend/units.all.nul ]; then
   say "$N units"; env $E CHUNK=25 UNIT_JOBS=2 $D transcripts units bend > $T/units.log 2>&1 || { say "units FAILED"; exit 1; }
   mv $T/bend/units.nul $T/bend/units.all.nul
 fi
-SEENX=; for x in a2bm6 a2bm7 a2bm8 a2bm9 a2bm6t a2bm7t a2bplfa a2bplfa2 a2bplfa3 a2bplfa5 a2baa a2baa2 a2baa4 a2bhs2 a2bpre2 a2bum a2bum12 a2bplfa16 a2bstd15 a2bum16; do
+SEENX=; for x in a2bm6 a2bm7 a2bm8 a2bm9 a2bm6t a2bm7t a2bplfa a2bplfa2 a2bplfa3 a2bplfa5 a2baa a2baa2 a2baa4 a2bhs2 a2bpre2 a2bum a2bum12 a2bplfa17 a2bstd16 a2bum16; do
   [ run/v6/transcripts-$x = $T ] && continue
   [ -e run/v6/transcripts-$x/bend/results.train.nul ] && SEENX="$SEENX seen=run/v6/transcripts-$x/bend/results.train.nul"; done
 say "$N: seen also:$SEENX"

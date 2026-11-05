@@ -16,16 +16,16 @@ count() { tr -cd '\0' < "$1" | wc -c | awk '{print int($1/2)}'; }
 worker() { systemctl --user reset-failed $1 2>/dev/null; systemd-run --user --unit=$1 --slice=ana-work.slice -p WorkingDirectory=$PWD -p MemoryMax=6G -p MemorySwapMax=1G -p OOMPolicy=continue -p StandardOutput=append:$PWD/run/v8/$1.log -p StandardError=append:$PWD/run/v8/$1.log /bin/sh -c "exec $2"; }
 
 say "waiting for the emits and col9"
-waitfor a2b-um16 a2b-std15 a2b-plfa16 ana-col9f
+waitfor a2b-um16 a2b-std16 a2b-plfa17 ana-col9f
 A=/home/hhefesto/src/agda2bend/run/a2b
-for c in corpus-um16 corpus-std15 corpus-plfa16; do
+for c in corpus-um16 corpus-std16 corpus-plfa17; do
   [ -s $A/$c/ledger.tsv ] || die "no $A/$c/ledger.tsv"
   say "$c: $(cut -f1 $A/$c/ledger.tsv | sort -u | wc -l) modules, $(grep -c $'\tchecked\t' $A/$c/ledger.tsv) checked"
 done
 grep -q 'col9 DONE' run/v8/col9-finish.log || die "col9 is not DONE (run/v8/col9-finish.log)"
 
 say "units"
-for k in plfa16 std15 um16; do
+for k in plfa17 std16 um16; do
   n=a2b$k; grep -q "$n DONE" run/v8/a2bsrc15.log 2>/dev/null && continue
   CHECK_PROCS=${CHECK_PROCS:-5} run/v5/clean/a2bsrc.sh $k >> run/v8/a2bsrc15.log 2>&1 || die "a2bsrc.sh $k (run/v8/a2bsrc15.log)"
 done
@@ -35,12 +35,12 @@ waitfor ana-mugen6q1 ana-mugen6q2
 worker ana-mugen6q1 run/v5/clean/mugen6q.sh; worker ana-mugen6q2 run/v5/clean/mugen6q.sh
 waitfor ana-mugen6q1 ana-mugen6q2
 run/v5/clean/mugen6q.sh move || die "move"
-for s in a2bplfa16 a2bstd15 a2bum16 col9; do [ -e run/v6/mugen/$s/DONE ] || die "run/v6/mugen/$s not DONE"; done
+for s in a2bplfa17 a2bstd16 a2bum16 col9; do [ -e run/v6/mugen/$s/DONE ] || die "run/v6/mugen/$s not DONE"; done
 
 say "the chains"
 worker ana-chain1 run/v5/clean/chain6.sh; worker ana-chain2 run/v5/clean/chain6.sh
 waitfor ana-chain1 ana-chain2
-for s in a2bplfa16 a2bstd15 a2bum16 col9; do [ -e run/v6/mugen/chain/$s/DONE ] || die "run/v6/mugen/chain/$s not DONE"; done
+for s in a2bplfa17 a2bstd16 a2bum16 col9; do [ -e run/v6/mugen/chain/$s/DONE ] || die "run/v6/mugen/chain/$s not DONE"; done
 
 waitfor ana-mix2
 export CV=$PWD/run/v6/mugen/chain/gcroot-bend-corpus-v2/bin/bend-corpus-v2
