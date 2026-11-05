@@ -28,8 +28,9 @@ DL=$(date -d "${DEADLINE:-2026-11-05 21:00}" +%s)
 ghs() { (cd $A; ls -d corpus-gh[0-9]* 2>/dev/null | sed 's/corpus-//'); }
 units() { local u e; for e in um21 $EMITS $(ghs); do u="$u a2b-$e"; done; echo $u; }
 while active $(units) && [ "$(date +%s)" -lt "$DL" ]; do sleep 120; done
-UM=um21
-active a2b-um21 && { UM=um16; say "um21 not finished by the deadline: $(cut -f1 $A/corpus-um21/ledger.tsv | sort -u | wc -l) modules"; }
+UM=um21; UMX=
+# (not finished: um16 by the user's rule, and what um21 reached on top of it, as one more stream: decl-new, after um16, keeps only the declarations um16 does not have; 11-05)
+active a2b-um21 && { UM=um16; UMX=um21; say "um21 not finished by the deadline: $(cut -f1 $A/corpus-um21/ledger.tsv | sort -u | wc -l) modules"; }
 systemctl --user stop $(units) 2>/dev/null
 if [ $UM = um21 ]; then
   lost=$(awk -F'\t' 'NR==FNR { a[$1"\t"$2]=$4; next } (($1"\t"$2) in a) && a[$1"\t"$2]=="checked" && $4!="checked" { n++ } END { print n+0 }' $A/corpus-um16/ledger.tsv $A/corpus-um21/ledger.tsv)
@@ -45,7 +46,7 @@ fi
 say "agda-unimath: $UM"
 while active ana-col9f; do sleep 120; done
 # (formal-ledger, the rest of Agda's repository: only if they were emitted)
-E2=; for e in $EMITS $(ghs); do [ -s $A/corpus-$e/ledger.tsv ] && E2="$E2 $e"; done; EMITS="$E2 $UM"
+E2=; for e in $EMITS $(ghs); do [ -s $A/corpus-$e/ledger.tsv ] && E2="$E2 $e"; done; EMITS="$E2 $UM $UMX"
 A2BS="a2bplfa19"; for e in $EMITS; do A2BS="$A2BS a2b$e"; done
 echo "$A2BS" > run/v8/r5c.a2b
 for e in $EMITS; do c=corpus-$e
