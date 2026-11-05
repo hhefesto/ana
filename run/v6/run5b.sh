@@ -48,6 +48,8 @@ done
 per() { awk -v n=$1 -v t=$((bend + oth)) 'BEGIN {p=int(200*n/t+0.5); if (p<1) p=1; print p}'; }
 specs="bend:$(per $bend)"; for l in haskell lean agda nix; do specs="$specs $l:$(per $(count $M/$l))"; done
 say "plan-windows $specs"
-env FILLER_COPIES=bend:$K OUT=$S SHARD=8000 JOBS=${PWJOBS:-4} TOKENIZER=weights/code32k.bpe BEND_PREPARE=run/v6/gcroot-bend-prepare/bin/bend-prepare BEND_WINDOWS=run/v6/gcroot-bend-windows/bin/bend-windows BEND_PLAN_SEGMENT=run/v6/gcroot-bend-plan-segment/bin/bend-plan-segment BEND_MIX=run/v6/gcroot-bend-mix/bin/bend-mix run/v6/gcroot-bend-plan-windows/bin/bend-plan-windows run/v6/R5b fp100m 16 $specs > run/v6/R5b.log 2>&1 || die "plan-windows (run/v6/R5b.log)"
+# (11-05: as many shards at once as leave the guard's 8 G, at 1.8 G a job: 325 shards are 2 h at 8 and 4 at 4)
+pwj() { awk '/^MemAvailable/ {j=int(($2/1048576-8)/1.8); print (j<4?4:(j>8?8:j))}' /proc/meminfo; }
+env FILLER_COPIES=bend:$K OUT=$S SHARD=8000 JOBS=${PWJOBS:-$(pwj)} TOKENIZER=weights/code32k.bpe BEND_PREPARE=run/v6/gcroot-bend-prepare/bin/bend-prepare BEND_WINDOWS=run/v6/gcroot-bend-windows/bin/bend-windows BEND_PLAN_SEGMENT=run/v6/gcroot-bend-plan-segment/bin/bend-plan-segment BEND_MIX=run/v6/gcroot-bend-mix/bin/bend-mix run/v6/gcroot-bend-plan-windows/bin/bend-plan-windows run/v6/R5b fp100m 16 $specs > run/v6/R5b.log 2>&1 || die "plan-windows (run/v6/R5b.log)"
 head -1 run/v6/R5b/plan-fp100m-b16-windows.tsv | cut -c1-80
 say "end: run/v6/R5b is ready"

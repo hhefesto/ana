@@ -65,7 +65,7 @@ grep -q 'col9 DONE' run/v8/col9-finish.log || die "col9 is not DONE (run/v8/col9
 
 say "units"
 # (run/v8/a2bseq.sh has taken the smaller emits as they ended)
-waitfor ana-a2bseq ana-ghsrc ana-src-um16 ana-src-gh1
+waitfor ana-a2bseq ana-ghsrc ana-src-um16 ana-src-gh1 ana-srcd
 # (11-05: um16 went through a2bsrc.sh early, its unit ana-src-um16, for the hour it saves here.  If um21 did win, decl-new must not take um16 for seen.)
 if [ $UM = um21 ] && [ -e run/v6/transcripts-a2bum16 ]; then mv run/v6/transcripts-a2bum16 run/v6/notused-a2bum16; sed -i "/a2bum16 DONE/d" run/v8/a2bsrc15.log; fi
 for k in $EMITS; do
@@ -147,6 +147,8 @@ done
 per() { awk -v n=$1 -v t=$((bend + oth)) 'BEGIN {p=int(200*n/t+0.5); if (p<1) p=1; print p}'; }
 specs="bend:$(per $bend)"; for l in haskell lean agda nix; do specs="$specs $l:$(per $(count $M/$l))"; done
 say "plan-windows $specs"
-env FILLER_COPIES=bend:$K OUT=$S SHARD=8000 JOBS=${PWJOBS:-4} TOKENIZER=weights/code32k.bpe BEND_PREPARE=run/v6/gcroot-bend-prepare/bin/bend-prepare BEND_WINDOWS=run/v6/gcroot-bend-windows/bin/bend-windows BEND_PLAN_SEGMENT=run/v6/gcroot-bend-plan-segment/bin/bend-plan-segment BEND_MIX=run/v6/gcroot-bend-mix/bin/bend-mix run/v6/gcroot-bend-plan-windows/bin/bend-plan-windows run/v8/R5c fp100m 16 $specs > run/v8/R5c.log 2>&1 || die "plan-windows (run/v8/R5c.log)"
+# (11-05: 325 shards are 2 h at 8 jobs and 4 at 4; at 1.8 G a job, 5 leave room for R5n's mix beside it, 8 G at its peak, and the guard's 8 G)
+pwj() { awk '/^MemAvailable/ {j=int(($2/1048576-16)/1.8); print (j<4?4:(j>5?5:j))}' /proc/meminfo; }
+env FILLER_COPIES=bend:$K OUT=$S SHARD=8000 JOBS=${PWJOBS:-$(pwj)} TOKENIZER=weights/code32k.bpe BEND_PREPARE=run/v6/gcroot-bend-prepare/bin/bend-prepare BEND_WINDOWS=run/v6/gcroot-bend-windows/bin/bend-windows BEND_PLAN_SEGMENT=run/v6/gcroot-bend-plan-segment/bin/bend-plan-segment BEND_MIX=run/v6/gcroot-bend-mix/bin/bend-mix run/v6/gcroot-bend-plan-windows/bin/bend-plan-windows run/v8/R5c fp100m 16 $specs > run/v8/R5c.log 2>&1 || die "plan-windows (run/v8/R5c.log)"
 head -1 run/v8/R5c/plan-fp100m-b16-windows.tsv | cut -c1-80
 say "end: run/v8/R5c is ready"

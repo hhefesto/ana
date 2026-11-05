@@ -20,9 +20,11 @@ count() { tr -cd '\0' < "$1" | wc -c | awk '{print int($1/2)}'; }
 export CV=$PWD/run/v6/mugen/chain/gcroot-bend-corpus-v2/bin/bend-corpus-v2
 N=run/v8/mixn; M=run/v6/mix; mkdir -p $N
 
-say "waiting for R5c"
-waitfor ana-run5c ana-run5b
-grep -q 'end: run/v8/R5c is ready' run/v8/run5c.log || die "R5c is not ready (run/v8/run5c.log)"
+# (11-05: its mixes beside R5c's plan-windows, which holds to 5 jobs for them: one after the other R5n landed at about 18:00 on Friday.  R5c's mix
+# ending means run/v8/r5c.a2b is settled; R5n's plan needs R5c's filler, not R5c's plan.)
+say "waiting for R5c's mix"
+while active ana-run5c && [ ! -e run/v8/mix3/bend.done ]; do sleep 120; done
+[ -e run/v8/mix3/bend.done ] || die "R5c's mix did not end (run/v8/run5c.log)"
 
 say "Bend"
 if [ ! -e $N/bend.done ]; then
@@ -33,6 +35,9 @@ if [ ! -e $N/bend.done ]; then
   say "bend dry: $f first-time, $r repairs, $x free: share $sh"
   R5C=1 MG=1 FF=1 CH=1 RATIO=1 CAP=1 DERIVE=none SHARE=$sh run/v5/clean/mix6.sh $N/bend > $N/bend.log 2>&1 || die "Bend mix ($N/bend.log)"
   [ "$(stat $N/bend.stats out-copy)" = 0 ] || die "copies in Bend's mix"
+  # (what killed R5b 48 minutes into plan-windows: mix-corpus refuses an id twice)
+  n=$(LC_ALL=C gawk 'BEGIN{RS="\0"} NR%2==1' $N/bend | LC_ALL=C sort -S 2G -T /tmp/bx | LC_ALL=C uniq -d | wc -l)
+  say "ids twice: $n"; [ "$n" = 0 ] || die "$n ids twice in $N/bend"
   touch $N/bend.done
 fi
 
@@ -49,6 +54,8 @@ for l in haskell agda lean; do
 done
 ln -sfn $PWD/$M/nix $N/nix
 
+say "waiting for R5c's plan"
+waitfor ana-run5c ana-run5b ana-fill5c
 bend=$(count $N/bend); oth=0
 for l in haskell agda lean nix; do oth=$((oth + $(count $N/$l))); done
 say "sessions: bend $bend, the other four $oth"
@@ -68,6 +75,8 @@ done
 per() { awk -v n=$1 -v t=$((bend + oth)) 'BEGIN {p=int(200*n/t+0.5); if (p<1) p=1; print p}'; }
 specs="bend:$(per $bend)"; for l in haskell lean agda nix; do specs="$specs $l:$(per $(count $N/$l))"; done
 say "plan-windows $specs, filler $K times"
-env FILLER_COPIES=bend:$K OUT=$S SHARD=8000 JOBS=${PWJOBS:-4} TOKENIZER=weights/code32k.bpe BEND_PREPARE=run/v6/gcroot-bend-prepare/bin/bend-prepare BEND_WINDOWS=run/v6/gcroot-bend-windows/bin/bend-windows BEND_PLAN_SEGMENT=run/v6/gcroot-bend-plan-segment/bin/bend-plan-segment BEND_MIX=run/v6/gcroot-bend-mix/bin/bend-mix run/v6/gcroot-bend-plan-windows/bin/bend-plan-windows run/v8/R5n fp100m 16 $specs > run/v8/R5n.log 2>&1 || die "plan-windows (run/v8/R5n.log)"
+# (11-05: as many shards at once as leave the guard's 8 G, at 1.8 G a job)
+pwj() { awk '/^MemAvailable/ {j=int(($2/1048576-8)/1.8); print (j<4?4:(j>8?8:j))}' /proc/meminfo; }
+env FILLER_COPIES=bend:$K OUT=$S SHARD=8000 JOBS=${PWJOBS:-$(pwj)} TOKENIZER=weights/code32k.bpe BEND_PREPARE=run/v6/gcroot-bend-prepare/bin/bend-prepare BEND_WINDOWS=run/v6/gcroot-bend-windows/bin/bend-windows BEND_PLAN_SEGMENT=run/v6/gcroot-bend-plan-segment/bin/bend-plan-segment BEND_MIX=run/v6/gcroot-bend-mix/bin/bend-mix run/v6/gcroot-bend-plan-windows/bin/bend-plan-windows run/v8/R5n fp100m 16 $specs > run/v8/R5n.log 2>&1 || die "plan-windows (run/v8/R5n.log)"
 head -1 run/v8/R5n/plan-fp100m-b16-windows.tsv | cut -c1-80
 say "end: run/v8/R5n is ready"

@@ -4,6 +4,10 @@ This file holds everything needed to continue this work from another machine and
 
 ## Run 5 for mugen: the last Bend streams, the mugen shape, ana in mugen's loop (2026-11-03, UTC-6; in progress)
 
+- **11-05 08:55, what shortens R5c and R5n (the sums at 08:43 left out R5b's plan and were 4-6 hours short: R5b about 15:00-18:00 today, R5c about 13:00 Friday, R5n about 16:00):**
+  - **run/v8/srcd.sh, unit ana-srcd (the user: "Move all current tasks to just delfos"):** a2bsrc.sh for at2, um16, aa21, pm21 and rd1 on delfos (~/ana-help/r5, a copy with its paths, run/v8/a2bsrc-d.log there), one at a time, each stream back here with a DONE in a2bsrc15.log. It stops at 20:30; what it did not finish, run5c.sh does. after5b.sh no longer starts um16 or those streams here, and ends at 20:15 so it cannot race run5c.sh.
+  - **plan-windows' JOBS:** from what memory leaves over the guard's 8 G, at 1.8 G a job (run5b.sh, run5n.sh: 4 to 8; run5c.sh: 4 to 5, so that R5n's mix fits beside it).
+  - **run5n.sh:** its mixes start when R5c's mix has ended, and its plan when R5c's has; it no longer needs R5c's plan to succeed, only its filler. It also checks for ids twice.
 - **11-05 08:36, R5b, R5c and R5n started again after refl's clearing (no plan file on disk at that time):**
   - **The user, 08:3x:** um21, std21, fl1 and tt1 stay on olimpo at idle priority ("Yes"). Still open: the partial um21 stream (`touch run/v8/um21-partial.yes` for yes; without it um16 alone), telomare at 10:00, the first thing in refl.
   - **Running on olimpo, inside ana-work.slice (CPUWeight=1, cores 0-3, so refl comes first):** ana-mix2 (remix5b.sh, CPUWeight=800 against the emits' 100, then ana-run5b the same: run/v6/R5b), ana-run5c (sleeps to 21:00), ana-run5n (waits for R5c). Outside the slice, light: ana-after5b (after the mix, when 13 G are free: col9's render, um16's units, a2bseq, ghsrc N=2; run/v8/after5b.log), ana-fromd (run/v8/fromd.log).
