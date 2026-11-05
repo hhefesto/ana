@@ -2,7 +2,7 @@
 # Keep olimpo usable (2026-11-03).  Freezing does not give memory back and nix-daemon's builders are not in
 # any of my cgroups, so under pressure this STOPS ana-work.slice (every job here restarts from what it kept;
 # nix clients run inside the slice, and a stopped client cancels its daemon build).  It never restarts anything.
-LOW=${LOW:-4}; SWAP=${SWAP:-6}; LOG=${LOG:-$HOME/src/ana/run/v6/safe/guard.log}
+LOW=${LOW:-8}; SWAP=${SWAP:-6}; LOG=${LOG:-$HOME/src/ana/run/v6/safe/guard.log}
 say() { echo "$(date '+%F %T') $*" >> "$LOG"; }
 say "guard up: stop ana-work.slice under ${LOW}G available or over ${SWAP}G swap used"
 while :; do
@@ -34,6 +34,13 @@ while :; do
       systemctl --user list-units --type=service --state=active --no-legend --plain 'ana-mugen6q*' 'ana-src-*' 'ana-ghsrc*' 'ana-a2bseq*' | awk '{print $1}' >> "$LOG"
       systemctl --user stop 'ana-mugen6q*' 'ana-src-*' 'ana-ghsrc*' 'ana-a2bseq*'
       sleep 15
+    # (11-05, "refl always takes priority": the emits one at a time, by what they add to what we already have: a stopped emit's modules stay)
+    elif systemctl --user is-active -q a2b-um21; then
+      say "available ${a}G, swap used ${s}G: stopping a2b-um21"; systemctl --user stop a2b-um21; sleep 15
+    elif systemctl --user is-active -q a2b-std21; then
+      say "available ${a}G, swap used ${s}G: stopping a2b-std21"; systemctl --user stop a2b-std21; sleep 15
+    elif systemctl --user is-active -q a2b-fl1; then
+      say "available ${a}G, swap used ${s}G: stopping a2b-fl1"; systemctl --user stop a2b-fl1; sleep 15
     elif systemctl --user is-active -q ana-work.slice; then
       say "available ${a}G, swap used ${s}G: stopping ana-work.slice"
       systemctl --user list-units --type=service --state=active --no-legend --plain 'ana-*' | awk '{print $1}' >> "$LOG"
