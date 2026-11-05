@@ -80,5 +80,9 @@ if [ ! -e $T/bend/units.nul ]; then
   cat $T/bend/units.nul.stats
 fi
 say "$N check+render"
-env $E TRANSCRIPT_FORMAT=2 COPIES=4 CHECK_PROCS=${CHECK_PROCS:-2} CHECK_JOBS=1 CHUNK=25 UNIT_JOBS=2 $D transcripts all bend > $T/all.log 2>&1 || { say "all FAILED"; exit 1; }
+# Through agda2bend's check daemons (11-05): a check of a unit in a deep module is 30-150 ms there, 2-4 s (and up) by a bend
+# of its own, which reads and checks every import each time; a2bum12's 5,296 units took 10 hours on 6 processes.  The
+# daemons print what bend prints; a check's limit is theirs, the queue is no timeout's business.
+U=$A/tools/checkd/units.sh; mkdir -p /tmp/bx/ud
+env $E TIMEOUT=890 $U /tmp/bx/ud/$N $SRC ${CHECKD_PORT:-47300} ${CHECKD_N:-4} env TRANSCRIPT_FORMAT=2 COPIES=4 CHECK_PROCS=${CHECK_PROCS:-2} CHECK_JOBS=1 CHUNK=25 UNIT_JOBS=2 $D transcripts all bend > $T/all.log 2>&1 || { say "all FAILED"; exit 1; }
 say "$N DONE"

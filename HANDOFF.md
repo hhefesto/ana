@@ -4,6 +4,10 @@ This file holds everything needed to continue this work from another machine and
 
 ## Run 5 for mugen: the last Bend streams, the mugen shape, ana in mugen's loop (2026-11-03, UTC-6; in progress)
 
+- **11-05, 04:50-05:15:**
+  - **a2bsrc.sh checks units through agda2bend's daemons (tools/checkd/units.sh, bendu; BEND for `transcripts all`):** a2bhs23's 535 units in 78 s with the machine at load 40, 534 kept, median check 6 ms; a2bum12's 5,296 had taken 10 hours. The output is byte for byte bend's (compared on a failing file). So agda-unimath's units need about an hour, not most of a day.
+  - **fill5c.sh: the newest emits first.** filler-union keeps the first version of an id, and an emit's ids are a2b:mods/PATH, so a2bm5's and a2bum's small modules would have stood in for um21's and std21's.
+  - **The checkpoint:** delfos is down. /tmp/bx/best/run3.sh (unit ana-best3, here) goes on with s2-step56725 and c2-step72491 (out/bits.tsv): on v2-mugen-bend c2-step72491 0.6405, c2-step70000 0.6412, s2-step56725 0.6502 bits a byte.
 - **11-05, 02:00-03:30:**
   - **ana-guard stopped ana-work.slice at 02:46** (my clang, two Agda exports, a test emit): ana-mix2 (R5b's mix, 94% through), a2b-um21, ana-run5c, ana-run5n. run5c.sh, seeing no emit active, compared um21 with um16 and stopped ("um21 lost 2"). The guard now stops a2b-exp-*, a2b-b* and ana-mix2 first. run/v8/remix-wait.sh starts ana-mix2 again when the smaller emits end, and R5b goes on from there.
   - **run/v8/a2bseq.sh (unit ana-a2bseq):** the smaller emits' units as each ends, in run5c.sh's order, so the deadline's hours go to agda-unimath's. run5c.sh waits for it, then runs what is left with CHECK_PROCS=10.
