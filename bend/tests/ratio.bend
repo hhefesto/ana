@@ -335,6 +335,20 @@ def rt.cfg(+ratio: Nat, +cap: Nat, +fill: Bool, +dry: Bool, +share: Nat) -> R.Rt
 def rt.run(+out: String, +c: R.RtCfg) -> IO(List<&2, Cl.Stat>):
   R.rto.go(out, rt.srcs(), [rt.fx("held.txt")], c)
 
+# the streams read twice, and with a stream before them that has one of their ids with another text
+def rt.run.twice(+out: String, +c: R.RtCfg) -> IO(List<&2, Cl.Stat>):
+  R.rto.go(out, [R.RtSrc{rt.fx("base.nul"), False{}}, R.RtSrc{rt.fx("mut.nul"), False{}}, R.RtSrc{rt.fx("chain.nul"), False{}},
+    R.RtSrc{rt.fx("t2t.nul"), False{}}, R.RtSrc{rt.fx("port.nul"), False{}},
+    R.RtSrc{rt.fx("base.nul"), False{}}, R.RtSrc{rt.fx("mut.nul"), False{}}, R.RtSrc{rt.fx("chain.nul"), False{}},
+    R.RtSrc{rt.fx("t2t.nul"), False{}}, R.RtSrc{rt.fx("port.nul"), False{}}], [rt.fx("held.txt")], c)
+
+def rt.run.other(+first: String, +out: String, +c: R.RtCfg) -> IO(List<&2, Cl.Stat>):
+  R.rto.go(out, [R.RtSrc{first, False{}}, R.RtSrc{rt.fx("base.nul"), False{}}, R.RtSrc{rt.fx("mut.nul"), False{}}, R.RtSrc{rt.fx("chain.nul"), False{}},
+    R.RtSrc{rt.fx("t2t.nul"), False{}}, R.RtSrc{rt.fx("port.nul"), False{}}], [rt.fx("held.txt")], c)
+
+def rt.other.text() -> String:
+  "## User\n\nThe same id, another text.\n"
+
 def rt.tool(+dir: String) -> IO(List<&2, RtCk>):
   +o = dir ++ "/out.nul"
   do IO<List<&2, RtCk>>:
@@ -351,7 +365,18 @@ def rt.tool(+dir: String) -> IO(List<&2, RtCk>):
     spool : Bool <- S.exists(o ++ ".rto-spool")
     +port : List<&2, RtP> <- rt.read(rt.fx("port.nul"))
     +prep : List<&2, U32> = rt.text.or(rt.text(port, rt.up() ++ "/repair"))
+    stw : List<&2, Cl.Stat> <- rt.run.twice(dir ++ "/twice.nul", rt.cfg(4n, 1n, False{}, False{}, 100n))
+    +btw : List<&2, U32> <- S.read(dir ++ "/twice.nul")
+    +stws : String = Cl.stat.show(stw)
+    S.write(dir ++ "/other.nul", L.v2.concat([S.b(rt.ua() ++ "/direct"), [0], S.b(rt.other.text()), [0]]))
+    sto : List<&2, Cl.Stat> <- rt.run.other(dir ++ "/other.nul", dir ++ "/first.nul", rt.cfg(4n, 1n, False{}, False{}, 100n))
+    +pto : List<&2, RtP> <- rt.read(dir ++ "/first.nul")
+    +atw : R.RtAud <- R.rto.audit(False{}, 4n, 1n, dir ++ "/twice.nul")
     return [RtCk{"tool: the law holds (audit: 18 records, 4 units, 13 first-time, 3 repairs, none breaks it, no id twice)", rt.aud.is(a, 18n, 4n, 13n, 3n)},
+      RtCk{"tool: the streams read twice write the same bytes, and the audit finds no id twice; the stats say drop-id-twice",
+        Bool.and(Bool.and(S.eq(btw, bytes), rt.aud.is(atw, 18n, 4n, 13n, 3n)), S.infix(S.b(stws), S.b("drop-id-twice ")))},
+      RtCk{"tool: an id in two streams stands as first read, whatever the later text",
+        S.eq(rt.text.or(rt.text(pto, rt.ua() ++ "/direct")), S.b(rt.other.text()))},
       RtCk{"tool: the law counted here, unit by unit (ratio 4, cap 1)", Bool.and(Bool.and(rt.law(ps, 4n, 1n, rt.u1()), rt.law(ps, 4n, 1n, rt.ua())),
         Bool.and(rt.law(ps, 4n, 1n, rt.up()), rt.law(ps, 4n, 1n, rt.uh())))},
       RtCk{"tool: each unit's first-time and repair counts (4+1, 4+1, 4+1 derived, 1+0)", Bool.and(Bool.and(rt.counts.is(rt.counts(ps, rt.u1()), 4n, 1n),

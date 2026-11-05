@@ -72,6 +72,7 @@ import ./Keyed.bend as K
 # and written, their bytes, the units by state, the kept repairs by tag), also
 # printed.  Without free= sources, OUT is then audited (rto.audit): every
 # unit's first-time count >= ratio * its repairs, repairs <= cap, no id twice.
+# An id read twice stands as first read (rto.seen; drop-id-twice in the stats).
 #
 # Logs go to stderr, stamped UTC-6.  The laws are bend/tests/ratio.bend.
 # Every def is prefixed `rto.`.
@@ -483,6 +484,29 @@ def rto.held.load(ps: List<&2, String>, h: Set()) -> IO(Set()):
         h2 : Set() <- rto.hl.fin(p, s)
         rto.held.load(more, h2)
 
+# An id read twice ----------------------------------------------------------------------------
+
+# The first read of an id stands, in both passes (11-04, R5b's plan: mix-corpus refused
+# run/v6/mix2/bend, 2,202 ids of the 873,750 read being in two streams: a unit emitted again by a
+# later agda2bend, a repository collected twice; their copies then twice as well).  The key is
+# sha256's first 16 hex digits, a tab before them so that no held line can be one: 873,750 ids
+# whole would hold about 2 GB, and a collision only drops one transcript.
+def rto.seen.key(+id: List<&2, U32>) -> String:
+  S.str(9 <> List.take(&2, U32, S.b(H.sha256(id)), 16n))
+
+def rto.seen.add(+k: String, x: Set() & Bool) -> Set() & Bool:
+  (h, twice) = x
+  match twice:
+    case True{}:
+      (h, True{})
+    case False{}:
+      (Set.add(h, k), False{})
+
+# the pass's ids with this one, and whether it had it already
+def rto.seen(h: Set(), +id: List<&2, U32>) -> Set() & Bool:
+  +k = rto.seen.key(id)
+  rto.seen.add(k, Set.has(h, k))
+
 # Pass 1: every unit's first-time transcripts and best repairs ----------------------------------
 
 type RtP1 is Type:
@@ -505,9 +529,17 @@ def rto.p1.held(+c: RtCfg, +free: Bool, r: S.Rd, m: Map<&2, RtU>, +n: Nat, +u: L
   (h, hd) = x
   RtP1{r, rto.p1.unit(rto.kind1(hd, cl, free), c, u, id, m), h, 1n+n, True{}, False{}}
 
+def rto.p1.new(+c: RtCfg, +free: Bool, r: S.Rd, m: Map<&2, RtU>, +n: Nat, +id: List<&2, U32>, +t: List<&2, U32>, x: Set() & Bool) -> RtP1:
+  (h, twice) = x
+  match twice:
+    case True{}:
+      RtP1{r, m, h, 1n+n, True{}, False{}}
+    case False{}:
+      +u = rto.unit(id)
+      rto.p1.held(c, free, r, m, n, u, id, rto.class(rto.fill(c), id, t), rto.held(h, u))
+
 def rto.p1.do(+c: RtCfg, +free: Bool, r: S.Rd, m: Map<&2, RtU>, h: Set(), +n: Nat, +id: List<&2, U32>, +t: List<&2, U32>) -> RtP1:
-  +u = rto.unit(id)
-  rto.p1.held(c, free, r, m, n, u, id, rto.class(rto.fill(c), id, t), rto.held(h, u))
+  rto.p1.new(c, free, r, m, n, id, t, rto.seen(h, id))
 
 def rto.p1.pair(+c: RtCfg, +free: Bool, m: Map<&2, RtU>, h: Set(), +n: Nat, +id: List<&2, U32>, x: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(RtP1):
   (r, mt) = x
@@ -666,9 +698,17 @@ def rto.p2.held(+c: RtCfg, +free: Bool, +cl: Nat, +u: List<&2, U32>, +id: List<&
   (h, hd) = x
   rto.p2.unit(c, free, cl, hd, u, id, t, r, o, j, h, st, Map.get(RtU, rto.u0(), m, S.str(u)))
 
+def rto.p2.new(+c: RtCfg, +free: Bool, r: S.Rd, o: File, m: Map<&2, RtU>, j: Map<&2, Nat>, st: List<&2, Cl.Stat>, +id: List<&2, U32>, +t: List<&2, U32>, x: Set() & Bool) -> IO(RtP2):
+  (h, twice) = x
+  match twice:
+    case True{}:
+      IO.pure(RtP2, RtP2{r, o, m, j, h, rto.bump("drop-id-twice", 1n, st), True{}, False{}})
+    case False{}:
+      +u = rto.unit(id)
+      rto.p2.held(c, free, rto.class(rto.fill(c), id, t), u, id, t, r, o, m, j, st, rto.held(h, u))
+
 def rto.p2.do(+c: RtCfg, +free: Bool, r: S.Rd, o: File, m: Map<&2, RtU>, j: Map<&2, Nat>, h: Set(), st: List<&2, Cl.Stat>, +id: List<&2, U32>, +t: List<&2, U32>) -> IO(RtP2):
-  +u = rto.unit(id)
-  rto.p2.held(c, free, rto.class(rto.fill(c), id, t), u, id, t, r, o, m, j, st, rto.held(h, u))
+  rto.p2.new(c, free, r, o, m, j, st, id, t, rto.seen(h, id))
 
 def rto.p2.pair(+c: RtCfg, +free: Bool, o: File, m: Map<&2, RtU>, j: Map<&2, Nat>, h: Set(), st: List<&2, Cl.Stat>, +id: List<&2, U32>, x: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(RtP2):
   (r, mt) = x
@@ -973,10 +1013,11 @@ def rto.fin(+out: String, +c: RtCfg, +ss: List<&2, RtSrc>, +spool: String, w: Rt
         rto.audit.if(Bool.and(Bool.not(rto.dry(c)), Bool.not(rto.any.free(ss))), c, out)
         return st2
 
-def rto.w0(o: File, mh: RtMH) -> RtW:
+# pass 2 reads the ids anew: h2 is the held lines alone, pass 1's h has its ids
+def rto.w0(o: File, h2: Set(), mh: RtMH) -> RtW:
   match mh:
     case RtMH{m, h}:
-      RtW{o, m, Map.new(&2, Nat), h, Nil{}}
+      RtW{o, m, Map.new(&2, Nat), h2, Nil{}}
 
 # the whole run; the answer is the stats
 def rto.go(+out: String, +ss: List<&2, RtSrc>, +hs: List<&2, String>, +c: RtCfg) -> IO(List<&2, Cl.Stat>):
@@ -986,7 +1027,8 @@ def rto.go(+out: String, +ss: List<&2, RtSrc>, +hs: List<&2, String>, +c: RtCfg)
     h : Set() <- rto.held.load(hs, Set.new())
     mh : RtMH <- rto.p1.all(c, ss, RtMH{Map.new(&2, RtU), h})
     o : File <- IO.try(File, File.open(spool, "w"))
-    w : RtW <- rto.p2.all(c, ss, rto.w0(o, mh))
+    h2 : Set() <- rto.held.load(hs, Set.new())
+    w : RtW <- rto.p2.all(c, ss, rto.w0(o, h2, mh))
     rto.fin(out, c, ss, spool, w)
 
 def rto.say(st: List<&2, Cl.Stat>) -> IO(Unit):
