@@ -16,16 +16,38 @@ count() { tr -cd '\0' < "$1" | wc -c | awk '{print int($1/2)}'; }
 worker() { systemctl --user reset-failed $1 2>/dev/null; systemd-run --user --unit=$1 --slice=ana-work.slice -p WorkingDirectory=$PWD -p MemoryMax=6G -p MemorySwapMax=1G -p OOMPolicy=continue -p StandardOutput=append:$PWD/run/v8/$1.log -p StandardError=append:$PWD/run/v8/$1.log /bin/sh -c "exec $2"; }
 
 say "waiting for the emits and col9"
-waitfor a2b-um16 a2b-std16 a2b-plfa17 ana-col9f
 A=/home/hhefesto/src/agda2bend/run/a2b
-for c in corpus-um16 corpus-std16 corpus-plfa17; do
+# The user, 11-05, of the assumptions run: "use it if it finishes by Thursday night with nothing lost and the gain holds
+# in the corpus copy", else corpus-um16 as far as it got.  um19 is that run: um18's 86 assumed lemmas, 21 more, the Data repair
+# for an assumption's type.  At the deadline an emit still going is stopped; a partial std16 is still its modules.
+DL=$(date -d "${DEADLINE:-2026-11-05 21:00}" +%s)
+while active a2b-um19 a2b-std16 && [ "$(date +%s)" -lt "$DL" ]; do sleep 120; done
+UM=um19
+active a2b-um19 && { UM=um16; say "um19 not finished by the deadline: $(cut -f1 $A/corpus-um19/ledger.tsv | sort -u | wc -l) modules"; }
+systemctl --user stop a2b-um19 a2b-std16 2>/dev/null
+if [ $UM = um19 ]; then
+  lost=$(awk -F'\t' 'NR==FNR { a[$1"\t"$2]=$4; next } (($1"\t"$2) in a) && a[$1"\t"$2]=="checked" && $4!="checked" { n++ } END { print n+0 }' $A/corpus-um16/ledger.tsv $A/corpus-um19/ledger.tsv)
+  # the corpus copies of the modules both reached, in defs
+  defs() { (cd "$1/corpus" && find . -name '*.bend' | sort) | comm -12 - <(cd "$2/corpus" && find . -name '*.bend' | sort) | (cd "$1/corpus" && xargs cat) | grep -c '^def '; }
+  d16=$(defs $A/corpus-um16 $A/corpus-um19); d19=$(defs $A/corpus-um19 $A/corpus-um16)
+  say "um19 against um16, the modules both reached: $lost lost; corpus copies $d19 defs against $d16"
+  # a loss is the user's call, not a fallback that throws the gain away: start again with UM_FORCE=um19 or um16
+  [ -n "${UM_FORCE:-}" ] && UM=$UM_FORCE
+  [ -n "${UM_FORCE:-}" ] || [ "$lost" = 0 ] || die "um19 lost $lost against um16: the user's call (UM_FORCE)"
+  [ -n "${UM_FORCE:-}" ] || [ "$d19" -gt "$d16" ] || UM=um16
+fi
+active a2b-um16 && systemctl --user stop a2b-um16
+say "agda-unimath: $UM"
+while active ana-col9f; do sleep 120; done
+echo "a2bplfa19 a2bstd16 a2b$UM" > run/v8/r5c.a2b
+for c in corpus-$UM corpus-std16 corpus-plfa19; do
   [ -s $A/$c/ledger.tsv ] || die "no $A/$c/ledger.tsv"
   say "$c: $(cut -f1 $A/$c/ledger.tsv | sort -u | wc -l) modules, $(grep -c $'\tchecked\t' $A/$c/ledger.tsv) checked"
 done
 grep -q 'col9 DONE' run/v8/col9-finish.log || die "col9 is not DONE (run/v8/col9-finish.log)"
 
 say "units"
-for k in plfa17 std16 um16; do
+for k in plfa19 std16 $UM; do
   n=a2b$k; grep -q "$n DONE" run/v8/a2bsrc15.log 2>/dev/null && continue
   CHECK_PROCS=${CHECK_PROCS:-5} run/v5/clean/a2bsrc.sh $k >> run/v8/a2bsrc15.log 2>&1 || die "a2bsrc.sh $k (run/v8/a2bsrc15.log)"
 done
@@ -35,12 +57,12 @@ waitfor ana-mugen6q1 ana-mugen6q2
 worker ana-mugen6q1 run/v5/clean/mugen6q.sh; worker ana-mugen6q2 run/v5/clean/mugen6q.sh
 waitfor ana-mugen6q1 ana-mugen6q2
 run/v5/clean/mugen6q.sh move || die "move"
-for s in a2bplfa17 a2bstd16 a2bum16 col9; do [ -e run/v6/mugen/$s/DONE ] || die "run/v6/mugen/$s not DONE"; done
+for s in a2bplfa19 a2bstd16 a2b$UM col9; do [ -e run/v6/mugen/$s/DONE ] || die "run/v6/mugen/$s not DONE"; done
 
 say "the chains"
 worker ana-chain1 run/v5/clean/chain6.sh; worker ana-chain2 run/v5/clean/chain6.sh
 waitfor ana-chain1 ana-chain2
-for s in a2bplfa17 a2bstd16 a2bum16 col9; do [ -e run/v6/mugen/chain/$s/DONE ] || die "run/v6/mugen/chain/$s not DONE"; done
+for s in a2bplfa19 a2bstd16 a2b$UM col9; do [ -e run/v6/mugen/chain/$s/DONE ] || die "run/v6/mugen/chain/$s not DONE"; done
 
 waitfor ana-mix2
 export CV=$PWD/run/v6/mugen/chain/gcroot-bend-corpus-v2/bin/bend-corpus-v2
