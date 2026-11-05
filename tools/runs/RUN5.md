@@ -55,7 +55,7 @@ binary with a bang is a clang 19 build, and Ubuntu 22.04's own clang stops at 15
 ssh -p PORT root@IP 'apt-get update -qq && apt-get install -y -qq rsync wget lsb-release gnupg software-properties-common && wget -qO- https://apt.llvm.org/llvm.sh | bash -s -- 19 && clang-19 --version | head -1'
 ```
 
-## 3. Stage (from here, about 15 minutes)
+## 3. Stage (from here, about an hour: olimpo's Wi-Fi uploads 2-3 MB/s on 11-03, the checkpoint 12 minutes, 5.4 GB of shards about 40)
 
 ```sh
 export PATH=$PWD/run/gcroot-bend-ops/bin:$PATH
