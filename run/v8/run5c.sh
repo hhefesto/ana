@@ -40,8 +40,8 @@ if active a2b-um21 || [ "$um21m" -lt "$UM21_MODS" ]; then
   UM=um16; [ -e run/v8/um21-partial.yes ] && UMX=um21
   say "um21 not finished by the deadline: $um21m of $UM21_MODS modules; partial stream: ${UMX:-no}"
 fi
-# (one by one: 11-05, a unit name that was not loaded failed the whole command, and um21, std21 ran on past the deadline)
-for u in $(units); do systemctl --user stop $u 2>/dev/null; done
+# (one by one: 11-05, a unit name that was not loaded failed the whole command, and um21, std21 ran on past the deadline.  Once only: a restart must not stop the GitHub shards that go on to GHCUT.)
+[ -e run/v8/deadline.stopped ] || { for u in $(units); do systemctl --user stop $u 2>/dev/null; done; touch run/v8/deadline.stopped; }
 if [ $UM = um21 ]; then
   lost=$(awk -F'\t' 'NR==FNR { a[$1"\t"$2]=$4; next } (($1"\t"$2) in a) && a[$1"\t"$2]=="checked" && $4!="checked" { n++ } END { print n+0 }' $A/corpus-um16/ledger.tsv $A/corpus-um21/ledger.tsv)
   # the corpus copies of the modules both reached, in defs

@@ -21,10 +21,11 @@ while :; do
       systemctl --user stop 'a2b-exp-*' 'a2b-b[0-9]*'
       sleep 15
     elif systemctl --user list-units --type=service --state=active --no-legend --plain 'a2b-gh[0-9]*' | grep -q .; then
-      say "available ${a}G, swap used ${s}G: stopping the GitHub shards"
-      systemctl --user list-units --type=service --state=active --no-legend --plain 'a2b-gh[0-9]*' | awk '{print $1}' >> "$LOG"
-      systemctl --user stop 'a2b-gh[0-9]*'
-      sleep 15
+      # (11-05 22:55: the biggest one, not all: a stopped shard's other modules are lost)
+      b=$(for u in $(systemctl --user list-units --type=service --state=active --no-legend --plain 'a2b-gh[0-9]*' | awk '{print $1}'); do echo "$(systemctl --user show -p MemoryCurrent --value $u) $u"; done | sort -rn | head -1 | cut -d' ' -f2)
+      say "available ${a}G, swap used ${s}G: stopping the GitHub shard $b"
+      systemctl --user stop "$b"
+      sleep 30
     # what run5c.sh takes up again by itself, before the emits' hours
     elif systemctl --user list-units --type=service --state=active --no-legend --plain 'ana-mugen6q*' 'ana-src-*' 'ana-ghsrc*' 'ana-a2bseq*' | grep -q .; then
       say "available ${a}G, swap used ${s}G: stopping the units and the mugen shape"
