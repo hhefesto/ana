@@ -13,8 +13,7 @@ say "filler"; rm -rf $S/bend.tmp
 new=; for s in $(tac -s ' ' run/v8/r5c.a2b); do d=run/v6/transcripts-$s/bend; [ -d $d ] && new="$new $d"; done
 rest=$(ls -d run/v[5-8]/transcripts-*/bend | grep -v -x -F -f <(printf '%s\n' $new))
 say "filler order:$(printf ' %s' $new | sed 's|run/v6/transcripts-||g; s|/bend||g')"
-$CV filler-union $S/bend.tmp run/v2/transcripts/bend $new $rest held=run/v2/results/bend.holdout.nul > $S/filler.log 2>&1 || { say "filler-union FAILED"; exit 1; }
-cat $S/bend.tmp/files-hi.nul $S/bend.tmp/files-lo.nul > $S/bend.tmp/all.nul
-$CV keyed-order nul "run 5c filler" $S/bend.tmp/all.nul $S/bend/files-hi.nul >> $S/filler.log 2>&1 || { say "keyed-order FAILED"; exit 1; }
-rm -rf $S/bend.tmp; : > $S/bend/files-lo.nul; touch $S/bend/files.done
+# (11-05: tools/nulmix's fillunion, seconds where filler-union and keyed-order took 5.7 hours; the same bytes on R5's filler)
+run/v6/gcroot-nulmix/bin/fillunion $S/bend/files-hi.nul "run 5c filler" held=run/v2/results/bend.holdout.nul run/v2/transcripts/bend $new $rest > $S/filler.log 2>&1 || { say "fillunion FAILED"; exit 1; }
+mv $S/bend/files-hi.nul.tmp $S/bend/files-hi.nul; : > $S/bend/files-lo.nul; touch $S/bend/files.done
 say "filler done: $(tr -cd '\0' < $S/bend/files-hi.nul | wc -c) NULs, $(du -h $S/bend/files-hi.nul | cut -f1)"

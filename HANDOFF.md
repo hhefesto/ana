@@ -4,6 +4,26 @@ This file holds everything needed to continue this work from another machine and
 
 ## Run 5 for mugen: the last Bend streams, the mugen shape, ana in mugen's loop (2026-11-03, UTC-6; in progress)
 
+- **11-05 22:15-22:50, the user: "Work on ana and the bend corpus", "All cores":**
+  - **~/.config/refl-first removed:** the emits and ana's jobs run on all 16 CPUs (cpu-split still gives telomare its half when telomare.slice has a process; touch the file to pin them to 0-3,8-11 again). The slices stay at CPUWeight=1.
+  - **The plans are about 11 hours shorter, and the bytes are the same:**
+    | Step | Bend | Now | Checked |
+    |---|---|---|---|
+    | plan-windows' mix.nul | 45 min | 33 s (tools/nulmix) | cmp with R5b's 6.4 GB |
+    | plan-windows' filler.nul | 4 h 54 | 69 s (tools/nulmix) | cmp with R5b's 14.2 GB |
+    | the parts and filler slices | 1.5 h + 4.6 h | 2 min (coreutils' split, from Bend) | sha256 of R5b's 311 parts and 118 slices |
+    | fill5c.sh's filler-union + keyed-order | 5.7 h | 7 s (tools/nulmix/FillUnion.hs) | cmp with R5's 406 MB, same log |
+    plan-windows end to end on a small corpus, old binary against new: 74 files, 0 different. The Bend road stays as the meaning and the fallback (no run/v6/gcroot-nulmix: nm.slow). What is left of a plan is its shards, about 3 h at 5 jobs.
+  - **R5b restarted with the new binary, PWJOBS=4:** at the split at 22:31, shards from 22:37, 4 jobs about 1.6 shards a minute, so about 02:00.
+  - **The guard stopped everything at 22:21, 22:33 and 22:41, none of it from the new tools:** a2bpm21's check+render holds units with `?goal` in stdlib's Algebra and Builtin, and a check daemon went to 24 G in 2.5 minutes; killed, ten checks fell back on a real bend each. Now: run/v8/checkd-cap.sh (unit ana-checkd-cap, outside the slice) kills a daemon over 5 G; tools/checkd/bendu (agda2bend) waits for the daemon to come back and asks once more, so a unit that was only queued behind the big one is not lost; such a unit fails as a check that ran out of time. srcd's FAILED pm21 and rd1 at 12:11 were probably this on delfos's 15 G (not confirmed). The guard stops the fallback plan before the slice.
+  - **The stops that did not stop:** `systemctl --user stop A B` fails whole if one name is not loaded, so at the deadline a2b-um21 and a2b-std21 ran on (2h54 of redone modules: 1,667 and 659 modules, no new ones, because a restarted emit redoes what it has) and delfos's gh8, gh10, gh11 too. Fixed in run5c.sh and gh-cut.sh. um21 and std21 are not restarted: no resume (agda2bend HANDOFF, "Not done"), and a shard adds more.
+  - **What the shorter plans buy: the GitHub shards go on to 03:00 Friday (GHCUT in run5c.sh).** run5c.sh does the other streams first, waits for GHCUT, runs run/v8/gh-cut.sh (stops the shards on both machines, mirrors delfos's corpus-gh* whose a2bsrc.sh has not begun, gh8, gh10 and gh11 included), adds the new shards to r5c.a2b, and takes the streams 6 at a time.
+    - **Delfos:** ana-help-ghsched from gh12, STOPAT 02:55, maxj.d 4.
+    - **Olimpo:** unit ana-ghsched2 (/tmp/bx/gh/ghsched2.sh, a copy in agda2bend tools/gh), from gh40, maxj 3, AVMIN=15. Its units are reserved in delfos's assigned.tsv with the tag `olimpo`: the 186 already exported here and 148 more from delfos; delfos's assigned.tsv and hashes.txt were merged in here first, so the two machines do not take the same unit.
+    - Why shards: gh9 gave 940 modules in 5.5 h, 6,986 sessions (292 MB), about 1,200 sessions a shard-hour.
+  - **The sums now (unmeasured from the mugen shape on):** units until about 03:00 (the others) and 04:20 (the shards); the filler at once; mugen shape about 05:20; chains; dry mix and mix (3.3 h at R5b's size) about 09:00; R5c's plan about 12:30; R5n's about 16:00. To cut earlier or later: restart ana-run5c with GHCUT in its environment (steps keep what they finished).
+  - **Unique Bend files at 22:48, before the last streams:** 49,885 files, 479 MB, by fillunion over every stream (R5's filler: 43,528, 406 MB).
+
 - **11-05 13:30, the user stopped everything on olimpo at 12:38 for telomare (a fix on master), then: restart the stopped jobs, "giving priority to refl work. The priority is refl > telomare > the rest of the projects."** Restarted: ana-guard, a2b-std21, a2b-tt1, a2b-um21 (the guard had stopped it at 09:41), ana-run5b (R5b's plan-windows starts over: it had run 1h50), ana-run5c, ana-run5n, ana-fromd, and ana-after5b (brings back ana-mugen6q1, ana-a2bseq, ana-ghsrc, which the guard stopped at 12:35, one at a time when 13 G are free). ana-work.slice stays at CPUWeight=1, IOWeight=1, and ~/.config/refl-first keeps them on cores 0-3; telomare runs in telomare.slice on cores 4-7. Delfos was never stopped.
 - **11-05 08:55, what shortens R5c and R5n (the sums at 08:43 left out R5b's plan and were 4-6 hours short: R5b about 15:00-18:00 today, R5c about 13:00 Friday, R5n about 16:00):**
   - **run/v8/srcd.sh, unit ana-srcd (the user: "Move all current tasks to just delfos"):** a2bsrc.sh for at2, um16, aa21, pm21 and rd1 on delfos (~/ana-help/r5, a copy with its paths, run/v8/a2bsrc-d.log there), one at a time, each stream back here with a DONE in a2bsrc15.log. It stops at 20:30; what it did not finish, run5c.sh does. after5b.sh no longer starts um16 or those streams here, and ends at 20:15 so it cannot race run5c.sh.
