@@ -13,6 +13,10 @@ This file holds everything needed to continue this work from another machine and
   - **run/v8/gh.frozen:** R5c's 22 GitHub shards, so that a restart neither takes later shards in nor runs gh-cut.sh again.
   - **Shards go on for the next corpus,** not this plan: delfos ana-help-ghsched from gh14, olimpo ana-ghsched2 from gh49 (CPUWeight 1, AVMIN 15, maxj 2), both to 18:00. A delfos shard stays on delfos.
   - **The guard stopped R5b at 03:18** (6 decl-new at 2.3 G each and 5 jobs at 1.8 G): memory, not CPU, is what limits this box tonight.
+- **11-06 06:40-06:51, the user: "Yes" to dropping gh8's long-named units and putting it back into R5c:**
+  - **The cause:** `base` in bend/Check/Bend.bend writes `dir/base/NAME`, so a unit whose context names a definition over 255 bytes kills its whole bend-check shard with "File name too long". The unit was `Prelude/Closures.bend#a2b_axty_anon_Reachable_inj@241`, not the 52 long-named units of `Prelude/InferenceRules.bend`, whose own check never reached that path. Not fixed in Check/Bend.bend.
+  - **Dropped 53 units from gh8's units.nul:** those 52 and that one, all in shard 0. The list is `run/v6/transcripts-a2bgh8/bend/units.dropped.long-names`, the old file `units.nul.with-long-names`. Shards 1-3 kept their results.
+  - **gh8 is DONE:** 3,949 units in, 3,945 kept, 3,657 train, 11,586 transcripts. `ana-run5c` restarted 06:50 with `systemctl restart`, so R5n's wait never saw it inactive; a2bgh8 is in r5c.a2b (22 GitHub shards) and rendering. The filler needed no rebuild: fill5c takes every transcripts directory, and a2bgh8's files were in it.
 - **11-05 22:15-22:50, the user: "Work on ana and the bend corpus", "All cores":**
   - **~/.config/refl-first removed:** the emits and ana's jobs run on all 16 CPUs (cpu-split still gives telomare its half when telomare.slice has a process; touch the file to pin them to 0-3,8-11 again). The slices stay at CPUWeight=1.
   - **The plans are about 11 hours shorter, and the bytes are the same:**
