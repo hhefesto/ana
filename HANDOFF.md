@@ -4,6 +4,15 @@ This file holds everything needed to continue this work from another machine and
 
 ## Run 5 for mugen: the last Bend streams, the mugen shape, ana in mugen's loop (2026-11-03, UTC-6; in progress)
 
+- **11-06 03:10-03:30, the user: "Health check", "Continue with ana's training corpus on all cylinders":**
+  - **R5b FAILED at 02:32:** 157 of 311 shards: "the filler corpus has no unused document of at least N tokens", at about window 4,800. A slice had 5,082 documents and a shard needs about 4,940 windows (62% of its 8,000 sessions). The filler's 55% in run5b.sh, run5c.sh, run5n.sh was too low. Not from nulmix: filler.nul and the slices are byte-identical to the old road's.
+  - **R5c and R5n would have failed the same way, worse** (K rounds up from 55%, about 57% against the 62% needed), hours after the mix. Now 75% (run5c.sh, run5n.sh). R5c's filler pass and each shard's filler step grow with it, about 15% on the plan's time; run5c's jobs may go to 6.
+  - **run/v8/fillmore.sh PLANDIR LOG [DOCS]:** the shards the last plan-windows failed for lack of filler get DOCS more documents from another slice; built shards stay. r5watch does it on such a FAILED (1500 documents, three rounds, then left for a person).
+  - **R5b restarted** with 1,000 more documents in those 157 slices (6,082, 76%: the test of R5c's 75%). Shards 8, 7, 6 built at 03:23. PWJOBS=3 (r5watch restarts it from 14 G): about 06:00.
+  - **run5c.sh, the old text, still runs** (sed -i leaves it its deleted file) until "the mugen shape"; ana-r5c-swap then stops it and r5watch restarts it on the new text: the streams' decl-new is not lost.
+  - **run/v8/gh.frozen:** R5c's 22 GitHub shards, so that a restart neither takes later shards in nor runs gh-cut.sh again.
+  - **Shards go on for the next corpus,** not this plan: delfos ana-help-ghsched from gh14, olimpo ana-ghsched2 from gh49 (CPUWeight 1, AVMIN 15, maxj 2), both to 18:00. A delfos shard stays on delfos.
+  - **The guard stopped R5b at 03:18** (6 decl-new at 2.3 G each and 5 jobs at 1.8 G): memory, not CPU, is what limits this box tonight.
 - **11-05 22:15-22:50, the user: "Work on ana and the bend corpus", "All cores":**
   - **~/.config/refl-first removed:** the emits and ana's jobs run on all 16 CPUs (cpu-split still gives telomare its half when telomare.slice has a process; touch the file to pin them to 0-3,8-11 again). The slices stay at CPUWeight=1.
   - **The plans are about 11 hours shorter, and the bytes are the same:**

@@ -62,7 +62,8 @@ say "sessions: bend $bend, the other four $oth"
 
 [ -e run/v8/R5csrc/bend/files.done ] || die "no filler (run/v8/R5csrc/bend/files.done)"
 S=run/v8/R5nsrc; mkdir -p $S/bend
-docs=$(( (bend + oth) * 55 / 100 / 1000 )); K=$(( docs * 1000 / ($(tr -cd '\0' < run/v8/R5csrc/bend/files-hi.nul | wc -c) / 2) + 1 ))
+# (11-06: 75, it was 55: run5c.sh says why.)
+docs=$(( (bend + oth) * 75 / 100 / 1000 )); K=$(( docs * 1000 / ($(tr -cd '\0' < run/v8/R5csrc/bend/files-hi.nul | wc -c) / 2) + 1 ))
 ln -sfn $PWD/run/v8/R5csrc/bend/files-hi.nul $S/bend/files-hi.nul; : > $S/bend/files-lo.nul; touch $S/bend/files.done
 ln -sfn $PWD/$N/bend $S/bend/transcripts.train.nul
 ln -sfn $PWD/run/v2/results/bend.holdout.nul $S/bend/results.holdout.nul

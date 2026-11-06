@@ -25,7 +25,8 @@ A=/home/hhefesto/src/agda2bend/run/a2b
 EMITS="std21 plfa22 aa21 hs21 pre21 pm21 hs23 pre23 at1 rd1 at2 fl1 tt1"  # (tt1: TypeTopology, GPL-3.0; the user, 11-05: "Yes" to the GPL and AGPL repositories, and any public code with no licence)
 DL=$(date -d "${DEADLINE:-2026-11-05 21:00}" +%s)
 # 11-05: the other GitHub repositories' shards (agda2bend tools/gh; ghsched.sh starts them while the emits run)
-ghs() { (cd $A; ls -d corpus-gh[0-9]* 2>/dev/null | sed 's/corpus-//'); }
+# (11-06: run/v8/gh.frozen, once GHCUT has passed: the plan's shards.  Shards started after the cut are for the next corpus, and a restart must not take them in.)
+ghs() { if [ -s run/v8/gh.frozen ]; then cat run/v8/gh.frozen; else (cd $A; ls -d corpus-gh[0-9]* 2>/dev/null | sed 's/corpus-//'); fi; }
 units() { local u e; for e in um21 $EMITS $(ghs); do u="$u a2b-$e"; done; echo $u; }
 # (11-05: to the deadline itself, not until no emit runs here: at 02:48 that went on early.  The guard can stop an emit, and delfos's shards are not units here.)
 while [ "$(date +%s)" -lt "$DL" ]; do sleep 120; done
@@ -79,7 +80,7 @@ done
 GHCUT=$(date -d "${GHCUT:-2026-11-06 03:00}" +%s)
 say "the GitHub shards go on to $(date -d @$GHCUT '+%F %T')"
 while [ "$(date +%s)" -lt "$GHCUT" ]; do sleep 60; done
-bash run/v8/gh-cut.sh >> run/v8/gh-cut.log 2>&1 || say "gh-cut.sh failed (run/v8/gh-cut.log), going on with what is here"
+[ -s run/v8/gh.frozen ] || { bash run/v8/gh-cut.sh >> run/v8/gh-cut.log 2>&1 || say "gh-cut.sh failed (run/v8/gh-cut.log), going on with what is here"; ghs > run/v8/gh.frozen.tmp; mv run/v8/gh.frozen.tmp run/v8/gh.frozen; }
 for e in $(ghs); do
   case " $EMITS " in *" $e "*) continue ;; esac
   [ -s $A/corpus-$e/ledger.tsv ] || continue
@@ -149,7 +150,8 @@ waitfor ana-fill5c
 S=run/v8/R5csrc
 [ -e $S/bend/files.done ] || die "no filler ($S/bend/files.done, $S/filler.log)"
 fdocs=$(( $(tr -cd '\0' < $S/bend/files-hi.nul | wc -c) / 2 )); say "filler: $fdocs files"
-docs=$(( (bend + oth) * 55 / 100 / 1000 )); K=$(( docs * 1000 / fdocs + 1 ))
+# (11-06: 75, it was 55.  R5b: 4,940 windows a shard of 8,000 sessions, 62%; its 64% of filler failed 157 of 311 shards at the end of their pools, 2h49 in.)
+docs=$(( (bend + oth) * 75 / 100 / 1000 )); K=$(( docs * 1000 / fdocs + 1 ))
 ln -sfn $PWD/$M3/bend $S/bend/transcripts.train.nul
 ln -sfn $PWD/run/v2/results/bend.holdout.nul $S/bend/results.holdout.nul
 for l in haskell agda lean nix; do mkdir -p $S/$l
@@ -162,7 +164,7 @@ per() { awk -v n=$1 -v t=$((bend + oth)) 'BEGIN {p=int(200*n/t+0.5); if (p<1) p=
 specs="bend:$(per $bend)"; for l in haskell lean agda nix; do specs="$specs $l:$(per $(count $M/$l))"; done
 say "plan-windows $specs"
 # (11-05: 325 shards are 2 h at 8 jobs and 4 at 4; at 1.8 G a job, 5 leave room for R5n's mix beside it, 8 G at its peak, and the guard's 8 G)
-pwj() { awk '/^MemAvailable/ {j=int(($2/1048576-16)/1.8); print (j<4?4:(j>5?5:j))}' /proc/meminfo; }
+pwj() { awk '/^MemAvailable/ {j=int(($2/1048576-16)/1.8); print (j<4?4:(j>6?6:j))}' /proc/meminfo; }
 env FILLER_COPIES=bend:$K OUT=$S SHARD=8000 JOBS=${PWJOBS:-$(pwj)} TOKENIZER=weights/code32k.bpe BEND_PREPARE=run/v6/gcroot-bend-prepare/bin/bend-prepare BEND_WINDOWS=run/v6/gcroot-bend-windows/bin/bend-windows BEND_PLAN_SEGMENT=run/v6/gcroot-bend-plan-segment/bin/bend-plan-segment BEND_MIX=run/v6/gcroot-bend-mix/bin/bend-mix run/v6/gcroot-bend-plan-windows/bin/bend-plan-windows run/v8/R5c fp100m 16 $specs > run/v8/R5c.log 2>&1 || die "plan-windows (run/v8/R5c.log)"
 head -1 run/v8/R5c/plan-fp100m-b16-windows.tsv | cut -c1-80
 say "end: run/v8/R5c is ready"
