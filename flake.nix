@@ -136,6 +136,11 @@
           # languages' files as filler) and cut into training shards with
           # their plan: `deploy plan-windows RUN_DIR SIZE BATCH LANG:PER ...`
           bend-plan-windows = bendBinary pkgs "bend-plan-windows" "PlanWindows.bend";
+          # plan-windows' mixes at disk speed (a byte is a list cell in Bend): tools/nulmix
+          nulmix = pkgs.runCommand "nulmix" { nativeBuildInputs = [ pkgs.haskellPackages.ghc ]; } ''
+            mkdir -p $out/bin
+            ghc -O2 -outputdir . -o $out/bin/nulmix ${./tools/nulmix/Main.hs}
+          '';
           # legere, a Bend Jev (docs/LEGERE.md): raw text cut into sections
           # tagged with ana's tags, with calibrated posteriors; its code goes
           # on to bend-units, bend-check and bend-transcript

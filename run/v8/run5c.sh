@@ -40,7 +40,8 @@ if active a2b-um21 || [ "$um21m" -lt "$UM21_MODS" ]; then
   UM=um16; [ -e run/v8/um21-partial.yes ] && UMX=um21
   say "um21 not finished by the deadline: $um21m of $UM21_MODS modules; partial stream: ${UMX:-no}"
 fi
-systemctl --user stop $(units) 2>/dev/null
+# (one by one: 11-05, a unit name that was not loaded failed the whole command, and um21, std21 ran on past the deadline)
+for u in $(units); do systemctl --user stop $u 2>/dev/null; done
 if [ $UM = um21 ]; then
   lost=$(awk -F'\t' 'NR==FNR { a[$1"\t"$2]=$4; next } (($1"\t"$2) in a) && a[$1"\t"$2]=="checked" && $4!="checked" { n++ } END { print n+0 }' $A/corpus-um16/ledger.tsv $A/corpus-um21/ledger.tsv)
   # the corpus copies of the modules both reached, in defs
@@ -73,12 +74,25 @@ for k in $EMITS; do
   n=a2b$k; grep -q "$n DONE" run/v8/a2bsrc15.log 2>/dev/null && continue
   CHECK_PROCS=${CHECK_PROCS:-10} run/v5/clean/a2bsrc.sh $k >> run/v8/a2bsrc15.log 2>&1 || die "a2bsrc.sh $k (run/v8/a2bsrc15.log)"
 done
-# The GitHub shards together, 4 at a time: decl-new alone is 20 minutes a stream, whatever its size, and they have little to see in each other.
+# (11-05 22:35: nulmix and split took about 11 hours off each plan, so the GitHub shards here and on delfos go on to GHCUT and what they reached by then goes in;
+# each hour of a shard is about 3,400 checked definitions, against um21's 1,700.  gh-cut.sh stops them and brings delfos's over.)
+GHCUT=$(date -d "${GHCUT:-2026-11-06 03:00}" +%s)
+say "the GitHub shards go on to $(date -d @$GHCUT '+%F %T')"
+while [ "$(date +%s)" -lt "$GHCUT" ]; do sleep 60; done
+bash run/v8/gh-cut.sh >> run/v8/gh-cut.log 2>&1 || say "gh-cut.sh failed (run/v8/gh-cut.log), going on with what is here"
+for e in $(ghs); do
+  case " $EMITS " in *" $e "*) continue ;; esac
+  [ -s $A/corpus-$e/ledger.tsv ] || continue
+  say "corpus-$e: $(cut -f1 $A/corpus-$e/ledger.tsv | sort -u | wc -l) modules, $(grep -c $'\tchecked\t' $A/corpus-$e/ledger.tsv) checked (new since the deadline)"
+  EMITS="$EMITS $e"; A2BS="$A2BS a2b$e"
+done
+echo "$A2BS" > run/v8/r5c.a2b
+# The GitHub shards together, 6 at a time (they were 4; nothing else is heavy here by then): decl-new alone is 20 minutes a stream, whatever its size, and they have little to see in each other.
 # (a shard of odd repositories is not worth stopping the night for)
 i=0; for k in $EMITS; do
   case $k in gh*) ;; *) continue ;; esac
   n=a2b$k; grep -q "$n DONE" run/v8/a2bsrc15.log 2>/dev/null && continue
-  while [ "$(jobs -rp | wc -l)" -ge 4 ]; do wait -n; done
+  while [ "$(jobs -rp | wc -l)" -ge 6 ]; do wait -n; done
   i=$((i + 1))
   ( CHECK_PROCS=4 CHECKD_N=2 CHECKD_PORT=$((47400 + 4 * i)) run/v5/clean/a2bsrc.sh $k >> run/v8/a2bsrc-$k.log 2>&1 && echo "$(date '+%F %T') $n DONE" >> run/v8/a2bsrc15.log ) &
 done

@@ -44,6 +44,9 @@ while :; do
       say "available ${a}G, swap used ${s}G: stopping the fallback mix"
       systemctl --user stop 'ana-mix2*'
       sleep 15
+    # (11-05 22:21: check+render at the same time as R5b's shards took the slice with it; R5b is the fallback, and its plan keeps the shards it finished)
+    elif systemctl --user is-active -q ana-run5b; then
+      say "available ${a}G, swap used ${s}G: stopping the fallback plan"; systemctl --user stop ana-run5b; pkill -f 'bend-(prepare|windows).* run/v6/R5b/' ; sleep 15
     elif systemctl --user is-active -q ana-work.slice; then
       say "available ${a}G, swap used ${s}G: stopping ana-work.slice"
       systemctl --user list-units --type=service --state=active --no-legend --plain 'ana-*' | awk '{print $1}' >> "$LOG"

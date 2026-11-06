@@ -519,13 +519,81 @@ def nm.mix(+dir: String, +name: String, srcs: List<NmS>) -> IO(Unit):
     r : List<&2, String> & Nat <- nm.q.go(big(), NmQ{srcs, Nil{}, o, ids, Nil{}, 0n, True{}})
     nm.mix.end(r, work, out, name)
 
-def nm.direct(+dir: String, +out: String, +ss: List<&2, Spec>) -> IO(Unit):
+def nm.slow(+dir: String, +out: String, +ss: List<&2, Spec>) -> IO(Unit):
   do IO<Unit>:
     tr : List<NmS> <- nm.open.tr(out, ss)
     nm.mix(dir, "mix", tr)
     +copies : String <- S.env("FILLER_COPIES", "")
     fl : List<NmS> <- nm.open.fl(copies, out, ss)
     nm.mix(dir, "filler", fl)
+
+# The same rounds at disk speed (11-05): a byte is a list cell above, 0.8 MB/s on one
+# core, and a plan's 14 GB filler took 5 of its 14 hours.  tools/nulmix (Haskell, the
+# gcroot below, or BEND_NULMIX) writes the same bytes, compared with cmp on R5b's 6.4 GB
+# mix and 14.2 GB filler; without it, nm.slow.  The check of the ids and the rename stay
+# here (nm.mix.end).
+def nm.join(ps: List<&2, String>) -> String:
+  match ps:
+    case Nil{}:
+      ""
+    case +p <> Nil{}:
+      p
+    case +p <> more:
+      p ++ "," ++ nm.join(more)
+
+def nm.tr.args(+out: String, ss: List<&2, Spec>) -> List<String>:
+  match ss:
+    case Nil{}:
+      Nil{}
+    case Spec{+l, +per, +rest} <> more:
+      (l ++ ":" ++ per ++ "::" ++ out ++ "/" ++ l ++ "/transcripts.train.nul") <> nm.tr.args(out, more)
+
+def nm.fl.args(+copies: String, +out: String, ss: List<&2, Spec>) -> List<String>:
+  match ss:
+    case Nil{}:
+      Nil{}
+    case Spec{+l, +per, +rest} <> more:
+      +hi = out ++ "/" ++ l ++ "/files-hi.nul"
+      +lo = out ++ "/" ++ l ++ "/files-lo.nul"
+      (l ++ ":" ++ per ++ ":" ++ out ++ "/" ++ l ++ "/results.holdout.nul:" ++ nm.join(hi <> lo <> nm.paths(Nat.sub(nm.copies(l, copies), 1n), hi, lo))) <> nm.fl.args(copies, out, more)
+
+def nm.fast.end(ok: Bool, +t: List<&2, U32>, +work: String, +out: String, +name: String) -> IO(Unit):
+  match ok:
+    case True{}:
+      do IO<Unit>:
+        xs : List<&2, U32> <- S.read(work ++ "/total")
+        nm.mix.end(([S.str(S.chomp(t))], Maybe.default(&2, Nat, Nat.read(S.str(S.chomp(xs))), 0n)), work, out, name)
+    case False{}:
+      IO.die(Unit, 1, "plan-windows: nulmix (" ++ name ++ "): " ++ S.str(S.lines.take(t, 12n)))
+
+def nm.fast.got(o: S.Out, +work: String, +out: String, +name: String) -> IO(Unit):
+  match o:
+    case S.Out{+st, +t}:
+      nm.fast.end(U32.is_eq(st, 0), t, work, out, name)
+
+def nm.fast(+nulmix: String, +dir: String, +name: String, specs: List<String>) -> IO(Unit):
+  +work = dir ++ "/" ++ name ++ ".ck"
+  +out = dir ++ "/" ++ name ++ ".nul"
+  do IO<Unit>:
+    S.mkdir(work)
+    o : S.Out <- S.run(".", [], forever(), nulmix, (out ++ ".tmp") <> (work ++ "/ids") <> (work ++ "/total") <> specs, Nil{})
+    nm.fast.got(o, work, out, name)
+
+def nm.direct.if(fast: Bool, +nulmix: String, +dir: String, +out: String, +ss: List<&2, Spec>) -> IO(Unit):
+  match fast:
+    case True{}:
+      do IO<Unit>:
+        nm.fast(nulmix, dir, "mix", nm.tr.args(out, ss))
+        +copies : String <- S.env("FILLER_COPIES", "")
+        nm.fast(nulmix, dir, "filler", nm.fl.args(copies, out, ss))
+    case False{}:
+      nm.slow(dir, out, ss)
+
+def nm.direct(+dir: String, +out: String, +ss: List<&2, Spec>) -> IO(Unit):
+  do IO<Unit>:
+    +nulmix : String <- S.env("BEND_NULMIX", "run/v6/gcroot-nulmix/bin/nulmix")
+    +fast : Bool <- S.exists(nulmix)
+    nm.direct.if(fast, nulmix, dir, out, ss)
 
 def any.cycle(ss: List<&2, Spec>) -> Bool:
   match ss:
@@ -540,77 +608,6 @@ def mix.if(done: Bool, +dir: String, +out: String, +bm: String, +ss: List<&2, Sp
       say("the mixes exist")
     case False{}:
       Bool.pick(IO(Unit), any.cycle(ss), mix.json(dir, out, bm, ss), nm.direct(dir, out, ss))
-
-# Parts: the pairs of a NUL file cut into files of n pairs ---------------------
-
-# A part's pairs go straight to its file.  (Until 11-03 they gathered in a list
-# first: 24 bytes a byte of text, so a 1.28 GB filler over 3 shards was killed at
-# 4 GB, /tmp/bx/r5mini.)
-type Sp is Type:
-  Sp{rd: S.Rd, o: File, k: Nat, i: Nat, go: Bool}
-
-def sp.path(+pre: String, +k: Nat) -> String:
-  pre ++ "-" ++ pad6(k) ++ ".nul"
-
-def sp.open(+pre: String, +k: Nat) -> IO(File):
-  IO.try(File, File.open(sp.path(pre, k), "w"))
-
-def sp.put(full: Bool, +pre: String, rd: S.Rd, o: File, +k: Nat, +i: Nat) -> IO(Sp):
-  match full:
-    case True{}:
-      do IO<Sp>:
-        File.close(o)
-        o2 : File <- sp.open(pre, 1n+k)
-        return Sp{rd, o2, 1n+k, 0n, True{}}
-    case False{}:
-      IO.pure(Sp, Sp{rd, o, k, i, True{}})
-
-def sp.got(+n: Nat, +pre: String, rd: S.Rd, o: File, +k: Nat, +i: Nat, m: Maybe<&2, List<&2, U32>>) -> IO(Sp):
-  match m:
-    case None{}:
-      IO.pure(Sp, Sp{rd, o, k, i, False{}})
-    case Some{+f}:
-      do IO<Sp>:
-        o2 : File <- S.emit(o, S.append(f, [0]))
-        sp.put(Nat.is_eq(1n+i, Nat.mul(2n, n)), pre, rd, o2, k, 1n+i)
-
-def sp.pair(+n: Nat, +pre: String, o: File, +k: Nat, +i: Nat, r: S.Rd & Maybe<&2, List<&2, U32>>) -> IO(Sp):
-  (rd, m) = r
-  sp.got(n, pre, rd, o, k, i, m)
-
-def sp.step(+n: Nat, +pre: String, s: Sp) -> IO(Sp):
-  match s:
-    case Sp{rd, o, +k, +i, g}:
-      do IO<Sp>:
-        r : S.Rd & Maybe<&2, List<&2, U32>> <- S.Rd.next(rd)
-        sp.pair(n, pre, o, k, i, r)
-
-# the end: the file opened for a part that never began goes
-def sp.end(+pre: String, +k: Nat, i: Nat) -> IO(Nat):
-  match i:
-    case 0n:
-      do IO<Nat>:
-        S.rm(sp.path(pre, k))
-        return k
-    case 1n+j:
-      IO.pure(Nat, 1n+k)
-
-def sp.go(fuel: Nat, +n: Nat, +pre: String, s: Sp) -> IO(Nat):
-  match fuel s:
-    case 1n+p Sp{rd, o, k, i, True{}}:
-      IO.bind(Sp, Nat, sp.step(n, pre, Sp{rd, o, k, i, True{}}), sp.go(p, n, pre))
-    case _ Sp{rd, o, +k, +i, g}:
-      do IO<Nat>:
-        S.Rd.close(rd)
-        File.close(o)
-        sp.end(pre, k, i)
-
-# the files written (named pre-000000.nul, ...)
-def split(+path: String, +n: Nat, +pre: String) -> IO(Nat):
-  do IO<Nat>:
-    rd : S.Rd <- S.Rd.open(path)
-    o : File <- sp.open(pre, 0n)
-    sp.go(big(), n, pre, Sp{rd, o, 0n, 0n, True{}})
 
 type Pt is Data:
   Pt{shards: Nat, fills: Nat}
@@ -682,6 +679,28 @@ def count.of(+path: String) -> IO(Nat):
   do IO<Nat>:
     +there : Bool <- S.exists(path ++ ".count")
     count.got(there, path)
+
+# Parts: the pairs of a NUL file cut into files of n pairs, named pre-000000.nul, ...
+# By S.Rd and S.emit this was 1 MB/s on one core (11-05: 1.5 h for R5b's mix, 4.6 h
+# for its filler), so coreutils' split: the same bytes (cmp on R5b's parts).
+def split.end(ok: Bool, +t: List<&2, U32>, +path: String, +k: Nat) -> IO(Nat):
+  match ok:
+    case True{}:
+      IO.pure(Nat, k)
+    case False{}:
+      IO.die(Nat, 1, "plan-windows: split " ++ path ++ ": " ++ S.str(S.lines.take(t, 12n)))
+
+def split.got(o: S.Out, +path: String, +k: Nat) -> IO(Nat):
+  match o:
+    case S.Out{+st, +t}:
+      split.end(U32.is_eq(st, 0), t, path, k)
+
+# the files written
+def split(+path: String, +n: Nat, +pre: String) -> IO(Nat):
+  do IO<Nat>:
+    +total : Nat <- count.of(path)
+    o : S.Out <- S.run(".", [], forever(), "split", ["--separator=\\0", "--lines=" ++ Nat.show(Nat.mul(2n, n)), "--suffix-length=6", "--numeric-suffixes", "--additional-suffix=.nul", path, pre ++ "-"], Nil{})
+    split.got(o, path, Nat.div(Nat.add(total, Nat.sub(n, 1n)), n))
 
 def parts.if(done: Bool, +dir: String, +shard: Nat, +fill: Nat) -> IO(Pt):
   match done:
