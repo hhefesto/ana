@@ -13,6 +13,7 @@ well with mugen."
   | R5b | `run/v6/R5b` | `bend/gpu/r5b-box.env` | `run/v6/run5b.sh`, `run/v6/run5b.log` | every language in the mugen shape (`docs/MUGEN-SHAPE.md`) with the chains and ana's own mistakes, the user's 4:1 unit by unit, Bend at most 4 repairs a unit |
   | R5c | `run/v8/R5c` | `bend/gpu/r5c-box.env` | `run/v8/run5c.sh`, `run/v8/run5c.log` | R5b plus col9 and 11-04's agda2bend emits |
   | R5n | `run/v8/R5n` | `bend/gpu/r5n-box.env` | `run/v8/run5n.sh`, `run/v8/run5n.log` | R5c's streams with **no copies**: each session once, one repair a unit, 4:1 over each language rather than each unit; far fewer steps, so a shorter and cheaper rental |
+  | R5d | `run/v8/R5d` | `bend/gpu/r5d-box.env` | `run/v8/run5d.sh`, `run/v8/run5d.log` | R5c plus the GitHub shards of the night of 11-06 (gh49 on); sized as R5c, so the new sessions take the place of copies and repairs |
 
   The trainer must be built from c847d84 or later, whose reader weighs a chain's wrong edits 0.
 - **Box:** 2 days of an RTX 5090 (the user, 11-03). Run 4's box took 2.15 s a step and the 11-03 rehearsal's 2.30 (14,230 tok/s), so 46 h is

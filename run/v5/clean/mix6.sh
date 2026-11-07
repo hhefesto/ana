@@ -122,7 +122,8 @@ for s in a2bplfa5 a2baa4 a2bhs2 a2bpre2; do add in run/v6/transcripts-$s/bend/tr
 # R5C=1 (run/v8/run5c.sh, 11-04): the last plan's streams, kept out of R5b's mix: 11-04's emits (a2bsrc.sh) and run 9's collection
 if [ "${R5C:-0}" = 1 ]; then
   # the emits run5c.sh settled on (run/v8/r5c.a2b)
-  for s in $(cat run/v8/r5c.a2b); do add in run/v6/transcripts-$s/bend/transcripts.train.nul; done
+  # (A2BLIST, 11-07: run/v8/run5d.sh's own list; R5c's stays)
+  for s in $(cat ${A2BLIST:-run/v8/r5c.a2b}); do add in run/v6/transcripts-$s/bend/transcripts.train.nul; done
   add in run/v8/transcripts-col9/bend/transcripts.train.nul
 fi
 # mutate's repairs (deduced from a correct unit).  MG=1 (11-03): left out.  They are format 2's text
