@@ -75,6 +75,14 @@ printf 'm\nm\nm\n' >> a2b/corpus-gh51/ledger.tsv; mkdir -p a2b/corpus-gh93
 export SIMROOT=$R ANA=$R A2BDIR=$R/a2b GHDIR=$R/gh TICK=1 PATH=$R/bin:$PATH
 t() { date -d "+$1 sec" '+%F %T'; }
 export EXPSTOP="$(t 1)" NONEW="$(t 2)" CUT="$(t 3)" DRYAT="$(t 8)" FREEZE="$(t 14)"
+# (run5d.sh wants its CV there; the stub mix6.sh never runs it)
+export CV=$R/bin/cv; printf '#!/bin/sh\n' > $CV; chmod +x $CV
+# NOCUT=1 (11-07, the rebuild): no cut, ana-ghsrc (here a loop) does the units; WAITFOR's two are through in seconds, so the
+# freeze comes before FREEZE, and gh92 (60 s) and gh91 (failed) are left out
+if [ "${NOCUT:-0}" = 1 ]; then
+  export FREEZE="$(t 40)" WAITFOR="a2bgh50 a2bgh51"
+  ( for k in gh50 gh51 gh91 gh92; do ( run/v5/clean/a2bsrc.sh $k && echo "$(date '+%F %T') a2b$k DONE" >> run/v8/a2bsrc15.log ) & done; wait ) &
+fi
 bash run/v8/run5d.sh; echo "exit $?"
 echo "--- stops"; sort -u stops | tr '\n' ';'; echo
 echo "--- mixes"; cut -c1-260 mixes

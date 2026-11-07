@@ -14,8 +14,16 @@
 #   run5d.sh units      the new streams' units (unit ana-r5d-units)
 #   run5d.sh shape      the mugen shape and the chains, in passes (unit ana-r5d-shape)
 # The clock and the places can be set from the environment, as the rehearsal does (run/v8/run5d-sim.sh).
+# NOCUT=1 (11-07, the user's "Yes" to "Should I fix the duplicate IDs and rebuild the R5d plan?"): the rebuild, beside the
+# corpus work, which goes on (the exports, the shards, ana-ghsrc's units, ana-checkd-cap: nothing of it is stopped).  The shape
+# and the chains in passes from the start; the freeze at FREEZE, or sooner once every stream in WAITFOR is through; then the
+# dry mix over what went in, the mix, the filler and plan-windows, as the night's run.
 cd "${ANA:-/home/hhefesto/src/ana}" || exit 1
 export BEND_NO_TELEMETRY=1
+# (11-07 07:00, "6174 ids twice in run/v8/mix4/bend": this script set no CV, so mix6.sh took its default, run 5's bend-corpus-v2,
+# whose repair-mix neither reads a chain's try nor drops an id twice; R5c's mix, by this one, dropped 5,742.  As run5c.sh, run5n.sh.)
+export CV=${CV:-$PWD/run/v6/mugen/chain/gcroot-bend-corpus-v2/bin/bend-corpus-v2}
+NOCUT=${NOCUT:-0}; WAITFOR=${WAITFOR:-}
 EXPSTOP=${EXPSTOP:-2026-11-07 02:00}; NONEW=${NONEW:-2026-11-07 02:15}; CUT=${CUT:-2026-11-07 03:00}
 DRYAT=${DRYAT:-2026-11-07 04:00}; FREEZE=${FREEZE:-2026-11-07 05:00}
 TICK=${TICK:-30}
@@ -31,7 +39,7 @@ count() { tr -cd '\0' < "$1" | wc -c | awk '{print int($1/2)}'; }
 # (one by one: a name not loaded fails the whole command; 11-05)
 stopu() { local u; for u in "$@"; do systemctl --user stop "$u" 2>/dev/null; done; }
 worker() { systemctl --user reset-failed $1 2>/dev/null; systemd-run --user --unit=$1 --slice=ana-work.slice -p WorkingDirectory=$PWD -p MemoryMax=12G -p MemorySwapMax=1G -p OOMPolicy=continue -p StandardOutput=append:$PWD/run/v8/$1.log -p StandardError=append:$PWD/run/v8/$1.log --setenv=PATH="$PATH" /bin/sh -c "exec $2"; }
-part() { systemctl --user reset-failed $1 2>/dev/null; systemd-run --user --unit=$1 --slice=ana-work.slice -p WorkingDirectory=$PWD -p OOMPolicy=continue -p StandardOutput=append:$PWD/run/v8/$1.log -p StandardError=append:$PWD/run/v8/$1.log --setenv=PATH="$PATH" --setenv=ANA="$PWD" --setenv=A2BDIR="$A" --setenv=TICK="$TICK" "$(command -v bash)" run/v8/run5d.sh $2; }
+part() { systemctl --user reset-failed $1 2>/dev/null; systemd-run --user --unit=$1 --slice=ana-work.slice -p WorkingDirectory=$PWD -p OOMPolicy=continue -p StandardOutput=append:$PWD/run/v8/$1.log -p StandardError=append:$PWD/run/v8/$1.log --setenv=PATH="$PATH" --setenv=ANA="$PWD" --setenv=A2BDIR="$A" --setenv=TICK="$TICK" --setenv=SHAPETICK="${SHAPETICK:-$TICK}" "$(command -v bash)" run/v8/run5d.sh $2; }
 # the shards not in R5c, the biggest first (if the time runs out, the small ones are what is lost)
 streams() { local d e
   for d in "$A"/corpus-gh[0-9]*; do
@@ -73,15 +81,24 @@ case "${1:-}" in
       worker ana-chain1 run/v5/clean/chain6.sh; worker ana-chain2 run/v5/clean/chain6.sh
       waitfor ana-chain1 ana-chain2
       [ -n "$last" ] && break
-      sleep $TICK
+      sleep ${SHAPETICK:-$TICK}
     done
     say "shape: none left"
     exit 0 ;;
 esac
 
 mkdir -p $M4 $S/bend
-say "the clock: exports $EXPSTOP, new shards $NONEW, shards $CUT, dry mix $DRYAT, freeze $FREEZE"
 [ -s run/v8/r5c.a2b ] || die "no run/v8/r5c.a2b"
+[ -x "$CV" ] || die "no $CV"
+# every stream of WAITFOR through (none given: never)
+alldone() { local t n; [ -n "$WAITFOR" ] || return 1; t=" $(through) "
+  for n in $WAITFOR; do case $t in *" $n "*) ;; *) return 1 ;; esac; done; return 0; }
+dryok=
+if [ "$NOCUT" = 1 ]; then
+  say "the rebuild: the corpus work goes on; freeze $FREEZE, or once these are through: ${WAITFOR:-(none given)}"
+  rm -f run/v8/r5d.units.done; part ana-r5d-shape shape
+else
+say "the clock: exports $EXPSTOP, new shards $NONEW, shards $CUT, dry mix $DRYAT, freeze $FREEZE"
 at "$EXPSTOP"; stopu a2b-exp-gh; touch "$GH/export.ended"; say "exports stopped"
 at "$NONEW"; stopu ana-ghsched2; say "no new shard"
 at "$CUT"
@@ -99,18 +116,21 @@ part ana-r5d-units units; part ana-r5d-shape shape
 at "$DRYAT"
 through > $L.dry
 say "dry mix over: $(cut -d' ' -f39- $L.dry)"
-dryok=
 if A2BLIST=$L.dry R5C=1 MG=1 FF=1 CH=1 run/v5/clean/mix6.sh $M4/dry dry > $M4/dry.log 2>&1; then dryok=1; else say "dry mix FAILED, again after the freeze (it costs an hour)"; fi
+fi
 
 fz=$(date -d "$FREEZE" +%s)
-while active ana-r5d-units ana-r5d-shape && [ "$(date +%s)" -lt "$fz" ]; do sleep $TICK; done
+while active ana-r5d-units ana-r5d-shape && [ "$(date +%s)" -lt "$fz" ] && ! alldone; do sleep $TICK; done
 say "the freeze"
 stopu ana-r5d-units ana-r5d-shape ana-mugen6q1 ana-mugen6q2 ana-mugen6q3
+# (a worker the freeze stopped leaves its claim, and mugen6q.sh skips a claimed stream for good: freed, so a later pass takes it)
+for c in run/v6/mugen-q/claim-*; do [ -d "$c" ] || continue; n=${c##*/claim-}
+  [ -e run/v6/mugen-q/out/$n/DONE ] || [ -e run/v6/mugen/$n/DONE ] || { rmdir "$c" 2>/dev/null && say "$n: its claim freed"; }; done
 waitfor ana-chain1 ana-chain2
 run/v5/clean/mugen6q.sh move | grep -v 'not DONE'
 worker ana-chain1 run/v5/clean/chain6.sh; worker ana-chain2 run/v5/clean/chain6.sh
 waitfor ana-chain1 ana-chain2
-stopu ana-checkd-cap
+[ "$NOCUT" = 1 ] || stopu ana-checkd-cap
 through > $L
 say "the plan's new streams: $(cut -d' ' -f39- $L)"
 for k in $(streams); do n=a2b$k; grep -qw $n $L || say "$n: not through by the freeze, left out"; done
