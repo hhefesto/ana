@@ -4,6 +4,13 @@ This file holds everything needed to continue this work from another machine and
 
 ## Run 5 for mugen: the last Bend streams, the mugen shape, ana in mugen's loop (2026-11-03, UTC-6; in progress)
 
+- **11-06 23:50, the user: "Work on augmenting the training corpus with extra bend code until tomorrow 9:30 am."** Olimpo only: delfos does not answer since about 21:00 ("No route to host", it answered at 20:03), so its gh14-19 emits are out of reach, and the 2,045 units below may overlap what it exported (decl-new drops repeats when both are in).
+  - **Exports:** a2b-exp-gh, `xargs -P 3 exp1.sh < /tmp/bx/gh/order3.txt`: the 2,045 units with no DONE here (30,691 modules), biggest first; log /tmp/bx/gh/exp.log.
+  - **Shards:** ana-ghsched2 from gh53, k12, maxj 3, AVMIN 8, 100-500 modules; export.ended removed so shard.py waits for 100; log /tmp/bx/gh/sched2.log.
+  - **Units:** ana-ghsrc, run/v8/ghsrc-night.sh (ghsrc.sh without its wait on run5c.log), N=2, gh49 onward; log run/v8/ghsrc-night.log, each shard run/v8/a2bsrc-ghK.log.
+  - **The clock:** night-stop-exp 07:30 (and touches export.ended), ana-ghsched2's own stop 07:45, night-stop-emit 08:40 (partial shards still go through ghsrc), night-stop-all 09:30.
+  - **Memory:** ana-work.slice MemoryHigh=22G, MemoryMax=24G (runtime only). ana-guard, ana-r5watch and run5n are NOT running: no restart loop and no "memory low" notices; the cap protects the desktop. ana-checkd-cap is on.
+  - **Not in any plan:** R5c stays as it was (310 shards, 17:50). R5n is unfinished. These streams need a new plan.
 - **11-06 07:05, the user: "push the 18:00 deadline to 21:00":** ana-ghsched2 and delfos's ana-help-ghsched restarted with STOPAT 21:00, their running shards untouched. R5c and R5n themselves did not change. The vast credit (about $45) is now due by 21:00. **The user 07:08: the reminder alone fires at 17:00** (remind-ana-run5.timer, for Sam's report); the deadline stays 21:00.
 - **11-06 03:10-03:30, the user: "Health check", "Continue with ana's training corpus on all cylinders":**
   - **R5b FAILED at 02:32:** 157 of 311 shards: "the filler corpus has no unused document of at least N tokens", at about window 4,800. A slice had 5,082 documents and a shard needs about 4,940 windows (62% of its 8,000 sessions). The filler's 55% in run5b.sh, run5c.sh, run5n.sh was too low. Not from nulmix: filler.nul and the slices are byte-identical to the old road's.
