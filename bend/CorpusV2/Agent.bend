@@ -162,6 +162,7 @@ def ea.prep.one(+i: Nat, +fmt1: Bool, +dir: String, +recs: List<&2, Ev.EvKv>, +r
       +task = dir ++ "/task." ++ Nat.show(i) ++ ".nul"
       +pf = dir ++ "/prompt." ++ Nat.show(i)
       do IO<C.CbJob>:
+        +bin : String <- S.env("AGENT_BIN", ea.bin())
         +src : String <- Ev.ev.src.if(S.eq(l, S.b("bend")), roots, home, u, Ev.ev.nth(Ev.ev.split(rec, 30), 7n))
         S.write(task, ea.task.bytes(u, l, src, r, rec))
         S.write(pf, asked)
@@ -173,7 +174,7 @@ def ea.prep.one(+i: Nat, +fmt1: Bool, +dir: String, +recs: List<&2, Ev.EvKv>, +r
         # and appended to DIR/episodes.eplog when the job ends (`ea.one`)
         return C.CbJob{i, List.append(&2, String, env0, {["AGENT_TOOL=" ++ dep ++ " corpus-v2 agent-tool " ++ task, "CHECK_TAG=" ++ Nat.show(Nat.add(tag, i)),
           "SAMPLE_SEED=" ++ Nat.show(Nat.mod(i, Nat.max(seeds, 1n))),
-          "AGENT_LOG=" ++ dir ++ "/ep." ++ Nat.show(i) ++ ".log", "AGENT_META=n=" ++ Nat.show(i) ++ "\nlang=" ++ S.str(l) ++ "\nunit=" ++ S.str(u) ++ "\n"] : List<&2, String>}), ea.bin(),
+          "AGENT_LOG=" ++ dir ++ "/ep." ++ Nat.show(i) ++ ".log", "AGENT_META=n=" ++ Nat.show(i) ++ "\nlang=" ++ S.str(l) ++ "\nunit=" ++ S.str(u) ++ "\n"] : List<&2, String>}), bin,
           {["+RTS", "--threads", threads, "-RTS", "--agent", "--prompt-file", pf] : List<&2, String>}}
 
 def ea.has(xs: List<&2, Nat>, +i: Nat) -> Bool:

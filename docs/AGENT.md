@@ -119,6 +119,11 @@ token budget (TOKENS), or AGENT_CALLS calls. The decoder state is a value
   `ana` without `--agent` writes what it wrote before (checked 2026-10-05).
 - Each episode streams to stdout as one transcript; stderr ends with
   `agent: solved|eos|budget|calls|tool-error; N calls, M tokens`.
+- `RETRY_TEMPERATURE` (default: `TEMPERATURE`) is the temperature of every
+  stretch after a failed check, so a greedy first try can be followed by
+  sampled retries (2026-11-10, the baseline for the retry copies). E5 takes
+  it from the environment; `AGENT_BIN` (default
+  `run/gcroot-bend-generate-agent/bin/bend-generate`) names the decoder E5 runs.
 
 ### The tools (bend/Agent/Tools.bend, `bend-agent-tool`)
 

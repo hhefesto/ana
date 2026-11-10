@@ -118,6 +118,14 @@ def AlM.st(+m: AlM) -> D.Settings:
     case AlM{dm, b, st, v, hs, n}:
       st
 
+# the model with the settings a retry decodes with: after a failed check
+# the loop goes on with the retry settings (RETRY_TEMPERATURE, Generate.bend;
+# by default the episode's own, so a greedy episode stays greedy)
+def AlM.retry(+m: AlM, +rs: D.Settings) -> AlM:
+  match m:
+    case AlM{dm, b, st, v, hs, n}:
+      AlM{dm, b, rs, v, hs, n}
+
 def AlM.vocab(+m: AlM) -> Nat:
   match m:
     case AlM{dm, b, st, v, hs, n}:
@@ -260,9 +268,10 @@ def al.resume(+m: AlM, +budget: Nat, +echo: List<&2, U32>, e: D.En, +pos: Nat, +
     al.gen(budget, al.g.of(m, l, px), m, Nat.add(pos, List.length(&2, U32, ids)), pending, l, Nil{}, 0n)
 
 # The loop: `fuel` is two steps a call (the call, then resuming after a
-# failed check), so at most fuel / 2 calls; `cmd` the tool command (run by
-# sh, the tool's name its argument $1, the episode so far its standard input)
-def al.round(+fuel: Nat, +m: AlM, +cmd: String, +budget: Nat, s: AlS, +ep: AlEp) -> IO(AlEp):
+# failed check), so at most fuel / 2 calls; `rs` the settings every stretch
+# after a failed check decodes with; `cmd` the tool command (run by sh, the
+# tool's name its argument $1, the episode so far its standard input)
+def al.round(+fuel: Nat, +m: AlM, +rs: D.Settings, +cmd: String, +budget: Nat, s: AlS, +ep: AlEp) -> IO(AlEp):
   match fuel s:
     case _ AlStop{why, +out, +n}:
       IO.pure(AlEp, al.ep.fin(al.ep.add(ep, 1n, out, n), why))
@@ -273,7 +282,7 @@ def al.round(+fuel: Nat, +m: AlM, +cmd: String, +budget: Nat, s: AlS, +ep: AlEp)
       do IO<AlEp>:
         r : Result<&1, &1, U32 & String, U32 & (String & String)> <-
           Process.run("sh", ["-c", cmd ++ " \"$1\"", "sh", al.str(tool)], al.str(al.ep.text(ep2)), 16777216, 3600000)
-        al.round(p, m, cmd, budget, al.tool.of(r, e, pos, rng, pending), ep2)
+        al.round(p, m, rs, cmd, budget, al.tool.of(r, e, pos, rng, pending), ep2)
     case _ AlPass{+echo}:
       do IO<AlEp>:
         IO.write(al.str(echo))
@@ -283,10 +292,11 @@ def al.round(+fuel: Nat, +m: AlM, +cmd: String, +budget: Nat, s: AlS, +ep: AlEp)
         IO.print_err("agent: " ++ msg)
         return al.ep.fin(ep, "tool-error")
     case 1n+p AlFail{+echo, e, +pos, +rng, +pending}:
+      +m2 = AlM.retry(m, rs)
       do IO<AlEp>:
         IO.write(al.str(echo))
-        s2 : AlS <- al.resume(m, budget, echo, e, pos, rng, pending)
-        al.round(p, m, cmd, budget, s2, al.ep.echo(ep, 1, echo))
+        s2 : AlS <- al.resume(m2, budget, echo, e, pos, rng, pending)
+        al.round(p, m2, rs, cmd, budget, s2, al.ep.echo(ep, 1, echo))
     case 0n AlFail{+echo, e, pos, rng, pending}:
       do IO<AlEp>:
         IO.write(al.str(echo))
@@ -304,7 +314,7 @@ def al.ask(+shape: String, +prompt: String) -> String:
 # prompt fed, then the loop.  The prompt is written to standard output
 # first, then everything ana and the tools write, as it comes: the
 # transcript.
-def al.episode(+md: D.Model, e: D.En, +st: D.Settings, +seed: String, +cmd: String, +calls: Nat, +budget: Nat, +prompt: List<&2, U32>) -> IO(AlEp):
+def al.episode(+md: D.Model, e: D.En, +st: D.Settings, +rs: D.Settings, +seed: String, +cmd: String, +calls: Nat, +budget: Nat, +prompt: List<&2, U32>) -> IO(AlEp):
   +m = al.of(md, st)
   +ids = List.append(&2, U32, [Tk.bos()], Tk.Bpe.encode(D.dc.Model.b(md), prompt))
   +l = al.line.of(prompt, AlLine{Nil{}, True{}})
@@ -312,4 +322,4 @@ def al.episode(+md: D.Model, e: D.En, +st: D.Settings, +seed: String, +cmd: Stri
     IO.write(al.str(prompt))
     px : D.Px <- D.dc.en.prefill.pick(ids, e, 0n, AlM.dm(m), AlM.st(m), AlM.vocab(m), False{}, D.dc.rng.of(seed))
     s : AlS <- al.gen(budget, al.g.of(m, l, px), m, List.length(&2, U32, ids), Nil{}, l, Nil{}, 0n)
-    al.round(Nat.mul(2n, calls), m, cmd, budget, s, AlEp{[E.EpSeg{0n, Nil{}, 0, prompt}], 0n, 0n, "", Nil{}})
+    al.round(Nat.mul(2n, calls), m, rs, cmd, budget, s, AlEp{[E.EpSeg{0n, Nil{}, 0, prompt}], 0n, 0n, "", Nil{}})
