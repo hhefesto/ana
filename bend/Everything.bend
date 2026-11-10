@@ -32,6 +32,7 @@ import ./Spec/Weighted.bend as SWeighted
 import ./Spec/Autoregressive.bend as SAutoregressive
 import ./Spec/Trie.bend as STrie
 import ./Spec/AutoregressiveTrie.bend as SAutoregressiveTrie
+import ./Spec/Operations.bend as SOperations
 import ./Spec/Decoding.bend as SDecoding
 import ./Spec/SpeculativeDecoding.bend as SSpeculative
 import ./Spec/Linear.bend as SLinear
