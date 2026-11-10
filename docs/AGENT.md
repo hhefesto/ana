@@ -124,6 +124,20 @@ token budget (TOKENS), or AGENT_CALLS calls. The decoder state is a value
   sampled retries (2026-11-10, the baseline for the retry copies). E5 takes
   it from the environment; `AGENT_BIN` (default
   `run/gcroot-bend-generate-agent/bin/bend-generate`) names the decoder E5 runs.
+- `RETRY_AVOID=1` decodes each retry's term from the product of the model
+  with avoid(T), T the term whose check just failed (Elliott's product,
+  bend/Spec/Operations.bend; 2026-11-10). A term starts after the line that
+  opens a code fence and runs to the call line. When the retry's term starts,
+  T is read once through the model in the retry's context (each step's
+  probability of T's token, of finishing T from there, and the likeliest
+  other token); the retry follows T up to the first step where another token
+  outweighs T's under the product, takes it, and decodes as usual after it.
+  An exact copy of T is impossible. The engine has no rewind, so after the
+  pass it is emptied and every token so far replayed (one more prefill per
+  retry). stderr gets `agent: product: the failed term N tokens, copied with
+  probability Q; kept D, then token A`. The choice is the product's greedy
+  one whatever `RETRY_TEMPERATURE` is; only one failed term (the last) is
+  avoided.
 
 ### The tools (bend/Agent/Tools.bend, `bend-agent-tool`)
 
