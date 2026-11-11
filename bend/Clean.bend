@@ -51,7 +51,7 @@ def fnv(+xs: List<&2, U32>) -> U32:
 
 # two independent lanes, sixteen hex digits
 def h64(+xs: List<&2, U32>) -> String:
-  N.U32.hex(fmix(fnv.go(xs, 2166136261))) ++ N.U32.hex(fmix(fnv.go(xs, 3735928559)))
+  N.U32.hex8(fmix(fnv.go(xs, 2166136261))) ++ N.U32.hex8(fmix(fnv.go(xs, 3735928559)))
 
 # the whitespace words of a text, each hashed
 def word.hashes(ws: List<&2, List<&2, U32>>) -> List<&2, U32>:
@@ -133,7 +133,7 @@ def hexes(ms: List<&2, U32>) -> String:
     case Nil{}:
       ""
     case +m <> more:
-      N.U32.hex(m) ++ hexes(more)
+      N.U32.hex8(m) ++ hexes(more)
 
 # `HASH INDEX` for every 10-gram
 def gram.lines(gs: List<&2, List<&2, U32>>, +ix: String) -> List<&2, U32>:

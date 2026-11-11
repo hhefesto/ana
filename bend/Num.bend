@@ -127,21 +127,22 @@ def hex.digit.go(+x: U32, small: Bool) -> Char:
 def hex.digit(+x: U32) -> Char:
   hex.digit.go(x, U32.is_lt(x, 10))
 
-def U32.hex.go(n: Nat, +x: U32, acc: String) -> String:
+def U32.hex8.go(n: Nat, +x: U32, acc: String) -> String:
   match n:
     case 0n:
       acc
     case 1n+p:
-      U32.hex.go(p, U32.shrn(x, 4n), SCon{hex.digit(U32.and(x, 15)), acc})
+      U32.hex8.go(p, U32.shrn(x, 4n), SCon{hex.digit(U32.and(x, 15)), acc})
 
-# eight lowercase hex digits
-def U32.hex(+x: U32) -> String:
-  U32.hex.go(8n, x, "")
+# eight lowercase hex digits, zeros kept (Base's U32.hex drops the leading
+# ones; since Bend 2.0.40 a module's def may not reuse a Base name)
+def U32.hex8(+x: U32) -> String:
+  U32.hex8.go(8n, x, "")
 
 def U64.hex(a: U64) -> String:
   match a:
     case U64{h, l}:
-      U32.hex(h) ++ U32.hex(l)
+      U32.hex8(h) ++ U32.hex8(l)
 
 # Decimal parse of a U64 (SAMPLE_SEED): digits only, None on anything else
 # or on an empty string.  Overflow wraps, as a Word64 read of an in-range

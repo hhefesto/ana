@@ -116,8 +116,8 @@ def pad(+xs: List<&2, U32>) -> List<&2, U32>:
 def H8.hex(s: H8) -> String:
   match s:
     case H8{a, b, c, d, e, f, g, h}:
-      N.U32.hex(a) ++ N.U32.hex(b) ++ N.U32.hex(c) ++ N.U32.hex(d)
-        ++ N.U32.hex(e) ++ N.U32.hex(f) ++ N.U32.hex(g) ++ N.U32.hex(h)
+      N.U32.hex8(a) ++ N.U32.hex8(b) ++ N.U32.hex8(c) ++ N.U32.hex8(d)
+        ++ N.U32.hex8(e) ++ N.U32.hex8(f) ++ N.U32.hex8(g) ++ N.U32.hex8(h)
 
 def sha256(+xs: List<&2, U32>) -> String:
   +padded = pad(xs)

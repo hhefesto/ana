@@ -67,9 +67,9 @@ def hex.lines(xs: List<&2, F32>, +k: Nat) -> String:
     case Nil{} _:
       "\n"
     case h <> t 0n:
-      "\n" ++ N.U32.hex(F32.bits(h)) ++ hex.lines(t, 15n)
+      "\n" ++ N.U32.hex8(F32.bits(h)) ++ hex.lines(t, 15n)
     case h <> t 1n+p:
-      N.U32.hex(F32.bits(h)) ++ hex.lines(t, p)
+      N.U32.hex8(F32.bits(h)) ++ hex.lines(t, p)
 
 def render(+c: C.Config, +tok: String, +step: Nat, +w: Md.Weights) -> String:
   +xs = Weights.flat(w)
