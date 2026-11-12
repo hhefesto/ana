@@ -409,7 +409,17 @@ def rt.vary(+dir: String) -> IO(List<&2, RtCk>):
     +ah : R.RtAud <- R.rto.audit(False{}, 4n, 1n, dir ++ "/s50.nul")
     +sf : List<&2, Cl.Stat> <- rt.run(dir ++ "/fill.nul", rt.cfg(4n, 1n, True{}, False{}, 100n))
     +af : R.RtAud <- R.rto.audit(True{}, 4n, 1n, dir ++ "/fill.nul")
-    return [RtCk{"cap=2: the law (28 records, 4 units, 21 first-time, 5 repairs)", rt.aud.is(a2, 28n, 4n, 21n, 5n)},
+    +s0 : List<&2, Cl.Stat> <- rt.run(dir ++ "/r0.nul", rt.cfg(0n, 1n, False{}, False{}, 100n))
+    +p0 : List<&2, RtP> <- rt.read(dir ++ "/r0.nul")
+    +a0 : R.RtAud <- R.rto.audit(False{}, 0n, 1n, dir ++ "/r0.nul")
+    return [RtCk{"ratio=0 (the user 11-12: the rule off): the law (9 records, 5 units, 3 first-time, 4 repairs)", rt.aud.is(a0, 9n, 5n, 3n, 4n)},
+      RtCk{"ratio=0: no copies, nothing derived; the no-first unit's repairs go only by the cap (cap 7, no first 0)",
+        rt.st.is(s0, [3n, 0n, 4n, 0n, 2n, 7n, 0n, 0n, 0n, 1n, 4n, 1n])},
+      RtCk{"ratio=0: each unit's first-time and repair counts (1+1, 1+1, 0+1 the port's, 0+1 the no-first unit's, 1+0)", Bool.and(Bool.and(
+        Bool.and(rt.counts.is(rt.counts(p0, rt.u1()), 1n, 1n), rt.counts.is(rt.counts(p0, rt.ua()), 1n, 1n)),
+        Bool.and(rt.counts.is(rt.counts(p0, rt.up()), 0n, 1n), rt.counts.is(rt.counts(p0, rt.u3()), 0n, 1n))), rt.counts.is(rt.counts(p0, rt.uh()), 1n, 0n))},
+      RtCk{"ratio=0: the port's repair kept as it stands, no /first", Bool.and(rt.has(p0, rt.up() ++ "/repair"), Bool.not(rt.has(p0, rt.up() ++ "/repair/first")))},
+      RtCk{"cap=2: the law (28 records, 4 units, 21 first-time, 5 repairs)", rt.aud.is(a2, 28n, 4n, 21n, 5n)},
       RtCk{"cap=2: the two least keys a unit (sha256sum: drop-arg and the format-2 repair; the chain and +3/repair)", Bool.and(Bool.and(
         rt.has(p2, "mut:" ++ rt.u1() ++ "/drop-arg-0"), rt.has(p2, rt.u1() ++ "/repair")), Bool.and(rt.has(p2, rt.ua() ++ "/chain-3"), rt.has(p2, rt.ua() ++ "+3/repair")))},
       RtCk{"cap=2: the stats (copies 14, cap drops 3)", rt.st.is(s2, [3n, 14n, 5n, 4n, 2n, 3n, 3n, 0n, 0n, 1n, 4n, 1n])},

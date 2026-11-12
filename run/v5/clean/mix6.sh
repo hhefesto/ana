@@ -3,7 +3,8 @@
 # first-time solutions at least 4 for every repair deduced from a correct one (ratio=4), each
 # unit's own first-time transcript repeated to cover its repairs; at most 4 deduced repairs a unit
 # (cap=4, the user 2026-10-29: "cap at 4 per unit"; mutate makes at most 5, so 5 is no cap; cap=1
-# before).  A unit with real history repairs (hist5.sh) keeps those and none of its made-up ones.
+# before).  11-12, the user: "Remove the 4:1 rule": RATIO=0 (R5f, run/v8/run5f.sh) keeps every
+# repair up to the cap, none copied, none dropped for want of a first-time one.  A unit with real history repairs (hist5.sh) keeps those and none of its made-up ones.
 # The nightly real-error attempts
 # (run/v5/act5: ana's own wrong programs and her fixes, not deduced from a correct one) pass
 # whole (free=).  A stream that is not there yet is left out, and said.

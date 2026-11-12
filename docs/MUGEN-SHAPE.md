@@ -161,7 +161,9 @@ a try, weight 0, as it takes a Term the tool rejected. Her check after it, and
 the fix, weigh 1. `edit` got its own heading class for that (9, `ag.is.call`
 covers it); a session with one edit reads as before (own9's first 2,763
 sessions pass the laws, no try in them). repair-mix classes a chain as a repair
-by those roles, so the 4:1 rule and the cap count it.
+by those roles, so the cap counts it (and the 4:1 rule did, until the user removed
+it on 11-12: "Remove the 4:1 rule"; these weights do its job, so R5f runs
+repair-mix ratio=0).
 
 **Her own mistakes (`MUGEN_ONLY=night`, `NIGHT=FILE`):** run/v5/act5's night
 transcripts, the only ones with her real failed attempts, were format 2. On

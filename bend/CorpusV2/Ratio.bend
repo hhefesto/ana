@@ -12,6 +12,8 @@ import ./Keyed.bend as K
 # call to fix, the training corpus should contain four times the program
 # correct from the start. I don't want ana to train on answering wrong on the
 # first try, I want ana to learn how to correct her mistakes if they occur."
+# The user, 2026-11-12: "Remove the 4:1 rule" (the trainer's weights do its
+# job: a try weighs 0, so she never trains on the wrong program): ratio=0.
 #
 #   bend-corpus-v2 repair-mix OUT WORD...
 #
@@ -23,7 +25,9 @@ import ./Keyed.bend as K
 #                as decl-new's OUT.dropped writes it (only the reasons
 #                v2-held, held-file, held-text and held-decl count); an id
 #                without `#` holds out every unit of that file
-#   ratio=N      first-time transcripts a kept repair needs (4)
+#   ratio=N      first-time transcripts a kept repair needs (4); 0, the rule
+#                off: no copies, and a repair whose unit has no first-time
+#                transcript is kept as it is (derive is then moot)
 #   cap=N        repairs kept a unit (1)
 #   share=P      the repair budget: only units whose slot, int(sha256(salt
 #                NUL "share" NUL u)[:8], 16) % 100, is under P keep repairs
@@ -58,7 +62,7 @@ import ./Keyed.bend as K
 # sha256(salt NUL id), is least: a unit's operators are drawn
 # evenly whatever how many mutants each gave (no operator crowds out the
 # rest), and the choice is the same on any machine.  When f(u) = 0 they are
-# dropped (no-first) unless derive covers u.  The unit's first-time
+# dropped (no-first) unless derive covers u or ratio is 0.  The unit's first-time
 # transcripts are then copied until there are max(f(u), ratio * kept(u)) of
 # them, the extra copies spread evenly over its distinct ones in the order
 # read (copy k of id is id/eK, k from 2); a derived one is id/first, its
@@ -282,6 +286,11 @@ def rto.deriv(+c: RtCfg, +u: List<&2, U32>) -> Bool:
     case RtCfg{r, k, s, f, d, y, q}:
       Bool.or(Nat.is_eq(d, 2n), Bool.and(Nat.is_eq(d, 1n), rto.whole(u)))
 
+# whether a kept repair needs a first-time transcript of its unit (ratio > 0;
+# ratio=0 is the rule off, 2026-11-12)
+def rto.needf(+c: RtCfg) -> Bool:
+  Nat.is_lt(0n, rto.ratio(c))
+
 def rto.derive.name(+d: Nat) -> String:
   match d:
     case 0n:
@@ -351,9 +360,9 @@ def rto.u.best(+x: RtU) -> List<&2, RtR>:
       b
 
 # the repairs a unit keeps: its best, unless it is outside the share, or
-# it has no first-time transcript and derive does not cover it
+# it has no first-time transcript, ratio > 0 and derive does not cover it
 def rto.kept.n(+c: RtCfg, +u: List<&2, U32>, +x: RtU) -> Nat:
-  +ok = Bool.and(rto.shared(c, u), Bool.or(Nat.is_lt(0n, rto.u.f(x)), rto.deriv(c, u)))
+  +ok = Bool.and(rto.shared(c, u), Bool.or(Bool.or(Nat.is_lt(0n, rto.u.f(x)), Bool.not(rto.needf(c))), rto.deriv(c, u)))
   Bool.pick(Nat, ok, List.length(&2, RtR, rto.u.best(x)), 0n)
 
 # the first-time transcripts a unit ends with: max(f, ratio * kept)
@@ -385,7 +394,7 @@ def rto.upd(kind: Nat, +c: RtCfg, +u: List<&2, U32>, +id: List<&2, U32>, x: RtU)
 # cap, 6 a repair whose unit has no first-time transcript, 7 passed through
 # (other, or a free source's repair), 8 a repair of a unit outside the share
 def rto.kind2(+c: RtCfg, +free: Bool, +cl: Nat, +held: Bool, +u: List<&2, U32>, +id: List<&2, U32>, +x: RtU) -> Nat:
-  +nofirst = Nat.is_eq(rto.u.f(x), 0n)
+  +nofirst = Bool.and(Nat.is_eq(rto.u.f(x), 0n), rto.needf(c))
   +rep = Bool.pick(Nat, Bool.not(rto.shared(c, u)), 8n, Bool.pick(Nat, Bool.and(nofirst, Bool.not(rto.deriv(c, u))), 6n,
     Bool.pick(Nat, rto.in.best(S.str(id), rto.u.best(x)), Bool.pick(Nat, nofirst, 4n, 3n), 5n)))
   Bool.pick(Nat, held, 0n, Bool.pick(Nat, Nat.is_eq(cl, 3n), 1n, Bool.pick(Nat, Nat.is_eq(cl, 0n), 2n,
@@ -799,7 +808,7 @@ def rto.units.st(+c: RtCfg, us: List<&2, Sigma<&2, &2, String, _ => RtU>>, st: L
       +kept = rto.kept.n(c, u, x)
       +st1 = rto.bump2("units", 1n, "units-first", rto.b2n(hasf), rto.bump2("units-repair", rto.b2n(hasr), "units-kept", rto.b2n(Nat.is_lt(0n, kept)), st))
       +sh = rto.shared(c, u)
-      +st2 = rto.bump2("units-no-first", rto.b2n(Bool.and(Bool.and(hasr, sh), Bool.and(Bool.not(hasf), Nat.is_eq(kept, 0n)))), "units-derived", rto.b2n(Bool.and(Bool.not(hasf), Nat.is_lt(0n, kept))), st1)
+      +st2 = rto.bump2("units-no-first", rto.b2n(Bool.and(Bool.and(hasr, sh), Bool.and(Bool.not(hasf), Nat.is_eq(kept, 0n)))), "units-derived", rto.b2n(Bool.and(Bool.and(Bool.not(hasf), rto.needf(c)), Nat.is_lt(0n, kept))), st1)
       +st3 = rto.bump("units-repair-unshared", rto.b2n(Bool.and(hasr, Bool.not(sh))), st2)
       rto.units.st(c, more, rto.bump2("units-first-final", rto.firsts.n(c, u, x), "units-first-read", rto.u.f(x), st3))
 
@@ -919,7 +928,7 @@ type RtArgs is Data:
 def rto.cfg.nat(+which: Nat, m: Maybe<&2, Nat>, +c: RtCfg) -> Maybe<&2, RtCfg>:
   match m c:
     case Some{+k} RtCfg{+r, +p, +s, +f, +d, +y, +q}:
-      Bool.pick(Maybe<&2, RtCfg>, Bool.and(Nat.is_eq(which, 0n), Nat.is_lt(0n, k)), Some{RtCfg{k, p, s, f, d, y, q}},
+      Bool.pick(Maybe<&2, RtCfg>, Nat.is_eq(which, 0n), Some{RtCfg{k, p, s, f, d, y, q}},
         Bool.pick(Maybe<&2, RtCfg>, Bool.and(Nat.is_eq(which, 1n), Nat.is_lt(0n, k)), Some{RtCfg{r, k, s, f, d, y, q}},
           Bool.pick(Maybe<&2, RtCfg>, Bool.and(Nat.is_eq(which, 2n), Bool.and(Nat.is_lt(0n, k), Nat.is_le(k, 100n))), Some{RtCfg{r, p, s, f, d, y, k}}, None{})))
     case _ _:
