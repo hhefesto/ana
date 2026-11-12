@@ -15,12 +15,15 @@
 #   CV: the bend-corpus-v2 to use (CH=1 needs one whose reader knows a chain's try: run/v6/mugen/chain/gcroot-bend-corpus-v2)
 #   FX=1 (11-12, docs/MUGEN-SHAPE.md "Fixes"): with CH=1, each stream's fixes (run/v8/fix6.sh) as the chains, and the nights
 #   again (run/v8/fix/night); CV then run/v8/fix/gcroot-2 (its repair-mix classes a miss by its shape)
+#   MGR, CHR, FXR (11-12, form 2: run/v9/f2.sh): where the mugen streams, their chains and their fixes are (default
+#   run/v6/mugen, run/v6/mugen/chain, run/v8/fix; form 2's: run/v9/f2/mugen, run/v9/f2/mugen/chain, run/v9/f2/fix)
 cd /home/hhefesto/src/ana || exit 1
 OUT=${1:?usage: mix6.sh OUT [dry]}
 DRY=${2:-}
 # 11-03: not run/v5/clean/bend-corpus-v2 (the copy of 10-28): its repair-mix reads a mugen session as
 # "other", so no copies and no cap; 0ed92bd classes them.  run/v5/gcroot-bend-corpus-v2-run5 is today's.
 CV=${CV:-run/v5/gcroot-bend-corpus-v2-run5/bin/bend-corpus-v2}
+MGR=${MGR:-run/v6/mugen}; CHR=${CHR:-run/v6/mugen/chain}; FXR=${FXR:-run/v8/fix}
 args=()
 # MG=1 (2026-11-03, the user 35718: "a step closer to mugen as an interface (turn wise)"): a
 # stream mugen6.sh rendered in the mugen shape (run/v6/mugen/NAME/DONE) goes in that shape, the
@@ -32,8 +35,8 @@ mg() { local f=$1 n
     *) echo "$f"; return ;;
   esac
   if [ "${MG:-0}" = 1 ]; then
-    if [ -e run/v6/mugen/$n/DONE ]; then echo run/v6/mugen/$n/transcripts.train.nul; return; fi
-    [ -s "$f" ] && echo "mix6: $n is not in the mugen shape yet (run/v6/mugen/$n/DONE): format 2" >&2
+    if [ -e $MGR/$n/DONE ]; then echo $MGR/$n/transcripts.train.nul; return; fi
+    [ -s "$f" ] && echo "mix6: $n is not in the mugen shape yet ($MGR/$n/DONE): format 2" >&2
   fi
   echo "$f"; }
 add() { local f; f=$(mg "$2"); if [ -s "$f" ]; then args+=("$1=$f"); else echo "mix6: not there: $f" >&2; fi; }
@@ -47,7 +50,7 @@ fresh() { local r=run/v6/recheck-$1 f=$2 o; if [ -e $r/DONE ] && [ -s "$f" ]; th
   if [ ! -s $o ] || [ $o -ot "$f" ] || [ $o -ot $r/stale.ids ]; then
     mkdir -p $r/streams; ALL=1 run/v5/gcroot-bend-corpus-v2-hd/bin/bend-corpus-v2 hist-drop "$f" $o.tmp $r/stale.ids >&2 && mv $o.tmp $o; fi
   echo $o; else [ -e $r/DONE ] || echo "mix6: $1 not rechecked on today's Bend ($r/DONE)" >&2; echo "$f"; fi; }
-hist() { local h=run/v6/hist-$1 m=run/v6/mugen/hist-$1; if [ -e $h/DONE ]; then
+hist() { local h=run/v6/hist-$1 m=$MGR/hist-$1; if [ -e $h/DONE ]; then
   if [ "${MG:-0}" = 1 ] && [ -e $m/DONE ] && [ -s $m/$1.train.nul ]; then add in $(fresh $1 $m/$1.train.nul); add in $m/transcripts.train.nul
   else [ "${MG:-0}" = 1 ] && echo "mix6: hist-$1 is not in the mugen shape yet ($m/DONE): format 2" >&2
     add in $(fresh $1 $h/$1.train.nul); add in $h/repairs.train.nul; fi
@@ -141,8 +144,8 @@ fi
 add in run/v5/port/transcripts.train.nul
 # ana's own mistakes and fixes (night runs; whole).  FX=1 (11-12): the nights rendered again by run/v8/fix6.sh, her passing
 # last Term kept only when it is the unit's original (else the original after her wrong Terms; gcdLoop passed and was wrong)
-if [ "${FX:-0}" = 1 ] && [ -e run/v8/fix/night/DONE ]; then add free run/v8/fix/night/transcripts.train.nul
-elif [ "${CH:-0}" = 1 ] && [ -e run/v6/mugen/chain/night/DONE ]; then add free run/v6/mugen/chain/night/transcripts.train.nul
+if [ "${FX:-0}" = 1 ] && [ -e $FXR/night/DONE ]; then add free $FXR/night/transcripts.train.nul
+elif [ "${CH:-0}" = 1 ] && [ -e $CHR/night/DONE ]; then add free $CHR/night/transcripts.train.nul
 else
 for d in run/v5/act5/ws/night*/accepted/bend-fix run/v5/act5/ws/night*/accepted/bend-act; do
   add free $d/transcripts.train.nul
@@ -151,7 +154,7 @@ fi
 # the chains of the mugen streams in the mix (CH=1).  A unit with real history repairs keeps those and none
 # of its made-up ones, so a history stream's chains go less hist5's units (ALL=1: a chain is all made up).
 if [ "${CH:-0}" = 1 ]; then
-  C=run/v6/mugen/chain
+  C=$CHR
   chain_of() { local n=$1 f=$C/$1/transcripts.train.nul o=$C/$1/kept.train.nul
     [ -e $C/$n/DONE ] || { echo "mix6: no chains for $n ($C/$n/DONE)" >&2; return; }
     if [ -e run/v6/hist-$n/DONE ] && [ -s run/v6/hist-$n/units.kept ]; then
@@ -162,8 +165,8 @@ if [ "${CH:-0}" = 1 ]; then
   chains=()
   for a in "${args[@]}"; do
     case $a in
-      in=run/v6/mugen/*/transcripts.train.nul) n=${a#in=run/v6/mugen/}; chains+=("${n%/transcripts.train.nul}") ;;
-      in=run/v6/recheck-*/streams/run_v6_mugen_hist-*) n=${a#in=run/v6/recheck-}; chains+=("${n%%/*}") ;;
+      in=$MGR/*/transcripts.train.nul) n=${a#in=$MGR/}; chains+=("${n%/transcripts.train.nul}") ;;
+      in=run/v6/recheck-*/streams/${MGR//\//_}_hist-*) n=${a#in=run/v6/recheck-}; chains+=("${n%%/*}") ;;
     esac
   done
   case " ${chains[*]} " in *" own5 "*) ;; *) [ -e run/v6/hist-own5/DONE ] && chains+=(own5) ;; esac
@@ -173,7 +176,7 @@ fi
 # a give-up a unit, under the rule as the chains are (a miss from the direct ask is first-time, its one try an edit mugen
 # refused; the rest by their roles), less a history stream's hist5 units and a recheck's stale ones, as the chains
 if [ "${FX:-0}" = 1 ] && [ "${CH:-0}" = 1 ]; then
-  X=run/v8/fix
+  X=$FXR
   fix_of() { local n=$1 f=$X/$1/transcripts.train.nul o=$X/$1/kept.train.nul
     [ -e $X/$n/DONE ] || { echo "mix6: no fixes for $n ($X/$n/DONE)" >&2; return; }
     if [ -e run/v6/hist-$n/DONE ] && [ -s run/v6/hist-$n/units.kept ]; then

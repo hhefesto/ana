@@ -184,7 +184,9 @@ type Hd is Data:
 #   1 User, 2 Context, 3 Attempt, 4 Term or Type, 5 a tool; 0 not a heading
 #   the mugen shape (docs/MUGEN-SHAPE.md, 2026-11-03): 1 user too, 6 a call
 #   (read, shell: the whole turn is ana's), 9 an edit (a call too, and a try
-#   when a later edit follows it), 7 echo, 8 mugen (ana's reply)
+#   when a later edit follows it), 7 echo, 8 mugen (ana's reply); form 2
+#   (docs/form2/README.md, 2026-11-12): check and look 6, def and add 9 (a
+#   write: a try when a later write follows it, as an edit)
 def ag.ascii(s: String) -> List<&2, U32>:
   match s:
     case SNil{}:
@@ -200,7 +202,8 @@ def ag.hd(+label: String, +k: Nat) -> Hd:
 def ag.hds.bytes() -> List<&2, Hd>:
   [ag.hd("User", 1n), ag.hd("Context", 2n), ag.hd("Attempt", 3n), ag.hd("Term", 4n), ag.hd("Type", 4n),
    ag.hd("ghc", 5n), ag.hd("agda", 5n), ag.hd("lean", 5n), ag.hd("bend", 5n), ag.hd("nix", 5n),
-   ag.hd("user", 1n), ag.hd("read", 6n), ag.hd("edit", 9n), ag.hd("shell", 6n), ag.hd("echo", 7n), ag.hd("mugen", 8n)]
+   ag.hd("user", 1n), ag.hd("read", 6n), ag.hd("edit", 9n), ag.hd("shell", 6n), ag.hd("echo", 7n), ag.hd("mugen", 8n),
+   ag.hd("check", 6n), ag.hd("look", 6n), ag.hd("def", 9n), ag.hd("add", 9n)]
 
 def ag.eq(xs: List<&2, U32>, ys: List<&2, U32>) -> Bool:
   match xs ys:

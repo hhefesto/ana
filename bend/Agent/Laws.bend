@@ -105,11 +105,12 @@ def la.is.mugen(+text: List<&2, U32>) -> Bool:
 
 # the fixes (2026-11-12; Transcript.bend "Fixes"): a miss has one try (the
 # refused edit), a stale fix after J tries J + 1, a give-up after J tries J
-# (its last edit puts the file back)
+# (its last edit puts the file back); form 2's (Transcript.bend "Form 2"): a
+# miss one (the refused def), a repeat after J tries J, a give-up J
 def la.fix.tries(+s: List<&2, U32>) -> Nat:
   +j = la.last.num(s, 0n)
   Bool.pick(Nat, A.ag.prefix(s, A.ag.ascii("mugen-fix-miss-")), 1n,
-    Bool.pick(Nat, A.ag.prefix(s, A.ag.ascii("mugen-fix-stale-")), 1n+j, Bool.pick(Nat, A.ag.prefix(s, A.ag.ascii("mugen-fix-giveup-")), j, 0n)))
+    Bool.pick(Nat, A.ag.prefix(s, A.ag.ascii("mugen-fix-stale-")), 1n+j, Bool.pick(Nat, Bool.or(A.ag.prefix(s, A.ag.ascii("mugen-fix-giveup-")), A.ag.prefix(s, A.ag.ascii("mugen-fix-repeat-"))), j, 0n)))
 
 def la.mugen.ok(+s: List<&2, U32>, +e: List<&2, A.Turn>) -> Bool:
   +acts = Nat.is_eq(A.ag.count(e, 3n), 1n)

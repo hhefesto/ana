@@ -1,4 +1,4 @@
-# Form 2 of ana's mugen sessions (a draft, 2026-11-12; nothing re-rendered)
+# Form 2 of ana's mugen sessions (2026-11-12; rendering again since 13:45)
 
 The user, 11-12: "I do want ana to learn to do mugen dynamics, but I also want it to do it in the easiest way for ana
 to learn"; then "Design it now and show you one session in the new form before anything is re-rendered".
@@ -19,28 +19,41 @@ Headings stay `## user`, `## echo`, `## mugen` and ana's calls; the checker's ou
 | call | ana writes | the echo |
 |---|---|---|
 | `## check` | the path | the checker's output as it is, and `(exit N)` (bend `--check-only`, ghc `-fno-code`, agda, lean) |
-| `## look` | the path, then names | each name's whole definition in the file, after `NAME, lines A-B:`; a library name, its signature |
-| `## def` | the path, then whole definitions | `ok: NAME, lines A-B` for each (a name not in the file goes after the last one replaced: `added: NAME, lines A-B`) |
+| `## look` | the path, then names, a line each | each name the file defines: `NAME, lines A-B:` and its whole definition; a Base name `NAME, in Base:` and its first line; another language's names its checker's Context (their types) |
+| `## def` | the path, then a whole definition | `ok: NAME, lines A-B`, then the check, as `## check`'s; a name the file does not define is refused (`refused: no NAME in PATH (a new definition is ## add); the nearest: N. No file was changed.`) |
+| `## add` | the path, then a whole definition | `added: NAME, lines A-B`, then the check; a name the file defines already is refused |
 | `## read` | the path, a line, a count | the lines, as today (kept for a direct task's context) |
 
-- `## def` replaces a definition by its name: nothing to copy, so no edit is ever refused, and a unit is one definition.
-  Haskell: the name's signature and equations; Agda: its signature and clauses; Lean: the declaration up to the next
-  one at the top level; Bend: `def`/`law` up to the next.
+The user's answers (11-12): a def of a name the file does not define is refused with the nearest name, and a new
+definition is its own call, `## add` (1, recommended); the check goes into the def's own echo (mugen's call, so a write
+and its verdict are one turn); repair sessions also from run 5's own failed tries (yes: the nights, `form2-night`).
+
+- `## def` replaces a definition by its name (Spec/Form2.bend's put: a lens over the file's pieces, its laws proven and
+  in the gate): nothing to copy, so no edit is refused for a misremembered line, and a unit is one definition.
 - No `## shell` in her sessions (it stays in mugen for the user's own work).
-- The reply starts with the last check's verdict line, copied from just above it (`ALL PROOFS CHECK.`, or
-  `SOME PROOFS FAIL: <its first error line>.` for a give-up), then what changed in a sentence.
-- Weights as today: a `## def` with a later `## def` is a try (0); her check after it, the next def and the reply weigh 1.
+- The reply starts with the verdict of the check just above it: Bend's first line (`ALL PROOFS CHECK.`, or
+  `SOME PROOFS FAIL: expected ..., observed ... at line N.` for a give-up); another checker's `ghc passes (exit 0).` or
+  `lean fails (exit 1): ...`; then what changed in a sentence.
+- Weights as today: a write (`## def`, `## add`) with a later write is a try (0); the next write and the reply weigh 1.
 
-## The shapes
+## The shapes (bend/Transcript.bend "Form 2", MUGEN_ONLY=form2*)
 
-direct, fill, repair, a repeat (a wrong def, the check's error, the right def) and a give-up (the defs that failed,
-the file put back, the verdict and the last error) carry over. The miss (an edit refused for a misremembered line) has
-no counterpart: no edit can be refused. In the first 43 parts of the 11-12 fixes, misses were 58k of 92k sessions.
+direct, fill, repair-M, the chains, and the fixes: `fix-miss-SHAPE` (the direct ask's new name sent to `## def`, or a
+fill's or repair's name misspelt, refused with the nearest; then the right call), `fix-repeat[-S]-J` (J wrong
+definitions, each with its check, then the right one), `fix-giveup[-fill]-J` (J wrong definitions, then the hole put
+back, and a reply with the verdict, the tries and the last error; only where the hole's check fails). Format mugen's
+misses and stale edits (an edit's old text not in the file) have no counterpart. In the first 43 parts of the 11-12
+fixes, those misses were 58k of 92k sessions.
+
+On 30 units of six streams (11-12): 0 of 1,011 sessions failed bend-agent-laws; mean tokens per session against format
+mugen's, the same units: Haskell direct 593 against 808, repair 626 against 779; Agda 760/951, 858/998; Lean 435/638,
+553/662; own5 (Bend) direct 659/708, repair 1,273/1,160 (look shows whole definitions); a2b direct 1,590/1,978.
 
 ## In mugen
 
-ana-mugen translates her calls into mugen's tools: `check` a shell command, `look` a read of the range, `def` an edit
-whose old text is the file's current definition. The user sees the usual view.
+The eval tool (CorpusV2/AgentMugen.bend, AM_FORM=2) runs the calls on the task's file: `check` the checker, `look`
+Spec/Form2.bend's get (Base names through `bend base`), `def` its put and the check, `add` the definition after the last
+line and the check. ana-mugen (mugen-web's /ana, `agent-mugen-live`) is still format mugen's.
 
 ## The example (and_inverse_l, a repeat)
 

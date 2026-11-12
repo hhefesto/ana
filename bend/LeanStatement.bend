@@ -194,9 +194,33 @@ def ls.added.at(+t: List<&2, U32>, m: Maybe<&2, Nat>) -> Maybe<&2, List<&2, U32>
       # its first line names the file
       Some{ls.plus(List.drop(&2, List<&2, U32>, S.split.lines(ls.upto(body, S.find(body, S.b("\n\n## "), 0n))), 1n))}
 
-# what the session's first edit writes
+def ls.nl.lines(xs: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +l <> t:
+      S.append(l, 10 <> ls.nl.lines(t))
+
+# form 2's (2026-11-12, Transcript.bend "Form 2"): the lines after the path of
+# the session's first `## add`, as they are
+def ls.wrote.at(+t: List<&2, U32>, m: Maybe<&2, Nat>) -> Maybe<&2, List<&2, U32>>:
+  match m:
+    case None{}:
+      None{}
+    case Some{+k}:
+      +body = List.drop(&2, U32, t, Nat.add(k, 9n))
+      Some{ls.nl.lines(List.drop(&2, List<&2, U32>, S.split.lines(ls.upto(body, S.find(body, S.b("\n\n## "), 0n))), 1n))}
+
+def ls.added.or(m: Maybe<&2, List<&2, U32>>, +t: List<&2, U32>) -> Maybe<&2, List<&2, U32>>:
+  match m:
+    case Some{x}:
+      Some{x}
+    case None{}:
+      ls.wrote.at(t, S.find(t, S.b("\n## add\n\n"), 0n))
+
+# what the session's first edit writes (form 2: its first add)
 def ls.added(+t: List<&2, U32>) -> Maybe<&2, List<&2, U32>>:
-  ls.added.at(t, S.find(t, S.b("\n## edit\n\n"), 0n))
+  ls.added.or(ls.added.at(t, S.find(t, S.b("\n## edit\n\n"), 0n)), t)
 
 # The whole statement ---------------------------------------------------------
 

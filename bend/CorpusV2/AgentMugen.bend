@@ -7,6 +7,8 @@ import ./Combine.bend as C
 import ../Check/Lib.bend as Cl
 import ../Clock.bend as Ck
 import ./Eval.bend as Ev
+import ../Units.bend as U
+import ../Spec/Form2.bend as F2
 
 # ana's tool loop in the mugen shape (docs/MUGEN-SHAPE.md; 2026-11-03): the
 # tool `ana --agent` calls when she ends a call with `## echo` (Agent/Loop.bend
@@ -214,13 +216,193 @@ def am.edit(+t: AmT, +f: List<&2, U32>, +body: List<&2, U32>) -> AmE:
     Bool.pick(String, Nat.is_lt(1n, n), "old matches more than once; give more context, or all", "")))
   Bool.pick(AmE, String.eq(why, ""), AmE{S.replace.first(f, old, new), Nil{}}, AmE{f, am.edit.why(path, why)})
 
+# Form 2's writes (2026-11-12; docs/form2/README.md, Transcript.bend "Form 2") ----------
+#
+# `## def PATH` and a definition replaces the piece of its name (Spec/Form2.bend's
+# put, over Transcript.bend's Bend instance: a head is `def`, `law` or `type NAME`
+# at column 0); a name the file does not define is refused, with the nearest one
+# when it is two edits away or less.  `## add PATH` and a definition puts it after
+# the file's last line; a name the file defines already is refused.  The echo
+# opens `ok: NAME, lines A-B` (`added: ...`), and the check follows (am.run).
+
+# a written definition's name: its first head line's (none: empty)
+def am.f2.hd1(+ls: List<&2, List<&2, U32>>) -> Maybe<&2, List<&2, U32>>:
+  match ls:
+    case Nil{}:
+      None{}
+    case +l <> t:
+      T.f2.bhd(l)
+
+def am.f2.name.go(ls: List<&2, List<&2, U32>>, m: Maybe<&2, List<&2, U32>>) -> List<&2, U32>:
+  match ls m:
+    case _ Some{n}:
+      n
+    case Nil{} None{}:
+      Nil{}
+    case l <> +t None{}:
+      am.f2.name.go(t, am.f2.hd1(t))
+
+def am.f2.name(+ls: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  am.f2.name.go(ls, am.f2.hd1(ls))
+
+# a definition's text as it goes in the file: no blank line after it, one newline
+def am.f2.text(+x: List<&2, U32>) -> List<&2, U32>:
+  S.append(am.trim(x), [10])
+
+# Edit distance (Levenshtein), a row at a time ---------------------------------------
+
+def am.lev.row(as: List<&2, U32>, ps: List<&2, Nat>, +c: U32, +left: Nat, +diag: Nat) -> List<&2, Nat>:
+  match as ps:
+    case +a <> at +p <> pt:
+      +v = Nat.min(Nat.min(1n+p, 1n+left), Nat.add(diag, Bool.pick(Nat, U32.is_eq(a, c), 0n, 1n)))
+      v <> am.lev.row(at, pt, c, v, p)
+    case _ _:
+      Nil{}
+
+def am.lev.last(ns: List<&2, Nat>, +d: Nat) -> Nat:
+  match ns:
+    case Nil{}:
+      d
+    case +n <> t:
+      am.lev.last(t, n)
+
+def am.lev.go(bs: List<&2, U32>, +as: List<&2, U32>, ps: List<&2, Nat>, +i: Nat) -> Nat:
+  match bs:
+    case Nil{}:
+      am.lev.last(ps, i)
+    case +c <> t:
+      am.lev.go(t, as, am.lev.row(as, ps, c, 1n+i, i), 1n+i)
+
+def am.lev.from(n: Nat, +k: Nat) -> List<&2, Nat>:
+  match n:
+    case 0n:
+      Nil{}
+    case 1n+p:
+      k <> am.lev.from(p, 1n+k)
+
+def am.lev(+a: List<&2, U32>, +b: List<&2, U32>) -> Nat:
+  am.lev.go(b, a, am.lev.from(S.len(a), 1n), 0n)
+
+# the name of ns nearest n, and how far (none: far past any name)
+type AmN is Data:
+  AmN{name: List<&2, U32>, d: Nat}
+
+def am.near(ns: List<&2, List<&2, U32>>, +n: List<&2, U32>, best: AmN) -> AmN:
+  match ns best:
+    case Nil{} b:
+      b
+    case +x <> t AmN{bn, +bd}:
+      +d = am.lev(x, n)
+      am.near(t, n, Bool.pick(AmN, Nat.is_lt(d, bd), AmN{x, d}, AmN{bn, bd}))
+
+# The pieces --------------------------------------------------------------------------
+
+def am.f2.doc(+f: List<&2, U32>) -> F2.Doc<List<&2, U32>, List<&2, U32>>:
+  T.f2.bdoc(f)
+
+def am.f2.defs(d: F2.Doc<List<&2, U32>, List<&2, U32>>) -> List<&2, F2.Piece<List<&2, U32>, List<&2, U32>>>:
+  match d:
+    case F2.Doc{p, g, ds}:
+      ds
+
+def am.f2.names(+f: List<&2, U32>) -> List<&2, List<&2, U32>>:
+  F2.names(List<&2, U32>, List<&2, U32>, am.f2.defs(am.f2.doc(f)))
+
+def am.f2.in(ns: List<&2, List<&2, U32>>, +n: List<&2, U32>) -> Bool:
+  match ns:
+    case Nil{}:
+      False{}
+    case x <> t:
+      Bool.or(S.eq(x, n), am.f2.in(t, n))
+
+def am.f2.has(+f: List<&2, U32>, +n: List<&2, U32>) -> Bool:
+  am.f2.in(am.f2.names(f), n)
+
+# the file with the piece named n's body as x (Spec/Form2.bend's put)
+def am.f2.put.in(d: F2.Doc<List<&2, U32>, List<&2, U32>>, +n: List<&2, U32>, +x: List<&2, U32>) -> List<&2, U32>:
+  match d:
+    case F2.Doc{p, g, ds}:
+      U.concat(F2.join(List<&2, U32>, List<&2, U32>, F2.Doc{p, g, F2.put(~List<&2, U32>, ~List<&2, U32>, ~T.f2.beq, ds, n, U.lines(x))}))
+
+def am.f2.put(+f: List<&2, U32>, +n: List<&2, U32>, +x: List<&2, U32>) -> List<&2, U32>:
+  am.f2.put.in(am.f2.doc(f), n, x)
+
+# the entry look shows for n (none: empty)
+def am.f2.entry(+f: List<&2, U32>, +n: List<&2, U32>) -> List<&2, U32>:
+  T.f2.in.doc(am.f2.doc(f), n)
+
+# the lines of the piece named n, as `lines A-B` (none: empty)
+def am.f2.span(+f: List<&2, U32>, +n: List<&2, U32>) -> List<&2, U32>:
+  +e = am.f2.entry(f, n)
+  List.take(&2, U32, List.drop(&2, U32, e, 2n+S.len(n)), Nat.sub(Nat.sub(S.len(T.mg.upto(e, 10)), 2n+S.len(n)), 1n))
+
+# a write's outcome: the file after it, its echo's first line, whether it was made
+type AmW is Data:
+  AmW{f: List<&2, U32>, said: List<&2, U32>, ok: Bool}
+
+def AmW.f(+w: AmW) -> List<&2, U32>:
+  match w:
+    case AmW{f, s, o}:
+      f
+
+def am.f2.refused(+path: List<&2, U32>, +n: List<&2, U32>, near: AmN) -> List<&2, U32>:
+  match near:
+    case AmN{x, +d}:
+      T.cat([S.b("refused: no "), n, S.b(" in "), path, S.b(" (a new definition is `## add`)"),
+        Bool.pick(List<&2, U32>, Nat.is_le(d, 2n), T.cat([S.b("; the nearest: "), x]), Nil{}), S.b(". No file was changed.")])
+
+def am.f2.def.on(there: Bool, +path: List<&2, U32>, +f: List<&2, U32>, +n: List<&2, U32>, +x: List<&2, U32>) -> AmW:
+  match there:
+    case True{}:
+      +f2 = am.f2.put(f, n, x)
+      AmW{f2, T.cat([S.b("ok: "), n, S.b(", "), am.f2.span(f2, n)]), True{}}
+    case False{}:
+      AmW{f, am.f2.refused(path, n, am.near(am.f2.names(f), n, AmN{Nil{}, 1000n})), False{}}
+
+def am.f2.add.on(there: Bool, +path: List<&2, U32>, +f: List<&2, U32>, +n: List<&2, U32>, +x: List<&2, U32>) -> AmW:
+  match there:
+    case True{}:
+      AmW{f, T.cat([S.b("refused: "), n, S.b(" is in "), path, S.b(" already, "), am.f2.span(f, n), S.b(" (`## def` replaces it). No file was changed.")]), False{}}
+    case False{}:
+      +f0 = Bool.pick(List<&2, U32>, Bool.or(T.empty(f), S.suffix(f, [10])), f, S.append(f, [10]))
+      +a = Nat.add(1n, T.mg.nls(f0))
+      AmW{S.append(f0, x), T.cat([S.b("added: "), n, S.b(", "), T.f2.span(a, x)]), True{}}
+
+# def (add: False) or add of body (`PATH`, then the definition) on f
+def am.f2.write(+add: Bool, +t: AmT, +f: List<&2, U32>, +body: List<&2, U32>) -> AmW:
+  +ls = S.split(body, 10)
+  +path = T.field(ls, 0n)
+  +x = am.f2.text(T.mg.join(List.drop(&2, List<&2, U32>, ls, 1n), [10]))
+  +n = am.f2.name(U.lines(x))
+  +bad = Bool.pick(List<&2, U32>, Bool.not(S.eq(path, am.path(t))), T.cat([S.b("refused: no file "), path, S.b(". No file was changed.")]),
+    Bool.pick(List<&2, U32>, T.empty(n), S.b("refused: no `def`, `law` or `type` NAME line in it. No file was changed."), Nil{}))
+  Bool.pick(AmW, Bool.not(T.empty(bad)), AmW{f, bad, False{}},
+    Bool.pick(AmW, add, am.f2.add.on(am.f2.has(f, n), path, f, n, x), am.f2.def.on(am.f2.has(f, n), path, f, n, x)))
+
+# a call's code: 1 edit, 2 def, 3 add, 4 check, 5 look, 0 any other
+def am.code.of(+lb: List<&2, U32>) -> Nat:
+  Bool.pick(Nat, S.eq(lb, S.b("edit")), 1n, Bool.pick(Nat, S.eq(lb, S.b("def")), 2n, Bool.pick(Nat, S.eq(lb, S.b("add")), 3n,
+    Bool.pick(Nat, S.eq(lb, S.b("check")), 4n, Bool.pick(Nat, S.eq(lb, S.b("look")), 5n, 0n)))))
+
+# the file after one call: an edit's, a def's or an add's (form 2), else as it was
+def am.replay.one(k: Nat, +t: AmT, +f: List<&2, U32>, +body: List<&2, U32>) -> List<&2, U32>:
+  match k:
+    case 1n:
+      AmE.f(am.edit(t, f, body))
+    case 2n:
+      AmW.f(am.f2.write(False{}, t, f, body))
+    case 3n:
+      AmW.f(am.f2.write(True{}, t, f, body))
+    case _:
+      f
+
 # the file after the earlier calls' edits
 def am.replay(cs: List<&2, List<&2, U32>>, +t: AmT, +f: List<&2, U32>) -> List<&2, U32>:
   match cs:
     case Nil{}:
       f
     case +x <> more:
-      am.replay(more, t, Bool.pick(List<&2, U32>, S.eq(am.label(x), S.b("edit")), AmE.f(am.edit(t, f, am.body(x))), f))
+      am.replay(more, t, am.replay.one(am.code.of(am.label(x)), t, f, am.body(x)))
 
 # The echoes ---------------------------------------------------------------------------
 
@@ -379,12 +561,66 @@ def am.shell.check(chk: Bool, +t: AmT, +f: List<&2, U32>, +cmd: List<&2, U32>, +
 def am.shell(+t: AmT, +f: List<&2, U32>, +cmd: List<&2, U32>, +bend: String, +work: String) -> IO(AmO):
   am.shell.check(Bool.and(S.prefix(cmd, S.b("bend ")), S.suffix(cmd, S.b(" --check-only"))), t, f, cmd, bend, work)
 
-# the last call, run on the file the earlier calls left
-def am.run.edit(ed: Bool, +t: AmT, +f: List<&2, U32>, +body: List<&2, U32>, +bend: String, +work: String) -> IO(AmO):
-  match ed:
+# Form 2's look and writes, run (2026-11-12) -------------------------------------------
+
+# look: each name's entry in the file, else its first line in Base (`bend base`)
+def am.f2.look.go(ns: List<&2, List<&2, U32>>, +f: List<&2, U32>, +path: List<&2, U32>, +bend: String) -> IO(List<&2, List<&2, U32>>):
+  match ns:
+    case Nil{}:
+      IO.pure(List<&2, List<&2, U32>>, Nil{})
+    case +n <> more:
+      +e = am.f2.entry(f, n)
+      do IO<List<&2, List<&2, U32>>>:
+        +o : S.Out <- S.run(".", ["BEND_NO_TELEMETRY=1"], 60, bend, ["base", S.str(n)], Nil{})
+        +l : List<&2, U32> = S.lines.first(S.Out.text(o))
+        +base : Bool = Bool.and(U32.is_eq(S.Out.status(o), 0), Bool.or(S.prefix(l, S.b("def ")), Bool.or(S.prefix(l, S.b("law ")), S.prefix(l, S.b("type ")))))
+        r : List<&2, List<&2, U32>> <- am.f2.look.go(more, f, path, bend)
+        return Bool.pick(List<&2, U32>, Bool.not(T.empty(e)), e,
+          Bool.pick(List<&2, U32>, base, T.cat([n, S.b(", in Base:\n"), l]), T.cat([n, S.b(": not in "), path, S.b(" or Base")]))) <> r
+
+def am.f2.look.if(there: Bool, +ns: List<&2, List<&2, U32>>, +f: List<&2, U32>, +path: List<&2, U32>, +bend: String) -> IO(AmO):
+  match there:
     case True{}:
-      IO.pure(AmO, am.edit.echo(t, f, body))
+      do IO<AmO>:
+        es : List<&2, List<&2, U32>> <- am.f2.look.go(ns, f, path, bend)
+        return AmO{T.mg.join(es, S.b("\n\n")), False{}}
     case False{}:
+      IO.pure(AmO, AmO{T.cat([S.b("ENOENT: no such file or directory, open '"), path, S.b("'")]), False{}})
+
+def am.f2.look(+t: AmT, +f: List<&2, U32>, +body: List<&2, U32>, +bend: String) -> IO(AmO):
+  +ls = S.split(body, 10)
+  +path = T.field(ls, 0n)
+  am.f2.look.if(S.eq(path, am.path(t)), T.mg.words(T.mg.join(List.drop(&2, List<&2, U32>, ls, 1n), [32])), f, path, bend)
+
+# a write's echo: its first line, then the check of the file it left (refused: the line alone)
+def am.f2.checked(o: AmO, +said: List<&2, U32>) -> AmO:
+  match o:
+    case AmO{e, s}:
+      AmO{T.cat([said, [10], e]), s}
+
+def am.f2.wrote(w: AmW, +t: AmT, +bend: String, +work: String) -> IO(AmO):
+  match w:
+    case AmW{+f, +said, True{}}:
+      do IO<AmO>:
+        o : AmO <- am.check(t, f, am.path(t), bend, work)
+        return am.f2.checked(o, said)
+    case AmW{f, +said, False{}}:
+      IO.pure(AmO, AmO{said, False{}})
+
+# the last call, run on the file the earlier calls left
+def am.run.edit(k: Nat, +t: AmT, +f: List<&2, U32>, +body: List<&2, U32>, +bend: String, +work: String) -> IO(AmO):
+  match k:
+    case 1n:
+      IO.pure(AmO, am.edit.echo(t, f, body))
+    case 2n:
+      am.f2.wrote(am.f2.write(False{}, t, f, body), t, bend, work)
+    case 3n:
+      am.f2.wrote(am.f2.write(True{}, t, f, body), t, bend, work)
+    case 4n:
+      am.check(t, f, am.trim(body), bend, work)
+    case 5n:
+      am.f2.look(t, f, body, bend)
+    case _:
       am.shell(t, f, body, bend, work)
 
 def am.run.read(rd: Bool, +lb: List<&2, U32>, +t: AmT, +f: List<&2, U32>, +body: List<&2, U32>, +bend: String, +work: String) -> IO(AmO):
@@ -392,7 +628,7 @@ def am.run.read(rd: Bool, +lb: List<&2, U32>, +t: AmT, +f: List<&2, U32>, +body:
     case True{}:
       IO.pure(AmO, am.read(t, f, body))
     case False{}:
-      am.run.edit(S.eq(lb, S.b("edit")), t, f, body, bend, work)
+      am.run.edit(am.code.of(lb), t, f, body, bend, work)
 
 def am.run.if(none: Bool, +x: List<&2, U32>, +t: AmT, +f: List<&2, U32>, +bend: String, +work: String) -> IO(AmO):
   match none:
@@ -865,6 +1101,17 @@ def am.ref(+t: AmT) -> List<&2, U32>:
   T.cat([am.prompt(t), T.mg.edit(path, am.f0(t), T.mg.with(fs, T.field(fs, 7n))),
     T.turn(S.b("shell"), T.cat([S.b("bend "), path, S.b(" --check-only\n")])), S.b("## echo\n")])
 
+# form 2's (AM_FORM=2; Transcript.bend "Form 2"): the ask, then the unit's own
+# definition written whole, `## add` for a direct ask, else `## def` (its echo
+# holds the check)
+def am.ref.f2(+t: AmT) -> List<&2, U32>:
+  +fs = AmT.fs(t)
+  +label = Bool.pick(List<&2, U32>, S.eq(AmT.shape(t), S.b("direct")), S.b("add"), S.b("def"))
+  T.cat([am.prompt(t), T.turn(label, T.cat([am.path(t), [10], T.mg.end.nl(T.f2.decl(fs, T.field(fs, 7n)))])), S.b("## echo\n")])
+
+def am.ref.of(+form2: Bool, +t: AmT) -> List<&2, U32>:
+  Bool.pick(List<&2, U32>, form2, am.ref.f2(t), am.ref(t))
+
 def am.shapes(+fs: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
   +fill = Bool.not(T.empty(T.field(fs, 13n)))
   +rep = Nat.is_lt(0n, T.mutant.count(fs))
@@ -895,8 +1142,9 @@ def AmO.solved(+o: AmO) -> Bool:
 def am.prep.one(+n: Nat, +dir: String, +u: List<&2, U32>, +src: String, +sh: List<&2, U32>, +rec: List<&2, U32>, +bend: String) -> IO(Bool):
   +tb = am.task.bytes(u, src, sh, rec)
   +t = am.task.of(tb)
-  +ref = am.ref(t)
   do IO<Bool>:
+    +form : String <- S.env("AM_FORM", "1")
+    +ref : List<&2, U32> = am.ref.of(String.eq(form, "2"), t)
     S.write(dir ++ "/task." ++ Nat.show(n) ++ ".nul", tb)
     S.write(dir ++ "/prompt." ++ Nat.show(n), am.prompt(t))
     S.write(dir ++ "/ref." ++ Nat.show(n), ref)
@@ -928,15 +1176,24 @@ def am.first(+t: AmT) -> List<&2, U32>:
     T.cat([T.turn(S.b("read"), T.cat([path, S.b(" "), T.mg.n(from), S.b(" "), T.mg.n(Nat.sub(Nat.add(n, 1n), from)), S.b("\n")])), S.b("## echo\n")]),
     T.cat([T.turn(S.b("shell"), T.cat([S.b("bend "), path, S.b(" --check-only\n")])), S.b("## echo\n")]))
 
+# form 2's (AM_FORM=2): a direct ask's read as above, else `## check`
+def am.first.f2(+t: AmT) -> List<&2, U32>:
+  Bool.pick(List<&2, U32>, S.eq(AmT.shape(t), S.b("direct")), am.first(t),
+    T.cat([T.turn(S.b("check"), T.cat([am.path(t), [10]])), S.b("## echo\n")]))
+
+def am.first.of(+form2: Bool, +t: AmT) -> List<&2, U32>:
+  Bool.pick(List<&2, U32>, form2, am.first.f2(t), am.first(t))
+
 def am.prep.shapes(ss: List<&2, List<&2, U32>>, +dir: String, +u: List<&2, U32>, +src: String, +rec: List<&2, U32>, +bend: String, p: AmP) -> IO(AmP):
   match ss p:
     case Nil{} _:
       IO.pure(AmP, p)
     case +sh <> more AmP{+k, qs, st}:
       do IO<AmP>:
+        +form : String <- S.env("AM_FORM", "1")
         +ok : Bool <- am.prep.one(k, dir, u, src, sh, rec, bend)
         Ck.log("agent-mugen-eval: task " ++ Nat.show(k) ++ " " ++ S.str(u) ++ " " ++ S.str(sh) ++ Bool.pick(String, ok, "", " STALE (its own body does not pass)"))
-        am.prep.shapes(more, dir, u, src, rec, bend, am.prep.keep(ok, k, u, sh, am.first(am.task.of(am.task.bytes(u, src, sh, rec))), AmP{k, qs, st}))
+        am.prep.shapes(more, dir, u, src, rec, bend, am.prep.keep(ok, k, u, sh, am.first.of(String.eq(form, "2"), am.task.of(am.task.bytes(u, src, sh, rec))), AmP{k, qs, st}))
 
 def am.src(+given: String, +roots: List<&2, String>, +home: String, +u: List<&2, U32>, +fs: List<&2, List<&2, U32>>) -> IO(String):
   Bool.pick(IO(String), String.eq(given, ""), Ev.ev.src.if(True{}, roots, home, u, T.field(fs, 7n)), IO.pure(String, given))

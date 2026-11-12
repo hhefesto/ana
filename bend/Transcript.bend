@@ -6,6 +6,7 @@ import ./Units.bend as U
 import ./Sys.bend as S
 import ./Mugen/Diff.bend as D
 import ./Agent/Spec.bend as A
+import ./Spec/Form2.bend as F2
 
 # transcripts: the checked units (bend-check LANG) rendered as the
 # coding-agent documents of docs/TRANSCRIPT-FORMAT.md.
@@ -1874,6 +1875,616 @@ def mg.all.night(+b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +night:
       +v = mg.got(Map.get(List<&2, U32>, Nil{}, night, mg.str(i)))
       nt.unit.on(Bool.not(empty(v)), b, limit, base, i, split(t, 30), v, mg.all.night(b, limit, base, night, more))
 
+# Form 2 (2026-11-12; docs/form2/README.md) -------------------------------------------
+#
+# The user, 11-12: "I do want ana to learn to do mugen dynamics, but I also want
+# it to do it in the easiest way for ana to learn".  MUGEN_ONLY=form2 renders a
+# unit's direct, fill and repair-M sessions, form2-chain its chain, form2-fix its
+# fixes, form2-night ana's own nights, and form2-all the first three at once, in
+# form 2's calls:
+#
+#   ## check  PATH                      the checker's output as it is, then `(exit N)`
+#   ## look   PATH, then names, a line  each name the file defines: `NAME, lines
+#             each                      A-B:` and its whole definition; a Base name
+#                                       (Bend) `NAME, in Base:` and its first line;
+#                                       another language's names the checker's
+#                                       Context (their types)
+#   ## add    PATH, then a definition   a new one, after the last: `added: NAME,
+#                                       lines A-B`, then the check, as `## check`'s
+#   ## def    PATH, then a definition   the one of its name replaced: `ok: NAME,
+#                                       lines A-B`, then the check; a name the file
+#                                       does not define is refused, with the
+#                                       nearest one, and no file changes
+#   ## read   PATH FROM LIMIT           as format mugen's (a direct ask's context)
+#
+# No shell and no line edits.  The reply opens with the verdict of the check
+# just above it (Bend's first line, and what it said when it failed; another
+# checker's `ghc passes (exit 0).`, or `ghc fails (exit 1): WHAT.`).  Look and
+# def mean Spec/Form2.bend's get and put (a lens over the file's pieces); the
+# unit's declaration is its file's last piece (Check/Bend.bend: the head, the
+# declaration, the tail left out), its lines from the head's end.  Every echo
+# is a recorded check or text of the file: no checker runs.
+#
+# The fixes (the user, 11-12: an edit that fails and is retried, a check that
+# fails more than once, an honest give-up):
+#
+#   mugen-fix-miss-SHAPE        (direct, fill, repair-M) a def refused: the
+#                               direct ask's new name sent to `## def`, or a
+#                               fill's or repair's name misspelt (a character
+#                               short); then the right call
+#   mugen-fix-repeat[-S]-J      (S fill or repair) J wrong definitions (the
+#                               mutants, each with its check), then the right one
+#   mugen-fix-giveup[-fill]-J   J wrong definitions, then the one that puts the
+#                               hole back (`?goal`, `_`, `?`), and a reply with
+#                               the verdict, the tries and the last error
+#
+# Format mugen's misses and stale edits (an edit's old text not in the file)
+# have no counterpart: a def copies no old text.  Every refused or wrong write
+# has a later write, so the reader takes it as a try (weight 0); a give-up's
+# last write is the hole, never a wrong program, and a give-up needs a hole
+# whose check fails (an Agda goal display passes: none there).
+
+# a call's turn: its label, the path's line, the rest
+def f2.call(+label: String, +path: List<&2, U32>, +rest: List<&2, U32>) -> List<&2, U32>:
+  turn(U.b(label), cat([path, nl(), rest]))
+
+# a check's echo text: the output (another checker's as if run on the file here), `(exit N)`
+def f2.out.on(bend: Bool, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +c: List<&2, U32>) -> List<&2, U32>:
+  match bend:
+    case True{}:
+      +k = check.of(c)
+      mg.shell.echo(check.out(k), check.status(k))
+    case False{}:
+      +k = check.of(c)
+      mg.shell.echo(mg.out(field(fs, 0n), path, check.out(k)), mg.status(check.status(k)))
+
+def f2.out(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +c: List<&2, U32>) -> List<&2, U32>:
+  f2.out.on(mg.is.bend(fs), fs, path, c)
+
+# a hole's check: Agda's is its goal display (Cmd_goal_type_context), which passes
+def f2.hole.on(agda: Bool, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +c: List<&2, U32>) -> List<&2, U32>:
+  match agda:
+    case True{}:
+      mg.shell.echo(mg.out(field(fs, 0n), path, check.out(check.of(c))), U.b("0"))
+    case False{}:
+      f2.out(fs, path, c)
+
+def f2.hole.out(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +c: List<&2, U32>) -> List<&2, U32>:
+  f2.hole.on(mg.is.agda(fs), fs, path, c)
+
+def f2.check(+path: List<&2, U32>, +text: List<&2, U32>) -> List<&2, U32>:
+  U.append(f2.call("check", path, Nil{}), mg.echo(text))
+
+# the declaration with body as the file has it, and its first line there
+def f2.decl(+fs: List<&2, List<&2, U32>>, +body: List<&2, U32>) -> List<&2, U32>:
+  U.append(field(fs, 6n), body)
+
+def f2.from(+fs: List<&2, List<&2, U32>>) -> Nat:
+  1n+mg.nls(mg.head(fs))
+
+def f2.span(+from: Nat, +text: List<&2, U32>) -> List<&2, U32>:
+  +n = List.length(&2, List<&2, U32>, mg.rows(text))
+  cat([U.b("lines "), mg.n(from), U.b("-"), mg.n(Nat.sub(Nat.add(from, n), 1n))])
+
+# a write of the declaration with body (label add or def), its echo: said
+# (added, ok), the name, its lines, then the check's text
+def f2.write(+label: String, +said: String, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +body: List<&2, U32>, +ctext: List<&2, U32>) -> List<&2, U32>:
+  +decl = f2.decl(fs, body)
+  U.append(f2.call(label, path, mg.end.nl(decl)),
+    mg.echo(cat([U.b(said), U.b(": "), field(fs, 2n), U.b(", "), f2.span(f2.from(fs), decl), nl(), ctext])))
+
+def f2.lab(+first: Bool) -> String:
+  Bool.pick(String, first, "add", "def")
+
+def f2.said(+first: Bool) -> String:
+  Bool.pick(String, first, "added", "ok")
+
+# A misspelt name -------------------------------------------------------------------
+
+# a byte a name may hold (ASCII letters, digits, _ . '; any byte past ASCII)
+def f2.namech(+c: U32) -> Bool:
+  Bool.or(U32.is_lt(126, c), Bool.or(Bool.and(U32.is_lt(96, c), U32.is_lt(c, 123)), Bool.or(Bool.and(U32.is_lt(64, c), U32.is_lt(c, 91)),
+    Bool.or(Bool.and(U32.is_lt(47, c), U32.is_lt(c, 58)), Bool.or(U32.is_eq(c, 95), Bool.or(U32.is_eq(c, 46), U32.is_eq(c, 39)))))))
+
+def f2.ascii(xs: List<&2, U32>) -> Bool:
+  match xs:
+    case Nil{}:
+      True{}
+    case +h <> t:
+      Bool.and(U32.is_lt(h, 127), f2.ascii(t))
+
+def f2.ends.word(+xs: List<&2, U32>) -> Bool:
+  match xs:
+    case Nil{}:
+      True{}
+    case +h <> t:
+      Bool.not(f2.namech(h))
+
+# xs with its first whole-word old (k its length) as new, and whether it had one
+type F2s is Data:
+  F2s{hit: Bool, text: List<&2, U32>}
+
+def f2.s.cons(+h: U32, r: F2s) -> F2s:
+  match r:
+    case F2s{b, t}:
+      F2s{b, h <> t}
+
+def f2.swap.go(fuel: Nat, xs: List<&2, U32>, +old: List<&2, U32>, +new: List<&2, U32>, +k: Nat, +edge: Bool) -> F2s:
+  match fuel xs:
+    case 1n+f +h <> +t:
+      +hit = Bool.and(edge, Bool.and(U.prefix(h <> t, old), f2.ends.word(List.drop(&2, U32, h <> t, k))))
+      Bool.pick(F2s, hit, F2s{True{}, U.append(new, List.drop(&2, U32, h <> t, k))}, f2.s.cons(h, f2.swap.go(f, t, old, new, k, Bool.not(f2.namech(h)))))
+    case _ xs2:
+      F2s{False{}, xs2}
+
+def f2.swap(+xs: List<&2, U32>, +old: List<&2, U32>, +new: List<&2, U32>) -> F2s:
+  f2.swap.go(1n+U.len(xs), xs, old, new, U.len(old), True{})
+
+# the name a character short in its middle (an ASCII name of 4 or more)
+def f2.typo(+n: List<&2, U32>) -> List<&2, U32>:
+  +h = Nat.div(U.len(n), 2n)
+  U.append(List.take(&2, U32, n, h), List.drop(&2, U32, n, 1n+h))
+
+def f2.typo.ok(+n: List<&2, U32>) -> Bool:
+  Bool.and(f2.ascii(n), Nat.is_lt(3n, U.len(n)))
+
+# mugen's refusal of a def whose name the file does not define
+def f2.refusal(+bad: List<&2, U32>, +path: List<&2, U32>, +near: List<&2, U32>) -> List<&2, U32>:
+  cat([U.b("refused: no "), bad, U.b(" in "), path, U.b(" (a new definition is `## add`); the nearest: "), near, U.b(". No file was changed.")])
+
+# a fill's or repair's def of body with the name misspelt, refused (hit: the
+# declaration had the name as a word)
+def f2.miss.of(s: F2s, +name: List<&2, U32>, +bad: List<&2, U32>, +path: List<&2, U32>) -> Mx:
+  match s:
+    case F2s{hit, text}:
+      Mx{Bool.and(hit, f2.typo.ok(name)), U.append(f2.call("def", path, mg.end.nl(text)), mg.echo(f2.refusal(bad, path, name)))}
+
+def f2.miss.def(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +body: List<&2, U32>) -> Mx:
+  +name = field(fs, 2n)
+  +bad = f2.typo(name)
+  f2.miss.of(f2.swap(f2.decl(fs, body), name, bad), name, bad, path)
+
+# a direct ask's new definition sent to `## def`: refused, nothing near it
+def f2.miss.add(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2, U32>:
+  U.append(f2.call("def", path, mg.end.nl(f2.decl(fs, field(fs, 7n)))),
+    mg.echo(cat([U.b("refused: no "), field(fs, 2n), U.b(" in "), path, U.b(" (a new definition is `## add`). No file was changed.")])))
+
+# Look --------------------------------------------------------------------------------
+
+# a definition as look shows it
+def f2.entry(+name: List<&2, U32>, +from: Nat, +text: List<&2, U32>) -> List<&2, U32>:
+  cat([name, U.b(", "), f2.span(from, text), U.b(":\n"), mg.chomp(text)])
+
+# Bend's pieces (Spec/Form2.bend's instance, over a line's bytes): a head is
+# `def NAME`, `law NAME` or `type NAME` at column 0, a gap line blank or a comment
+def f2.bname(xs: List<&2, U32>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +c <> t:
+      Bool.pick(List<&2, U32>, Bool.not(Bool.or(U32.is_eq(c, 40), Bool.or(U32.is_eq(c, 58), Bool.or(U32.is_eq(c, 60), U.is_space(c))))), c <> f2.bname(t), Nil{})
+
+def f2.bafter(+l: List<&2, U32>, +p: List<&2, U32>) -> Maybe<&2, List<&2, U32>>:
+  Bool.pick(Maybe<&2, List<&2, U32>>, U.prefix(l, p), Some{f2.bname(List.drop(&2, U32, l, U.len(p)))}, None{})
+
+def f2.bhd(+l: List<&2, U32>) -> Maybe<&2, List<&2, U32>>:
+  Maybe.or(&2, List<&2, U32>, f2.bafter(l, U.b("def ")), Maybe.or(&2, List<&2, U32>, f2.bafter(l, U.b("law ")), f2.bafter(l, U.b("type "))))
+
+def f2.bgp(+l: List<&2, U32>) -> Bool:
+  Bool.or(U.blank(l), head.is(l, 35))
+
+def f2.beq(a: List<&2, U32>, b: List<&2, U32>) -> Bool:
+  U.eq(a, b)
+
+def f2.bdoc(+head: List<&2, U32>) -> F2.Doc<List<&2, U32>, List<&2, U32>>:
+  F2.split(~List<&2, U32>, ~List<&2, U32>, ~f2.bhd, ~f2.bgp, ~f2.beq, U.lines(head))
+
+# the entry of the piece named n, the pieces from line k on (none: empty)
+def f2.piece.at(ds: List<&2, F2.Piece<List<&2, U32>, List<&2, U32>>>, +k: Nat, +n: List<&2, U32>) -> List<&2, U32>:
+  match ds:
+    case Nil{}:
+      Nil{}
+    case F2.Piece{nm, +b, +g} <> t:
+      Bool.pick(List<&2, U32>, U.eq(nm, n), f2.entry(n, k, U.concat(b)),
+        f2.piece.at(t, Nat.add(k, Nat.add(List.length(&2, List<&2, U32>, b), List.length(&2, List<&2, U32>, g))), n))
+
+def f2.in.doc(+d: F2.Doc<List<&2, U32>, List<&2, U32>>, +n: List<&2, U32>) -> List<&2, U32>:
+  match d:
+    case F2.Doc{+p, +g, ds}:
+      f2.piece.at(ds, 1n+Nat.add(List.length(&2, List<&2, U32>, p), List.length(&2, List<&2, U32>, g)), n)
+
+# a looked-up name and its answer
+type F2e is Data:
+  F2e{name: List<&2, U32>, text: List<&2, U32>}
+
+def f2.e.on(ok: Bool, +n: List<&2, U32>, +t: List<&2, U32>, rest: List<&2, F2e>) -> List<&2, F2e>:
+  match ok:
+    case True{}:
+      F2e{n, t} <> rest
+    case False{}:
+      rest
+
+# the names the head defines, each with its piece
+def f2.heads(ns: List<&2, List<&2, U32>>, +d: F2.Doc<List<&2, U32>, List<&2, U32>>) -> List<&2, F2e>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case +n <> t:
+      +x = f2.in.doc(d, n)
+      f2.e.on(Bool.not(empty(x)), n, x, f2.heads(t, d))
+
+# (the head cut into pieces only when the Context names one it defines)
+def f2.heads.if(some: Bool, ns: List<&2, List<&2, U32>>, +head: List<&2, U32>) -> List<&2, F2e>:
+  match some:
+    case True{}:
+      f2.heads(ns, f2.bdoc(head))
+    case False{}:
+      Nil{}
+
+def f2.bases(bs: List<&2, Bl>) -> List<&2, F2e>:
+  match bs:
+    case Nil{}:
+      Nil{}
+    case Bl{+n, +l} <> t:
+      F2e{n, cat([n, U.b(", in Base:\n"), l])} <> f2.bases(t)
+
+def f2.e.names(es: List<&2, F2e>) -> List<&2, List<&2, U32>>:
+  match es:
+    case Nil{}:
+      Nil{}
+    case F2e{n, t} <> r:
+      n <> f2.e.names(r)
+
+def f2.e.texts(es: List<&2, F2e>) -> List<&2, List<&2, U32>>:
+  match es:
+    case Nil{}:
+      Nil{}
+    case F2e{n, t} <> r:
+      t <> f2.e.texts(r)
+
+# the look call for es (none: no call)
+def f2.look.of(+path: List<&2, U32>, +es: List<&2, F2e>) -> List<&2, U32>:
+  Bool.pick(List<&2, U32>, Nat.is_eq(List.length(&2, F2e, es), 0n), Nil{},
+    U.append(f2.call("look", path, U.append(mg.join(f2.e.names(es), nl()), nl())), mg.echo(mg.join(f2.e.texts(es), U.b("\n\n")))))
+
+# the declaration (body: as the file has it; none: a direct ask's, not there yet)
+# and the names the Context lists: Bend's from the head's pieces and Base
+def f2.looks.bend(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +mine: List<&2, F2e>, +base: Map<&2, List<&2, U32>>) -> List<&2, U32>:
+  +ns = mg.words(field(fs, 9n))
+  +hls = split(field(fs, 5n), 10)
+  +inf = mg.keep(ns, hls, True{})
+  f2.look.of(path, List.concat(&2, F2e, [mine, f2.heads.if(Bool.not(Nat.is_eq(List.length(&2, List<&2, U32>, inf), 0n)), inf, field(fs, 5n)),
+    f2.bases(mg.based(mg.keep(ns, hls, False{}), base))]))
+
+# another language's: the declaration, then the Context under the names it lists
+def f2.looks.other(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +mine: List<&2, F2e>) -> List<&2, U32>:
+  +ns = mg.words(field(fs, 9n))
+  +ctx = mg.chomp(mg.out(field(fs, 0n), path, field(fs, 12n)))
+  +some = Bool.and(Bool.not(empty(ctx)), Bool.not(Nat.is_eq(List.length(&2, List<&2, U32>, ns), 0n)))
+  +es = Bool.pick(List<&2, F2e>, some, List.append(&2, F2e, mine, [F2e{mg.join(ns, nl()), ctx}]), mine)
+  f2.look.of(path, es)
+
+def f2.looks.on(bend: Bool, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +mine: List<&2, F2e>, +base: Map<&2, List<&2, U32>>) -> List<&2, U32>:
+  match bend:
+    case True{}:
+      f2.looks.bend(fs, path, mine, base)
+    case False{}:
+      f2.looks.other(fs, path, mine)
+
+# a look at the declaration with body (fill, repair) and the Context's names
+def f2.looks(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +body: List<&2, U32>, +base: Map<&2, List<&2, U32>>) -> List<&2, U32>:
+  f2.looks.on(mg.is.bend(fs), fs, path, [F2e{field(fs, 2n), f2.entry(field(fs, 2n), f2.from(fs), f2.decl(fs, body))}], base)
+
+# a direct ask's: the Context's names only
+def f2.looks.new(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>) -> List<&2, U32>:
+  f2.looks.on(mg.is.bend(fs), fs, path, Nil{}, base)
+
+# Verdicts and replies ---------------------------------------------------------------
+
+def f2.unpunct.r(r: List<&2, U32>) -> List<&2, U32>:
+  match r:
+    case +h <> +t:
+      Bool.pick(List<&2, U32>, Bool.or(U32.is_eq(h, 46), U32.is_eq(h, 58)), f2.unpunct.r(t), h <> t)
+    case Nil{}:
+      Nil{}
+
+# a line less its last `.` or `:`
+def f2.unpunct(+l: List<&2, U32>) -> List<&2, U32>:
+  List.reverse(&2, U32, f2.unpunct.r(List.reverse(&2, U32, U.trim.right(l))))
+
+def f2.passed(+c: List<&2, U32>) -> Bool:
+  U.eq(mg.status(check.status(check.of(c))), U.b("0"))
+
+# Bend's: the output's first line, and when it failed what it said and where
+def f2.verdict.bend(+c: List<&2, U32>) -> List<&2, U32>:
+  +o = check.out(check.of(c))
+  +l = f2.unpunct(mg.upto(lead.trim(o), 10))
+  +w = List.drop(&2, U32, mg.why(o), 18n)
+  Bool.pick(List<&2, U32>, Bool.or(f2.passed(c), empty(w)), U.append(l, U.b(".")), cat([l, U.b(": "), w, U.b(".")]))
+
+# another checker's: passes or fails, the exit, and what it said
+def f2.verdict.other(+fs: List<&2, List<&2, U32>>, +c: List<&2, U32>) -> List<&2, U32>:
+  +s = mg.status(check.status(check.of(c)))
+  +w = List.drop(&2, U32, mg.why.other(fs, check.out(check.of(c))), Nat.add(U.len(mg.said(fs)), 8n))
+  +fail = cat([mg.said(fs), U.b(" fails (exit "), s, U.b(")"), Bool.pick(List<&2, U32>, empty(w), Nil{}, U.append(U.b(": "), w)), U.b(".")])
+  Bool.pick(List<&2, U32>, f2.passed(c), cat([mg.said(fs), U.b(" passes (exit 0).")]), fail)
+
+def f2.verdict.on(bend: Bool, +fs: List<&2, List<&2, U32>>, +c: List<&2, U32>) -> List<&2, U32>:
+  match bend:
+    case True{}:
+      f2.verdict.bend(c)
+    case False{}:
+      f2.verdict.other(fs, c)
+
+def f2.verdict(+fs: List<&2, List<&2, U32>>, +c: List<&2, U32>) -> List<&2, U32>:
+  f2.verdict.on(mg.is.bend(fs), fs, c)
+
+def f2.done.direct(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2, U32>:
+  +name = code(field(fs, 2n))
+  cat([f2.verdict(fs, field(fs, 11n)), [32], Bool.pick(List<&2, U32>, mg.prop(fs), cat([U.b("Proved "), name, U.b(" in "), path, U.b(".")]),
+    cat([U.b("Added "), name, U.b(" to "), path, U.b(".")]))])
+
+def f2.done.fill(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2, U32>:
+  cat([f2.verdict(fs, field(fs, 11n)), U.b(" Filled the hole in "), code(field(fs, 2n)), U.b(" ("), path, U.b(").")])
+
+def f2.done.repair(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +m: Nat) -> List<&2, U32>:
+  cat([f2.verdict(fs, field(fs, 11n)), U.b(" Fixed "), code(field(fs, 2n)), U.b(" in "), path,
+    mg.why.on(mg.is.bend(fs), fs, check.out(check.of(mutant.check(fs, m)))), U.b(".")])
+
+# a give-up's: the verdict on the hole put back, the tries, the last one's error
+def f2.giveup(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +j: Nat, +l: Nat) -> List<&2, U32>:
+  cat([f2.verdict(fs, field(fs, 13n)), U.b(" I could not get "), code(field(fs, 2n)), U.b(" in "), path, U.b(" to pass in "), mg.n(j), U.b(" tries"),
+    mg.why.on(mg.is.bend(fs), fs, check.out(check.of(mutant.check(fs, l)))), U.b(". I put the hole back in "), code(field(fs, 2n)), U.b(".")])
+
+def f2.reply.x(+x: Nat, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +j: Nat, +l: Nat, +done: List<&2, U32>) -> List<&2, U32>:
+  mg.reply(Bool.pick(List<&2, U32>, Nat.is_eq(x, 1n), f2.giveup(fs, path, j, l), done))
+
+# a give-up needs a hole whose check fails
+def f2.can.give(+fs: List<&2, List<&2, U32>>) -> Bool:
+  Bool.and(Bool.not(empty(field(fs, 13n))), Bool.not(f2.passed(field(fs, 13n))))
+
+# Sessions ------------------------------------------------------------------------------
+
+# the last write: x 0 the original, its check; 1 the hole back, its check
+def f2.end(x: Nat, +first: Bool, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2, U32>:
+  match x:
+    case 0n:
+      f2.write(f2.lab(first), f2.said(first), fs, path, field(fs, 7n), f2.out(fs, path, field(fs, 11n)))
+    case _:
+      f2.write(f2.lab(first), f2.said(first), fs, path, field(fs, 10n), f2.hole.out(fs, path, field(fs, 13n)))
+
+# j wrong writes, the mutants from m on, each with its recorded check, then
+# the end x gives; first: the file has no declaration yet (its first write an add)
+def f2.tries(+x: Nat, j: Nat, +first: Bool, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +m: Nat, +nm: Nat) -> List<&2, U32>:
+  match j:
+    case 0n:
+      f2.end(x, first, fs, path)
+    case 1n+p:
+      U.append(f2.write(f2.lab(first), f2.said(first), fs, path, mutant(fs, m), f2.out(fs, path, mutant.check(fs, m))),
+        f2.tries(x, p, False{}, fs, path, next.m(m, 1n, nm), nm))
+
+def f2.read.tail(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2, U32>:
+  +f0 = mg.head(fs)
+  +n = List.length(&2, List<&2, U32>, mg.rows(f0))
+  +from = Bool.pick(Nat, Nat.is_lt(n, 25n), 1n, Nat.sub(n, 23n))
+  mg.read(path, f0, from, Nat.sub(Nat.add(n, 1n), from))
+
+# direct: the ask, the file's last lines, the look-ups, [a def refused], the
+# writes (an add first), the reply
+def f2.direct(+x: Nat, +miss: Bool, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>, +j: Nat, +m: Nat, +nm: Nat) -> Mx:
+  +ok = Bool.and(mg.tries.ok(j, fs, Nil{}, m, nm), Bool.or(Nat.is_eq(x, 0n), f2.can.give(fs)))
+  Mx{ok, cat([mg.user(mg.ask.direct(fs, path)), f2.read.tail(fs, path), f2.looks.new(fs, path, base),
+    Bool.pick(List<&2, U32>, miss, f2.miss.add(fs, path), Nil{}), f2.tries(x, j, True{}, fs, path, m, nm),
+    f2.reply.x(x, fs, path, j, mg.last.m(m, j, nm), f2.done.direct(fs, path))])}
+
+# fill: the ask, the hole's check, a look at the declaration and the
+# Context's names, [a def refused], the writes, the reply
+def f2.fill(+x: Nat, +miss: Bool, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>, +j: Nat, +m: Nat, +nm: Nat) -> Mx:
+  +ok = Bool.and(mg.tries.ok(j, fs, field(fs, 10n), m, nm), Bool.or(Nat.is_eq(x, 0n), f2.can.give(fs)))
+  +r = Bool.pick(Mx, miss, f2.miss.def(fs, path, field(fs, 7n)), Mx{True{}, Nil{}})
+  mx.and(ok, mx.pre(cat([mg.user(mg.ask.fill(fs, path)), f2.check(path, f2.hole.out(fs, path, field(fs, 13n))), f2.looks(fs, path, field(fs, 10n), base)]),
+    mx.post(r, U.append(f2.tries(x, j, False{}, fs, path, m, nm), f2.reply.x(x, fs, path, j, mg.last.m(m, j, nm), f2.done.fill(fs, path))))))
+
+# repair: mutant m handed over: the ask, its check, a look, [a def refused],
+# j wrong writes from the next mutant on, the right one, the reply
+def f2.repair(+miss: Bool, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>, +m: Nat, +j: Nat, +nm: Nat) -> Mx:
+  +mut = mutant(fs, m)
+  +ok = mg.tries.ok(j, fs, mut, next.m(m, 1n, nm), nm)
+  +r = Bool.pick(Mx, miss, f2.miss.def(fs, path, field(fs, 7n)), Mx{True{}, Nil{}})
+  mx.and(ok, mx.pre(cat([mg.user(mg.ask.repair(fs, path)), f2.check(path, f2.out(fs, path, mutant.check(fs, m))), f2.looks(fs, path, mut, base)]),
+    mx.post(r, U.append(f2.tries(0n, j, False{}, fs, path, next.m(m, 1n, nm), nm), mg.reply(f2.done.repair(fs, path, m))))))
+
+# Presentations -------------------------------------------------------------------------
+
+def f2.keep(r: Mx, +b: Tk.Bpe, +limit: Nat, +id: List<&2, U32>, +shape: List<&2, U32>, rest: List<&2, Mg>) -> List<&2, Mg>:
+  match r:
+    case Mx{ok, t}:
+      mg.one.keep(ok, b, limit, id, shape, t, rest)
+
+def f2.repairs(k: Nat, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +m: Nat, +nm: Nat, rest: List<&2, Mg>) -> List<&2, Mg>:
+  match k:
+    case 0n:
+      rest
+    case 1n+j:
+      f2.keep(f2.repair(False{}, fs, path, base, m, 0n, nm), b, limit, id, U.append(U.b("repair-"), mg.n(m)),
+        f2.repairs(j, b, limit, base, id, fs, path, 1n+m, nm, rest))
+
+# a unit's sessions, as format mugen's mg.unit: direct (not Nix), fill (a hole), a repair a mutant
+def f2.fill.if(some: Bool, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +nm: Nat, rest: List<&2, Mg>) -> List<&2, Mg>:
+  match some:
+    case True{}:
+      f2.keep(f2.fill(0n, False{}, fs, path, base, 0n, 0n, nm), b, limit, id, U.b("fill"), rest)
+    case False{}:
+      rest
+
+def f2.direct.if(some: Bool, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +nm: Nat, rest: List<&2, Mg>) -> List<&2, Mg>:
+  match some:
+    case True{}:
+      f2.keep(f2.direct(0n, False{}, fs, path, base, 0n, 0n, nm), b, limit, id, U.b("direct"), rest)
+    case False{}:
+      rest
+
+def f2.unit(+b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, rest: List<&2, Mg>) -> List<&2, Mg>:
+  +path = mg.path(id)
+  +nm = mutant.count(fs)
+  f2.direct.if(Bool.not(mg.is.nix(fs)), b, limit, base, id, fs, path, nm,
+    f2.fill.if(Bool.not(empty(field(fs, 13n))), b, limit, base, id, fs, path, nm, f2.repairs(nm, b, limit, base, id, fs, path, 0n, nm, rest)))
+
+# the unit's chain, as format chain's mg.chain.unit chooses it
+def f2.chain.at(repair: Bool, hole: Bool, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +j: Nat, +m: Nat, +nm: Nat, rest: List<&2, Mg>) -> List<&2, Mg>:
+  match repair hole:
+    case True{} _:
+      f2.keep(f2.repair(False{}, fs, path, base, m, j, nm), b, limit, id, U.append(U.b("chain-repair-"), mg.n(j)), rest)
+    case False{} True{}:
+      f2.keep(f2.fill(0n, False{}, fs, path, base, j, m, nm), b, limit, id, U.append(U.b("chain-fill-"), mg.n(j)), rest)
+    case False{} False{}:
+      f2.keep(f2.direct(0n, False{}, fs, path, base, j, m, nm), b, limit, id, U.append(U.b("chain-"), mg.n(j)), rest)
+
+def f2.chain.if(some: Bool, +repair: Bool, +hole: Bool, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +j: Nat, +nm: Nat, rest: List<&2, Mg>) -> List<&2, Mg>:
+  match some:
+    case True{}:
+      f2.chain.at(repair, hole, b, limit, base, id, fs, mg.path(id), j, roll(id, 9n, nm), nm, rest)
+    case False{}:
+      rest
+
+def f2.chain(+b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, rest: List<&2, Mg>) -> List<&2, Mg>:
+  +nm = mutant.count(fs)
+  +nix = mg.is.nix(fs)
+  +repair = Bool.and(Nat.is_lt(1n, nm), Bool.or(nix, Nat.is_lt(roll(id, 12n, 100n), 30n)))
+  +r = roll(id, 11n, 100n)
+  +want = Bool.pick(Nat, Nat.is_lt(r, 55n), 1n, Bool.pick(Nat, Nat.is_lt(r, 85n), 2n, 3n))
+  +left = Bool.pick(Nat, repair, Nat.sub(nm, 1n), nm)
+  +j = Nat.min(want, Nat.min(left, Nat.sub(chain.k(), 1n)))
+  +hole = Bool.and(Bool.not(empty(field(fs, 13n))), Nat.is_lt(roll(id, 14n, 100n), 50n))
+  f2.chain.if(Bool.and(Nat.is_lt(0n, j), Bool.or(repair, Bool.not(nix))), repair, hole, b, limit, base, id, fs, j, nm, rest)
+
+# a fix of x (0 repeat, 1 give-up, 2 miss) from start s (0 direct, 1 fill, 2 repair; 3 none)
+def f2.fix.at(s: Nat, +x: Nat, +name: String, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +j: Nat, +m: Nat, +nm: Nat, rest: List<&2, Mg>) -> List<&2, Mg>:
+  match s:
+    case 0n:
+      +miss = Nat.is_eq(x, 2n)
+      +jn = Bool.pick(List<&2, U32>, miss, U.b("-direct"), U.append(U.b("-"), mg.n(j)))
+      f2.keep(f2.direct(Bool.pick(Nat, Nat.is_eq(x, 1n), 1n, 0n), miss, fs, mg.path(id), base, Bool.pick(Nat, miss, 0n, j), m, nm), b, limit, id, cat([U.b("fix-"), U.b(name), jn]), rest)
+    case 1n:
+      +miss = Nat.is_eq(x, 2n)
+      +jn = Bool.pick(List<&2, U32>, miss, Nil{}, U.append(U.b("-"), mg.n(j)))
+      f2.keep(f2.fill(Bool.pick(Nat, Nat.is_eq(x, 1n), 1n, 0n), miss, fs, mg.path(id), base, Bool.pick(Nat, miss, 0n, j), m, nm), b, limit, id, cat([U.b("fix-"), U.b(name), U.b("-fill"), jn]), rest)
+    case 2n:
+      +miss = Nat.is_eq(x, 2n)
+      +jn = Bool.pick(List<&2, U32>, miss, U.append(U.b("-"), mg.n(m)), U.append(U.b("-"), mg.n(j)))
+      f2.keep(f2.repair(miss, fs, mg.path(id), base, m, Bool.pick(Nat, miss, 0n, j), nm), b, limit, id, cat([U.b("fix-"), U.b(name), U.b("-repair"), jn]), rest)
+    case _:
+      rest
+
+# a unit's fixes, by its hash as format mugen's mg.fix.unit: a miss (direct,
+# fill or repair), a repeat after 1, 2 or 3 wrong tries (30/40/30; from the
+# direct ask after 2 or more), and for half the units with two mutants or
+# more and a failing hole a give-up after 2 or 3 (from the direct ask or the fill)
+def f2.fix(+b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, rest: List<&2, Mg>) -> List<&2, Mg>:
+  +nm = mutant.count(fs)
+  +d = Bool.not(mg.is.nix(fs))
+  +f = Bool.and(d, Bool.not(empty(field(fs, 13n))))
+  +m = roll(id, 9n, nm)
+  +ms = mg.start(roll(id, 15n, 3n), d, f, Nat.is_lt(0n, nm))
+  +r = roll(id, 17n, 100n)
+  +want = Bool.pick(Nat, Nat.is_lt(r, 30n), 1n, Bool.pick(Nat, Nat.is_lt(r, 70n), 2n, 3n))
+  +ss = mg.start(roll(id, 16n, 3n), Bool.and(d, Nat.is_lt(1n, nm)), f, Nat.is_lt(1n, nm))
+  +left = Bool.pick(Nat, Nat.is_eq(ss, 2n), Nat.sub(nm, 1n), nm)
+  +js = Nat.min(Nat.min(left, Nat.sub(chain.k(), 1n)), Bool.pick(Nat, Nat.is_eq(ss, 0n), Nat.max(want, 2n), want))
+  +gj = Nat.min(nm, Bool.pick(Nat, Nat.is_eq(roll(id, 19n, 2n), 0n), 2n, 3n))
+  +give = Bool.and(Bool.and(Nat.is_lt(1n, nm), Nat.is_lt(roll(id, 18n, 100n), 50n)), Bool.and(Bool.or(d, f), f2.can.give(fs)))
+  +gs = Bool.pick(Nat, give, mg.start(roll(id, 20n, 2n), d, f, False{}), 3n)
+  f2.fix.at(ms, 2n, "miss", b, limit, base, id, fs, 0n, m, nm,
+    f2.fix.at(Bool.pick(Nat, Nat.is_lt(0n, js), ss, 3n), 0n, "repeat", b, limit, base, id, fs, js, m, nm,
+      f2.fix.at(gs, 1n, "giveup", b, limit, base, id, fs, gj, m, nm, rest)))
+
+# Ana's own nights in form 2: her Terms as writes of the declaration (an add
+# first), each with its check, the last the original unless hers was (nt.right)
+def f2.nt.writes(ns: List<&2, Nt>, +first: Bool, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2, U32>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case Nt{+b, +c} <> t:
+      U.append(f2.write(f2.lab(first), f2.said(first), fs, path, b, f2.out(fs, path, c)), f2.nt.writes(t, False{}, fs, path))
+
+def f2.nt.session(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>, +ns: List<&2, Nt>) -> List<&2, U32>:
+  cat([mg.user(mg.ask.direct(fs, path)), f2.read.tail(fs, path), f2.looks.new(fs, path, base), f2.nt.writes(ns, True{}, fs, path),
+    mg.reply(f2.done.direct(fs, path))])
+
+def f2.nt.r(r: Nr, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +sh: List<&2, U32>, rest: List<&2, Mg>) -> List<&2, Mg>:
+  match r:
+    case Nr{+ns, +sw}:
+      +j = Nat.sub(List.length(&2, Nt, ns), 1n)
+      +ok = Bool.and(nt.last.passed(ns), Bool.not(Bool.and(sw, Nat.is_eq(j, 0n))))
+      mg.one.keep(ok, b, limit, id, nt.shape(sh, j), f2.nt.session(fs, mg.path(id), base, ns), rest)
+
+def f2.nt.on(some: Bool, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +v: List<&2, U32>, rest: List<&2, Mg>) -> List<&2, Mg>:
+  match some:
+    case True{}:
+      +k = U.find(v, [0], 0n)
+      +ns = nt.uniq(nt.of(A.ag.blocks(10, A.ag.hds.bytes(), List.drop(&2, U32, v, 1n+k))), Nil{})
+      f2.nt.r(nt.right(ns, field(fs, 7n), field(fs, 11n)), b, limit, base, id, fs, List.take(&2, U32, v, k), rest)
+    case False{}:
+      rest
+
+# which: 0 every shape, 1 the chain, 2 the fixes, 3 all three, 5 the repairs only (a history stream's)
+def f2.of(+which: Nat, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, rest: List<&2, Mg>) -> List<&2, Mg>:
+  match which:
+    case 0n:
+      f2.unit(b, limit, base, id, fs, rest)
+    case 1n:
+      f2.chain(b, limit, base, id, fs, rest)
+    case 2n:
+      f2.fix(b, limit, base, id, fs, rest)
+    case 5n:
+      f2.repairs(mutant.count(fs), b, limit, base, id, fs, mg.path(id), 0n, mutant.count(fs), rest)
+    case _:
+      f2.unit(b, limit, base, id, fs, f2.chain(b, limit, base, id, fs, f2.fix(b, limit, base, id, fs, rest)))
+
+def f2.of.if(ok: Bool, +which: Nat, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, rest: List<&2, Mg>) -> List<&2, Mg>:
+  match ok:
+    case True{}:
+      f2.of(which, b, limit, base, id, fs, rest)
+    case False{}:
+      rest
+
+# (a unit past 512 KB gives none, as the fixes: a look splits its head)
+def f2.all(+which: Nat, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, rs: List<&2, Ns.Doc>) -> List<&2, Mg>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case Ns.Doc{+i, +t} <> more:
+      +fs = split(t, 30)
+      f2.of.if(Bool.and(mg.small(fs), Nat.is_lt(U.len(t), 524288n)), which, b, limit, base, i, fs, f2.all(which, b, limit, base, more))
+
+def f2.all.night(+b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +night: Map<&2, List<&2, U32>>, rs: List<&2, Ns.Doc>) -> List<&2, Mg>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case Ns.Doc{+i, +t} <> more:
+      +v = mg.got(Map.get(List<&2, U32>, Nil{}, night, mg.str(i)))
+      f2.nt.on(Bool.not(empty(v)), b, limit, base, i, split(t, 30), v, f2.all.night(b, limit, base, night, more))
+
+# MUGEN_ONLY's form 2 modes: form2, form2-chain, form2-fix, form2-all (which 0-3), form2-night (4),
+# form2-repair (5)
+def f2.which(+only: String) -> Nat:
+  Bool.pick(Nat, String.eq(only, "form2-chain"), 1n, Bool.pick(Nat, String.eq(only, "form2-fix"), 2n,
+    Bool.pick(Nat, String.eq(only, "form2-all"), 3n, Bool.pick(Nat, String.eq(only, "form2-night"), 4n,
+      Bool.pick(Nat, String.eq(only, "form2-repair"), 5n, 0n)))))
+
+def f2.is(+only: String) -> Bool:
+  String.starts_with(only, "form2")
+
+def f2.render.on(night: Bool, +which: Nat, +b: Tk.Bpe, +limit: Nat, +cf: Mgc, rs: List<&2, Ns.Doc>) -> List<&2, Mg>:
+  match night:
+    case True{}:
+      f2.all.night(b, limit, Mgc.base(cf), Mgc.night(cf), rs)
+    case False{}:
+      f2.all(which, b, limit, Mgc.base(cf), rs)
+
+def f2.render(+only: String, +b: Tk.Bpe, +limit: Nat, +cf: Mgc, rs: List<&2, Ns.Doc>) -> List<&2, Mg>:
+  f2.render.on(Nat.is_eq(f2.which(only), 4n), f2.which(only), b, limit, cf, rs)
+
 # the units a render takes: the chains, the night's, the fixes, or every shape
 def mg.all.on(chain: Bool, night: Bool, fix: Bool, +b: Tk.Bpe, +limit: Nat, +cf: Mgc, rs: List<&2, Ns.Doc>) -> List<&2, Mg>:
   match chain night fix:
@@ -1886,8 +2497,15 @@ def mg.all.on(chain: Bool, night: Bool, fix: Bool, +b: Tk.Bpe, +limit: Nat, +cf:
     case False{} False{} False{}:
       mg.all(b, limit, Mgc.base(cf), rs)
 
+def mg.all.f2(form2: Bool, +only: String, +b: Tk.Bpe, +limit: Nat, +cf: Mgc, rs: List<&2, Ns.Doc>) -> List<&2, Mg>:
+  match form2:
+    case True{}:
+      f2.render(only, b, limit, cf, rs)
+    case False{}:
+      mg.all.on(String.eq(only, "chain"), String.eq(only, "night"), String.eq(only, "fix"), b, limit, cf, rs)
+
 def mg.all.of(+only: String, +b: Tk.Bpe, +limit: Nat, +cf: Mgc, rs: List<&2, Ns.Doc>) -> List<&2, Mg>:
-  mg.all.on(String.eq(only, "chain"), String.eq(only, "night"), String.eq(only, "fix"), b, limit, cf, rs)
+  mg.all.f2(f2.is(only), only, b, limit, cf, rs)
 
 def mg.docs(ms: List<&2, Mg>) -> List<&2, Ns.Doc>:
   match ms:
@@ -1910,7 +2528,7 @@ def mg.shape.of(+id: List<&2, U32>) -> List<&2, U32>:
   mg.seg.go(id, Nil{})
 
 def mg.only.ok(+only: String, +id: List<&2, U32>) -> Bool:
-  Bool.or(String.is_empty(only), S.prefix(mg.shape.of(id), S.b("mugen-" ++ only)))
+  Bool.or(Bool.or(String.is_empty(only), f2.is(only)), S.prefix(mg.shape.of(id), S.b("mugen-" ++ only)))
 
 # the presentations MUGEN_ONLY keeps
 def mg.docs.only(+only: String, ds: List<&2, Ns.Doc>) -> List<&2, Ns.Doc>:
@@ -1984,7 +2602,7 @@ def batch() -> Nat:
 # the file: a thousand units of col9's or a2bum12's went past 3 GB (11-12), so its
 # batches are a hundred
 def batch.of(+only: String) -> Nat:
-  Bool.pick(Nat, String.eq(only, "fix"), 100n, batch())
+  Bool.pick(Nat, Bool.or(String.eq(only, "fix"), f2.is(only)), 100n, batch())
 
 def big() -> Nat:
   U32.to_nat(4294967295)
