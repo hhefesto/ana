@@ -1,0 +1,153 @@
+## user
+
+`and_inverse_l` in mods/Data/Bool/Properties.bend fails bend check. Fix it.
+
+Agda: Data.Bool.Properties.∧-inverseˡ
+Properties.agda, line 407
+
+## shell
+
+bend mods/Data/Bool/Properties.bend --check-only
+
+## echo
+
+```
+SOME PROOFS FAIL
+Error:
+- expected : a match heading this case (this case is orphaned)
+- observed : 'case'
+Location:
+631 |       {==}
+632>|     case True{}:
+    |     ^^^^
+633 |       {==}
+(exit 1)
+```
+
+## read
+
+mods/Data/Bool/Properties.bend 628 6
+
+## echo
+
+```
+def and_inverse_l(x: Bool) -> {Bool__Base.and(Bool__Base.not(x), x) == False{} : Bool}:
+  match x:
+    case False{}
+      {==}
+    case True{}:
+      {==}
+[lines 628-633 of 633]
+```
+
+## edit
+
+mods/Data/Bool/Properties.bend
+-    case False{}
+-      {==}
+-    case True{}:
++    case False{}:
++      {==}
++    case :{}True
+
+## echo
+
+```
+--- mods/Data/Bool/Properties.bend
++++ mods/Data/Bool/Properties.bend
+@@ -627,7 +627,7 @@
+ # Properties.agda, line 407
+ def and_inverse_l(x: Bool) -> {Bool__Base.and(Bool__Base.not(x), x) == False{} : Bool}:
+   match x:
+-    case False{}
++    case False{}:
+       {==}
+-    case True{}:
++    case :{}True
+       {==}
+```
+
+## shell
+
+bend mods/Data/Bool/Properties.bend --check-only
+
+## echo
+
+```
+SOME PROOFS FAIL
+Error:
+- expected : a term
+- observed : ':'
+Location:
+631 |       {==}
+632>|     case :{}True
+    |          ^
+633 |       {==}
+(exit 1)
+```
+
+## edit
+
+mods/Data/Bool/Properties.bend
+-    case False{}
++    case False{}:
+
+## echo
+
+```
+Edit 1 (mods/Data/Bool/Properties.bend): old was not found. No file was changed.
+```
+
+## read
+
+mods/Data/Bool/Properties.bend 628 6
+
+## echo
+
+```
+def and_inverse_l(x: Bool) -> {Bool__Base.and(Bool__Base.not(x), x) == False{} : Bool}:
+  match x:
+    case False{}:
+      {==}
+    case :{}True
+      {==}
+[lines 628-633 of 633]
+```
+
+## edit
+
+mods/Data/Bool/Properties.bend
+-    case :{}True
++    case True{}:
+
+## echo
+
+```
+--- mods/Data/Bool/Properties.bend
++++ mods/Data/Bool/Properties.bend
+@@ -629,5 +629,5 @@
+   match x:
+     case False{}:
+       {==}
+-    case :{}True
++    case True{}:
+       {==}
+```
+
+## shell
+
+bend mods/Data/Bool/Properties.bend --check-only
+
+## echo
+
+```
+ALL PROOFS CHECK
+Use --verdict for mathematical validity.
+(exit 0)
+```
+
+## mugen
+
+Fixed `and_inverse_l` in mods/Data/Bool/Properties.bend: bend check said expected a match heading this case (this case is orphaned), observed 'case' at line 632. It passes now.
+
+

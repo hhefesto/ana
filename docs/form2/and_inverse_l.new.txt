@@ -1,0 +1,109 @@
+## user
+
+`and_inverse_l` in mods/Data/Bool/Properties.bend fails bend check. Fix it.
+
+Agda: Data.Bool.Properties.∧-inverseˡ
+Properties.agda, line 407
+
+## check
+
+mods/Data/Bool/Properties.bend
+
+## echo
+
+```
+SOME PROOFS FAIL
+Error:
+- expected : a match heading this case (this case is orphaned)
+- observed : 'case'
+Location:
+631 |       {==}
+632>|     case True{}:
+    |     ^^^^
+633 |       {==}
+(exit 1)
+```
+
+## look
+
+mods/Data/Bool/Properties.bend
+and_inverse_l
+
+## echo
+
+```
+and_inverse_l, lines 628-633:
+def and_inverse_l(x: Bool) -> {Bool__Base.and(Bool__Base.not(x), x) == False{} : Bool}:
+  match x:
+    case False{}
+      {==}
+    case True{}:
+      {==}
+```
+
+## def
+
+mods/Data/Bool/Properties.bend
+def and_inverse_l(x: Bool) -> {Bool__Base.and(Bool__Base.not(x), x) == False{} : Bool}:
+  match x:
+    case False{}:
+      {==}
+    case :{}True
+      {==}
+
+## echo
+
+```
+ok: and_inverse_l, lines 628-633
+```
+
+## check
+
+mods/Data/Bool/Properties.bend
+
+## echo
+
+```
+SOME PROOFS FAIL
+Error:
+- expected : a term
+- observed : ':'
+Location:
+631 |       {==}
+632>|     case :{}True
+    |          ^
+633 |       {==}
+(exit 1)
+```
+
+## def
+
+mods/Data/Bool/Properties.bend
+def and_inverse_l(x: Bool) -> {Bool__Base.and(Bool__Base.not(x), x) == False{} : Bool}:
+  match x:
+    case False{}:
+      {==}
+    case True{}:
+      {==}
+
+## echo
+
+```
+ok: and_inverse_l, lines 628-633
+```
+
+## check
+
+mods/Data/Bool/Properties.bend
+
+## echo
+
+```
+ALL PROOFS CHECK
+Use --verdict for mathematical validity.
+(exit 0)
+```
+
+## mugen
+
+ALL PROOFS CHECK. Fixed `and_inverse_l` in mods/Data/Bool/Properties.bend: its `case False{}` had lost the `:` after it.
