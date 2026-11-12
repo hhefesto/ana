@@ -17,7 +17,8 @@ import ../Transcript.bend as Tr
 #              and verify, none for direct and term-to-type; the User first.
 #              The mugen shape (`## user` first): one act, the `## mugen`
 #              reply, no attempt; J tries for mugen-chain*-J, any for
-#              mugen-night-* (ana's own), else none
+#              mugen-night-* (ana's own), 1 for mugen-fix-miss-*, J + 1 for
+#              mugen-fix-stale*-J, J for mugen-fix-giveup*-J, else none
 #   tokens     the tokens read back to the same tokens, as a transcript
 #   agree      each token's role is the role of every one of its bytes
 #
@@ -102,11 +103,19 @@ def la.shape.ok(+s: List<&2, U32>, +e: List<&2, A.Turn>) -> Bool:
 def la.is.mugen(+text: List<&2, U32>) -> Bool:
   A.ag.prefix(text, A.ag.ascii("## user\n"))
 
+# the fixes (2026-11-12; Transcript.bend "Fixes"): a miss has one try (the
+# refused edit), a stale fix after J tries J + 1, a give-up after J tries J
+# (its last edit puts the file back)
+def la.fix.tries(+s: List<&2, U32>) -> Nat:
+  +j = la.last.num(s, 0n)
+  Bool.pick(Nat, A.ag.prefix(s, A.ag.ascii("mugen-fix-miss-")), 1n,
+    Bool.pick(Nat, A.ag.prefix(s, A.ag.ascii("mugen-fix-stale-")), 1n+j, Bool.pick(Nat, A.ag.prefix(s, A.ag.ascii("mugen-fix-giveup-")), j, 0n)))
+
 def la.mugen.ok(+s: List<&2, U32>, +e: List<&2, A.Turn>) -> Bool:
   +acts = Nat.is_eq(A.ag.count(e, 3n), 1n)
   +chain = A.ag.prefix(s, A.ag.ascii("mugen-chain-"))
   +own = A.ag.prefix(s, A.ag.ascii("mugen-night-"))
-  +tries = Bool.or(own, Nat.is_eq(A.ag.count(e, 6n), Bool.pick(Nat, chain, la.last.num(s, 0n), 0n)))
+  +tries = Bool.or(own, Nat.is_eq(A.ag.count(e, 6n), Bool.pick(Nat, chain, la.last.num(s, 0n), la.fix.tries(s))))
   +none = Bool.and(Nat.is_eq(A.ag.count(e, 2n), 0n), tries)
   Bool.and(Bool.and(acts, none), Bool.and(A.ag.prefix(la.act.text(e), A.ag.ascii("## mugen\n")), la.first.user(e)))
 

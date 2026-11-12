@@ -171,6 +171,56 @@ repeat of the Term before is left out (she repeated herself in most). The
 bytes of each check are the recorded ones, the Terms back under the def's
 indent. 5,645 transcripts, 4,628 fit the window.
 
+## Fixes (2026-11-12)
+
+What run 5's checkpoints did wrong on the 176 tasks, and R5d's sessions never
+showed. Of R5d's first 583,180 sessions, 45 had an edit mugen refused, 2 did
+not end in a pass, and 97% made one edit; at r5-step120000, of the 124 tasks
+she failed, 58 ended in a false "passes", 45 sent the same call again and 33
+had an edit that did not apply. The user (11-12): "add sessions where an edit
+fails and is retried; add sessions where the check fails more than once
+before it's fixed; add sessions that end with an honest 'couldn't do it,
+here's the error'; filter out solutions that pass the check but are wrong".
+
+`MUGEN_ONLY=fix` renders up to three more sessions a unit, its own stream
+(`run/v8/fix/NAME`, run/v8/fix6.sh), with no new checker runs:
+
+| shape | starts as | then |
+|---|---|---|
+| `mugen-fix-miss-direct`, `-fill`, `-repair-M` | the shape | the fix, sent first with its first line that is not blank as she might misremember it (two spaces more indent, or a character short in its middle), refused (`Edit 1 (P): old was not found. No file was changed.`); a read of those lines, two more each side; the fix and its pass |
+| `mugen-fix-stale-J`, `-fill-J`, `-repair-J` | the shape | J wrong edits, each with its recorded check; the fix sent first as though the last of them had not been made (its old text the one before it: the edit she sent again on the 176 tasks), refused; a read of the declaration as it is; the fix and its pass |
+| `mugen-fix-giveup-J`, `-fill-J` | direct or fill | J wrong edits (2 or 3), each with its recorded check; an edit that puts the file back as it was; the reply: `I could not get NAME in P to pass in J tries: bend check said WHAT at line N. I put P back as it was.` |
+
+One of each a unit where it has what it needs, chosen by the unit's hash: the
+miss from the direct ask, the fill or a repair (a third each); the stale fix
+after 1, 2 or 3 tries (30/40/30; from the direct ask only after 2 or more, as
+after one the head it edits is still there); the give-up for half the units
+with two mutants or more. A refused edit is a session only when its old text
+is nowhere in the file. Nix gives misses and stale fixes from a repair only.
+
+**Weights.** Every wrong or refused edit has a later edit, so Agent/Spec.bend's
+reader takes it as a try (weight 0), as a chain's. The give-up's last edit is
+the one that puts the file back, so no wrong program is trained, and it never
+starts from a repair (putting the file back would write the mutant). Her read
+after a refusal, and her reply after the last failed check, weigh 1.
+
+**The rule.** repair-mix classes `mugen-fix-miss-direct` as first-time (its
+one try is an edit mugen refused: no wrong program was ever in the file),
+`-fill` as a fill and `-repair-M` as a repair; the stale fixes and the
+give-ups by their roles, repairs.
+
+**The nights.** Her last Term passed the check, which is not to say it was
+right: `own:hs2bend/00289/Problem033.bend#gcdLoop` looked up `Nat.mod`, never
+used it, and passed with a loop that returns `a`. Her last Term now stands
+only when it is the unit's original, spaces aside; else the original takes
+its place after her wrong Terms, and a night with no wrong Term before it
+gives nothing (it would be the direct session again). No test can show her
+other Term right; the original is right by what the corpus is.
+
+bend-agent-laws: one try for a miss, J + 1 for a stale fix after J, J for a
+give-up. tests/mugen.bend holds the miss (both typos), the stale fix, the
+give-up and the nights' rule.
+
 ## ana in the loop: agent-mugen and its evaluation (2026-11-03)
 
 `ana --agent` (Agent/Loop.bend) calls its tool when ana ends a line `## echo`

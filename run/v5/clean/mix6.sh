@@ -12,6 +12,8 @@
 #   CH=1 (11-04, docs/MUGEN-SHAPE.md "Chains"): with MG=1, each stream's chains (chain6.sh) as repairs under the
 #   rule, less those of units a recheck dropped or with real history repairs, and the nights in the mugen shape
 #   CV: the bend-corpus-v2 to use (CH=1 needs one whose reader knows a chain's try: run/v6/mugen/chain/gcroot-bend-corpus-v2)
+#   FX=1 (11-12, docs/MUGEN-SHAPE.md "Fixes"): with CH=1, each stream's fixes (run/v8/fix6.sh) as the chains, and the nights
+#   again (run/v8/fix/night); CV then run/v8/fix/gcroot-2 (its repair-mix classes a miss by its shape)
 cd /home/hhefesto/src/ana || exit 1
 OUT=${1:?usage: mix6.sh OUT [dry]}
 DRY=${2:-}
@@ -136,8 +138,10 @@ add in run/v5/mut-py2bend/accepted/bend-mut/transcripts.train.nul
 histmut own5 run/v5/mut-own5/accepted/bend-mut/transcripts.train.nul
 fi
 add in run/v5/port/transcripts.train.nul
-# ana's own mistakes and fixes (night runs; whole)
-if [ "${CH:-0}" = 1 ] && [ -e run/v6/mugen/chain/night/DONE ]; then add free run/v6/mugen/chain/night/transcripts.train.nul
+# ana's own mistakes and fixes (night runs; whole).  FX=1 (11-12): the nights rendered again by run/v8/fix6.sh, her passing
+# last Term kept only when it is the unit's original (else the original after her wrong Terms; gcdLoop passed and was wrong)
+if [ "${FX:-0}" = 1 ] && [ -e run/v8/fix/night/DONE ]; then add free run/v8/fix/night/transcripts.train.nul
+elif [ "${CH:-0}" = 1 ] && [ -e run/v6/mugen/chain/night/DONE ]; then add free run/v6/mugen/chain/night/transcripts.train.nul
 else
 for d in run/v5/act5/ws/night*/accepted/bend-fix run/v5/act5/ws/night*/accepted/bend-act; do
   add free $d/transcripts.train.nul
@@ -163,6 +167,20 @@ if [ "${CH:-0}" = 1 ]; then
   done
   case " ${chains[*]} " in *" own5 "*) ;; *) [ -e run/v6/hist-own5/DONE ] && chains+=(own5) ;; esac
   for n in "${chains[@]}"; do case $n in hist-*) ;; *) chain_of "$n" ;; esac; done
+fi
+# the fixes of the same streams (FX=1 with CH=1, 11-12; docs/MUGEN-SHAPE.md "Fixes", run/v8/fix6.sh): a miss, a stale fix and
+# a give-up a unit, under the rule as the chains are (a miss from the direct ask is first-time, its one try an edit mugen
+# refused; the rest by their roles), less a history stream's hist5 units and a recheck's stale ones, as the chains
+if [ "${FX:-0}" = 1 ] && [ "${CH:-0}" = 1 ]; then
+  X=run/v8/fix
+  fix_of() { local n=$1 f=$X/$1/transcripts.train.nul o=$X/$1/kept.train.nul
+    [ -e $X/$n/DONE ] || { echo "mix6: no fixes for $n ($X/$n/DONE)" >&2; return; }
+    if [ -e run/v6/hist-$n/DONE ] && [ -s run/v6/hist-$n/units.kept ]; then
+      if [ ! -s $o ] || [ $o -ot $f ]; then ALL=1 run/v5/gcroot-bend-corpus-v2-hd/bin/bend-corpus-v2 hist-drop $f $o.tmp run/v6/hist-$n/units.kept >&2 && mv $o.tmp $o; fi
+      f=$o
+    fi
+    add in "$(fresh $n $f)"; }
+  for n in "${chains[@]}"; do case $n in hist-*) ;; *) fix_of "$n" ;; esac; done
 fi
 # wrong on purpose: units of gavel's and knot's mutants/ files that differ from every def beside
 # them (tools/corpus-v2/hist/mutheld.py, 10-28: 106 of run 2's and col6's 118 such units)

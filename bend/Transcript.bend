@@ -1436,6 +1436,282 @@ def mg.all(+b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, rs: List<&2, 
       +fs = split(t, 30)
       mg.unit.if(mg.small(fs), b, limit, base, i, fs, mg.all(b, limit, base, more))
 
+# Fixes (2026-11-12; docs/MUGEN-SHAPE.md "Fixes") -------------------------------------
+#
+# What run 5's checkpoints did wrong on the 176 tasks, and R5d's sessions never
+# showed (its first 583,180: 45 with a refused edit, 2 that did not end in a pass,
+# 97% with one edit): at 120k, of 124 failed tasks 58 ended in a false "passes",
+# 45 sent the same call again, 33 had an edit that did not apply.  The user
+# (11-12): "add sessions where an edit fails and is retried; add sessions where
+# the check fails more than once before it's fixed; add sessions that end with
+# an honest 'couldn't do it, here's the error'".  MUGEN_ONLY=fix renders, a unit,
+# with no checker run (each check is a recorded one):
+#
+#   mugen-fix-miss-SHAPE      (direct, fill, repair-M) the fix sent first with its
+#                             first line that is not blank as ana might
+#                             misremember it, refused; a read of those lines;
+#                             the fix, its pass
+#   mugen-fix-stale[-S]-J     (S fill or repair) J wrong edits, then the fix sent
+#                             first as though the last of them had not been made
+#                             (the old text is the one before it), refused; a
+#                             read of the declaration; the fix, its pass
+#   mugen-fix-giveup[-fill]-J J wrong edits and no fix: an edit that puts the
+#                             file back as it was, and a reply that says so and
+#                             the last check's error
+#
+# Every wrong or refused edit has a later edit, so the reader takes it as a try
+# (weight 0); the give-up's last edit is the one that puts the file back, so no
+# wrong program is trained, nor the mutant a repair hands over (a give-up starts
+# from the direct ask or the fill only).
+
+type Mx is Data:
+  Mx{ok: Bool, text: List<&2, U32>}
+
+def mx.pre(+t: List<&2, U32>, r: Mx) -> Mx:
+  match r:
+    case Mx{ok, u}:
+      Mx{ok, U.append(t, u)}
+
+def mx.post(r: Mx, +t: List<&2, U32>) -> Mx:
+  match r:
+    case Mx{ok, u}:
+      Mx{ok, U.append(u, t)}
+
+def mx.and(+ok: Bool, r: Mx) -> Mx:
+  match r:
+    case Mx{o, u}:
+      Mx{Bool.and(ok, o), u}
+
+# mugen's refusal of an edit whose old text is not in the file (Tools.bend
+# tl.edit.apply; AgentMugen's am.edit.why)
+def mg.refused(+path: List<&2, U32>) -> List<&2, U32>:
+  cat([U.b("Edit 1 ("), path, U.b("): old was not found. No file was changed.")])
+
+def mg.edit.turn(+path: List<&2, U32>, +old: List<&2, List<&2, U32>>, +new: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  turn(U.b("edit"), cat([path, nl(), mg.marked(45, old), mg.marked(43, new)]))
+
+# the lines mg.edit would replace to make l1 of f0 (its lines l0)
+def mg.rg(+f0: List<&2, U32>, +l0: List<&2, List<&2, U32>>, +l1: List<&2, List<&2, U32>>) -> Rg:
+  +n0 = List.length(&2, List<&2, U32>, l0)
+  +n1 = List.length(&2, List<&2, U32>, l1)
+  +p = mg.common(l0, l1)
+  +s = Nat.min(mg.common(List.reverse(&2, List<&2, U32>, l0), List.reverse(&2, List<&2, U32>, l1)), Nat.min(Nat.sub(n0, p), Nat.sub(n1, p)))
+  mg.grow(Nat.add(n0, 2n), l0, f0, n0, p, s)
+
+# the index of the first line of ls that is not blank (none: past the last)
+def mg.nb(ls: List<&2, List<&2, U32>>, +i: Nat) -> Nat:
+  match ls:
+    case Nil{}:
+      i
+    case +l <> t:
+      Bool.pick(Nat, U.blank(l), mg.nb(t, 1n+i), i)
+
+def mg.set.at(ls: List<&2, List<&2, U32>>, i: Nat, +x: List<&2, U32>) -> List<&2, List<&2, U32>>:
+  match ls i:
+    case Nil{} _:
+      Nil{}
+    case l <> t 0n:
+      x <> t
+    case l <> t 1n+j:
+      l <> mg.set.at(t, j, x)
+
+# a line as ana might misremember it: one character short in its middle (k odd,
+# a line of 4 characters or more), else two spaces more indent
+def mg.typo(+l: List<&2, U32>, +k: Nat) -> List<&2, U32>:
+  +n = U.len(mg.chomp(l))
+  +h = Nat.div(n, 2n)
+  +cut = Bool.and(Nat.is_eq(Nat.mod(k, 2n), 1n), Nat.is_lt(3n, n))
+  Bool.pick(List<&2, U32>, cut, U.append(List.take(&2, U32, l, h), List.drop(&2, U32, l, 1n+h)), U.append(U.b("  "), l))
+
+# a refused edit: its text (the call and mugen's refusal), the index of its
+# first old line in the file, how many old lines; ok when its old text is
+# nowhere in the file
+type Mm is Data:
+  Mm{ok: Bool, text: List<&2, U32>, at: Nat, rows: Nat}
+
+# the edit that makes l1 of f0, with its first old line that is not blank as
+# mg.typo writes it (and its first new line, when that is the same line)
+def mg.miss.typo(r: Rg, +k: Nat, +path: List<&2, U32>, +f0: List<&2, U32>, +l0: List<&2, List<&2, U32>>, +l1: List<&2, List<&2, U32>>) -> Mm:
+  match r:
+    case Rg{+a, +z}:
+      +old = mg.slice(l0, a, Nat.sub(List.length(&2, List<&2, U32>, l0), z))
+      +new = mg.slice(l1, a, Nat.sub(List.length(&2, List<&2, U32>, l1), z))
+      +i = mg.nb(old, 0n)
+      +o = U.nth(old, i)
+      +bad = mg.typo(o, k)
+      +old2 = mg.set.at(old, i, bad)
+      +new2 = Bool.pick(List<&2, List<&2, U32>>, U.eq(U.nth(new, i), o), mg.set.at(new, i, bad), new)
+      +ok = Bool.and(Nat.is_lt(i, List.length(&2, List<&2, U32>, old)), Nat.is_eq(mg.count(f0, U.concat(old2)), 0n))
+      Mm{ok, U.append(mg.edit.turn(path, old2, new2), mg.echo(mg.refused(path))), a, List.length(&2, List<&2, U32>, old)}
+
+# the edit that makes l1 of the file before ana's last edit (lb, fb), sent to
+# the file as that edit left it (f0): refused when its old text is not there
+def mg.miss.stale(r: Rg, +path: List<&2, U32>, +f0: List<&2, U32>, +lb: List<&2, List<&2, U32>>, +l1: List<&2, List<&2, U32>>) -> Mm:
+  match r:
+    case Rg{+a, +z}:
+      +old = mg.slice(lb, a, Nat.sub(List.length(&2, List<&2, U32>, lb), z))
+      +new = mg.slice(l1, a, Nat.sub(List.length(&2, List<&2, U32>, l1), z))
+      +ok = Bool.and(Bool.not(empty(U.concat(old))), Nat.is_eq(mg.count(f0, U.concat(old)), 0n))
+      Mm{ok, U.append(mg.edit.turn(path, old, new), mg.echo(mg.refused(path))), a, List.length(&2, List<&2, U32>, old)}
+
+# after a typo's refusal: a read of the old lines, two more each side
+def mg.missed.typo(m: Mm, +path: List<&2, U32>, +f0: List<&2, U32>, +fix: List<&2, U32>) -> Mx:
+  match m:
+    case Mm{ok, t, +a, n}:
+      +from = Bool.pick(Nat, Nat.is_lt(a, 2n), 1n, Nat.sub(a, 1n))
+      Mx{ok, cat([t, mg.read(path, f0, from, Nat.add(n, 4n)), fix])}
+
+# after a stale edit's refusal: a read of the declaration as it is now
+def mg.missed.stale(m: Mm, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +f0: List<&2, U32>, +fix: List<&2, U32>) -> Mx:
+  match m:
+    case Mm{ok, t, a, n}:
+      +h = mg.nls(mg.head(fs))
+      Mx{ok, cat([t, mg.read(path, f0, 1n+h, Nat.sub(List.length(&2, List<&2, U32>, mg.rows(f0)), h)), fix])}
+
+# the end of a session as x has it, f0 the file now, fb the file before ana's
+# last edit, s0 the file the session started from: 0 the fix and its check; 1
+# the fix first with a typo; 2 the fix first as an edit of fb; 3 no fix, the
+# file put back as s0
+def mg.fix.edit(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +f0: List<&2, U32>) -> List<&2, U32>:
+  cat([mg.edit(path, f0, mg.with(fs, field(fs, 7n))), mg.check.in(fs, path, field(fs, 11n))])
+
+def mg.fix.last(x: Nat, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +s0: List<&2, U32>, +fb: List<&2, U32>, +f0: List<&2, U32>, +k: Nat) -> Mx:
+  match x:
+    case 0n:
+      Mx{True{}, mg.fix.edit(fs, path, f0)}
+    case 1n:
+      +l0 = U.lines(f0)
+      +l1 = U.lines(mg.with(fs, field(fs, 7n)))
+      mg.missed.typo(mg.miss.typo(mg.rg(f0, l0, l1), k, path, f0, l0, l1), path, f0, mg.fix.edit(fs, path, f0))
+    case 2n:
+      +lb = U.lines(fb)
+      +l1 = U.lines(mg.with(fs, field(fs, 7n)))
+      mg.missed.stale(mg.miss.stale(mg.rg(fb, lb, l1), path, f0, lb, l1), fs, path, f0, mg.fix.edit(fs, path, f0))
+    case _:
+      Mx{Bool.not(U.eq(f0, s0)), mg.edit(path, f0, s0)}
+
+# j wrong edits (the mutants from m on, each with its recorded check), then
+# the end x gives
+def mg.tries.x(x: Nat, j: Nat, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +s0: List<&2, U32>, +fb: List<&2, U32>, +f0: List<&2, U32>, +m: Nat, +nm: Nat, +k: Nat) -> Mx:
+  match j:
+    case 0n:
+      mg.fix.last(x, fs, path, s0, fb, f0, k)
+    case 1n+p:
+      +f1 = mg.with(fs, mutant(fs, m))
+      mx.pre(cat([mg.edit(path, f0, f1), mg.check.in(fs, path, mutant.check(fs, m))]), mg.tries.x(x, p, fs, path, s0, f0, f1, next.m(m, 1n, nm), nm, k))
+
+# a give-up's reply: the tries it made, the last check's error, the file back
+def mg.reply.giveup(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +j: Nat, +c: List<&2, U32>) -> List<&2, U32>:
+  cat([U.b("I could not get "), code(field(fs, 2n)), U.b(" in "), path, U.b(" to pass in "), mg.n(j), U.b(" tries"),
+    mg.why.on(mg.is.bend(fs), fs, check.out(check.of(c))), U.b(". I put "), path, U.b(" back as it was.")])
+
+# the reply: the shape's own, or a give-up's (the last try's mutant, l)
+def mg.reply.x(+x: Nat, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +j: Nat, +l: Nat, +done: List<&2, U32>) -> List<&2, U32>:
+  Bool.pick(List<&2, U32>, Nat.is_eq(x, 3n), mg.reply.giveup(fs, path, j, mutant.check(fs, l)), done)
+
+# the mutant the last of j tries from m edits in
+def mg.last.m(+m: Nat, +j: Nat, +nm: Nat) -> Nat:
+  next.m(m, Nat.sub(j, 1n), nm)
+
+def mg.direct.x(+x: Nat, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>, +j: Nat, +m: Nat, +nm: Nat, +k: Nat) -> Mx:
+  +f0 = mg.head(fs)
+  +n = List.length(&2, List<&2, U32>, mg.rows(f0))
+  +from = Bool.pick(Nat, Nat.is_lt(n, 25n), 1n, Nat.sub(n, 23n))
+  +r = mg.tries.x(x, j, fs, path, f0, f0, f0, m, nm, k)
+  mx.and(mg.tries.ok(j, fs, Nil{}, m, nm),
+    mx.post(mx.pre(cat([mg.user(mg.ask.direct(fs, path)), mg.read(path, f0, from, Nat.sub(Nat.add(n, 1n), from)), mg.looks(path, f0, fs, base)]), r),
+      mg.reply(mg.reply.x(x, fs, path, j, mg.last.m(m, j, nm), mg.reply.direct(fs, path)))))
+
+def mg.fill.x(+x: Nat, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>, +j: Nat, +m: Nat, +nm: Nat, +k: Nat) -> Mx:
+  +f0 = mg.with(fs, field(fs, 10n))
+  +r = mg.tries.x(x, j, fs, path, f0, f0, f0, m, nm, k)
+  +done = cat([U.b("Filled the hole in "), code(field(fs, 2n)), U.b(" ("), path, U.b("); "), mg.said(fs), U.b(" passes.")])
+  mx.and(mg.tries.ok(j, fs, field(fs, 10n), m, nm),
+    mx.post(mx.pre(cat([mg.user(mg.ask.fill(fs, path)), mg.check.hole(fs, path, field(fs, 13n)), mg.looks(path, f0, fs, base)]), r),
+      mg.reply(mg.reply.x(x, fs, path, j, mg.last.m(m, j, nm), done))))
+
+# mutant m handed over, then j wrong edits from the next mutant on (no give-up)
+def mg.repair.x(+x: Nat, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>, +m: Nat, +j: Nat, +nm: Nat, +k: Nat) -> Mx:
+  +mut = mutant(fs, m)
+  +f0 = mg.with(fs, mut)
+  +from = Nat.add(1n, mg.nls(mg.head(fs)))
+  +rows = List.length(&2, List<&2, U32>, U.lines(U.append(field(fs, 6n), mut)))
+  +r = mg.tries.x(x, j, fs, path, f0, f0, f0, next.m(m, 1n, nm), nm, k)
+  +done = cat([U.b("Fixed "), code(field(fs, 2n)), U.b(" in "), path, mg.why.on(mg.is.bend(fs), fs, check.out(check.of(mutant.check(fs, m)))), U.b(". It passes now.")])
+  mx.and(Bool.and(Nat.is_lt(x, 3n), mg.tries.ok(j, fs, mut, next.m(m, 1n, nm), nm)),
+    mx.post(mx.pre(cat([mg.user(mg.ask.repair(fs, path)), mg.check.in(fs, path, mutant.check(fs, m)), mg.read(path, f0, from, rows), mg.looks(path, f0, fs, base)]), r),
+      mg.reply(done)))
+
+# a start the unit has: s (0 direct, 1 fill, 2 repair) when it has it, else the
+# first of them it has (3: none)
+def mg.start(+s: Nat, +d: Bool, +f: Bool, +r: Bool) -> Nat:
+  +first = Bool.pick(Nat, d, 0n, Bool.pick(Nat, f, 1n, Bool.pick(Nat, r, 2n, 3n)))
+  Bool.pick(Nat, Bool.or(Bool.and(Nat.is_eq(s, 0n), d), Bool.or(Bool.and(Nat.is_eq(s, 1n), f), Bool.and(Nat.is_eq(s, 2n), r))), s, first)
+
+def mg.fix.keep(r: Mx, +b: Tk.Bpe, +limit: Nat, +id: List<&2, U32>, +shape: List<&2, U32>, rest: List<&2, Mg>) -> List<&2, Mg>:
+  match r:
+    case Mx{ok, t}:
+      mg.one.keep(ok, b, limit, id, shape, t, rest)
+
+# `-J` after a shape's name (a miss has no tries: none)
+def mg.fix.jn(+x: Nat, +j: Nat) -> List<&2, U32>:
+  Bool.pick(List<&2, U32>, Nat.is_eq(x, 1n), Nil{}, U.append(U.b("-"), mg.n(j)))
+
+# a session of x from start s, its shape fix-NAME-...
+def mg.fix.at(s: Nat, +x: Nat, +name: String, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +j: Nat, +m: Nat, +nm: Nat, +k: Nat, rest: List<&2, Mg>) -> List<&2, Mg>:
+  match s:
+    case 0n:
+      mg.fix.keep(mg.direct.x(x, fs, mg.path(id), base, j, m, nm, k), b, limit, id, cat([U.b("fix-"), U.b(name), Bool.pick(List<&2, U32>, Nat.is_eq(x, 1n), U.b("-direct"), mg.fix.jn(x, j))]), rest)
+    case 1n:
+      mg.fix.keep(mg.fill.x(x, fs, mg.path(id), base, j, m, nm, k), b, limit, id, cat([U.b("fix-"), U.b(name), U.b("-fill"), mg.fix.jn(x, j)]), rest)
+    case 2n:
+      mg.fix.keep(mg.repair.x(x, fs, mg.path(id), base, m, j, nm, k), b, limit, id, cat([U.b("fix-"), U.b(name), U.b("-repair"), Bool.pick(List<&2, U32>, Nat.is_eq(x, 1n), U.append(U.b("-"), mg.n(m)), mg.fix.jn(x, j))]), rest)
+    case _:
+      rest
+
+# a unit's fixes, each where the unit has what it needs, the choices by its
+# hash: a miss (direct, fill or repair, a third each), a stale fix after 1, 2
+# or 3 tries (30/40/30; from a fill or a repair, or from the direct ask after 2
+# or more), and for half the units with two mutants or more a give-up after 2
+# or 3 (from the direct ask or the fill).  Nix is never asked directly and has
+# no hole: its repairs only.
+def mg.fix.unit(+b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, rest: List<&2, Mg>) -> List<&2, Mg>:
+  +nm = mutant.count(fs)
+  +d = Bool.not(mg.is.nix(fs))
+  +f = Bool.and(d, Bool.not(empty(field(fs, 13n))))
+  +m = roll(id, 9n, nm)
+  +k = roll(id, 21n, 2n)
+  # the miss
+  +ms = mg.start(roll(id, 15n, 3n), d, f, Nat.is_lt(0n, nm))
+  # the stale fix: J tries, as many mutants as there are (a repair hands one over)
+  +r = roll(id, 17n, 100n)
+  +want = Bool.pick(Nat, Nat.is_lt(r, 30n), 1n, Bool.pick(Nat, Nat.is_lt(r, 70n), 2n, 3n))
+  +ss = mg.start(roll(id, 16n, 3n), Bool.and(d, Nat.is_lt(1n, nm)), f, Nat.is_lt(1n, nm))
+  +left = Bool.pick(Nat, Nat.is_eq(ss, 2n), Nat.sub(nm, 1n), nm)
+  +js = Nat.min(Nat.min(left, Nat.sub(chain.k(), 1n)), Bool.pick(Nat, Nat.is_eq(ss, 0n), Nat.max(want, 2n), want))
+  # the give-up
+  +gj = Nat.min(nm, Bool.pick(Nat, Nat.is_eq(roll(id, 19n, 2n), 0n), 2n, 3n))
+  +give = Bool.and(Bool.and(Nat.is_lt(1n, nm), Nat.is_lt(roll(id, 18n, 100n), 50n)), Bool.or(d, f))
+  +gs = Bool.pick(Nat, give, mg.start(roll(id, 20n, 2n), d, f, False{}), 3n)
+  mg.fix.at(ms, 1n, "miss", b, limit, base, id, fs, 0n, m, nm, k,
+    mg.fix.at(Bool.pick(Nat, Nat.is_lt(0n, js), ss, 3n), 2n, "stale", b, limit, base, id, fs, js, m, nm, k,
+      mg.fix.at(gs, 3n, "giveup", b, limit, base, id, fs, gj, m, nm, k, rest)))
+
+def mg.fix.unit.if(ok: Bool, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, rest: List<&2, Mg>) -> List<&2, Mg>:
+  match ok:
+    case True{}:
+      mg.fix.unit(b, limit, base, id, fs, rest)
+    case False{}:
+      rest
+
+def mg.all.fix(+b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, rs: List<&2, Ns.Doc>) -> List<&2, Mg>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case Ns.Doc{+i, +t} <> more:
+      +fs = split(t, 30)
+      mg.fix.unit.if(mg.small(fs), b, limit, base, i, fs, mg.all.fix(b, limit, base, more))
+
 # Ana's own mistakes in the shape (2026-11-04; docs/MUGEN-SHAPE.md "Chains"):
 # the nights' transcripts (run/v5/act5, format 2: her Terms, each with the check
 # it got, the last the pass) as a direct session on the file, each Term an edit
@@ -1535,13 +1811,56 @@ def nt.session(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2
 def nt.shape(+sh: List<&2, U32>, +j: Nat) -> List<&2, U32>:
   cat([U.b("night-"), List.take(&2, U32, sh, U.find(sh, [45], 0n)), [45], mg.n(j)])
 
+# Her last Term passed the check, which is not to say it was right (11-12):
+# own:hs2bend/00289/Problem033.bend#gcdLoop's was `gcdLoop(f, a, b)`, a loop
+# that never looks at b, and it never used the Nat.mod it looked up.  So her
+# last Term stands only when it is the unit's original, spaces aside; else the
+# original takes its place after her wrong Terms, and a night with no wrong
+# Term before it gives nothing (it would be the direct session again).
+def nt.ws(+c: U32) -> Bool:
+  Bool.or(U32.is_eq(c, 32), Bool.or(U32.is_eq(c, 10), Bool.or(U32.is_eq(c, 9), U32.is_eq(c, 13))))
+
+# the bytes less spaces, tabs and newlines
+def nt.sq(xs: List<&2, U32>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +h <> t:
+      +r = nt.sq(t)
+      Bool.pick(List<&2, U32>, nt.ws(h), r, h <> r)
+
+type Nr is Data:
+  Nr{ns: List<&2, Nt>, swapped: Bool}
+
+def nr.cons(+n: Nt, r: Nr) -> Nr:
+  match r:
+    case Nr{ns, s}:
+      Nr{n <> ns, s}
+
+# her Terms with the last the original's (o, its check oc) unless it is the original
+def nt.right(ns: List<&2, Nt>, +o: List<&2, U32>, +oc: List<&2, U32>) -> Nr:
+  match ns:
+    case Nil{}:
+      Nr{Nil{}, False{}}
+    case Nt{+b, +c} <> Nil{}:
+      +same = U.eq(nt.sq(b), nt.sq(o))
+      Nr{Bool.pick(Nt, same, Nt{b, c}, Nt{o, oc}) <> Nil{}, Bool.not(same)}
+    case Nt{b, c} <> t:
+      nr.cons(Nt{b, c}, nt.right(t, o, oc))
+
+def nt.unit.r(r: Nr, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +sh: List<&2, U32>, rest: List<&2, Mg>) -> List<&2, Mg>:
+  match r:
+    case Nr{+ns, +sw}:
+      +j = Nat.sub(List.length(&2, Nt, ns), 1n)
+      +ok = Bool.and(nt.last.passed(ns), Bool.not(Bool.and(sw, Nat.is_eq(j, 0n))))
+      mg.one.keep(ok, b, limit, id, nt.shape(sh, j), nt.session(fs, mg.path(id), base, ns), rest)
+
 def nt.unit.on(some: Bool, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +v: List<&2, U32>, rest: List<&2, Mg>) -> List<&2, Mg>:
   match some:
     case True{}:
       +k = U.find(v, [0], 0n)
       +ns = nt.uniq(nt.of(A.ag.blocks(10, A.ag.hds.bytes(), List.drop(&2, U32, v, 1n+k))), Nil{})
-      +j = Nat.sub(List.length(&2, Nt, ns), 1n)
-      mg.one.keep(nt.last.passed(ns), b, limit, id, nt.shape(List.take(&2, U32, v, k), j), nt.session(fs, mg.path(id), base, ns), rest)
+      nt.unit.r(nt.right(ns, field(fs, 7n), field(fs, 11n)), b, limit, base, id, fs, List.take(&2, U32, v, k), rest)
     case False{}:
       rest
 
@@ -1553,18 +1872,20 @@ def mg.all.night(+b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +night:
       +v = mg.got(Map.get(List<&2, U32>, Nil{}, night, mg.str(i)))
       nt.unit.on(Bool.not(empty(v)), b, limit, base, i, split(t, 30), v, mg.all.night(b, limit, base, night, more))
 
-# the units a render takes: the chains, the night's, or every shape
-def mg.all.on(chain: Bool, night: Bool, +b: Tk.Bpe, +limit: Nat, +cf: Mgc, rs: List<&2, Ns.Doc>) -> List<&2, Mg>:
-  match chain night:
-    case True{} _:
+# the units a render takes: the chains, the night's, the fixes, or every shape
+def mg.all.on(chain: Bool, night: Bool, fix: Bool, +b: Tk.Bpe, +limit: Nat, +cf: Mgc, rs: List<&2, Ns.Doc>) -> List<&2, Mg>:
+  match chain night fix:
+    case True{} _ _:
       mg.all.chain(b, limit, Mgc.base(cf), rs)
-    case False{} True{}:
+    case False{} True{} _:
       mg.all.night(b, limit, Mgc.base(cf), Mgc.night(cf), rs)
-    case False{} False{}:
+    case False{} False{} True{}:
+      mg.all.fix(b, limit, Mgc.base(cf), rs)
+    case False{} False{} False{}:
       mg.all(b, limit, Mgc.base(cf), rs)
 
 def mg.all.of(+only: String, +b: Tk.Bpe, +limit: Nat, +cf: Mgc, rs: List<&2, Ns.Doc>) -> List<&2, Mg>:
-  mg.all.on(String.eq(only, "chain"), String.eq(only, "night"), b, limit, cf, rs)
+  mg.all.on(String.eq(only, "chain"), String.eq(only, "night"), String.eq(only, "fix"), b, limit, cf, rs)
 
 def mg.docs(ms: List<&2, Mg>) -> List<&2, Ns.Doc>:
   match ms:

@@ -119,6 +119,76 @@ def night() -> String:
       Bool.and(has(t, "+  match n:\n+    case 0n:\n+\n+      0n\n"), has(t, "```\nALL PROOFS CHECK\n(exit 0)\n```\n\n## mugen\n")))))
   ok.if("night", ok)
 
+# her last Term passed but is not the original (11-12, gcdLoop): the original
+# takes its place after her wrong Term; one that is the original (spaces aside)
+# stands
+def night.swapped(r: T.Nr) -> Bool:
+  match r:
+    case T.Nr{+rs, sw}:
+      +t = T.nt.session(two(), path(), base(), rs)
+      Bool.and(Bool.and(sw, Bool.and(Nat.is_eq(List.length(&2, T.Nt, rs), 2n), T.nt.last.passed(rs))),
+        Bool.and(Bool.and(has(t, "+  Nat.add(n, m)\n\n## echo\n"), has(t, "## edit\n\ndemo/Two.bend\n-  Nat.add(n, m)\n+  Nat.add(n, n)\n\n")),
+          Bool.and(Bool.not(has(t, "match n")), has(t, "```\nALL PROOFS CHECK\n(exit 0)\n```\n\n## mugen\n"))))
+
+def night.kept(r: T.Nr) -> Bool:
+  match r:
+    case T.Nr{rs, sw}:
+      Bool.not(sw)
+
+def night.right() -> String:
+  +ns = T.nt.uniq(T.nt.of(A.ag.blocks(10, A.ag.hds.bytes(), night.text())), Nil{})
+  +ok = night.swapped(T.nt.right(ns, U.b("  Nat.add(n, n)\n"), ck("0", "ALL PROOFS CHECK\n")))
+  +same = night.kept(T.nt.right(ns, U.b("  match n:\n    case 0n:\n\n      0n\n"), ck("0", "X\n")))
+  ok.if("night: a passing last Term that is not the original", Bool.and(ok, same))
+
+# The fixes (2026-11-12) ---------------------------------------------------------
+
+def mx.text(r: T.Mx) -> List<&2, U32>:
+  match r:
+    case T.Mx{ok, t}:
+      t
+
+def mx.ok(r: T.Mx) -> Bool:
+  match r:
+    case T.Mx{ok, t}:
+      ok
+
+def tries(+t: List<&2, U32>) -> Nat:
+  A.ag.count(A.ag.read.bytes(t), 6n)
+
+# a miss: the fix sent first with its first line two spaces in (k 0) or a
+# character short (k 1), refused; a read of those lines; then the fix
+def fix.miss() -> String:
+  +r0 = T.mg.direct.x(1n, two(), path(), base(), 0n, 0n, 1n, 0n)
+  +r1 = T.mg.direct.x(1n, two(), path(), base(), 0n, 0n, 1n, 1n)
+  +t = mx.text(r0)
+  +ok = Bool.and(Bool.and(mx.ok(r0), mx.ok(r1)),
+    Bool.and(Bool.and(has(t, "## edit\n\ndemo/Two.bend\n-  # n twice.\n+  # n twice.\n+def twice(n: Nat) -> Nat:\n+  Nat.add(n, n)\n\n## echo\n\n```\nEdit 1 (demo/Two.bend): old was not found. No file was changed.\n```\n\n## read\n\ndemo/Two.bend 1 5\n\n## echo\n\n```\nimport Base\n\n# n twice.\n[lines 1-3 of 3]\n```\n\n## edit\n\ndemo/Two.bend\n-# n twice.\n"),
+      has(mx.text(r1), "-# n tice.\n+# n tice.\n")),
+      Bool.and(Nat.is_eq(tries(t), 1n), has(t, "## mugen\n\nAdded `twice` to demo/Two.bend; bend check passes.\n"))))
+  ok.if("fix: miss", ok)
+
+# a stale fix: a wrong edit, then the fix sent as though it had not been made
+# (its old text the hole), refused; a read of the declaration; then the fix
+def fix.stale() -> String:
+  +r = T.mg.fill.x(2n, two2(), path(), base(), 1n, 0n, 2n, 0n)
+  +t = mx.text(r)
+  +ok = Bool.and(Bool.and(mx.ok(r), Nat.is_eq(tries(t), 2n)),
+    Bool.and(has(t, "## edit\n\ndemo/Two.bend\n-  ?goal\n+  Nat.add(n, n)\n\n## echo\n\n```\nEdit 1 (demo/Two.bend): old was not found. No file was changed.\n```\n\n## read\n\ndemo/Two.bend 4 2\n\n## echo\n\n```\ndef twice(n: Nat) -> Nat:\n  Nat.add(n, m)\n[lines 4-5 of 5]\n```\n\n## edit\n\ndemo/Two.bend\n-  Nat.add(n, m)\n+  Nat.add(n, n)\n"),
+      has(t, "## mugen\n\nFilled the hole in `twice` (demo/Two.bend); bend check passes.\n")))
+  +direct1 = mx.ok(T.mg.direct.x(2n, two2(), path(), base(), 1n, 0n, 2n, 0n))
+  ok.if("fix: stale (and none from the direct ask after one try: its old text is still there)", Bool.and(ok, Bool.not(direct1)))
+
+# a give-up: two wrong edits, the file put back, the last check's error said
+def fix.giveup() -> String:
+  +r = T.mg.direct.x(3n, two2(), path(), base(), 2n, 0n, 2n, 0n)
+  +t = mx.text(r)
+  +ok = Bool.and(Bool.and(mx.ok(r), Nat.is_eq(tries(t), 2n)),
+    Bool.and(has(t, "## edit\n\ndemo/Two.bend\n-def twice(n: Nat) -> Nat:\n-  Nat.add(n, k)\n\n## echo\n"),
+      has(t, "## mugen\n\nI could not get `twice` in demo/Two.bend to pass in 2 tries: bend check said expected a defined name, observed k at line 5. I put demo/Two.bend back as it was.\n")))
+  +repair = mx.ok(T.mg.repair.x(3n, two2(), path(), base(), 0n, 1n, 2n, 0n))
+  ok.if("fix: give-up (and none from a repair: it would write the mutant back)", Bool.and(ok, Bool.not(repair)))
+
 def main() -> IO(Unit):
   do IO<Unit>:
     IO.print(other())
@@ -132,6 +202,12 @@ def main() -> IO(Unit):
     IO.print(ok.if("a chain's tries change the body", Bool.and(T.mg.tries.ok(1n, two2(), Nil{}, 0n, 2n), Bool.not(T.mg.tries.ok(1n, two2(), U.b("  Nat.add(n, m)\n"), 0n, 2n)))))
     IO.print(chain.bytes())
     IO.print(night())
+    IO.print(night.right())
+    IO.print(fix.miss())
+    IO.print(fix.stale())
+    IO.print(fix.giveup())
+    IO.print(turns("fix: miss, direct", mx.text(T.mg.direct.x(1n, two(), path(), base(), 0n, 0n, 1n, 0n)), "## user\n## read\n## echo\n## shell\n## echo\n## edit\n## echo\n## read\n## echo\n## edit\n## echo\n## shell\n## echo\n## mugen\n"))
+    IO.print(turns("fix: give-up, direct", mx.text(T.mg.direct.x(3n, two2(), path(), base(), 2n, 0n, 2n, 0n)), "## user\n## read\n## echo\n## shell\n## echo\n## edit\n## echo\n## shell\n## echo\n## edit\n## echo\n## shell\n## echo\n## edit\n## echo\n## mugen\n"))
     IO.print(turns("repair", T.mg.repair(two(), path(), base(), 0n), "## user\n## shell\n## echo\n## read\n## echo\n## shell\n## echo\n## edit\n## echo\n## shell\n## echo\n## mugen\n"))
     IO.print(count())
     IO.print(only())

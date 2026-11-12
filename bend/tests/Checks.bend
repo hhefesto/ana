@@ -448,7 +448,7 @@ def chk.tests() -> List<&2, ChkTest>:
    # byte for byte (echoes as mugen's read, edit and shell answer), the
    # repair's read, edit, diff and reply, each shape's turns, old's count,
    # MUGEN_ONLY's shapes (2026-11-03)
-   ChkTest{"mugen.bend", False{}, RExact{chk.oks(["other", "direct", "repair", "turns direct", "turns fill", "turns chain, direct", "turns chain, fill", "turns chain, repair", "a chain's tries change the body", "chain's edits and checks", "night", "turns repair", "count", "only"])}},
+   ChkTest{"mugen.bend", False{}, RExact{chk.oks(["other", "direct", "repair", "turns direct", "turns fill", "turns chain, direct", "turns chain, fill", "turns chain, repair", "a chain's tries change the body", "chain's edits and checks", "night", "night: a passing last Term that is not the original", "fix: miss", "fix: stale (and none from the direct ask after one try: its old text is still there)", "fix: give-up (and none from a repair: it would write the mutant back)", "turns fix: miss, direct", "turns fix: give-up, direct", "turns repair", "count", "only"])}},
    # agent-mugen, the loop's mugen in the mugen shape: each shape's read,
    # edit and grep echoes as the renderer's, mugen's refusals, the bend base
    # asks, when a file is done, the reference session, the loop's call on
