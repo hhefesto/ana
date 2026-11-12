@@ -60,6 +60,32 @@
           export BEND_NO_TELEMETRY=1
           exec ${bend2.packages.${pkgs.stdenv.hostPlatform.system}.default}/bin/bend "$@"
         '';
+      # Lean v4.34.0, the release `bend --verdict` builds its kernel with
+      # (the user 2026-11-12: Lean 4.34 in the devShell; nix/lean4.nix)
+      leanFor = pkgs: pkgs.callPackage ./nix/lean4.nix { };
+      # BendTT, the kernel `bend --verdict` checks a book with: the
+      # bendtt.lean of the pinned Bend, built as bend2/safe.ts kernel_bin
+      # does (lean -c, then leanc -O3 -DNDEBUG), once, in the store.  bend
+      # takes it from $BENDTT and builds nothing in ~/.bend.
+      bendttFor =
+        pkgs:
+        pkgs.runCommandCC "bendtt" { nativeBuildInputs = [ (leanFor pkgs) ]; } ''
+          export HOME=$TMPDIR LEAN_CC=${pkgs.stdenv.cc}/bin/cc
+          cp ${bend2.packages.${pkgs.stdenv.hostPlatform.system}.default}/libexec/bend/bend2/bendtt.lean .
+          lean -c bendtt.c bendtt.lean
+          leanc -O3 -DNDEBUG bendtt.c -o bendtt
+          install -Dm755 bendtt $out/bin/bendtt
+        '';
+      # the bend command a person runs (packages.bend, the devShell):
+      # bendFor plus $BENDTT, so `bend FILE --verdict` works.  The builds
+      # keep bendFor, so the kernel isn't a dependency of every corpus.
+      bendVerdictFor =
+        pkgs:
+        pkgs.writeShellScriptBin "bend" ''
+          export BEND_NO_TELEMETRY=1
+          export BENDTT="''${BENDTT:-${bendttFor pkgs}/bin/bendtt}"
+          exec ${bend2.packages.${pkgs.stdenv.hostPlatform.system}.default}/bin/bend "$@"
+        '';
       # A Bend2 program compiled to a native binary (C via clang).
       # the GHC `bend-check haskell` drives: the packages listed in
       # deploy/check/ghc-packages.txt (one per line, # comments)
@@ -90,7 +116,9 @@
           };
         in
         {
-          bend = bendFor pkgs;
+          bend = bendVerdictFor pkgs;
+          lean4 = leanFor pkgs;
+          bendtt = bendttFor pkgs;
           bend-generate = bendBinary pkgs "bend-generate" "Generate.bend";
           bend-bench = bendBinary pkgs "bend-bench" "Bench.bend";
           # the Bend2 trainer: CORPUS, TOKENIZER_FILE, PRESET, TRAIN_* as in
@@ -498,13 +526,23 @@
           # (bend-check): the compilers and checkers of the languages
           # the corpus teaches.  Lean comes through elan, because a Lean
           # project pins its own toolchain (mathlib's lean-toolchain).
+          # Lean v4.34.0 is here for `bend --verdict` (2026-11-12): its
+          # kernel in $BENDTT, and the toolchain itself as lean-4.34 and
+          # lake-4.34, since `lean` and `lake` stay elan's.
           default = pkgs.mkShell {
             packages = [
-              (bendFor pkgs)
+              (bendVerdictFor pkgs)
               (ghcHarness pkgs)
               agda
               pkgs.elan
+              (pkgs.runCommand "lean-4.34" { } ''
+                mkdir -p $out/bin
+                for t in lean lake leanc; do
+                  ln -s ${leanFor pkgs}/bin/$t $out/bin/$t-4.34
+                done
+              '')
             ];
+            BENDTT = "${bendttFor pkgs}/bin/bendtt";
           };
           cuda = pkgs.mkShell {
             packages = [
