@@ -46,6 +46,7 @@ import ./Spec/Transformer.bend as STransformer
 import ./Spec/TiedHead.bend as STiedHead
 import ./Spec/ResidualStream.bend as SResidual
 import ./Spec/Refinement.bend as SRefinement
+import ./Spec/Form2.bend as SForm2
 import ./Train.bend as Train
 import ./Parse.bend as Parse
 import ./Checkpoint.bend as Checkpoint
