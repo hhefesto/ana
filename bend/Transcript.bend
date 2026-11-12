@@ -1704,13 +1704,15 @@ def mg.fix.unit.if(ok: Bool, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U3
     case False{}:
       rest
 
+# (a unit past 512 KB gives no fixes: col9's lexbend Pipeline.bend#ReportEvidence.report_correct
+# is 45 MB, and its three sessions, each with copies of the file, went past 3 GB; 11-12)
 def mg.all.fix(+b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, rs: List<&2, Ns.Doc>) -> List<&2, Mg>:
   match rs:
     case Nil{}:
       Nil{}
     case Ns.Doc{+i, +t} <> more:
       +fs = split(t, 30)
-      mg.fix.unit.if(mg.small(fs), b, limit, base, i, fs, mg.all.fix(b, limit, base, more))
+      mg.fix.unit.if(Bool.and(mg.small(fs), Nat.is_lt(U.len(t), 524288n)), b, limit, base, i, fs, mg.all.fix(b, limit, base, more))
 
 # Ana's own mistakes in the shape (2026-11-04; docs/MUGEN-SHAPE.md "Chains"):
 # the nights' transcripts (run/v5/act5, format 2: her Terms, each with the check
@@ -1978,6 +1980,12 @@ def mg.cfg.night(+bx: List<&2, U32>, +sizes: String, +only: String, +nx: List<&2
 def batch() -> Nat:
   1000n
 
+# MUGEN_ONLY=fix renders three sessions a unit, most with three or four copies of
+# the file: a thousand units of col9's or a2bum12's went past 3 GB (11-12), so its
+# batches are a hundred
+def batch.of(+only: String) -> Nat:
+  Bool.pick(Nat, String.eq(only, "fix"), 100n, batch())
+
 def big() -> Nat:
   U32.to_nat(4294967295)
 
@@ -2057,7 +2065,7 @@ def ps.step(+fmt: Nat, +out: String, +b: Tk.Bpe, +limit: Nat, +cf: Mgc, p: Ps) -
   match p:
     case Ps{rd, +n, +m, e}:
       do IO<Ps>:
-        bt : Bt <- bt.go(batch(), Bt{rd, Nil{}, False{}})
+        bt : Bt <- bt.go(batch.of(Mgc.only(cf)), Bt{rd, Nil{}, False{}})
         ps.batch(fmt, out, b, limit, cf, n, m, bt)
 
 # batches until the stream ends
