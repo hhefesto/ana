@@ -119,13 +119,13 @@ def agent.fin(+t1: Nat, +log: String, +meta: String, ep: L.AlEp) -> IO(Unit):
         agent.log(String.is_empty(log), log, meta, f, ss)
         IO.print_err("agent: " ++ f ++ "; " ++ Nat.show(c) ++ " calls, " ++ Nat.show(k) ++ " tokens in " ++ D.dc.ms(t1, t2) ++ " ms")
 
-def agent.go(+tool: String, +calls: Nat, +budget: Nat, +st: D.Settings, +rs: D.Settings, +avoid: Bool, +seed: String, +prompt: String, +t0: Nat, +log: String, +meta: String, me: D.Model & D.En) -> IO(Unit):
+def agent.go(+tool: String, +calls: Nat, +budget: Nat, +st: D.Settings, +rs: D.Settings, +avoid: Bool, +seed: String, +first: String, +rep: Nat, +report: Bool, +prompt: String, +t0: Nat, +log: String, +meta: String, me: D.Model & D.En) -> IO(Unit):
   (+m, e) = me
   do IO<Unit>:
     +t1 : Nat <- IO.now()
     IO.print_err("agent: loaded in " ++ D.dc.ms(t0, t1) ++ " ms")
     IO.print("=== ana: step " ++ Nat.show(D.dc.Model.step(m)) ++ " of " ++ Nat.show(D.dc.Model.total(m)) ++ " (" ++ pct(D.dc.Model.step(m), Nat.max(D.dc.Model.total(m), 1n)) ++ "% of its plan) ===")
-    ep : L.AlEp <- L.al.episode(m, e, st, rs, avoid, seed, tool, calls, budget, Tk.utf8.bytes(prompt))
+    ep : L.AlEp <- L.al.episode(m, e, st, rs, avoid, seed, tool, calls, budget, Tk.utf8.bytes(first), rep, report, Tk.utf8.bytes(prompt))
     agent.fin(t1, log, meta ++ "step=" ++ Nat.show(D.dc.Model.step(m)) ++ "\nseed=" ++ seed ++ "\n", ep)
 
 def agent(+path: String, +prompt: String, +tokens: String, +pinned: String, +t0: Nat) -> IO(Unit):
@@ -141,12 +141,15 @@ def agent(+path: String, +prompt: String, +tokens: String, +pinned: String, +t0:
     +shape : String <- D.dc.env("AGENT_SHAPE", "")
     +rtemp : String <- D.dc.env("RETRY_TEMPERATURE", temp)
     +ravoid : String <- D.dc.env("RETRY_AVOID", "")
+    +first : String <- D.dc.env("AGENT_FIRST", "")
+    +rep : String <- D.dc.env("AGENT_REPEAT", "0")
+    +report : String <- D.dc.env("AGENT_REPORT", "")
     +st : D.Settings = D.dc.settings(temp, topk, topp)
     +rs : D.Settings = D.dc.settings(rtemp, topk, topp)
-    IO.print_err("agent: temperature=" ++ temp ++ " retry_temperature=" ++ rtemp ++ " retry_avoid=" ++ ravoid ++ " top_k=" ++ topk ++ " top_p=" ++ topp ++ " seed=" ++ seed ++ "; tool `" ++ tool ++ "`, at most " ++ calls ++ " calls")
+    IO.print_err("agent: temperature=" ++ temp ++ " retry_temperature=" ++ rtemp ++ " retry_avoid=" ++ ravoid ++ " top_k=" ++ topk ++ " top_p=" ++ topp ++ " seed=" ++ seed ++ "; tool `" ++ tool ++ "`, at most " ++ calls ++ " calls; repeat=" ++ rep ++ " report=" ++ report ++ Bool.pick(String, String.is_empty(first), "", "; the first call made for her"))
     me : D.Model & D.En <- D.dc.load(path, pinned)
-    agent.go(tool, D.dc.nat.or(U32.read(calls), 4n), D.dc.nat.or(U32.read(tokens), 128n), st, rs, String.eq(ravoid, "1"), seed, L.al.ask(shape, prompt), t0, log,
-      meta ++ "temperature=" ++ temp ++ "\nretry_temperature=" ++ rtemp ++ "\nretry_avoid=" ++ ravoid ++ "\ntop_p=" ++ topp ++ "\ncalls=" ++ calls ++ "\ntokens=" ++ tokens ++ "\n", me)
+    agent.go(tool, D.dc.nat.or(U32.read(calls), 4n), D.dc.nat.or(U32.read(tokens), 128n), st, rs, String.eq(ravoid, "1"), seed, first, D.dc.nat.or(U32.read(rep), 0n), String.eq(report, "1"), L.al.ask(shape, prompt), t0, log,
+      meta ++ "temperature=" ++ temp ++ "\nretry_temperature=" ++ rtemp ++ "\nretry_avoid=" ++ ravoid ++ "\ntop_p=" ++ topp ++ "\ncalls=" ++ calls ++ "\ntokens=" ++ tokens ++ "\nrepeat=" ++ rep ++ "\nreport=" ++ report ++ "\nfirst=" ++ Bool.pick(String, String.is_empty(first), "0", "1") ++ "\n", me)
 
 # Command line -----------------------------------------------------------
 #

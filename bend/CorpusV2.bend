@@ -57,6 +57,7 @@ import ./CorpusV2/HistDrop.bend as Hd
 #   agent-act CKPT DIR [K]          ana's own episodes on train units, accepted and fixed   (CorpusV2/AgentAct.bend)
 #   agent-mugen TASK TOOL  agent-mugen-eval CKPT|selftest DIR [K]   the loop's mugen; ana on held-out units in the mugen shape   (CorpusV2/AgentMugen.bend)
 #   agent-mugen-live TOOL           the same tool for real, on the files under its directory: mugen's /ana   (CorpusV2/AgentMugen.bend)
+#   agent-mugen-score DIR           an evaluation's solved episodes held to each unit's own behaviour   (CorpusV2/AgentMugen.bend)
 #   agent-stats DIR [DIR2]  compare A B   E5's statistics; E1 or behaviour paired by prompt   (CorpusV2/Stats.bend)
 #   behaviour tasks [--check] [LANG...] | run CKPT|REF TAG [LANG...] | selftest [LANG...]
 #                                   the behaviour test   (CorpusV2/Behaviour.bend)
@@ -277,6 +278,8 @@ def c2.args(xs: List<String>) -> IO(Unit):
       Am.am.eval(more)
     case "agent-mugen-live" <> more:
       Am.am.live(more)
+    case "agent-mugen-score" <> more:
+      Am.am.score.cmd(more)
     case "filler-union" <> more:
       St.st.filler.union(more)
     case "keyed-order" <> more:

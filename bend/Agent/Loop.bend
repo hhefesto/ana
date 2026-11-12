@@ -183,47 +183,59 @@ def al.k.step(+k: AlK, +l: AlLine, +tb: List<&2, U32>, +t: U32) -> AlK:
 
 # The model and its settings, fixed for an episode: dims, the tokenizer,
 # the sampling settings, the vocabulary, the byte headings, the newline
-# token (the weights live in the engine, Decode.bend's En)
+# token (the weights live in the engine, Decode.bend's En); rep, the
+# repetition cut's window (AGENT_REPEAT, 0: none) and report, whether her
+# `## mugen` report is held for the tool's word on it (AGENT_REPORT=1)
 type AlM is Data:
-  AlM{dm: Md.Dims, b: Tk.Bpe, st: D.Settings, vocab: Nat, hs: List<&2, A.Hd>, nlt: U32}
+  AlM{dm: Md.Dims, b: Tk.Bpe, st: D.Settings, vocab: Nat, hs: List<&2, A.Hd>, nlt: U32, rep: Nat, report: Bool}
 
 def AlM.dm(+m: AlM) -> Md.Dims:
   match m:
-    case AlM{dm, b, st, v, hs, n}:
+    case AlM{dm, b, st, v, hs, n, r, rp}:
       dm
 
 def AlM.b(+m: AlM) -> Tk.Bpe:
   match m:
-    case AlM{dm, b, st, v, hs, n}:
+    case AlM{dm, b, st, v, hs, n, r, rp}:
       b
 
 def AlM.st(+m: AlM) -> D.Settings:
   match m:
-    case AlM{dm, b, st, v, hs, n}:
+    case AlM{dm, b, st, v, hs, n, r, rp}:
       st
+
+def AlM.rep(+m: AlM) -> Nat:
+  match m:
+    case AlM{dm, b, st, v, hs, n, r, rp}:
+      r
+
+def AlM.report(+m: AlM) -> Bool:
+  match m:
+    case AlM{dm, b, st, v, hs, n, r, rp}:
+      rp
 
 # the model with the settings a retry decodes with: after a failed check
 # the loop goes on with the retry settings (RETRY_TEMPERATURE, Generate.bend;
 # by default the episode's own, so a greedy episode stays greedy)
 def AlM.retry(+m: AlM, +rs: D.Settings) -> AlM:
   match m:
-    case AlM{dm, b, st, v, hs, n}:
-      AlM{dm, b, rs, v, hs, n}
+    case AlM{dm, b, st, v, hs, n, r, rp}:
+      AlM{dm, b, rs, v, hs, n, r, rp}
 
 def AlM.vocab(+m: AlM) -> Nat:
   match m:
-    case AlM{dm, b, st, v, hs, n}:
+    case AlM{dm, b, st, v, hs, n, r, rp}:
       v
 
 def AlM.hs(+m: AlM) -> List<&2, A.Hd>:
   match m:
-    case AlM{dm, b, st, v, hs, n}:
+    case AlM{dm, b, st, v, hs, n, r, rp}:
       hs
 
-def al.of(+md: D.Model, +st: D.Settings) -> AlM:
+def al.of(+md: D.Model, +st: D.Settings, +rep: Nat, +report: Bool) -> AlM:
   match md:
     case D.Model{+c, t, s, +b}:
-      AlM{Md.Dims.of(c), b, st, C.Config.vocab(c), A.ag.hds.bytes(), al.first(Tk.Bpe.encode(b, [10]))}
+      AlM{Md.Dims.of(c), b, st, C.Config.vocab(c), A.ag.hds.bytes(), al.first(Tk.Bpe.encode(b, [10])), rep, report}
 
 # whether picking token t on this line ends a call line
 def al.is.call(+m: AlM, +l: AlLine, +t: U32) -> Bool:
@@ -353,7 +365,9 @@ def al.next(+m: AlM, +start: Bool, +k: AlK, +l: AlLine, e: D.En, +pos: Nat, +t: 
           al.next.free(m, Bool.and(start, Bool.not(al.is.empty(av))), k, l, e, pos, t, rng)
 
 # Where the loop is
-#   AlStop    ana ended a stretch (EOS or the budget): what it wrote, tokens
+#   AlStop    ana ended a stretch (EOS, the budget, or the repetition cut):
+#             what it wrote, tokens, and how many of its bytes were
+#             written out before a held `## mugen` report (0: none held)
 #   AlCalled  ana ended a call line: the tool, what it wrote, tokens, the
 #             decoder after the line (engine, position, RNG, pending bytes),
 #             every token fed (newest first) and the stretch's term
@@ -362,7 +376,7 @@ def al.next(+m: AlM, +start: Bool, +k: AlK, +l: AlLine, e: D.En, +pos: Nat, +t: 
 #             the tokens fed and the failed term
 #   AlBroke   the tool could not answer
 type AlS is Type:
-  AlStop{why: String, out: List<&2, U32>, n: Nat}
+  AlStop{why: String, out: List<&2, U32>, n: Nat, cut: Nat}
   AlCalled{tool: List<&2, U32>, out: List<&2, U32>, n: Nat, e: D.En, pos: Nat, rng: Sm.Rng, pending: List<&2, U32>, fed: List<&2, U32>, tm: List<&2, U32>}
   AlPass{echo: List<&2, U32>}
   AlFail{echo: List<&2, U32>, e: D.En, pos: Nat, rng: Sm.Rng, pending: List<&2, U32>, fed: List<&2, U32>, tm: List<&2, U32>}
@@ -371,7 +385,7 @@ type AlS is Type:
 # the call line's newline fed (no logits: the echo comes next)
 def al.called(+m: AlM, +pk: Sm.Pick, e: D.En, +pos: Nat, +pending: List<&2, U32>, +out: List<&2, U32>, +count: Nat, +tool: List<&2, U32>, +k: AlK) -> IO(AlS):
   match m:
-    case AlM{dm, +b, st, vocab, hs, +nlt}:
+    case AlM{dm, +b, st, vocab, hs, +nlt, rep, report}:
       +d = D.dc.emit(b, pending, nlt)
       do IO<AlS>:
         IO.write(D.dc.Dec.text(d))
@@ -379,32 +393,98 @@ def al.called(+m: AlM, +pk: Sm.Pick, e: D.En, +pos: Nat, +pending: List<&2, U32>
         return AlCalled{tool, List.reverse(&2, U32, 10 <> out), 1n+count, e2, 1n+pos, D.dc.Pick.rng(pk), D.dc.Dec.pending(d),
           nlt <> al.k.fed(k), al.k.term(k, D.dc.Pick.token(pk))}
 
-def al.halt(stop: Bool, +out: List<&2, U32>, +count: Nat) -> IO(AlS):
+def al.halt(stop: Bool, +out: List<&2, U32>, +count: Nat, +cut: Nat) -> IO(AlS):
   match stop:
     case True{}:
-      IO.pure(AlS, AlStop{"eos", List.reverse(&2, U32, out), count})
+      IO.pure(AlS, AlStop{"eos", List.reverse(&2, U32, out), count, cut})
     case False{}:
-      IO.pure(AlS, AlStop{"budget", List.reverse(&2, U32, out), count})
+      IO.pure(AlS, AlStop{"budget", List.reverse(&2, U32, out), count, cut})
 
-# decode until EOS, the budget, or a call (the pick ends a call line);
-# `out` is what ana wrote, newest byte first
-def al.gen(n: Nat, g: AlG, +m: AlM, +pos: Nat, +pending: List<&2, U32>, +l: AlLine, +out: List<&2, U32>, +count: Nat) -> IO(AlS):
-  match n g:
-    case 1n+p AlG{e, +pk, False{}, True{}, +k}:
-      al.called(m, pk, e, pos, pending, out, count, al.call.at(AlM.hs(m), l), k)
-    case 1n+p AlG{e, +pk, False{}, False{}, +k}:
+# The repetition cut (AGENT_REPEAT=W, 11-11).  Greedy decoding loops: at
+# step 99,500 one stretch wrote `Nil{}, Nil{}, ...` to the budget, another
+# one line 38 times.  A stretch ends (`repeat`) once its last W tokens are
+# a run of period 1 to 16: xs[i] = xs[i + k] for every i below W - k, so
+# at least W / 16 copies of one short run (W = 128: 8 or more).
+def al.rep.at(n: Nat, xs: List<&2, U32>, ys: List<&2, U32>) -> Bool:
+  match n xs ys:
+    case 0n _ _:
+      True{}
+    case 1n+p x <> xt y <> yt:
+      Bool.and(U32.is_eq(x, y), al.rep.at(p, xt, yt))
+    case _ _ _:
+      False{}
+
+def al.rep.any(k: Nat, +xs: List<&2, U32>, +w: Nat) -> Bool:
+  match k:
+    case 0n:
+      False{}
+    case 1n+(+p):
+      Bool.or(al.rep.at(Nat.sub(w, 1n+p), xs, List.drop(&2, U32, xs, 1n+p)), al.rep.any(p, xs, w))
+
+# whether the stretch's last tokens (fed, newest first; count of them hers)
+# repeat: the cut on, and the stretch at least its window long
+def al.loops(+m: AlM, +k: AlK, +count: Nat) -> Bool:
+  +w = AlM.rep(m)
+  Bool.and(Bool.and(Nat.is_lt(0n, w), Nat.is_le(w, count)), al.rep.any(16n, List.take(&2, U32, al.k.fed(k), w), w))
+
+# The held report (AGENT_REPORT=1, 11-11).  Every session she trained on
+# ends in a passing check and a `## mugen` report that says so, so she
+# writes "... passes." whether or not it does (81 of the 118 unsolved
+# episodes at step 99,500).  With the report held, what she writes after a
+# `## mugen` heading line is not written out as it comes; when the stretch
+# ends the tool is asked about it (its name `mugen`, the episode on its
+# standard input): exit 0, it stands and is written; exit 1, the tool's
+# standard output is written in its place (the report the session earned).
+# A call made after the heading writes the held text first.
+def al.report.at(+m: AlM, +l: AlLine, +tb: List<&2, U32>) -> Bool:
+  match l:
+    case AlLine{+line, +pe}:
+      Bool.and(Bool.and(AlM.report(m), al.starts.nl(tb)), Bool.and(pe, A.ag.eq(List.reverse(&2, U32, line), Tk.utf8.bytes("## mugen"))))
+
+def al.out(hold: Bool, +s: String) -> IO(Unit):
+  match hold:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      IO.write(s)
+
+# the held text, written (out newest first, its first cut bytes already out)
+def al.flush(hold: Bool, +out: List<&2, U32>, +cut: Nat) -> IO(Unit):
+  match hold:
+    case True{}:
+      IO.write(al.str(List.drop(&2, U32, List.reverse(&2, U32, out), cut)))
+    case False{}:
+      IO.pure(Unit, Unit{})
+
+# decode until EOS, the budget, a call (the pick ends a call line), or the
+# repetition cut (rp: the tokens so far repeat); `out` is what ana wrote,
+# newest byte first; hold, whether a report is held (from byte cut of out on)
+def al.gen(n: Nat, rp: Bool, g: AlG, +m: AlM, +pos: Nat, +pending: List<&2, U32>, +l: AlLine, +out: List<&2, U32>, +count: Nat, +hold: Bool, +cut: Nat) -> IO(AlS):
+  match n rp g:
+    case _ True{} _:
+      do IO<AlS>:
+        IO.print_err("agent: the repetition cut: the last " ++ Nat.show(AlM.rep(m)) ++ " tokens repeat a short run")
+        return AlStop{"repeat", List.reverse(&2, U32, out), count, cut}
+    case 1n+p False{} AlG{e, +pk, False{}, True{}, +k}:
+      do IO<AlS>:
+        al.flush(hold, out, cut)
+        al.called(m, pk, e, pos, pending, out, count, al.call.at(AlM.hs(m), l), k)
+    case 1n+p False{} AlG{e, +pk, False{}, False{}, +k}:
       +b = AlM.b(m)
       +t = D.dc.Pick.token(pk)
       +tb = Tk.Bpe.decode(b, t)
       +d = D.dc.emit(b, pending, t)
       +l2 = al.next.line(l, tb)
       +k2 = al.k.step(k, l, tb, t)
+      +out2 = List.append(&2, U32, List.reverse(&2, U32, tb), out)
+      +starts = Bool.and(Bool.not(hold), al.report.at(m, l, tb))
+      +cut2 = Bool.pick(Nat, starts, List.length(&2, U32, out2), cut)
       do IO<AlS>:
-        IO.write(D.dc.Dec.text(d))
+        al.out(hold, D.dc.Dec.text(d))
         g2 : AlG <- al.next(m, Bool.and(Bool.not(al.k.on(k)), al.k.on(k2)), k2, l2, e, pos, t, D.dc.Pick.rng(pk))
-        al.gen(p, g2, m, 1n+pos, D.dc.Dec.pending(d), l2, List.append(&2, U32, List.reverse(&2, U32, tb), out), 1n+count)
-    case _ AlG{e, pk, stop, call, k}:
-      al.halt(stop, out, count)
+        al.gen(p, al.loops(m, k2, 1n+count), g2, m, 1n+pos, D.dc.Dec.pending(d), l2, out2, 1n+count, Bool.or(hold, starts), cut2)
+    case _ False{} AlG{e, pk, stop, call, k}:
+      al.halt(stop, out, count, cut)
 
 # The episode as written: its segments (Agent/Episode.bend), newest first,
 # each with who wrote it (0 the prompt, 1 ana, 2 a tool: its name and exit
@@ -467,7 +547,53 @@ def al.resume(+m: AlM, +budget: Nat, +echo: List<&2, U32>, e: D.En, +pos: Nat, +
   +k = {AlK{List.append(&2, U32, List.reverse(&2, U32, ids), fed), f, f, Nil{}, av, Nil{}} : AlK}
   do IO<AlS>:
     px : D.Px <- D.dc.en.prefill.pick(ids, e, pos, AlM.dm(m), AlM.st(m), AlM.vocab(m), False{}, rng)
-    al.gen(budget, al.g.of(m, l, px, k), m, Nat.add(pos, List.length(&2, U32, ids)), pending, l, Nil{}, 0n)
+    al.gen(budget, False{}, al.g.of(m, l, px, k), m, Nat.add(pos, List.length(&2, U32, ids)), pending, l, Nil{}, 0n, False{}, 0n)
+
+# her report's segment and the tool's in its place
+def al.ep.say(+e: AlEp, +x: List<&2, U32>) -> AlEp:
+  match e:
+    case AlEp{ss, c, k, f, tl}:
+      AlEp{E.EpSeg{2n, Tk.utf8.bytes("mugen"), 1, x} <> ss, c, k, f, tl}
+
+# the tool's word on a held report: exit 0 it stands, exit 1 its output
+# replaces it, anything else leaves it (and says so on the error stream)
+def al.verdict.got(stands: Bool, other: Bool, +st: U32, +so: String, +se: String, +why: String, +out: List<&2, U32>, +n: Nat, +cut: Nat, +ep: AlEp) -> IO(AlEp):
+  match stands other:
+    case True{} _:
+      do IO<AlEp>:
+        IO.write(al.str(List.drop(&2, U32, out, cut)))
+        return al.ep.fin(al.ep.add(ep, 1n, out, n), why)
+    case False{} False{}:
+      do IO<AlEp>:
+        IO.write(so)
+        IO.print_err("agent: her report, replaced by the tool's: " ++ al.str(List.drop(&2, U32, out, cut)))
+        return al.ep.fin(al.ep.say(al.ep.add(ep, 1n, List.take(&2, U32, out, cut), n), Tk.utf8.bytes(so)), why)
+    case False{} True{}:
+      do IO<AlEp>:
+        IO.write(al.str(List.drop(&2, U32, out, cut)))
+        IO.print_err("agent: the report's check failed (exit " ++ U32.show(st) ++ "): " ++ se)
+        return al.ep.fin(al.ep.add(ep, 1n, out, n), why)
+
+def al.verdict(r: Result<&1, &1, U32 & String, U32 & (String & String)>, +why: String, +out: List<&2, U32>, +n: Nat, +cut: Nat, +ep: AlEp) -> IO(AlEp):
+  match r:
+    case Done{(+st, (so, se))}:
+      al.verdict.got(U32.is_eq(st, 0), Bool.not(U32.is_eq(st, 1)), st, so, se, why, out, n, cut, ep)
+    case Fail{(code, msg)}:
+      do IO<AlEp>:
+        IO.write(al.str(List.drop(&2, U32, out, cut)))
+        IO.print_err("agent: the report's check did not run: " ++ msg)
+        return al.ep.fin(al.ep.add(ep, 1n, out, n), why)
+
+# a stretch's end: a held report goes to the tool first
+def al.stop(none: Bool, +cmd: String, +why: String, +out: List<&2, U32>, +n: Nat, +cut: Nat, +ep: AlEp) -> IO(AlEp):
+  match none:
+    case True{}:
+      IO.pure(AlEp, al.ep.fin(al.ep.add(ep, 1n, out, n), why))
+    case False{}:
+      do IO<AlEp>:
+        r : Result<&1, &1, U32 & String, U32 & (String & String)> <-
+          Process.run("sh", ["-c", cmd ++ " \"$1\"", "sh", "mugen"], al.str(al.ep.text(al.ep.add(ep, 1n, out, n))), 16777216, 3600000)
+        al.verdict(r, why, out, n, cut, ep)
 
 # The loop: `fuel` is two steps a call (the call, then resuming after a
 # failed check), so at most fuel / 2 calls; `rs` the settings every stretch
@@ -477,8 +603,8 @@ def al.resume(+m: AlM, +budget: Nat, +echo: List<&2, U32>, e: D.En, +pos: Nat, +
 # its standard input)
 def al.round(+fuel: Nat, +m: AlM, +rs: D.Settings, +avoid: Bool, +cmd: String, +budget: Nat, s: AlS, +ep: AlEp) -> IO(AlEp):
   match fuel s:
-    case _ AlStop{why, +out, +n}:
-      IO.pure(AlEp, al.ep.fin(al.ep.add(ep, 1n, out, n), why))
+    case _ AlStop{+why, +out, +n, +cut}:
+      al.stop(Nat.is_eq(cut, 0n), cmd, why, out, n, cut, ep)
     case 0n AlCalled{tool, +out, +n, e, pos, rng, pending, fed, tm}:
       IO.pure(AlEp, al.ep.fin(al.ep.add(ep, 1n, out, n), "calls"))
     case 1n+p AlCalled{+tool, +out, +n, e, +pos, +rng, +pending, +fed, +tm}:
@@ -514,17 +640,33 @@ def al.round(+fuel: Nat, +m: AlM, +rs: D.Settings, +avoid: Bool, +cmd: String, +
 def al.ask(+shape: String, +prompt: String) -> String:
   Bool.pick(String, String.eq(shape, "mugen"), "## user\n\n" ++ prompt ++ "\n\n", prompt)
 
+# The first call made for her (AGENT_FIRST, 11-11): the text of a call (its
+# heading, its body, `## echo` and that line's newline), fed as if she had
+# written it, so the tool answers it before she draws a token.  Every
+# session she trained on opens the same way for its shape (an added
+# definition: a read of the file's last 24 lines; a hole or a fix: the
+# check), and at step 99,500 she guessed the read's lines (`kex.bend 332
+# 24` on a 45-line file) or the path (`lib/Sort.hs` for `src/Sort.hs`).
+def al.start(none: Bool, +m: AlM, +l: AlLine, px: D.Px, +first: List<&2, U32>, +k: AlK) -> AlG:
+  match none:
+    case True{}:
+      al.g.of(m, l, px, k)
+    case False{}:
+      match px:
+        case D.Px{e, +pk, p}:
+          al.forced.first(m, l, e, Tk.Bpe.encode(AlM.b(m), first), D.dc.Pick.rng(pk), k)
+
 # An episode from a prompt on an engine with empty states: BOS and the
-# prompt fed, then the loop.  The prompt is written to standard output
-# first, then everything ana and the tools write, as it comes: the
-# transcript.
-def al.episode(+md: D.Model, e: D.En, +st: D.Settings, +rs: D.Settings, +avoid: Bool, +seed: String, +cmd: String, +calls: Nat, +budget: Nat, +prompt: List<&2, U32>) -> IO(AlEp):
-  +m = al.of(md, st)
+# prompt fed, then the loop (the first call made for her when `first` is
+# not empty).  The prompt is written to standard output first, then
+# everything ana and the tools write, as it comes: the transcript.
+def al.episode(+md: D.Model, e: D.En, +st: D.Settings, +rs: D.Settings, +avoid: Bool, +seed: String, +cmd: String, +calls: Nat, +budget: Nat, +first: List<&2, U32>, +rep: Nat, +report: Bool, +prompt: List<&2, U32>) -> IO(AlEp):
+  +m = al.of(md, st, rep, report)
   +ids = List.append(&2, U32, [Tk.bos()], Tk.Bpe.encode(D.dc.Model.b(md), prompt))
   +l = al.line.of(prompt, AlLine{Nil{}, True{}})
   +f = al.fence.of(prompt, AlLine{Nil{}, True{}}, False{})
   do IO<AlEp>:
     IO.write(al.str(prompt))
     px : D.Px <- D.dc.en.prefill.pick(ids, e, 0n, AlM.dm(m), AlM.st(m), AlM.vocab(m), False{}, D.dc.rng.of(seed))
-    s : AlS <- al.gen(budget, al.g.of(m, l, px, AlK{List.reverse(&2, U32, ids), f, f, Nil{}, Nil{}, Nil{}}), m, List.length(&2, U32, ids), Nil{}, l, Nil{}, 0n)
+    s : AlS <- al.gen(budget, False{}, al.start(al.is.empty(first), m, l, px, first, AlK{List.reverse(&2, U32, ids), f, f, Nil{}, Nil{}, Nil{}}), m, List.length(&2, U32, ids), Nil{}, l, Nil{}, 0n, False{}, 0n)
     al.round(Nat.mul(2n, calls), m, rs, avoid, cmd, budget, s, AlEp{[E.EpSeg{0n, Nil{}, 0, prompt}], 0n, 0n, "", Nil{}})

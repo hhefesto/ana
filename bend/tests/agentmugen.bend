@@ -170,8 +170,52 @@ def clip() -> String:
   +ok = Bool.and(Bool.and(U.eq(M.am.clip(whole), whole), U.eq(M.am.clip(big), want)), U.eq(M.am.clip(two), want2))
   Bool.pick(String, ok, "ok clip", "MISMATCH clip")
 
+# The harness fixes of 11-11.  A closing fence after a one-line command is
+# dropped; the first call made for her is the one her sessions open with,
+# for each shape; the repetition cut sees a short run repeated and nothing
+# in a run of distinct tokens.
+def upto(n: Nat) -> List<&2, U32>:
+  match n:
+    case 0n:
+      Nil{}
+    case 1n+(+k):
+      U32.from_nat(k) <> upto(k)
+
+def fixes() -> String:
+  +fence = U.eq(M.am.body(U.b("## shell\n\nana-type src/Sort.hs mergeSortSort\n\n```\n")), U.b("ana-type src/Sort.hs mergeSortSort"))
+  +plain = U.eq(M.am.body(U.b("## shell\n\nbend x.bend --check-only\n\n")), U.b("bend x.bend --check-only"))
+  +d = U.prefix(T.mg.direct(two(), path(), base()), U.append(M.am.prompt(task("direct")), M.am.first(task("direct"))))
+  +f = U.prefix(T.mg.fill(two(), path(), base()), U.append(M.am.prompt(task("fill")), M.am.first(task("fill"))))
+  +r = U.prefix(T.mg.repair(two(), path(), base(), 0n), U.append(M.am.prompt(task("repair-0")), M.am.first(task("repair-0"))))
+  +loop = Lp.al.rep.any(16n, rep(40n, [7, 8, 9]), 96n)
+  +distinct = Bool.not(Lp.al.rep.any(16n, upto(96n), 96n))
+  +ok = Bool.and(Bool.and(Bool.and(fence, plain), Bool.and(d, f)), Bool.and(r, Bool.and(loop, distinct)))
+  Bool.pick(String, ok, "ok fixes", "MISMATCH fixes")
+
+# The stricter score's pure parts: a def's head read; a type's inputs; the
+# unit's own calls renamed (not another name's, not a field's); the tests
+# appended for two()'s `twice`; no proof there
+def score.decl(d: M.AmD) -> Bool:
+  match d:
+    case M.AmD{+n, +tys, +ret, +ok}:
+      Bool.and(Bool.and(ok, U.eq(n, U.b("nonzero"))), Bool.and(Bool.and(U.eq(U.nth(tys, 0n), U.b("List<&2, U32>")), U.eq(U.nth(tys, 1n), U.b("Bool"))),
+        Bool.and(Nat.is_eq(List.length(&2, List<&2, U32>, tys), 2n), U.eq(ret, U.b("Maybe<&2, List<&2, U32>>")))))
+
+def score() -> String:
+  +dl = score.decl(M.am.sc.decl(U.b("def nonzero(ss: List<&2, U32>, z: Bool) -> Maybe<&2, List<&2, U32>>:\n")))
+  +vs = U.eq(T.mg.join(M.am.sc.vals(4n, M.am.sc.kind(U.b("List<&2, U32>"))), [10]), U.b("[]\n[1]\n[1, 4294967295]\n[4294967295, 1, 4294967295]"))
+  +ps = U.eq(T.mg.join(M.am.sc.vals(4n, M.am.sc.kind(U.b("Result<&1, &1, U32 & String, Bool>"))), [10]), U.b("Done{True{}}\nDone{False{}}\nFail{(0, \"\")}"))
+  +ren = U.eq(M.am.sc.ren(U.b("  go(a, x.go(b), go4(c), go (d))\n"), U.b("go")), U.b("  go.orig_(a, x.go(b), go4(c), go (d))\n"))
+  +plan = M.am.sc.plan(two())
+  +p0 = U.prefix(plan, U.b("\ndef twice.orig_(n: Nat) -> Nat:\n  Nat.add(Nat.add(n, n), one())\n\ndef twice.t0_() -> {twice(0n) == twice.orig_(0n) : Nat}:\n  {==}\n\n"))
+  +p3 = U.infix(plan, U.b("def twice.t3_() -> {twice(5n) == twice.orig_(5n) : Nat}:"))
+  +ok = Bool.and(Bool.and(Bool.and(dl, vs), Bool.and(ps, ren)), Bool.and(Bool.and(p0, p3), Bool.not(M.am.sc.proof(two()))))
+  Bool.pick(String, ok, "ok score", "MISMATCH score")
+
 def main() -> IO(Unit):
   do IO<Unit>:
+    IO.print(fixes())
+    IO.print(score())
     IO.print(ask())
     IO.print(clip())
     IO.print(echoes("direct", "direct", T.mg.direct(two(), path(), base()), 3n))

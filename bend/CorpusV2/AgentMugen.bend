@@ -128,8 +128,21 @@ def am.trim(+xs: List<&2, U32>) -> List<&2, U32>:
 def am.label(+x: List<&2, U32>) -> List<&2, U32>:
   S.chomp(List.drop(&2, U32, A.ag.line1(10, x), 3n))
 
+# without a closing code fence on its last line (11-11: her `ana-type` call
+# came as the command, an empty line, then a fence, and the one-line rule
+# refused it)
+def am.unfence.on(cut: Bool, +xs: List<&2, U32>) -> List<&2, U32>:
+  match cut:
+    case True{}:
+      S.chomp(List.take(&2, U32, xs, Nat.sub(S.len(xs), 3n)))
+    case False{}:
+      xs
+
+def am.unfence(+xs: List<&2, U32>) -> List<&2, U32>:
+  am.unfence.on(Bool.or(S.eq(xs, S.b("```")), S.suffix(xs, S.b("\n```"))), xs)
+
 def am.body(+x: List<&2, U32>) -> List<&2, U32>:
-  am.trim(A.ag.after1(10, x))
+  am.unfence(am.trim(A.ag.after1(10, x)))
 
 def am.last.or(xs: List<&2, List<&2, U32>>) -> List<&2, U32>:
   match xs:
@@ -301,7 +314,8 @@ def am.copy(have: Bool, +src: String, +work: String, +repo: String) -> IO(Unit):
           "-exec", "cp", "--parents", "{}", work ++ "/src/", ";"], Nil{})
         return Unit{}
 
-def am.check.in(+t: AmT, +f: List<&2, U32>, +work: String, +bend: String) -> IO(AmO):
+# (secs: the check's time limit)
+def am.check.for(+secs: U32, +t: AmT, +f: List<&2, U32>, +work: String, +bend: String) -> IO(AmO):
   +rel = L.v2.after(L.v2.before(AmT.id(t), 35), 58)
   +repo = S.str(L.v2.before(rel, 47))
   +udir = work ++ "/src/" ++ S.str(Cl.before.last(rel, [47]))
@@ -309,10 +323,13 @@ def am.check.in(+t: AmT, +f: List<&2, U32>, +work: String, +bend: String) -> IO(
     h : Bool <- S.exists(work ++ "/src/" ++ repo)
     am.copy(h, AmT.src(t), work, repo)
     S.write(udir ++ "/Unit.bend", f)
-    +o : S.Out <- S.run(udir, ["BEND_NO_TELEMETRY=1"], 180, bend, ["Unit.bend", "--check-only"], Nil{})
+    +o : S.Out <- S.run(udir, ["BEND_NO_TELEMETRY=1"], secs, bend, ["Unit.bend", "--check-only"], Nil{})
     S.rm(udir ++ "/Unit.bend")
     +st : U32 = S.Out.status(o)
     return AmO{T.mg.shell.echo(S.clean(work, 100n, S.Out.text(o)), S.b(U32.show(st))), Bool.and(U32.is_eq(st, 0), am.done(t, f))}
+
+def am.check.in(+t: AmT, +f: List<&2, U32>, +work: String, +bend: String) -> IO(AmO):
+  am.check.for(180, t, f, work, bend)
 
 def am.check.at(made: Bool, +t: AmT, +f: List<&2, U32>, +work: String, +bend: String) -> IO(AmO):
   match made:
@@ -450,26 +467,63 @@ def am.say(o: AmO, +work: String) -> IO(Unit):
         IO.write(S.str(A.ag.after1(10, T.mg.echo(am.clip(e)))))
         am.end(s, work)
 
-def am.tool.go(t: Maybe<&2, List<&2, U32>>, ep: Maybe<&2, List<&2, U32>>) -> IO(Unit):
-  match t ep:
-    case Some{+tx} Some{+ex}:
+# The report's check (tool name `mugen`, 11-11; Agent/Loop.bend's held
+# report, AGENT_REPORT=1): her `## mugen` report stands (exit 0) when the
+# file her edits leave solves the task; else the tool writes the report the
+# session earned (exit 1), as the loop writes it after the heading line.
+# Nothing is marked solved here: only a passing check call solves a task.
+def am.report.why(+t: AmT, +f: List<&2, U32>, +echo: List<&2, U32>) -> List<&2, U32>:
+  +path = am.path(t)
+  +what = Bool.pick(List<&2, U32>, S.eq(f, am.f0(t)), T.cat([S.b("Nothing was done: no edit applied, so "), path, S.b(" is as it was given.")]),
+    Bool.pick(List<&2, U32>, S.suffix(echo, S.b("(exit 0)")), T.cat([S.b("Not done: "), path, S.b(" passes its check without the definition the task asks for.")]),
+      S.b("Not done: the check fails.")))
+  T.cat([S.b("\n"), what, S.b("\n\n`bend "), path, S.b(" --check-only` now:\n\n```\n"), S.chomp(S.lines.take(echo, 8n)), S.b("\n```\n\n")])
+
+def am.report.on(s: Bool, +t: AmT, +f: List<&2, U32>, +echo: List<&2, U32>) -> IO(Unit):
+  match s:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      do IO<Unit>:
+        IO.write(S.str(am.report.why(t, f, echo)))
+        IO.die(Unit, 1, "agent-mugen: her report does not stand")
+
+def am.report.say(o: AmO, +t: AmT, +f: List<&2, U32>) -> IO(Unit):
+  match o:
+    case AmO{+e, s}:
+      am.report.on(s, t, f, e)
+
+def am.report.check(+t: AmT, +ex: List<&2, U32>, +bend: String, +work: String) -> IO(Unit):
+  +f = am.replay(am.calls(A.ag.blocks(10, A.ag.hds.bytes(), ex)), t, am.f0(t))
+  do IO<Unit>:
+    o : AmO <- am.check(t, f, am.path(t), bend, work)
+    am.report.say(o, t, f)
+
+def am.tool.go(report: Bool, t: Maybe<&2, List<&2, U32>>, ep: Maybe<&2, List<&2, U32>>) -> IO(Unit):
+  match report t ep:
+    case True{} Some{+tx} Some{+ex}:
+      do IO<Unit>:
+        +bend : String <- S.env("BEND", "bend")
+        +work : String <- S.env("AGENT_WORK", "")
+        am.report.check(am.task.of(tx), ex, bend, work)
+    case False{} Some{+tx} Some{+ex}:
       +task = am.task.of(tx)
       do IO<Unit>:
         +bend : String <- S.env("BEND", "bend")
         +work : String <- S.env("AGENT_WORK", "")
         o : AmO <- am.run(task, am.calls(A.ag.blocks(10, A.ag.hds.bytes(), ex)), bend, work)
         am.say(o, work)
-    case _ _:
+    case _ _ _:
       IO.die(Unit, 2, "agent-mugen: cannot read the task or the episode")
 
 # xs: the arguments after `agent-mugen`
 def am.tool(xs: List<String>) -> IO(Unit):
   match xs:
-    case +task <> tool <> Nil{}:
+    case +task <> +tool <> Nil{}:
       do IO<Unit>:
         t : Maybe<&2, List<&2, U32>> <- S.slurp(task)
         ep : Maybe<&2, List<&2, U32>> <- S.slurp("/dev/stdin")
-        am.tool.go(t, ep)
+        am.tool.go(String.eq(tool, "mugen"), t, ep)
     case _:
       IO.die(Unit, 2, "usage: agent-mugen TASK TOOL < EPISODE")
 
@@ -698,24 +752,81 @@ def am.live.say(o: AmO) -> IO(Unit):
         IO.write(S.str(A.ag.after1(10, T.mg.echo(am.clip(e)))))
         IO.die(Unit, 1, "agent-mugen-live: ana goes on")
 
-def am.live.go(ep: Maybe<&2, List<&2, U32>>) -> IO(Unit):
-  match ep:
-    case Some{+ex}:
+# The report's check for /ana (tool name `mugen`, 11-11): her report stands
+# (exit 0) when an edit applied and the last check she ran passes now, run
+# again on the files as they are; else the tool writes what is true (exit 1).
+def am.live.is.check(+cmd: List<&2, U32>) -> Bool:
+  Bool.or(Bool.and(S.prefix(cmd, S.b("bend ")), S.suffix(cmd, S.b(" --check-only"))),
+    Bool.or(S.prefix(cmd, S.b("ghc -fno-code -w ")), Bool.or(S.prefix(cmd, S.b("agda ")),
+      Bool.or(S.prefix(cmd, S.b("lake env lean ")), S.prefix(cmd, S.b("nix-instantiate --eval --strict "))))))
+
+# what her session did: whether an edit applied (its echo is not a
+# refusal), and the last check she ran (empty: none); prev the last call
+def am.live.did(bs: List<&2, A.Blk>, +prev: List<&2, U32>, +ch: Bool, +chk: List<&2, U32>) -> Bool & List<&2, U32>:
+  match bs:
+    case Nil{}:
+      (ch, chk)
+    case A.Blk{+c, +x} <> t:
+      +lb = am.label(prev)
+      +echo = Nat.is_eq(c, 7n)
+      +ch2 = Bool.or(ch, Bool.and(Bool.and(echo, S.eq(lb, S.b("edit"))), Bool.not(S.infix(x, S.b("No file was changed.")))))
+      +chk2 = Bool.pick(List<&2, U32>, Bool.and(Bool.and(echo, S.eq(lb, S.b("shell"))), am.live.is.check(am.body(prev))), am.body(prev), chk)
+      am.live.did(t, Bool.pick(List<&2, U32>, A.ag.is.call(c), x, prev), ch2, chk2)
+
+def am.live.report.why(+ch: Bool, +chk: List<&2, U32>, +echo: List<&2, U32>) -> List<&2, U32>:
+  +ran = Bool.not(T.empty(chk))
+  +what = Bool.pick(List<&2, U32>, Bool.not(ch), S.b("Nothing was done: no edit applied, so no file was changed."),
+    Bool.pick(List<&2, U32>, Bool.not(ran), S.b("Not checked: the edits applied, but no check ran."), S.b("Not done: the last check fails.")))
+  +now = Bool.pick(List<&2, U32>, ran, T.cat([S.b("\n\n`"), chk, S.b("` now:\n\n```\n"), S.chomp(S.lines.take(echo, 8n)), S.b("\n```")]), Nil{})
+  T.cat([S.b("\n"), what, now, S.b("\n\n")])
+
+def am.live.report.say(stands: Bool, +ch: Bool, +chk: List<&2, U32>, +echo: List<&2, U32>) -> IO(Unit):
+  match stands:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      do IO<Unit>:
+        IO.write(S.str(am.live.report.why(ch, chk, echo)))
+        IO.die(Unit, 1, "agent-mugen-live: her report does not stand")
+
+def am.live.report.run(ran: Bool, +chk: List<&2, U32>, +bend: String) -> IO(AmO):
+  match ran:
+    case True{}:
+      am.live.shell(chk, bend)
+    case False{}:
+      IO.pure(AmO, AmO{Nil{}, False{}})
+
+def am.live.report.go(did: Bool & List<&2, U32>) -> IO(Unit):
+  (+ch, +chk) = did
+  do IO<Unit>:
+    +bend : String <- S.env("BEND", "bend")
+    o : AmO <- am.live.report.run(Bool.not(T.empty(chk)), chk, bend)
+    +echo : List<&2, U32> = AmO.echo(o)
+    am.live.report.say(Bool.and(Bool.and(ch, Bool.not(T.empty(chk))), S.suffix(echo, S.b("(exit 0)"))), ch, chk, echo)
+
+def am.live.report(+ex: List<&2, U32>) -> IO(Unit):
+  am.live.report.go(am.live.did(A.ag.blocks(10, A.ag.hds.bytes(), ex), Nil{}, False{}, Nil{}))
+
+def am.live.go(report: Bool, ep: Maybe<&2, List<&2, U32>>) -> IO(Unit):
+  match report ep:
+    case True{} Some{+ex}:
+      am.live.report(ex)
+    case False{} Some{+ex}:
       +x = am.last.or(am.calls(A.ag.blocks(10, A.ag.hds.bytes(), ex)))
       do IO<Unit>:
         +bend : String <- S.env("BEND", "bend")
         o : AmO <- am.live.run.if(T.empty(x), x, bend)
         am.live.say(o)
-    case None{}:
+    case _ None{}:
       IO.die(Unit, 2, "agent-mugen-live: cannot read the episode")
 
 # xs: the arguments after `agent-mugen-live`
 def am.live(xs: List<String>) -> IO(Unit):
   match xs:
-    case tool <> Nil{}:
+    case +tool <> Nil{}:
       do IO<Unit>:
         ep : Maybe<&2, List<&2, U32>> <- S.slurp("/dev/stdin")
-        am.live.go(ep)
+        am.live.go(String.eq(tool, "mugen"), ep)
     case _:
       IO.die(Unit, 2, "usage: agent-mugen-live TOOL < EPISODE")
 
@@ -759,18 +870,19 @@ def am.shapes(+fs: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
   +rep = Nat.is_lt(0n, T.mutant.count(fs))
   S.b("direct") <> am.keep.on(fill, S.b("fill"), am.keep.on(rep, S.b("repair-0"), Nil{}))
 
+# a task to run: its number, unit, shape, and the first call made for her
 type AmQ is Data:
-  AmQ{n: Nat, unit: List<&2, U32>, shape: List<&2, U32>}
+  AmQ{n: Nat, unit: List<&2, U32>, shape: List<&2, U32>, first: List<&2, U32>}
 
 def AmQ.n(+q: AmQ) -> Nat:
   match q:
-    case AmQ{n, u, s}:
+    case AmQ{n, u, s, f}:
       n
 
 def am.q.nth(qs: List<&2, AmQ>, +i: Nat) -> AmQ:
   match qs:
     case Nil{}:
-      AmQ{i, Nil{}, Nil{}}
+      AmQ{i, Nil{}, Nil{}, Nil{}}
     case +q <> more:
       Bool.pick(AmQ, Nat.is_eq(AmQ.n(q), i), q, am.q.nth(more, i))
 
@@ -797,12 +909,24 @@ def am.prep.one(+n: Nat, +dir: String, +u: List<&2, U32>, +src: String, +sh: Lis
 type AmP is Data:
   AmP{n: Nat, qs: List<&2, AmQ>, stale: Nat}
 
-def am.prep.keep(ok: Bool, +n: Nat, +u: List<&2, U32>, +sh: List<&2, U32>, p: AmP) -> AmP:
+def am.prep.keep(ok: Bool, +n: Nat, +u: List<&2, U32>, +sh: List<&2, U32>, +first: List<&2, U32>, p: AmP) -> AmP:
   match ok p:
     case True{} AmP{k, qs, st}:
-      AmP{1n+k, AmQ{n, u, sh} <> qs, st}
+      AmP{1n+k, AmQ{n, u, sh, first} <> qs, st}
     case False{} AmP{k, qs, st}:
       AmP{1n+k, qs, 1n+st}
+
+# The first call made for her (AM_FIRST=1, the default since 11-11; the
+# loop's AGENT_FIRST): the call her sessions open with for the shape
+# (Transcript.bend's mg.direct, mg.fill, mg.repair): an added definition,
+# a read of the head's last 24 lines; a hole or a fix, the check
+def am.first(+t: AmT) -> List<&2, U32>:
+  +path = am.path(t)
+  +n = List.length(&2, List<&2, U32>, T.mg.rows(am.f0(t)))
+  +from = Bool.pick(Nat, Nat.is_lt(n, 25n), 1n, Nat.sub(n, 23n))
+  Bool.pick(List<&2, U32>, S.eq(AmT.shape(t), S.b("direct")),
+    T.cat([T.turn(S.b("read"), T.cat([path, S.b(" "), T.mg.n(from), S.b(" "), T.mg.n(Nat.sub(Nat.add(n, 1n), from)), S.b("\n")])), S.b("## echo\n")]),
+    T.cat([T.turn(S.b("shell"), T.cat([S.b("bend "), path, S.b(" --check-only\n")])), S.b("## echo\n")]))
 
 def am.prep.shapes(ss: List<&2, List<&2, U32>>, +dir: String, +u: List<&2, U32>, +src: String, +rec: List<&2, U32>, +bend: String, p: AmP) -> IO(AmP):
   match ss p:
@@ -812,7 +936,7 @@ def am.prep.shapes(ss: List<&2, List<&2, U32>>, +dir: String, +u: List<&2, U32>,
       do IO<AmP>:
         +ok : Bool <- am.prep.one(k, dir, u, src, sh, rec, bend)
         Ck.log("agent-mugen-eval: task " ++ Nat.show(k) ++ " " ++ S.str(u) ++ " " ++ S.str(sh) ++ Bool.pick(String, ok, "", " STALE (its own body does not pass)"))
-        am.prep.shapes(more, dir, u, src, rec, bend, am.prep.keep(ok, k, u, sh, AmP{k, qs, st}))
+        am.prep.shapes(more, dir, u, src, rec, bend, am.prep.keep(ok, k, u, sh, am.first(am.task.of(am.task.bytes(u, src, sh, rec))), AmP{k, qs, st}))
 
 def am.src(+given: String, +roots: List<&2, String>, +home: String, +u: List<&2, U32>, +fs: List<&2, List<&2, U32>>) -> IO(String):
   Bool.pick(IO(String), String.eq(given, ""), Ev.ev.src.if(True{}, roots, home, u, T.field(fs, 7n)), IO.pure(String, given))
@@ -842,26 +966,459 @@ def am.bend.only(kvs: List<&2, Ev.EvKv>) -> List<&2, Ev.EvKv>:
     case Ev.EvKv{+u, +rec} <> more:
       am.kv.on(S.eq(T.field(S.split(rec, 30), 0n), S.b("bend")), Ev.EvKv{u, rec}, am.bend.only(more))
 
+# The stricter score -------------------------------------------------------------
+#
+#   agent-mugen-score DIR
+#       (11-11.)  The check alone let wrong code count: at step 99,500, 21
+#       of the 58 "solved" were not the unit's behaviour (a `nonzero` that
+#       never says None, `go` with and for xor, swapped assert bodies).  For
+#       each episode of the evaluation in DIR that solved its task
+#       (mugen.nul), the file her edits leave (her calls in episodes.nul
+#       replayed on the shape's file) is held to the unit's own definition:
+#         same      her file is the unit's own
+#         proof     the unit is a proof (a law, or a def whose type is an
+#                   equation): any proof the check passes is right
+#         right     on test inputs her definition gives what the original
+#                   gives: `{f(x) == f.orig_(x) : R}` by `{==}`, for each x
+#         wrong     it does not, or it does not check against them
+#         slow      her tests timed out where the original's passed
+#         untested  no inputs for a parameter's type (a record, an array,
+#                   IO, ...), a result that cannot be compared (IO, a
+#                   function), or tests that fail on the original itself
+#       The tests run on the original first (the unit's own file with
+#       them), so a broken test leaves a task untested, never wrong.  Inputs:
+#       Nat 0n 1n 2n 5n; U32 0 1 2 7 4294967295; Bool; String "" "a" "ab c";
+#       Unit; lists, Maybe, Result and pairs of those; their products, at
+#       most 16 cases, each file's check 180 s at most, as the tool's.  Writes
+#       DIR/score.tsv (N, shape, verdict, unit) and DIR/score.txt; the
+#       evaluation runs it after report.txt.
+
+def am.sc.lstrip(xs: List<&2, U32>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +c <> +t:
+      Bool.pick(List<&2, U32>, Bool.or(U32.is_eq(c, 32), U32.is_eq(c, 10)), am.sc.lstrip(t), c <> t)
+
+# without spaces and newlines at either end
+def am.sc.trim(+xs: List<&2, U32>) -> List<&2, U32>:
+  List.reverse(&2, U32, am.sc.lstrip(List.reverse(&2, U32, am.sc.lstrip(xs))))
+
+def am.sc.opens(+c: U32) -> Bool:
+  Bool.or(Bool.or(U32.is_eq(c, 40), U32.is_eq(c, 60)), Bool.or(U32.is_eq(c, 91), U32.is_eq(c, 123)))
+
+def am.sc.closes(+c: U32) -> Bool:
+  Bool.or(Bool.or(U32.is_eq(c, 41), U32.is_eq(c, 62)), Bool.or(U32.is_eq(c, 93), U32.is_eq(c, 125)))
+
+# `->` and `=>` masked, so their `>` closes no bracket
+def am.sc.mask(+xs: List<&2, U32>) -> List<&2, U32>:
+  S.replace(S.replace(xs, S.b("->"), [1, 1]), S.b("=>"), [2, 2])
+
+def am.sc.unmask(+xs: List<&2, U32>) -> List<&2, U32>:
+  S.replace(S.replace(xs, [1, 1], S.b("->")), [2, 2], S.b("=>"))
+
+# xs cut at each sep outside brackets ((), <>, [], {}; d the depth), each
+# piece trimmed
+def am.sc.cut(xs: List<&2, U32>, +sep: U32, +d: Nat, +cur: List<&2, U32>, +acc: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match xs:
+    case Nil{}:
+      List.reverse(&2, List<&2, U32>, am.sc.trim(List.reverse(&2, U32, cur)) <> acc)
+    case +c <> t:
+      +hit = Bool.and(U32.is_eq(c, sep), Nat.is_eq(d, 0n))
+      +d2 = Nat.sub(Nat.add(d, Bool.pick(Nat, am.sc.opens(c), 1n, 0n)), Bool.pick(Nat, am.sc.closes(c), 1n, 0n))
+      am.sc.cut(t, sep, Bool.pick(Nat, hit, d, d2), Bool.pick(List<&2, U32>, hit, Nil{}, c <> cur),
+        Bool.pick(List<&2, List<&2, U32>>, hit, am.sc.trim(List.reverse(&2, U32, cur)) <> acc, acc))
+
+def am.sc.cuts(+xs: List<&2, U32>, +sep: U32) -> List<&2, List<&2, U32>>:
+  am.sc.cut(xs, sep, 0n, Nil{}, Nil{})
+
+def am.sc.len(+xs: List<&2, List<&2, U32>>) -> Nat:
+  List.length(&2, List<&2, U32>, xs)
+
+# A type's inputs ------------------------------------------------------------
+
+# what a type is, for its inputs
+type AmK is Type:
+  AmKLeaf{vs: List<&2, List<&2, U32>>}
+  AmKList{x: List<&2, U32>}
+  AmKMaybe{x: List<&2, U32>}
+  AmKPair{a: List<&2, U32>, b: List<&2, U32>}
+  AmKRes{e: List<&2, U32>, a: List<&2, U32>}
+
+def am.sc.is(+ty: List<&2, U32>, +open: List<&2, U32>) -> Bool:
+  Bool.and(S.prefix(ty, open), S.suffix(ty, S.b(">")))
+
+# the text between `open` and the last `>`
+def am.sc.within(+ty: List<&2, U32>, +open: List<&2, U32>) -> List<&2, U32>:
+  am.sc.trim(List.take(&2, U32, S.strip(ty, open), Nat.sub(Nat.sub(S.len(ty), S.len(open)), 1n)))
+
+# that, less a leading region (`&2, `)
+def am.sc.inner(+ty: List<&2, U32>, +open: List<&2, U32>) -> List<&2, U32>:
+  +x = am.sc.within(ty, open)
+  Bool.pick(List<&2, U32>, S.head.is(x, 38), am.sc.trim(L.v2.after.str(x, S.b(","))), x)
+
+def am.sc.leaf(+ty: List<&2, U32>) -> List<&2, List<&2, U32>>:
+  Bool.pick(List<&2, List<&2, U32>>, S.eq(ty, S.b("Nat")), [S.b("0n"), S.b("1n"), S.b("2n"), S.b("5n")],
+    Bool.pick(List<&2, List<&2, U32>>, S.eq(ty, S.b("U32")), [S.b("0"), S.b("1"), S.b("2"), S.b("7"), S.b("4294967295")],
+      Bool.pick(List<&2, List<&2, U32>>, S.eq(ty, S.b("Bool")), [S.b("True{}"), S.b("False{}")],
+        Bool.pick(List<&2, List<&2, U32>>, S.eq(ty, S.b("String")), [S.b("\"\""), S.b("\"a\""), S.b("\"ab c\"")],
+          Bool.pick(List<&2, List<&2, U32>>, S.eq(ty, S.b("Unit")), [S.b("Unit{}")], Nil{})))))
+
+# a pair at the top (`A & B`), else a list, a Maybe, a Result, else a leaf
+# (no inputs: none)
+def am.sc.kind(+ty0: List<&2, U32>) -> AmK:
+  +ty = am.sc.trim(ty0)
+  +amp = am.sc.cuts(ty, 38)
+  +res = am.sc.cuts(am.sc.within(ty, S.b("Result<")), 44)
+  +nr = am.sc.len(res)
+  Bool.pick(AmK, Nat.is_eq(am.sc.len(amp), 2n), AmKPair{T.field(amp, 0n), T.field(amp, 1n)},
+    Bool.pick(AmK, am.sc.is(ty, S.b("List<")), AmKList{am.sc.inner(ty, S.b("List<"))},
+      Bool.pick(AmK, am.sc.is(ty, S.b("Maybe<")), AmKMaybe{am.sc.inner(ty, S.b("Maybe<"))},
+        Bool.pick(AmK, Bool.and(am.sc.is(ty, S.b("Result<")), Nat.is_le(2n, nr)), AmKRes{T.field(res, Nat.sub(nr, 2n)), T.field(res, Nat.sub(nr, 1n))},
+          AmKLeaf{am.sc.leaf(ty)}))))
+
+# the second input (the first when there is one) and the last
+def am.sc.a(+vs: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  T.field(vs, Nat.min(1n, Nat.sub(am.sc.len(vs), 1n)))
+
+def am.sc.z(+vs: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  T.field(vs, Nat.sub(am.sc.len(vs), 1n))
+
+# out, when vs has inputs
+def am.sc.if(+vs: List<&2, List<&2, U32>>, +out: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  Bool.pick(List<&2, List<&2, U32>>, Nat.is_eq(am.sc.len(vs), 0n), Nil{}, out)
+
+def am.sc.lists(+vs: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  +a = am.sc.a(vs)
+  +z = am.sc.z(vs)
+  am.sc.if(vs, [S.b("[]"), T.cat([S.b("["), a, S.b("]")]), T.cat([S.b("["), a, S.b(", "), z, S.b("]")]), T.cat([S.b("["), z, S.b(", "), a, S.b(", "), z, S.b("]")])])
+
+def am.sc.maybes(+vs: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  am.sc.if(vs, [S.b("None{}"), T.cat([S.b("Some{"), am.sc.a(vs), S.b("}")]), T.cat([S.b("Some{"), am.sc.z(vs), S.b("}")])])
+
+def am.sc.results(+es: List<&2, List<&2, U32>>, +xs: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  am.sc.if(es, am.sc.if(xs, [T.cat([S.b("Done{"), T.field(xs, 0n), S.b("}")]), T.cat([S.b("Done{"), am.sc.z(xs), S.b("}")]), T.cat([S.b("Fail{"), T.field(es, 0n), S.b("}")])]))
+
+def am.sc.pair(+x: List<&2, U32>, +y: List<&2, U32>) -> List<&2, U32>:
+  T.cat([S.b("("), x, S.b(", "), y, S.b(")")])
+
+def am.sc.pairs(+xs: List<&2, List<&2, U32>>, +ys: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  am.sc.if(xs, am.sc.if(ys, [am.sc.pair(T.field(xs, 0n), T.field(ys, 0n)), am.sc.pair(am.sc.a(xs), am.sc.z(ys)), am.sc.pair(am.sc.z(xs), am.sc.a(ys))]))
+
+# a type's inputs, as text (none: no inputs for it); fuel the nesting
+def am.sc.vals(fuel: Nat, k: AmK) -> List<&2, List<&2, U32>>:
+  match fuel k:
+    case 0n _:
+      Nil{}
+    case 1n+p AmKLeaf{+vs}:
+      vs
+    case 1n+p AmKList{+x}:
+      am.sc.lists(am.sc.vals(p, am.sc.kind(x)))
+    case 1n+p AmKMaybe{+x}:
+      am.sc.maybes(am.sc.vals(p, am.sc.kind(x)))
+    case 1n+(+p) AmKPair{+a, +b}:
+      am.sc.pairs(am.sc.vals(p, am.sc.kind(a)), am.sc.vals(p, am.sc.kind(b)))
+    case 1n+(+p) AmKRes{+e, +a}:
+      am.sc.results(am.sc.vals(p, am.sc.kind(e)), am.sc.vals(p, am.sc.kind(a)))
+
+# The declaration ------------------------------------------------------------
+
+# a def's head: its name, its parameters' types, its result type, and
+# whether it reads (`def NAME(PARAMS) -> TYPE:`, no type parameters)
+type AmD is Data:
+  AmD{name: List<&2, U32>, tys: List<&2, List<&2, U32>>, ret: List<&2, U32>, ok: Bool}
+
+def am.sc.tys(ps: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case +p <> t:
+      am.sc.trim(L.v2.after.str(p, S.b(":"))) <> am.sc.tys(t)
+
+def am.sc.colon(+x: List<&2, U32>) -> List<&2, U32>:
+  Bool.pick(List<&2, U32>, S.suffix(x, S.b(":")), List.take(&2, U32, x, Nat.sub(S.len(x), 1n)), x)
+
+def am.sc.decl(+d0: List<&2, U32>) -> AmD:
+  +d = am.sc.mask(S.chomp(d0))
+  +rest = S.strip(d, S.b("def "))
+  +name = am.before.str(rest, S.b("("))
+  +pieces = am.sc.cuts(List.drop(&2, U32, rest, Nat.add(S.len(name), 1n)), 41)
+  +args = T.field(pieces, 0n)
+  +ret = am.sc.unmask(am.sc.trim(am.sc.colon(am.sc.trim(S.strip(T.field(pieces, 1n), [1, 1])))))
+  +ok = Bool.and(Bool.and(S.prefix(d, S.b("def ")), Nat.is_eq(am.sc.len(pieces), 2n)),
+    Bool.not(Bool.or(Bool.or(S.infix(name, S.b("<")), S.infix(name, S.b(" "))), T.empty(name))))
+  AmD{name, am.sc.tys(Bool.pick(List<&2, List<&2, U32>>, T.empty(args), Nil{}, am.sc.cuts(args, 44))), ret, ok}
+
+# a proof: a law that states an equation, or a def whose type is one
+def am.sc.proof.def(d: AmD) -> Bool:
+  match d:
+    case AmD{n, t, +r, +ok}:
+      Bool.and(ok, S.prefix(r, S.b("{")))
+
+def am.sc.proof(+fs: List<&2, List<&2, U32>>) -> Bool:
+  +d6 = T.field(fs, 6n)
+  Bool.or(Bool.and(S.prefix(d6, S.b("law ")), S.infix(d6, S.b("=="))), am.sc.proof.def(am.sc.decl(d6)))
+
+# The tests ------------------------------------------------------------------
+
+# whether c ends a name (is not a letter, a digit, `_` or `.`)
+def am.sc.edge(+c: U32) -> Bool:
+  Bool.not(Bool.or(Bool.or(Bool.and(U32.is_le(97, c), U32.is_le(c, 122)), Bool.and(U32.is_le(65, c), U32.is_le(c, 90))),
+    Bool.or(Bool.and(U32.is_le(48, c), U32.is_le(c, 57)), Bool.or(U32.is_eq(c, 95), U32.is_eq(c, 46)))))
+
+# xs with `.orig_` after each call of the name (p: the name and `(`, n its
+# length; ins: the name's bytes still to copy before it, prev the last byte)
+def am.sc.ren.go(xs: List<&2, U32>, +p: List<&2, U32>, +n: Nat, +ins: Nat, +prev: U32) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +h <> +t:
+      +left = Bool.pick(Nat, Bool.and(Nat.is_eq(ins, 0n), Bool.and(am.sc.edge(prev), S.prefix(h <> t, p))), n, ins)
+      +rest = am.sc.ren.go(t, p, n, Nat.sub(left, 1n), h)
+      h <> Bool.pick(List<&2, U32>, Nat.is_eq(left, 1n), S.append(S.b(".orig_"), rest), rest)
+
+def am.sc.ren(+xs: List<&2, U32>, +name: List<&2, U32>) -> List<&2, U32>:
+  am.sc.ren.go(xs, S.append(name, S.b("(")), S.len(name), 0n, 10)
+
+def am.sc.join(xs: List<&2, List<&2, U32>>, +sep: List<&2, U32>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case x <> Nil{}:
+      x
+    case x <> more:
+      T.cat([x, sep, am.sc.join(more, sep)])
+
+def am.sc.conss(+v: List<&2, U32>, rs: List<&2, List<&2, List<&2, U32>>>) -> List<&2, List<&2, List<&2, U32>>>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case +r <> t:
+      (v <> r) <> am.sc.conss(v, t)
+
+def am.sc.cross(vs: List<&2, List<&2, U32>>, +rs: List<&2, List<&2, List<&2, U32>>>) -> List<&2, List<&2, List<&2, U32>>>:
+  match vs:
+    case Nil{}:
+      Nil{}
+    case +v <> t:
+      List.append(&2, List<&2, List<&2, U32>>, am.sc.conss(v, rs), am.sc.cross(t, rs))
+
+# every choice of one input a parameter
+def am.sc.prod(vls: List<&2, List<&2, List<&2, U32>>>) -> List<&2, List<&2, List<&2, U32>>>:
+  match vls:
+    case Nil{}:
+      [Nil{}]
+    case +vs <> t:
+      am.sc.cross(vs, am.sc.prod(t))
+
+def am.sc.valss(tys: List<&2, List<&2, U32>>) -> List<&2, List<&2, List<&2, U32>>>:
+  match tys:
+    case Nil{}:
+      Nil{}
+    case +ty <> t:
+      am.sc.vals(4n, am.sc.kind(ty)) <> am.sc.valss(t)
+
+def am.sc.all.some(vls: List<&2, List<&2, List<&2, U32>>>) -> Bool:
+  match vls:
+    case Nil{}:
+      True{}
+    case +vs <> t:
+      Bool.and(Bool.not(Nat.is_eq(am.sc.len(vs), 0n)), am.sc.all.some(t))
+
+def am.sc.keep(keep: Bool, +x: List<&2, List<&2, U32>>, rest: List<&2, List<&2, List<&2, U32>>>) -> List<&2, List<&2, List<&2, U32>>>:
+  match keep:
+    case True{}:
+      x <> rest
+    case False{}:
+      rest
+
+# every step-th case, from the first
+def am.sc.thin(xs: List<&2, List<&2, List<&2, U32>>>, +step: Nat, +c: Nat) -> List<&2, List<&2, List<&2, U32>>>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +x <> t:
+      am.sc.keep(Nat.is_eq(c, 0n), x, am.sc.thin(t, step, Bool.pick(Nat, Nat.is_eq(1n+c, step), 0n, 1n+c)))
+
+def am.sc.test(+name: List<&2, U32>, +ret: List<&2, U32>, +i: Nat, +args: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  +call = T.cat([S.b("("), am.sc.join(args, S.b(", ")), S.b(")")])
+  T.cat([S.b("def "), name, S.b(".t"), T.mg.n(i), S.b("_() -> {"), name, call, S.b(" == "), name, S.b(".orig_"), call, S.b(" : "), ret, S.b("}:\n  {==}\n\n")])
+
+def am.sc.tests(xss: List<&2, List<&2, List<&2, U32>>>, +name: List<&2, U32>, +ret: List<&2, U32>, +i: Nat) -> List<&2, U32>:
+  match xss:
+    case Nil{}:
+      Nil{}
+    case +a <> t:
+      S.append(am.sc.test(name, ret, i, a), am.sc.tests(t, name, ret, 1n+i))
+
+# the text appended to a file to test its definition against the original
+# (`NAME.orig_`, its own calls renamed; then the cases), empty when none
+def am.sc.plan.of(d: AmD, +d6: List<&2, U32>, +body: List<&2, U32>) -> List<&2, U32>:
+  match d:
+    case AmD{+name, +tys, +ret, +ok}:
+      +vls = am.sc.valss(tys)
+      +cs = am.sc.prod(vls)
+      +step = Nat.add(Nat.div(List.length(&2, List<&2, List<&2, U32>>, cs), 16n), 1n)
+      +bad = Bool.or(Bool.or(S.prefix(ret, S.b("IO(")), S.infix(ret, S.b("->"))), Bool.or(S.prefix(ret, S.b("{")), T.empty(ret)))
+      +orig = T.cat([S.replace.first(d6, T.cat([S.b("def "), name, S.b("(")]), T.cat([S.b("def "), name, S.b(".orig_(")])), am.sc.ren(body, name)])
+      Bool.pick(List<&2, U32>, Bool.and(Bool.and(ok, am.sc.all.some(vls)), Bool.not(bad)),
+        T.cat([S.b("\n"), orig, S.b("\n"), am.sc.tests(am.sc.thin(cs, step, 0n), name, ret, 0n)]), Nil{})
+
+def am.sc.plan(+fs: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  +d6 = T.field(fs, 6n)
+  am.sc.plan.of(am.sc.decl(d6), d6, T.field(fs, 7n))
+
+# The verdicts ---------------------------------------------------------------
+
+def am.sc.tested(+hers: AmO) -> List<&2, U32>:
+  Bool.pick(List<&2, U32>, AmO.solved(hers), S.b("right"), Bool.pick(List<&2, U32>, S.suffix(AmO.echo(hers), S.b("(exit 124)")), S.b("slow"), S.b("wrong")))
+
+def am.sc.hers(sane: Bool, +t: AmT, +f: List<&2, U32>, +plan: List<&2, U32>, +work: String, +bend: String) -> IO(List<&2, U32>):
+  match sane:
+    case False{}:
+      IO.pure(List<&2, U32>, S.b("untested"))
+    case True{}:
+      do IO<List<&2, U32>>:
+        b : AmO <- am.check.in(t, S.append(f, plan), work, bend)
+        return am.sc.tested(b)
+
+def am.sc.run(has: Bool, +t: AmT, +f: List<&2, U32>, +orig: List<&2, U32>, +plan: List<&2, U32>, +work: String, +bend: String) -> IO(List<&2, U32>):
+  match has:
+    case False{}:
+      IO.pure(List<&2, U32>, S.b("untested"))
+    case True{}:
+      do IO<List<&2, U32>>:
+        a : AmO <- am.check.in(t, S.append(orig, plan), work, bend)
+        am.sc.hers(AmO.solved(a), t, f, plan, work, bend)
+
+def am.sc.judge.go(same: Bool, proof: Bool, +t: AmT, +f: List<&2, U32>, +orig: List<&2, U32>, +plan: List<&2, U32>, +work: String, +bend: String) -> IO(List<&2, U32>):
+  match same proof:
+    case True{} _:
+      IO.pure(List<&2, U32>, S.b("same"))
+    case False{} True{}:
+      IO.pure(List<&2, U32>, S.b("proof"))
+    case False{} False{}:
+      am.sc.run(Bool.not(T.empty(plan)), t, f, orig, plan, work, bend)
+
+def am.sc.judge(m: Maybe<&2, List<&2, U32>>, +ep: List<&2, U32>, +work: String, +bend: String) -> IO(List<&2, U32>):
+  match m:
+    case None{}:
+      IO.pure(List<&2, U32>, S.b("untested"))
+    case Some{+tx}:
+      +t = am.task.of(tx)
+      +fs = AmT.fs(t)
+      +f = am.replay(am.calls(A.ag.blocks(10, A.ag.hds.bytes(), ep)), t, am.f0(t))
+      +orig = T.mg.with(fs, T.field(fs, 7n))
+      am.sc.judge.go(S.eq(S.chomp(f), S.chomp(orig)), am.sc.proof(fs), t, f, orig, am.sc.plan(fs), work, bend)
+
+# an episode's verdict: its number, shape, verdict, unit
+type AmV is Data:
+  AmV{n: List<&2, U32>, shape: List<&2, U32>, v: List<&2, U32>, unit: List<&2, U32>}
+
+# episode n's text in episodes.nul
+def am.sc.ep(kvs: List<&2, Ev.EvKv>, +n: List<&2, U32>) -> List<&2, U32>:
+  match kvs:
+    case Nil{}:
+      Nil{}
+    case Ev.EvKv{+k, +v} <> t:
+      Bool.pick(List<&2, U32>, S.eq(k, n), v, am.sc.ep(t, n))
+
+# a mugen.nul record (N, UNIT, SHAPE, SOLVED, CALLS, SECS) judged when solved
+def am.sc.one(solved: Bool, +r: List<&2, List<&2, U32>>, +dir: String, +eps: List<&2, Ev.EvKv>, +work: String, +bend: String) -> IO(List<&2, AmV>):
+  match solved:
+    case False{}:
+      IO.pure(List<&2, AmV>, Nil{})
+    case True{}:
+      +n = T.field(r, 0n)
+      do IO<List<&2, AmV>>:
+        m : Maybe<&2, List<&2, U32>> <- S.slurp(dir ++ "/task." ++ S.str(n) ++ ".nul")
+        +v : List<&2, U32> <- am.sc.judge(m, am.sc.ep(eps, n), work, bend)
+        Ck.log("agent-mugen-score: " ++ S.str(n) ++ " " ++ S.str(T.field(r, 2n)) ++ " " ++ S.str(v) ++ " " ++ S.str(T.field(r, 1n)))
+        return [AmV{n, T.field(r, 2n), v, T.field(r, 1n)}]
+
+def am.sc.each(rs: List<&2, Ev.EvKv>, +dir: String, +eps: List<&2, Ev.EvKv>, +work: String, +bend: String, +acc: List<&2, AmV>) -> IO(List<&2, AmV>):
+  match rs:
+    case Nil{}:
+      IO.pure(List<&2, AmV>, List.reverse(&2, AmV, acc))
+    case Ev.EvKv{k, +v} <> t:
+      +r = S.split(v, 30)
+      do IO<List<&2, AmV>>:
+        x : List<&2, AmV> <- am.sc.one(S.eq(T.field(r, 3n), S.b("1")), r, dir, eps, work, bend)
+        am.sc.each(t, dir, eps, work, bend, List.append(&2, AmV, x, acc))
+
+# how many verdicts v (empty: any) in shape sh (empty: all)
+def am.sc.n(xs: List<&2, AmV>, +sh: List<&2, U32>, +v: List<&2, U32>) -> Nat:
+  match xs:
+    case Nil{}:
+      0n
+    case AmV{n, +s, +w, u} <> t:
+      Nat.add(Bool.pick(Nat, Bool.and(Bool.or(T.empty(sh), S.eq(s, sh)), Bool.or(T.empty(v), S.eq(w, v))), 1n, 0n), am.sc.n(t, sh, v))
+
+# how many tasks in shape sh (empty: all)
+def am.sc.tasks(rs: List<&2, Ev.EvKv>, +sh: List<&2, U32>) -> Nat:
+  match rs:
+    case Nil{}:
+      0n
+    case Ev.EvKv{k, +v} <> t:
+      Nat.add(Bool.pick(Nat, Bool.or(T.empty(sh), S.eq(T.field(S.split(v, 30), 2n), sh)), 1n, 0n), am.sc.tasks(t, sh))
+
+def am.sc.c(+xs: List<&2, AmV>, +sh: List<&2, U32>, +v: String) -> String:
+  Nat.show(am.sc.n(xs, sh, S.b(v)))
+
+def am.sc.line(+xs: List<&2, AmV>, +rs: List<&2, Ev.EvKv>, +label: String, +sh: List<&2, U32>) -> String:
+  +right = Nat.add(Nat.add(am.sc.n(xs, sh, S.b("same")), am.sc.n(xs, sh, S.b("proof"))), am.sc.n(xs, sh, S.b("right")))
+  label ++ " right " ++ Nat.show(right) ++ "/" ++ Nat.show(am.sc.tasks(rs, sh)) ++ " (of " ++ Nat.show(am.sc.n(xs, sh, Nil{})) ++ " solved: same " ++ am.sc.c(xs, sh, "same") ++ ", proof " ++ am.sc.c(xs, sh, "proof")
+    ++ ", tested right " ++ am.sc.c(xs, sh, "right") ++ ", wrong " ++ am.sc.c(xs, sh, "wrong") ++ ", slow " ++ am.sc.c(xs, sh, "slow") ++ ", untested " ++ am.sc.c(xs, sh, "untested") ++ ")\n"
+
+def am.sc.tsv(xs: List<&2, AmV>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case AmV{+n, +s, +v, +u} <> t:
+      T.cat([S.join([n, s, v, u], 9), [10], am.sc.tsv(t)])
+
+def am.score(+dir: String) -> IO(Unit):
+  do IO<Unit>:
+    +bend : String <- S.env("BEND", "bend")
+    +rs : List<&2, Ev.EvKv> <- Ev.ev.nul(dir ++ "/mugen.nul")
+    +eps : List<&2, Ev.EvKv> <- Ev.ev.nul(dir ++ "/episodes.nul")
+    +work : String <- S.mktemp()
+    +xs : List<&2, AmV> <- am.sc.each(rs, dir, eps, work, bend, Nil{})
+    S.rm(work)
+    S.write(dir ++ "/score.tsv", am.sc.tsv(xs))
+    +txt : String = am.sc.line(xs, rs, "direct", S.b("direct")) ++ am.sc.line(xs, rs, "fill", S.b("fill")) ++ am.sc.line(xs, rs, "repair", S.b("repair-0")) ++ am.sc.line(xs, rs, "all", Nil{})
+    S.write(dir ++ "/score.txt", S.b(txt))
+    IO.print(txt)
+
+# xs: the arguments after `agent-mugen-score`
+def am.score.cmd(xs: List<String>) -> IO(Unit):
+  match xs:
+    case +d <> Nil{}:
+      am.score(d)
+    case _:
+      IO.die(Unit, 2, "usage: agent-mugen-score DIR")
+
 # The episodes -------------------------------------------------------------------
 
-def am.job(+dir: String, +env0: List<&2, String>, +dep: String, +threads: String, +tag: Nat, +bin: String, q: AmQ) -> C.CbJob:
+def am.job(+dir: String, +env0: List<&2, String>, +dep: String, +threads: String, +tag: Nat, +bin: String, +fon: Bool, q: AmQ) -> C.CbJob:
   match q:
-    case AmQ{+i, u, s}:
+    case AmQ{+i, u, s, f}:
       +task = dir ++ "/task." ++ Nat.show(i) ++ ".nul"
       C.CbJob{i, List.append(&2, String, env0, {["AGENT_TOOL=" ++ dep ++ " corpus-v2 agent-mugen " ++ task, "AGENT_WORK=" ++ dir ++ "/work." ++ Nat.show(i),
+        "AGENT_FIRST=" ++ Bool.pick(String, fon, S.str(f), ""),
         "CHECK_TAG=" ++ Nat.show(Nat.add(tag, i)), "AGENT_LOG=" ++ dir ++ "/ep." ++ Nat.show(i) ++ ".log",
         "AGENT_META=n=" ++ Nat.show(i) ++ "\nlang=bend\nunit=" ++ S.str(u) ++ "\n"] : List<&2, String>}), bin,
         {["+RTS", "--threads", threads, "-RTS", "--agent", "--prompt-file", dir ++ "/prompt." ++ Nat.show(i)] : List<&2, String>}}
 
-def am.jobs(qs: List<&2, AmQ>, +dir: String, +env0: List<&2, String>, +dep: String, +threads: String, +tag: Nat, +bin: String) -> IO(List<&2, C.CbJob>):
+def am.jobs(qs: List<&2, AmQ>, +dir: String, +env0: List<&2, String>, +dep: String, +threads: String, +tag: Nat, +bin: String, +fon: Bool) -> IO(List<&2, C.CbJob>):
   match qs:
     case Nil{}:
       IO.pure(List<&2, C.CbJob>, Nil{})
     case +q <> more:
       do IO<List<&2, C.CbJob>>:
         S.mkdir(dir ++ "/work." ++ Nat.show(AmQ.n(q)))
-        js : List<&2, C.CbJob> <- am.jobs(more, dir, env0, dep, threads, tag, bin)
-        return am.job(dir, env0, dep, threads, tag, bin, q) <> js
+        js : List<&2, C.CbJob> <- am.jobs(more, dir, env0, dep, threads, tag, bin, fon)
+        return am.job(dir, env0, dep, threads, tag, bin, fon, q) <> js
 
 # an episode's outcome
 type AmR is Data:
@@ -876,7 +1433,7 @@ def am.ncalls(bs: List<&2, A.Blk>) -> Nat:
 
 def am.one(+count: Nat, +dir: String, +q: AmQ, r: C.CbRes) -> IO(AmR):
   match q r:
-    case AmQ{+i, +u, +sh} C.CbRes{j, o, +ms}:
+    case AmQ{+i, +u, +sh, f} C.CbRes{j, o, +ms}:
       +ep = S.no.nul(S.Out.text(o))
       +secs = Ev.ev.secs(ms)
       +nc = am.ncalls(A.ag.blocks(10, A.ag.hds.bytes(), ep))
@@ -921,7 +1478,8 @@ def am.fin(+n: Nat, +qs: List<&2, AmQ>, +dir: String, +stale: Nat, x: Chan(C.CbR
     C.cb.pool.close(p)
     S.write(dir ++ "/report.txt", S.b(am.report(xs, stale)))
     IO.print(am.report(xs, stale))
-    Ck.log("agent-mugen-eval: " ++ Nat.show(n) ++ " episodes in " ++ dir)
+    Ck.log("agent-mugen-eval: " ++ Nat.show(n) ++ " episodes in " ++ dir ++ "; the stricter score next")
+    am.score(dir)
 
 def am.episodes(self: Bool, +ckpt: String, +dir: String, +qs: List<&2, AmQ>, +stale: Nat) -> IO(Unit):
   match self:
@@ -941,12 +1499,16 @@ def am.episodes(self: Bool, +ckpt: String, +dir: String, +qs: List<&2, AmQ>, +st
         +dep : String <- S.env("AGENT_DEPLOY", "nix run .#deploy --")
         +bend : String <- S.env("BEND", "bend")
         +bin : String <- S.env("AGENT_BIN", "run/gcroot-bend-generate-agent/bin/bend-generate")
+        +first : String <- S.env("AM_FIRST", "1")
+        +rep : String <- S.env("AM_REPEAT", "128")
+        +report : String <- S.env("AM_REPORT", "1")
         +env0 : List<&2, String> = {["CKPT=" ++ ckpt, "TOKENS=" ++ tokens, "AGENT_CALLS=" ++ calls, "TEMPERATURE=" ++ temp, "TOKENIZER_FILE=weights/code32k.bpe",
-          "BEND=" ++ bend, "BEND_NO_TELEMETRY=1"] : List<&2, String>}
-        Ck.log("agent-mugen-eval: " ++ Nat.show(List.length(&2, AmQ, qs)) ++ " episodes, " ++ Nat.show(procs) ++ " at a time, " ++ calls ++ " calls, " ++ tokens ++ " tokens a stretch, temperature " ++ temp)
+          "BEND=" ++ bend, "BEND_NO_TELEMETRY=1", "AGENT_REPEAT=" ++ rep, "AGENT_REPORT=" ++ report] : List<&2, String>}
+        Ck.log("agent-mugen-eval: " ++ Nat.show(List.length(&2, AmQ, qs)) ++ " episodes, " ++ Nat.show(procs) ++ " at a time, " ++ calls ++ " calls, " ++ tokens ++ " tokens a stretch, temperature " ++ temp
+          ++ "; first call made for her " ++ first ++ ", repetition cut " ++ rep ++ ", report check " ++ report)
         S.add(dir ++ "/episodes.nul", Nil{})
         S.add(dir ++ "/mugen.nul", Nil{})
-        +js : List<&2, C.CbJob> <- am.jobs(List.reverse(&2, AmQ, qs), dir, env0, dep, threads, tag, bin)
+        +js : List<&2, C.CbJob> <- am.jobs(List.reverse(&2, AmQ, qs), dir, env0, dep, threads, tag, bin, String.eq(first, "1"))
         p : C.CbPool <- C.cb.pool.open(procs, js)
         am.fin(List.length(&2, C.CbJob, js), qs, dir, stale, C.cb.pool.res(p))
 
