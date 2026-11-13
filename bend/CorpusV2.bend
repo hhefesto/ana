@@ -27,6 +27,8 @@ import ./CorpusV2/Ratio.bend as Rt
 import ./CorpusV2/Intake.bend as It
 import ./CorpusV2/Trim.bend as Tm
 import ./CorpusV2/HistDrop.bend as Hd
+import ./CorpusV2/Theory.bend as Th
+import ./CorpusV2/Exlaw.bend as Ex
 
 # bend-corpus-v2: corpus v2's tools (docs/CORPUS-V2.md), one subcommand each,
 # ported from the Python they replaced, each byte-identical to it on the
@@ -69,6 +71,9 @@ import ./CorpusV2/HistDrop.bend as Hd
 #                                   operators, the checker's real errors, format 2's repair layout into
 #                                   OUT/accepted/bend-mut (an act directory for s2); PROCS workers
 #                                   (mutate-part), resumable   (CorpusV2/Mutate.bend)
+#   exlaw UNITS OUT                 Bend units' laws from running the original (example laws, the file's own
+#                                   laws) in field 14, and their law mutants; every pair of UNITS into OUT, in
+#                                   order   (CorpusV2/Exlaw.bend; parts in parallel: run/v9/f3.sh)
 #   decl-new UNITS OUT [held=FILE]... [seen=FILE]... [cap=PREFIX:N]...   a new wave's units less the
 #                                   declarations the corpus trains on (seen) or holds out (held: units, or
 #                                   source files by id and content key; and run/v2/holdout's ids and keys),
@@ -91,6 +96,10 @@ import ./CorpusV2/HistDrop.bend as Hd
 #                                   held-out units name
 #   port-fix INBOX FIXED OUT        the port inbox's fixed files (FIXED/REPO/FIXED.tsv): their JSON
 #                                   lines and whole-file repair transcripts   (CorpusV2/Intake.bend)
+#   theory-pick META OUT            the arXiv papers pass 2's theory filler takes: math.CT, and
+#                                   type theory, proof assistants, categorical and denotational
+#                                   semantics, formal verification by topic; OUT the credits list,
+#                                   OUT.pat grep patterns   (CorpusV2/Theory.bend)
 #
 # The run recipes (2026-10-15, the plan "all logic in Bend", Phase 4: the
 # tools/corpus-v2 scripts they replace in brackets):
@@ -308,6 +317,8 @@ def c2.args(xs: List<String>) -> IO(Unit):
       Mu.mtt.main(more)
     case "mutate-part" <> more:
       Mu.mtt.part.main(more)
+    case "exlaw" <> more:
+      Ex.ex.main(more)
     case "port" <> more:
       Pt.pt.main(more)
     case "decl-new" <> more:
@@ -316,6 +327,8 @@ def c2.args(xs: List<String>) -> IO(Unit):
       Tm.trm.main(more)
     case "hist-drop" <> more:
       Hd.hdr.main(more)
+    case "theory-pick" <> more:
+      Th.thy.main(more)
     case "repair-mix" <> more:
       Rt.rto.main(more)
     case "files-jsonl" <> more:
