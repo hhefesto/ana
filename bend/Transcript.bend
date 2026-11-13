@@ -7,6 +7,7 @@ import ./Sys.bend as S
 import ./Mugen/Diff.bend as D
 import ./Agent/Spec.bend as A
 import ./Spec/Form2.bend as F2
+import ./Spec/Kinds.bend as Kd
 
 # transcripts: the checked units (bend-check LANG) rendered as the
 # coding-agent documents of docs/TRANSCRIPT-FORMAT.md.
@@ -2179,6 +2180,57 @@ def f2.looks(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +body: List<&2,
 def f2.looks.new(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>) -> List<&2, U32>:
   f2.looks.on(mg.is.bend(fs), fs, path, Nil{}, base)
 
+# Laws in the replies (Form 2 kinds, below) ------------------------------------------
+
+# a Bend unit's laws: the text after its definition in the file (none: empty)
+def f3.laws(+fs: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  +x = field(fs, 14n)
+  Bool.pick(List<&2, U32>, Bool.and(mg.is.bend(fs), Bool.not(U.has(x, 31))), x, Nil{})
+
+def f3.in(ns: List<&2, List<&2, U32>>, +n: List<&2, U32>) -> Bool:
+  match ns:
+    case Nil{}:
+      False{}
+    case +x <> t:
+      Bool.or(U.eq(x, n), f3.in(t, n))
+
+def f3.dedupe(ns: List<&2, List<&2, U32>>, +seen: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case +n <> t:
+      +had = f3.in(seen, n)
+      mg.keep.on(Bool.not(had), n, f3.dedupe(t, Bool.pick(List<&2, List<&2, U32>>, had, seen, n <> seen)))
+
+# a text's pieces' names, in order, each once (Bend's heads: a law and its
+# proof's def share one)
+def f3.names.d(+d: F2.Doc<List<&2, U32>, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match d:
+    case F2.Doc{+p, +g, ds}:
+      F2.names(List<&2, U32>, List<&2, U32>, ds)
+
+def f3.names(+x: List<&2, U32>) -> List<&2, List<&2, U32>>:
+  f3.dedupe(f3.names.d(f2.bdoc(x)), Nil{})
+
+# a check that failed at one of the unit's laws: what the law says and what
+# the definition computed (Bend's `- expected` is the left side's value, the
+# definition's; `- observed` the law's right side); none when it did not
+def f3.why.law(+fs: List<&2, List<&2, U32>>, +out: List<&2, U32>) -> List<&2, U32>:
+  +ls = split(out, 10)
+  +at = U.trim.right(U.strip(mg.find(ls, U.b("Location: ")), U.b("Location: ")))
+  +hit = Bool.and(Bool.not(empty(f3.laws(fs))), f3.in(f3.names(f3.laws(fs)), at))
+  Bool.pick(List<&2, U32>, hit, cat([U.b(": its law "), code(at), U.b(" says "), mg.val(mg.find(ls, U.b("- observed"))), U.b(", and it computed "), mg.val(mg.find(ls, U.b("- expected")))]), Nil{})
+
+# a failed check's why in a reply: at one of the unit's laws, the law's; else
+# as mg.why.on (the checker's message and line)
+def f3.why.on(bend: Bool, +fs: List<&2, List<&2, U32>>, +out: List<&2, U32>) -> List<&2, U32>:
+  match bend:
+    case True{}:
+      +w = f3.why.law(fs, out)
+      Bool.pick(List<&2, U32>, empty(w), mg.why(out), w)
+    case False{}:
+      mg.why.other(fs, out)
+
 # Verdicts and replies ---------------------------------------------------------------
 
 def f2.unpunct.r(r: List<&2, U32>) -> List<&2, U32>:
@@ -2229,12 +2281,12 @@ def f2.done.fill(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2,
 
 def f2.done.repair(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +m: Nat) -> List<&2, U32>:
   cat([f2.verdict(fs, field(fs, 11n)), U.b(" Fixed "), code(field(fs, 2n)), U.b(" in "), path,
-    mg.why.on(mg.is.bend(fs), fs, check.out(check.of(mutant.check(fs, m)))), U.b(".")])
+    f3.why.on(mg.is.bend(fs), fs, check.out(check.of(mutant.check(fs, m)))), U.b(".")])
 
 # a give-up's: the verdict on the hole put back, the tries, the last one's error
 def f2.giveup(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +j: Nat, +l: Nat) -> List<&2, U32>:
   cat([f2.verdict(fs, field(fs, 13n)), U.b(" I could not get "), code(field(fs, 2n)), U.b(" in "), path, U.b(" to pass in "), mg.n(j), U.b(" tries"),
-    mg.why.on(mg.is.bend(fs), fs, check.out(check.of(mutant.check(fs, l)))), U.b(". I put the hole back in "), code(field(fs, 2n)), U.b(".")])
+    f3.why.on(mg.is.bend(fs), fs, check.out(check.of(mutant.check(fs, l)))), U.b(". I put the hole back in "), code(field(fs, 2n)), U.b(".")])
 
 def f2.reply.x(+x: Nat, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +j: Nat, +l: Nat, +done: List<&2, U32>) -> List<&2, U32>:
   mg.reply(Bool.pick(List<&2, U32>, Nat.is_eq(x, 1n), f2.giveup(fs, path, j, l), done))
@@ -2242,6 +2294,420 @@ def f2.reply.x(+x: Nat, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +j: 
 # a give-up needs a hole whose check fails
 def f2.can.give(+fs: List<&2, List<&2, U32>>) -> Bool:
   Bool.and(Bool.not(empty(field(fs, 13n))), Bool.not(f2.passed(field(fs, 13n))))
+
+# Form 2's kinds (2026-11-13; docs/form2/KINDS.md, Spec/Kinds.bend) ---------------------
+#
+# The user, 11-13: the prose "In the request, and ana also writes it as a `#`
+# comment above her function"; laws "Example laws from running the original,
+# plus the file's own general laws when it has them"; a function with no
+# comment "Keep them, with the type and laws but no prose".  A Bend unit's
+# direct session (and the chains and fixes that start from the direct ask)
+# reads its head cut at a line (Spec/Kinds.bend's cut): before the function's
+# comment, and before the definitions right above it that it calls, through
+# one another (at most 3; up to 8 when they reach back to the file's first
+# definition: a nearly empty file, `scratch`).  Her first add writes the lines
+# from the cut, her definition and its laws, so the file it leaves is the
+# unit's and the recorded check stands; its echo names every definition it
+# added (`added: h, f, f.ex1, lines A-B`, as AgentMugen's).  The laws (bend-corpus-v2
+# exlaw) are field 14, Bend's empty type field: a check holds 0x1F, laws never
+# do; they follow the definition in every shape's file.  Every Base name the
+# written code calls is looked up (the Context's 16 names, then the rest), and
+# 1 in 8 direct asks that call Base first look up a near name that does not
+# exist (`NAME: not in PATH or Base`).
+
+def f3.minus(ns: List<&2, List<&2, U32>>, +out: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case +n <> t:
+      mg.keep.on(Bool.not(f3.in(out, n)), n, f3.minus(t, out))
+
+# The cut --------------------------------------------------------------------------------
+
+# how many of a gap's last lines are comments (`#` at column 0): the piece below's
+def f3.tcom.go(rs: List<&2, List<&2, U32>>, +n: Nat) -> Nat:
+  match rs:
+    case Nil{}:
+      n
+    case +l <> t:
+      Bool.pick(Nat, head.is(l, 35), f3.tcom.go(t, 1n+n), n)
+
+def f3.tcom(+ls: List<&2, List<&2, U32>>) -> Nat:
+  f3.tcom.go(List.reverse(&2, List<&2, U32>, ls), 0n)
+
+# a head's piece: its name, the line its comment starts at, its text, whether a def or a law
+type F3p is Data:
+  F3p{name: List<&2, U32>, at: Nat, text: List<&2, U32>, isdef: Bool}
+
+def F3p.at(+p: F3p) -> Nat:
+  match p:
+    case F3p{n, a, x, d}:
+      a
+
+def F3p.def(+p: F3p) -> Bool:
+  match p:
+    case F3p{n, a, x, d}:
+      d
+
+# the pieces from line s on, c comment lines above the first
+def f3.ps(ds: List<&2, F2.Piece<List<&2, U32>, List<&2, U32>>>, +s: Nat, +c: Nat) -> List<&2, F3p>:
+  match ds:
+    case Nil{}:
+      Nil{}
+    case F2.Piece{+nm, +b, +g} <> t:
+      +x = U.concat(b)
+      +d = Bool.or(U.prefix(x, U.b("def ")), U.prefix(x, U.b("law ")))
+      +s2 = Nat.add(s, Nat.add(List.length(&2, List<&2, U32>, b), List.length(&2, List<&2, U32>, g)))
+      F3p{nm, Nat.sub(s, c), x, d} <> f3.ps(t, s2, f3.tcom(g))
+
+# whether the first byte is a name's
+def f3.namehd(+xs: List<&2, U32>) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case +h <> t:
+      f2.namech(h)
+
+# whether text uses the name n: n there with no name byte on either side
+def f3.uses.go(xs: List<&2, U32>, +n: List<&2, U32>, +prev: Bool) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case +h <> +t:
+      +hit = Bool.and(Bool.not(prev), Bool.and(U.prefix(h <> t, n), Bool.not(f3.namehd(List.drop(&2, U32, h <> t, U.len(n))))))
+      Bool.or(hit, f3.uses.go(t, n, f2.namech(h)))
+
+def f3.uses(+xs: List<&2, U32>, +n: List<&2, U32>) -> Bool:
+  Bool.and(Bool.not(empty(n)), f3.uses.go(xs, n, False{}))
+
+# the walk from the last piece up: the next is taken when it is a def or a law
+# the text so far uses (at most 8)
+type F3w is Data:
+  F3w{k: Nat, at: Nat}
+
+def f3.take.ok(+rs: List<&2, F3p>, +need: List<&2, U32>, +k: Nat) -> Bool:
+  match rs:
+    case Nil{}:
+      False{}
+    case F3p{+nm, a, x, +d} <> t:
+      Bool.and(Bool.and(d, Nat.is_lt(k, 8n)), f3.uses(need, nm))
+
+def f3.walk(rs: List<&2, F3p>, ok: Bool, +need: List<&2, U32>, +k: Nat, +at: Nat) -> F3w:
+  match rs ok:
+    case F3p{nm, +a, +x, d} <> +t True{}:
+      +need2 = U.append(need, x)
+      f3.walk(t, f3.take.ok(t, need2, 1n+k), need2, 1n+k, a)
+    case _ _:
+      F3w{k, at}
+
+def f3.types(ps: List<&2, F3p>) -> Bool:
+  match ps:
+    case Nil{}:
+      True{}
+    case +p <> t:
+      Bool.and(Bool.not(F3p.def(p)), f3.types(t))
+
+def f3.nth.at(ps: List<&2, F3p>, +i: Nat, +d: Nat) -> Nat:
+  match ps:
+    case Nil{}:
+      d
+    case +p <> t:
+      Bool.pick(Nat, Nat.is_eq(i, 0n), F3p.at(p), f3.nth.at(t, Nat.sub(i, 1n), d))
+
+# the cut: the line ana's file ends before, the definitions her add writes
+# before hers, whether nothing else is left (only imports, types, comments)
+type F3c is Data:
+  F3c{at: Nat, k: Nat, scratch: Bool}
+
+def f3.cut.on(+ps: List<&2, F3p>, +w: F3w) -> F3c:
+  match w:
+    case F3w{+k, +at}:
+      +np = List.length(&2, F3p, ps)
+      +scratch = Bool.and(Nat.is_lt(0n, k), f3.types(List.take(&2, F3p, ps, Nat.sub(np, k))))
+      +three = Bool.and(Bool.not(scratch), Nat.is_lt(3n, k))
+      Bool.pick(F3c, three, F3c{f3.nth.at(ps, Nat.sub(np, 3n), at), 3n, False{}}, F3c{at, k, scratch})
+
+def f3.cut.d(+d: F2.Doc<List<&2, U32>, List<&2, U32>>, +ls: List<&2, List<&2, U32>>, +need: List<&2, U32>) -> F3c:
+  match d:
+    case F2.Doc{+p, +g, ds}:
+      +ps = f3.ps(ds, Nat.add(List.length(&2, List<&2, U32>, p), List.length(&2, List<&2, U32>, g)), f3.tcom(g))
+      +at0 = Nat.sub(List.length(&2, List<&2, U32>, ls), f3.tcom(ls))
+      +rs = List.reverse(&2, F3p, ps)
+      f3.cut.on(ps, f3.walk(rs, f3.take.ok(rs, need, 0n), need, 0n, at0))
+
+def f3.cut.of(+head: List<&2, U32>, +ls: List<&2, List<&2, U32>>, +need: List<&2, U32>) -> F3c:
+  f3.cut.d(f2.bdoc(head), ls, need)
+
+# a direct session's view of the unit: the file she reads, the lines her add
+# writes before the declaration, how many definitions those hold, scratch
+type F3v is Data:
+  F3v{head: List<&2, U32>, lead: List<&2, U32>, k: Nat, scratch: Bool}
+
+def F3v.head(+v: F3v) -> List<&2, U32>:
+  match v:
+    case F3v{h, l, k, s}:
+      h
+
+def F3v.lead(+v: F3v) -> List<&2, U32>:
+  match v:
+    case F3v{h, l, k, s}:
+      l
+
+def F3v.k(+v: F3v) -> Nat:
+  match v:
+    case F3v{h, l, k, s}:
+      k
+
+def F3v.scratch(+v: F3v) -> Bool:
+  match v:
+    case F3v{h, l, k, s}:
+      s
+
+# the whole head, nothing cut (another language, a fill or a repair)
+def f3.none(+fs: List<&2, List<&2, U32>>) -> F3v:
+  F3v{mg.head(fs), Nil{}, 0n, False{}}
+
+def f3.view.ab(p: List<&2, List<&2, U32>> & List<&2, List<&2, U32>>, +k: Nat, +s: Bool) -> F3v:
+  match p:
+    case (a, b):
+      F3v{U.concat(a), U.concat(b), k, s}
+
+def f3.view.of(+ls: List<&2, List<&2, U32>>, +c: F3c) -> F3v:
+  match c:
+    case F3c{+at, k, s}:
+      f3.view.ab(Kd.cut(List<&2, U32>, ls, at), k, s)
+
+def f3.view.on(bend: Bool, +fs: List<&2, List<&2, U32>>) -> F3v:
+  match bend:
+    case True{}:
+      +ls = U.lines(mg.head(fs))
+      f3.view.of(ls, f3.cut.of(mg.head(fs), ls, f2.decl(fs, field(fs, 7n))))
+    case False{}:
+      f3.none(fs)
+
+def f3.view(+fs: List<&2, List<&2, U32>>) -> F3v:
+  f3.view.on(mg.is.bend(fs), fs)
+
+# The writes -----------------------------------------------------------------------------
+
+# the first add's text: the lines from the cut, the declaration with body, its laws
+def f3.add.text(+v: F3v, +fs: List<&2, List<&2, U32>>, +body: List<&2, U32>) -> List<&2, U32>:
+  mg.end.nl(cat([F3v.lead(v), f2.decl(fs, body), f3.laws(fs)]))
+
+def f3.add(+v: F3v, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +body: List<&2, U32>, +ctext: List<&2, U32>) -> List<&2, U32>:
+  +x = f3.add.text(v, fs, body)
+  U.append(f2.call("add", path, x),
+    mg.echo(cat([U.b("added: "), mg.join(f3.names(x), U.b(", ")), U.b(", "), f2.span(1n+mg.nls(F3v.head(v)), x), nl(), ctext])))
+
+# a session's first write (an add when first): Bend's through the view
+def f3.write(+first: Bool, +v: F3v, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +body: List<&2, U32>, +ctext: List<&2, U32>) -> List<&2, U32>:
+  Bool.pick(List<&2, U32>, Bool.and(first, mg.is.bend(fs)), f3.add(v, fs, path, body, ctext), f2.write(f2.lab(first), f2.said(first), fs, path, body, ctext))
+
+# The ask and the reply ------------------------------------------------------------------
+
+# the laws' statements, their proofs left out: each `law` line and the lines
+# under it up to the next head or blank line, a blank line between laws
+def f3.stmts.go(ls: List<&2, List<&2, U32>>, +inside: Bool, +first: Bool) -> List<&2, U32>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> t:
+      +islaw = U.prefix(l, U.b("law "))
+      +stop = Bool.or(U.blank(l), Bool.or(U.prefix(l, U.b("def ")), U.prefix(l, U.b("type "))))
+      +sep = Bool.pick(List<&2, U32>, Bool.and(islaw, Bool.not(first)), nl(), Nil{})
+      +keep = Bool.or(islaw, Bool.and(inside, Bool.not(stop)))
+      U.append(Bool.pick(List<&2, U32>, keep, U.append(sep, l), Nil{}), f3.stmts.go(t, keep, Bool.and(first, Bool.not(islaw))))
+
+def f3.stmts(+laws: List<&2, U32>) -> List<&2, U32>:
+  mg.chomp(f3.stmts.go(U.lines(laws), False{}, True{}))
+
+# a direct ask: as mg.ask.direct's, the laws' statements under the signature
+def f3.ask.direct(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2, U32>:
+  +laws = f3.laws(fs)
+  +name = code(field(fs, 2n))
+  +line = Bool.pick(List<&2, U32>, mg.prop(fs), cat([U.b("Prove "), name, U.b(" in "), path, U.b(".")]), cat([U.b("Add "), name, U.b(" to "), path, U.b(".")]))
+  +sig = Bool.pick(List<&2, U32>, empty(laws), tidy(field(fs, 4n)), cat([tidy(field(fs, 4n)), U.b("\n\n"), f3.stmts(laws)]))
+  cat([mg.doc(fs, line), U.b("\n\n"), mg.chomp(fence(field(fs, 0n), sig))])
+
+# `a`, `a` and `b`, `a`, `b` and `c`
+def f3.ands(ns: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case +n <> +t:
+      +k = List.length(&2, List<&2, U32>, t)
+      Bool.pick(List<&2, U32>, Nat.is_eq(k, 0n), code(n), cat([code(n), Bool.pick(List<&2, U32>, Nat.is_eq(k, 1n), U.b(" and "), U.b(", ")), f3.ands(t)]))
+
+def f3.before(ns: List<&2, List<&2, U32>>, +n: List<&2, U32>) -> List<&2, List<&2, U32>>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case +x <> t:
+      Bool.pick(List<&2, List<&2, U32>>, U.eq(x, n), Nil{}, x <> f3.before(t, n))
+
+def f3.after(ns: List<&2, List<&2, U32>>, +n: List<&2, U32>) -> List<&2, List<&2, U32>>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case +x <> +t:
+      Bool.pick(List<&2, List<&2, U32>>, U.eq(x, n), t, f3.after(t, n))
+
+# direct's reply: the verdict, what was added (the helpers before hers), its laws
+def f3.done.direct(+v: F3v, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2, U32>:
+  +n = field(fs, 2n)
+  +ns = f3.names(f3.add.text(v, fs, field(fs, 7n)))
+  +hs = f3.before(ns, n)
+  +ls = f3.after(ns, n)
+  +wl = Bool.pick(List<&2, U32>, empty(f3.laws(fs)), Nil{}, U.append(U.b(", with its laws "), f3.ands(ls)))
+  +what = Bool.pick(List<&2, U32>, mg.prop(fs),
+    cat([U.b("Proved "), code(n), U.b(" in "), path, Bool.pick(List<&2, U32>, Nat.is_eq(List.length(&2, List<&2, U32>, hs), 0n), Nil{}, U.append(U.b(", after "), f3.ands(hs)))]),
+    cat([U.b("Added "), f3.ands(List.append(&2, List<&2, U32>, hs, [n])), U.b(" to "), path]))
+  cat([f2.verdict(fs, field(fs, 11n)), [32], what, wl, U.b(".")])
+
+# the first mutant from m on that fails at a law (nm: none)
+def f3.lawmut(k: Nat, +fs: List<&2, List<&2, U32>>, +m: Nat, +nm: Nat) -> Nat:
+  match k:
+    case 0n:
+      nm
+    case 1n+j:
+      Bool.pick(Nat, Bool.not(empty(f3.why.law(fs, check.out(check.of(mutant.check(fs, m)))))), m, f3.lawmut(j, fs, 1n+m, nm))
+
+# The look-ups ---------------------------------------------------------------------------
+
+# the names a text's code lines hold (a letter or `_` first; comments left out)
+def f3.toks.go(xs: List<&2, U32>, +cur: List<&2, U32>, +acc: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match xs:
+    case Nil{}:
+      List.reverse(&2, List<&2, U32>, Bool.pick(List<&2, List<&2, U32>>, empty(cur), acc, List.reverse(&2, U32, cur) <> acc))
+    case +h <> t:
+      +more = Bool.or(f2.namech(h), Bool.and(Bool.not(empty(cur)), Bool.and(U32.is_lt(47, h), U32.is_lt(h, 58))))
+      +start = Bool.and(empty(cur), Bool.or(U32.is_eq(h, 95), Bool.or(Bool.and(U32.is_lt(96, h), U32.is_lt(h, 123)), Bool.and(U32.is_lt(64, h), U32.is_lt(h, 91)))))
+      +keep = Bool.or(start, Bool.and(Bool.not(empty(cur)), more))
+      +acc2 = Bool.pick(List<&2, List<&2, U32>>, Bool.or(keep, empty(cur)), acc, List.reverse(&2, U32, cur) <> acc)
+      f3.toks.go(t, Bool.pick(List<&2, U32>, keep, h <> cur, Nil{}), acc2)
+
+def f3.code.lines(ls: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> t:
+      U.append(Bool.pick(List<&2, U32>, head.is(lead.trim(l), 35), Nil{}, l), f3.code.lines(t))
+
+def f3.toks(+x: List<&2, U32>) -> List<&2, List<&2, U32>>:
+  f3.dedupe(f3.toks.go(f3.code.lines(U.lines(x)), Nil{}, Nil{}), Nil{})
+
+# Base's defs and laws among ns (not its types: every signature names those)
+def f3.based.fn(ns: List<&2, List<&2, U32>>, +base: Map<&2, List<&2, U32>>) -> List<&2, Bl>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case +n <> more:
+      +l = mg.got(Map.get(List<&2, U32>, Nil{}, base, mg.str(n)))
+      mg.based.on(Bool.or(U.prefix(l, U.b("def ")), U.prefix(l, U.b("law "))), n, l, f3.based.fn(more, base))
+
+# a direct ask's look-ups through the view: the Context's names, then every
+# other name the add's code uses (Base's defs and laws, the file's
+# definitions), less the ones it defines: the file's whole pieces, Base's
+# first lines
+def f3.look.ctx(+v: F3v, +fs: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  f3.minus(mg.words(field(fs, 9n)), f3.names(f3.add.text(v, fs, field(fs, 7n))))
+
+def f3.look.more(+v: F3v, +fs: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  +x = f3.add.text(v, fs, field(fs, 7n))
+  f3.minus(f3.toks(x), List.append(&2, List<&2, U32>, mg.words(field(fs, 9n)), f3.names(x)))
+
+def f3.look.bases(+v: F3v, +fs: List<&2, List<&2, U32>>, +hls: List<&2, List<&2, U32>>, +base: Map<&2, List<&2, U32>>) -> List<&2, Bl>:
+  List.append(&2, Bl, mg.based(mg.keep(f3.look.ctx(v, fs), hls, False{}), base), f3.based.fn(mg.keep(f3.look.more(v, fs), hls, False{}), base))
+
+def f3.looks(+v: F3v, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>) -> List<&2, U32>:
+  +head = F3v.head(v)
+  +hls = split(head, 10)
+  +inf = mg.keep(List.append(&2, List<&2, U32>, f3.look.ctx(v, fs), f3.look.more(v, fs)), hls, True{})
+  f2.look.of(path, List.append(&2, F2e, f2.heads.if(Bool.not(Nat.is_eq(List.length(&2, List<&2, U32>, inf), 0n)), inf, head),
+    f2.bases(f3.look.bases(v, fs, hls, base))))
+
+# A near name that is not there: a Base name the add calls with another
+# namespace (one of the file's types first, then Base's), or with an `s` more
+# or less, or `is_` less or more; the first that neither Base nor the file has
+def f3.ns.of(+n: List<&2, U32>) -> List<&2, U32>:
+  mg.upto(n, 46)
+
+def f3.fn.of(+n: List<&2, U32>) -> List<&2, U32>:
+  mg.after(n, 46)
+
+def f3.bytes.all(ss: List<&2, String>) -> List<&2, List<&2, U32>>:
+  match ss:
+    case Nil{}:
+      Nil{}
+    case +s <> t:
+      U.b(s) <> f3.bytes.all(t)
+
+# each namespace with fn after it
+def f3.prefixed(ps: List<&2, List<&2, U32>>, +fn: List<&2, U32>) -> List<&2, List<&2, U32>>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case +p <> t:
+      cat([p, [46], fn]) <> f3.prefixed(t, fn)
+
+def f3.near.cands(+n: List<&2, U32>, +types: List<&2, List<&2, U32>>, +r: Nat) -> List<&2, List<&2, U32>>:
+  +fn = f3.fn.of(n)
+  +sib : List<&2, String> = ["List", "Nat", "U32", "String", "Bool", "Maybe", "Char", "Map", "I32", "Pair"]
+  +k = Nat.mod(r, 10n)
+  +rot = List.append(&2, String, List.drop(&2, String, sib, k), List.take(&2, String, sib, k))
+  +ons = f3.prefixed(f3.bytes.all(rot), fn)
+  +own = f3.prefixed(types, fn)
+  +edits : List<&2, List<&2, U32>> = [U.append(n, [115]), List.take(&2, U32, n, Nat.sub(U.len(n), 1n)), cat([f3.ns.of(n), [46], U.strip(fn, U.b("is_"))]), cat([f3.ns.of(n), U.b(".is_"), fn])]
+  List.concat(&2, List<&2, U32>, [own, ons, edits])
+
+def f3.absent(+c: List<&2, U32>, +n: List<&2, U32>, +hls: List<&2, List<&2, U32>>, +base: Map<&2, List<&2, U32>>) -> Bool:
+  Bool.and(Bool.and(Bool.not(U.eq(c, n)), Bool.and(f3.namehd(c), Nat.is_lt(2n, U.len(c)))),
+    Bool.and(Nat.is_eq(List.length(&2, Bl, mg.based([c], base)), 0n), Bool.not(mg.sig.any(hls, c))))
+
+def f3.near.go(cs: List<&2, List<&2, U32>>, +n: List<&2, U32>, +hls: List<&2, List<&2, U32>>, +base: Map<&2, List<&2, U32>>) -> List<&2, U32>:
+  match cs:
+    case Nil{}:
+      Nil{}
+    case +c <> t:
+      Bool.pick(List<&2, U32>, f3.absent(c, n, hls, base), c, f3.near.go(t, n, hls, base))
+
+def f3.types.of(ps: List<&2, F2.Piece<List<&2, U32>, List<&2, U32>>>) -> List<&2, List<&2, U32>>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case F2.Piece{+nm, +b, g} <> t:
+      mg.keep.on(Bool.and(U.prefix(U.concat(b), U.b("type ")), Bool.not(U.has(nm, 46))), nm, f3.types.of(t))
+
+def f3.types.d(+d: F2.Doc<List<&2, U32>, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match d:
+    case F2.Doc{+p, +g, ds}:
+      f3.types.of(ds)
+
+def f3.types.in(+head: List<&2, U32>) -> List<&2, List<&2, U32>>:
+  f3.types.d(f2.bdoc(head))
+
+def f3.dotted(ns: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case +n <> t:
+      mg.keep.on(Bool.and(U.has(n, 46), Bool.not(empty(f3.fn.of(n)))), n, f3.dotted(t))
+
+# the miss: a look of the near name and its echo (none: no Base name to miss)
+def f3.miss.look(+v: F3v, +fs: List<&2, List<&2, U32>>, +id: List<&2, U32>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>) -> List<&2, U32>:
+  +head = F3v.head(v)
+  +hls = split(head, 10)
+  +bs = f3.dotted(mg.bl.names(f3.based.fn(mg.keep(List.append(&2, List<&2, U32>, f3.look.ctx(v, fs), f3.look.more(v, fs)), hls, False{}), base)))
+  +k = List.length(&2, List<&2, U32>, bs)
+  +n = U.nth(bs, roll(id, 22n, Nat.max(k, 1n)))
+  +types = f3.types.in(head)
+  +c = Bool.pick(List<&2, U32>, Nat.is_eq(k, 0n), Nil{}, f3.near.go(f3.near.cands(n, types, roll(id, 23n, 10n)), n, hls, base))
+  Bool.pick(List<&2, U32>, empty(c), Nil{}, f2.look.of(path, [F2e{c, cat([c, U.b(": not in "), path, U.b(" or Base")])}]))
+
+def f3.read.tail(+head: List<&2, U32>, +path: List<&2, U32>) -> List<&2, U32>:
+  +n = List.length(&2, List<&2, U32>, mg.rows(head))
+  +from = Bool.pick(Nat, Nat.is_lt(n, 25n), 1n, Nat.sub(n, 23n))
+  mg.read(path, head, from, Nat.sub(Nat.add(n, 1n), from))
 
 # Sessions ------------------------------------------------------------------------------
 
@@ -2270,12 +2736,71 @@ def f2.read.tail(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2,
   mg.read(path, f0, from, Nat.sub(Nat.add(n, 1n), from))
 
 # direct: the ask, the file's last lines, the look-ups, [a def refused], the
-# writes (an add first), the reply
-def f2.direct(+x: Nat, +miss: Bool, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>, +j: Nat, +m: Nat, +nm: Nat) -> Mx:
+# writes (an add first), the reply (another language's: R5g's, as it was)
+def f2.direct.other(+x: Nat, +miss: Bool, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>, +j: Nat, +m: Nat, +nm: Nat) -> Mx:
   +ok = Bool.and(mg.tries.ok(j, fs, Nil{}, m, nm), Bool.or(Nat.is_eq(x, 0n), f2.can.give(fs)))
   Mx{ok, cat([mg.user(mg.ask.direct(fs, path)), f2.read.tail(fs, path), f2.looks.new(fs, path, base),
     Bool.pick(List<&2, U32>, miss, f2.miss.add(fs, path), Nil{}), f2.tries(x, j, True{}, fs, path, m, nm),
     f2.reply.x(x, fs, path, j, mg.last.m(m, j, nm), f2.done.direct(fs, path))])}
+
+# Bend's last write and tries as f2.end's and f2.tries's, the first through the
+# view (an add of the lines from the cut, the declaration, its laws)
+def f3.end(x: Nat, +first: Bool, +v: F3v, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2, U32>:
+  match x:
+    case 0n:
+      f3.write(first, v, fs, path, field(fs, 7n), f2.out(fs, path, field(fs, 11n)))
+    case _:
+      f3.write(first, v, fs, path, field(fs, 10n), f2.hole.out(fs, path, field(fs, 13n)))
+
+def f3.tries(+x: Nat, j: Nat, +first: Bool, +v: F3v, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +m: Nat, +nm: Nat) -> List<&2, U32>:
+  match j:
+    case 0n:
+      f3.end(x, first, v, fs, path)
+    case 1n+p:
+      U.append(f3.write(first, v, fs, path, mutant(fs, m), f2.out(fs, path, mutant.check(fs, m))),
+        f3.tries(x, p, False{}, v, fs, path, next.m(m, 1n, nm), nm))
+
+# about 1 in 8 Bend direct asks look up a near name first (none when the add
+# calls no Base definition)
+def f3.near(+id: List<&2, U32>) -> Bool:
+  Nat.is_eq(roll(id, 24n, 8n), 0n)
+
+def f3.miss.if(near: Bool, +v: F3v, +fs: List<&2, List<&2, U32>>, +id: List<&2, U32>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>) -> List<&2, U32>:
+  match near:
+    case True{}:
+      f3.miss.look(v, fs, id, path, base)
+    case False{}:
+      Nil{}
+
+# a Bend direct ask through the view: the ask (with the laws' statements), the
+# cut file's last lines, [a near name not found], the look-ups, [a def
+# refused], the writes (the first an add from the cut), the reply
+def f3.direct(+x: Nat, +miss: Bool, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +j: Nat, +m: Nat, +nm: Nat) -> Mx:
+  +v = f3.view(fs)
+  +ok = Bool.and(mg.tries.ok(j, fs, Nil{}, m, nm), Bool.or(Nat.is_eq(x, 0n), f2.can.give(fs)))
+  Mx{ok, cat([mg.user(f3.ask.direct(fs, path)), f3.read.tail(F3v.head(v), path), f3.miss.if(f3.near(id), v, fs, id, path, base),
+    f3.looks(v, fs, path, base), Bool.pick(List<&2, U32>, miss, f2.miss.add(fs, path), Nil{}), f3.tries(x, j, True{}, v, fs, path, m, nm),
+    f2.reply.x(x, fs, path, j, mg.last.m(m, j, nm), f3.done.direct(v, fs, path))])}
+
+def f2.direct.on(bend: Bool, +x: Nat, +miss: Bool, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +j: Nat, +m: Nat, +nm: Nat) -> Mx:
+  match bend:
+    case True{}:
+      f3.direct(x, miss, fs, path, base, id, j, m, nm)
+    case False{}:
+      f2.direct.other(x, miss, fs, path, base, j, m, nm)
+
+def f2.direct(+x: Nat, +miss: Bool, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +j: Nat, +m: Nat, +nm: Nat) -> Mx:
+  f2.direct.on(mg.is.bend(fs), x, miss, fs, path, base, id, j, m, nm)
+
+# a direct session's tag: `direct`, `direct-helper-K` (K definitions above
+# hers in her add), `direct-scratch-K` (a nearly empty file), `-miss` after
+# when she looks up a near name first
+def f3.tag(+fs: List<&2, List<&2, U32>>, +id: List<&2, U32>, +base: Map<&2, List<&2, U32>>) -> List<&2, U32>:
+  +v = f3.view(fs)
+  +k = F3v.k(v)
+  +kind = Bool.pick(List<&2, U32>, Nat.is_eq(k, 0n), Nil{}, cat([Bool.pick(List<&2, U32>, F3v.scratch(v), U.b("-scratch-"), U.b("-helper-")), mg.n(k)]))
+  +near = Bool.not(empty(f3.miss.if(Bool.and(mg.is.bend(fs), f3.near(id)), v, fs, id, mg.path(id), base)))
+  cat([U.b("direct"), kind, Bool.pick(List<&2, U32>, near, U.b("-miss"), Nil{})])
 
 # fill: the ask, the hole's check, a look at the declaration and the
 # Context's names, [a def refused], the writes, the reply
@@ -2320,7 +2845,7 @@ def f2.fill.if(some: Bool, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>
 def f2.direct.if(some: Bool, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +nm: Nat, rest: List<&2, Mg>) -> List<&2, Mg>:
   match some:
     case True{}:
-      f2.keep(f2.direct(0n, False{}, fs, path, base, 0n, 0n, nm), b, limit, id, U.b("direct"), rest)
+      f2.keep(f2.direct(0n, False{}, fs, path, base, id, 0n, 0n, nm), b, limit, id, f3.tag(fs, id, base), rest)
     case False{}:
       rest
 
@@ -2338,7 +2863,7 @@ def f2.chain.at(repair: Bool, hole: Bool, +b: Tk.Bpe, +limit: Nat, +base: Map<&2
     case False{} True{}:
       f2.keep(f2.fill(0n, False{}, fs, path, base, j, m, nm), b, limit, id, U.append(U.b("chain-fill-"), mg.n(j)), rest)
     case False{} False{}:
-      f2.keep(f2.direct(0n, False{}, fs, path, base, j, m, nm), b, limit, id, U.append(U.b("chain-"), mg.n(j)), rest)
+      f2.keep(f2.direct(0n, False{}, fs, path, base, id, j, m, nm), b, limit, id, U.append(U.b("chain-"), mg.n(j)), rest)
 
 def f2.chain.if(some: Bool, +repair: Bool, +hole: Bool, +b: Tk.Bpe, +limit: Nat, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +j: Nat, +nm: Nat, rest: List<&2, Mg>) -> List<&2, Mg>:
   match some:
@@ -2364,7 +2889,7 @@ def f2.fix.at(s: Nat, +x: Nat, +name: String, +b: Tk.Bpe, +limit: Nat, +base: Ma
     case 0n:
       +miss = Nat.is_eq(x, 2n)
       +jn = Bool.pick(List<&2, U32>, miss, U.b("-direct"), U.append(U.b("-"), mg.n(j)))
-      f2.keep(f2.direct(Bool.pick(Nat, Nat.is_eq(x, 1n), 1n, 0n), miss, fs, mg.path(id), base, Bool.pick(Nat, miss, 0n, j), m, nm), b, limit, id, cat([U.b("fix-"), U.b(name), jn]), rest)
+      f2.keep(f2.direct(Bool.pick(Nat, Nat.is_eq(x, 1n), 1n, 0n), miss, fs, mg.path(id), base, id, Bool.pick(Nat, miss, 0n, j), m, nm), b, limit, id, cat([U.b("fix-"), U.b(name), jn]), rest)
     case 1n:
       +miss = Nat.is_eq(x, 2n)
       +jn = Bool.pick(List<&2, U32>, miss, Nil{}, U.append(U.b("-"), mg.n(j)))

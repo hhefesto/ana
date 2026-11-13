@@ -88,15 +88,36 @@ def am.f0(+t: AmT) -> List<&2, U32>:
   +fs = AmT.fs(t)
   +sh = AmT.shape(t)
   Bool.pick(List<&2, U32>, S.eq(sh, S.b("direct")), T.mg.head(fs),
-    Bool.pick(List<&2, U32>, S.eq(sh, S.b("fill")), T.mg.with(fs, T.field(fs, 10n)),
-      T.mg.with(fs, T.mutant(fs, C.cb.nat(S.strip(sh, S.b("repair-")))))))
+    Bool.pick(List<&2, U32>, S.eq(sh, S.b("direct-cut")), T.F3v.head(T.f3.view(fs)),
+    Bool.pick(List<&2, U32>, S.eq(sh, S.b("fill")), S.append(T.mg.with(fs, T.field(fs, 10n)), T.f3.laws(fs)),
+      S.append(T.mg.with(fs, T.mutant(fs, C.cb.nat(S.strip(sh, S.b("repair-"))))), T.f3.laws(fs)))))
+
+# whether every non-blank line of ls is in f
+def am.lines.in(ls: List<&2, List<&2, U32>>, +f: List<&2, U32>) -> Bool:
+  match ls:
+    case Nil{}:
+      True{}
+    case +l <> t:
+      Bool.and(Bool.or(U.blank(l), U.infix(f, S.chomp(l))), am.lines.in(t, f))
+
+# direct-cut's (Form 2's kinds): the cut file still opens it, it defines the
+# unit's name (her helpers are hers), and it holds the laws' statements
+def am.done.cut(+fs: List<&2, List<&2, U32>>, +f: List<&2, U32>) -> Bool:
+  +laws = T.f3.laws(fs)
+  Bool.and(S.prefix(f, T.F3v.head(T.f3.view(fs))), Bool.and(T.f3.in(T.f3.names(f), T.field(fs, 2n)), am.lines.in(U.lines(T.f3.stmts(laws)), f)))
 
 # whether a file holds the unit's definition: the head and the declaration's
-# first part, then a body
+# first part, then a body (direct-cut: am.done.cut)
+def am.done.on(cut: Bool, +fs: List<&2, List<&2, U32>>, +f: List<&2, U32>) -> Bool:
+  match cut:
+    case True{}:
+      am.done.cut(fs, f)
+    case False{}:
+      +pre = T.mg.with(fs, Nil{})
+      Bool.and(S.prefix(f, pre), Bool.not(S.eq(S.chomp(f), S.chomp(pre))))
+
 def am.done(+t: AmT, +f: List<&2, U32>) -> Bool:
-  +fs = AmT.fs(t)
-  +pre = T.mg.with(fs, Nil{})
-  Bool.and(S.prefix(f, pre), Bool.not(S.eq(S.chomp(f), S.chomp(pre))))
+  am.done.on(S.eq(AmT.shape(t), S.b("direct-cut")), AmT.fs(t), f)
 
 # The calls --------------------------------------------------------------------------
 
@@ -359,14 +380,37 @@ def am.f2.def.on(there: Bool, +path: List<&2, U32>, +f: List<&2, U32>, +n: List<
     case False{}:
       AmW{f, am.f2.refused(path, n, am.near(am.f2.names(f), n, AmN{Nil{}, 1000n})), False{}}
 
-def am.f2.add.on(there: Bool, +path: List<&2, U32>, +f: List<&2, U32>, +n: List<&2, U32>, +x: List<&2, U32>) -> AmW:
+# an add's text may hold several definitions (Form 2's kinds, 2026-11-13: her
+# helpers, her `#` comment, the function, its laws): its echo names each,
+# `added: h, f, f.ex1, lines A-B` (one: `added: f, lines A-B`, as before);
+# refused when the file holds any of them already (the first, n)
+def am.f2.add.on(there: Bool, +path: List<&2, U32>, +f: List<&2, U32>, +n: List<&2, U32>, +ns: List<&2, List<&2, U32>>, +x: List<&2, U32>) -> AmW:
   match there:
     case True{}:
       AmW{f, T.cat([S.b("refused: "), n, S.b(" is in "), path, S.b(" already, "), am.f2.span(f, n), S.b(" (`## def` replaces it). No file was changed.")]), False{}}
     case False{}:
       +f0 = Bool.pick(List<&2, U32>, Bool.or(T.empty(f), S.suffix(f, [10])), f, S.append(f, [10]))
       +a = Nat.add(1n, T.mg.nls(f0))
-      AmW{S.append(f0, x), T.cat([S.b("added: "), n, S.b(", "), T.f2.span(a, x)]), True{}}
+      AmW{S.append(f0, x), T.cat([S.b("added: "), T.mg.join(ns, S.b(", ")), S.b(", "), T.f2.span(a, x)]), True{}}
+
+# the first of ns the file f holds (none: empty)
+def am.f2.had(ns: List<&2, List<&2, U32>>, +f: List<&2, U32>) -> List<&2, U32>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case +n <> t:
+      +rest = am.f2.had(t, f)
+      Bool.pick(List<&2, U32>, am.f2.has(f, n), n, rest)
+
+# an add's names: its pieces' (none read: the one name line, n)
+def am.f2.add.names(+n: List<&2, U32>, +x: List<&2, U32>) -> List<&2, List<&2, U32>>:
+  +ns = T.f3.names(x)
+  Bool.pick(List<&2, List<&2, U32>>, Nat.is_eq(List.length(&2, List<&2, U32>, ns), 0n), [n], ns)
+
+def am.f2.add(+path: List<&2, U32>, +f: List<&2, U32>, +n: List<&2, U32>, +x: List<&2, U32>) -> AmW:
+  +ns = am.f2.add.names(n, x)
+  +had = am.f2.had(ns, f)
+  am.f2.add.on(Bool.not(T.empty(had)), path, f, had, ns, x)
 
 # def (add: False) or add of body (`PATH`, then the definition) on f
 def am.f2.write(+add: Bool, +t: AmT, +f: List<&2, U32>, +body: List<&2, U32>) -> AmW:
@@ -377,7 +421,7 @@ def am.f2.write(+add: Bool, +t: AmT, +f: List<&2, U32>, +body: List<&2, U32>) ->
   +bad = Bool.pick(List<&2, U32>, Bool.not(S.eq(path, am.path(t))), T.cat([S.b("refused: no file "), path, S.b(". No file was changed.")]),
     Bool.pick(List<&2, U32>, T.empty(n), S.b("refused: no `def`, `law` or `type` NAME line in it. No file was changed."), Nil{}))
   Bool.pick(AmW, Bool.not(T.empty(bad)), AmW{f, bad, False{}},
-    Bool.pick(AmW, add, am.f2.add.on(am.f2.has(f, n), path, f, n, x), am.f2.def.on(am.f2.has(f, n), path, f, n, x)))
+    Bool.pick(AmW, add, am.f2.add(path, f, n, x), am.f2.def.on(am.f2.has(f, n), path, f, n, x)))
 
 # a call's code: 1 edit, 2 def, 3 add, 4 check, 5 look, 0 any other
 def am.code.of(+lb: List<&2, U32>) -> Nat:
@@ -1089,7 +1133,8 @@ def am.live(xs: List<String>) -> IO(Unit):
 
 def am.ask(+sh: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2, U32>:
   Bool.pick(List<&2, U32>, S.eq(sh, S.b("direct")), T.mg.ask.direct(fs, path),
-    Bool.pick(List<&2, U32>, S.eq(sh, S.b("fill")), T.mg.ask.fill(fs, path), T.mg.ask.repair(fs, path)))
+    Bool.pick(List<&2, U32>, S.eq(sh, S.b("direct-cut")), T.f3.ask.direct(fs, path),
+    Bool.pick(List<&2, U32>, S.eq(sh, S.b("fill")), T.mg.ask.fill(fs, path), T.mg.ask.repair(fs, path))))
 
 def am.prompt(+t: AmT) -> List<&2, U32>:
   T.mg.user(am.ask(AmT.shape(t), AmT.fs(t), am.path(t)))
@@ -1106,8 +1151,10 @@ def am.ref(+t: AmT) -> List<&2, U32>:
 # holds the check)
 def am.ref.f2(+t: AmT) -> List<&2, U32>:
   +fs = AmT.fs(t)
-  +label = Bool.pick(List<&2, U32>, S.eq(AmT.shape(t), S.b("direct")), S.b("add"), S.b("def"))
-  T.cat([am.prompt(t), T.turn(label, T.cat([am.path(t), [10], T.mg.end.nl(T.f2.decl(fs, T.field(fs, 7n)))])), S.b("## echo\n")])
+  +cut = S.eq(AmT.shape(t), S.b("direct-cut"))
+  +label = Bool.pick(List<&2, U32>, Bool.or(cut, S.eq(AmT.shape(t), S.b("direct"))), S.b("add"), S.b("def"))
+  +x = Bool.pick(List<&2, U32>, cut, T.f3.add.text(T.f3.view(fs), fs, T.field(fs, 7n)), T.mg.end.nl(T.f2.decl(fs, T.field(fs, 7n))))
+  T.cat([am.prompt(t), T.turn(label, T.cat([am.path(t), [10], x])), S.b("## echo\n")])
 
 def am.ref.of(+form2: Bool, +t: AmT) -> List<&2, U32>:
   Bool.pick(List<&2, U32>, form2, am.ref.f2(t), am.ref(t))
