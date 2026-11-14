@@ -26,9 +26,10 @@ import ./ExlawText.bend as X
 # other unit as it was.  OUT.log: a line a unit; OUT.stats: the counts.
 #
 # A Bend unit whose original passes (field 11 exits 0), not a proposition,
-# whose declaration `def NAME(PARAMS) -> RESULT:` has only Base data in its
+# whose declaration `def NAME(PARAMS) -> RESULT:` has only data in its
 # parameters and result (Nat, U32, Bool, Char, String, `List<&2, T>` and
-# `A & B` of them; no type parameters), is checked as bend-check checks it
+# `A & B` of them, and since 2026-11-14 a `type T is Data:` of its head, its
+# inputs built from its constructors; no type parameters), is checked as bend-check checks it
 # (Check/Bend.bend's layout: the head, the declaration's pre, the body, as
 # Unit.bend beside its file in a copy of its repository's .bend files, `bend
 # Unit.bend --check-only` under TIMEOUT (30) s, BEND as mutate's), in its
@@ -229,7 +230,7 @@ def ex.placed(+cx: ExCx, +src: String, +uid: List<&2, U32>, +rec: List<&2, U32>,
   +cf = {Bd.Cf{ExCf.bend(c), src, U32.from_nat(ExCf.t(c)), 100n} : Bd.Cf}
   +u = {Cl.U{0n, uid, List.take(&2, List<&2, U32>, fs, 11n)} : Cl.U}
   +p = {ExP{cf, tdir, udir, u} : ExP}
-  +cs = X.ex.calls(T.field(fs, 2n), X.ExSig.ps(sig), T.roll(uid, 31n, 5n))
+  +cs = X.ex.calls.in(X.ex.tbl(T.field(fs, 5n)), T.field(fs, 2n), X.ExSig.ps(sig), T.roll(uid, 31n, 5n))
   do IO<ExU>:
     +h : Bool <- S.exists(tdir ++ "/src/" ++ repo)
     Mu.mtt.copy(h, src, tdir, repo)
