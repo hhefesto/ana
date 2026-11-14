@@ -19,23 +19,51 @@ def ex.close(+c: U32) -> Bool:
 def ex.trim(+x: List<&2, U32>) -> List<&2, U32>:
   U.trim.right(T.lead.trim(x))
 
-# xs cut at each byte s outside brackets ( [ { < and string and char literals
-def ex.sp.go(xs: List<&2, U32>, +s: U32, +cur: List<&2, U32>, +acc: List<&2, List<&2, U32>>, +d: Nat, +q: U32, +esc: Bool) -> List<&2, List<&2, U32>>:
+# xs cut at each byte s outside brackets ( [ { < and string and char literals.
+# Linear: the depth is a U32 (a Nat is unary: copying and comparing it cost
+# its size) and a step builds only the branch it takes (Bool.pick builds both:
+# it reversed the piece so far at every byte, 11 h on a 2.7 MB `- expected`,
+# 2026-11-13).
+type ExSp is Data:
+  ExSp{cur: List<&2, U32>, acc: List<&2, List<&2, U32>>}
+
+def ex.sp.put(cut: Bool, +h: U32, cur: List<&2, U32>, acc: List<&2, List<&2, U32>>) -> ExSp:
+  match cut:
+    case True{}:
+      ExSp{Nil{}, List.reverse(&2, U32, cur) <> acc}
+    case False{}:
+      ExSp{h <> cur, acc}
+
+def ex.sp.step(cut: Bool, +h: U32, st: ExSp) -> ExSp:
+  match st:
+    case ExSp{cur, acc}:
+      ex.sp.put(cut, h, cur, acc)
+
+def ex.sp.end(st: ExSp) -> List<&2, List<&2, U32>>:
+  match st:
+    case ExSp{cur, acc}:
+      List.reverse(&2, List<&2, U32>, List.reverse(&2, U32, cur) <> acc)
+
+# one bracket less, never below none
+def ex.sp.out(+d: U32) -> U32:
+  Bool.pick(U32, U32.is_eq(d, 0), 0, U32.sub(d, 1))
+
+def ex.sp.go(xs: List<&2, U32>, +s: U32, st: ExSp, +d: U32, +q: U32, +esc: Bool) -> List<&2, List<&2, U32>>:
   match xs:
     case Nil{}:
-      List.reverse(&2, List<&2, U32>, List.reverse(&2, U32, cur) <> acc)
+      ex.sp.end(st)
     case +h <> t:
       +inq = Bool.not(U32.is_eq(q, 0))
       +shut = Bool.and(U32.is_eq(h, q), Bool.not(esc))
       +opens = Bool.or(U32.is_eq(h, 34), U32.is_eq(h, 39))
       +q2 = Bool.pick(U32, inq, Bool.pick(U32, shut, 0, q), Bool.pick(U32, opens, h, 0))
       +esc2 = Bool.and(inq, Bool.and(U32.is_eq(h, 92), Bool.not(esc)))
-      +d2 = Bool.pick(Nat, inq, d, Bool.pick(Nat, ex.open(h), 1n+d, Bool.pick(Nat, ex.close(h), Nat.sub(d, 1n), d)))
-      +cut = Bool.and(Bool.not(inq), Bool.and(Nat.is_eq(d, 0n), U32.is_eq(h, s)))
-      ex.sp.go(t, s, Bool.pick(List<&2, U32>, cut, Nil{}, h <> cur), Bool.pick(List<&2, List<&2, U32>>, cut, List.reverse(&2, U32, cur) <> acc, acc), d2, q2, esc2)
+      +d2 = Bool.pick(U32, inq, d, Bool.pick(U32, ex.open(h), U32.add(d, 1), Bool.pick(U32, ex.close(h), ex.sp.out(d), d)))
+      +cut = Bool.and(Bool.not(inq), Bool.and(U32.is_eq(d, 0), U32.is_eq(h, s)))
+      ex.sp.go(t, s, ex.sp.step(cut, h, st), d2, q2, esc2)
 
 def ex.sp(+xs: List<&2, U32>, +s: U32) -> List<&2, List<&2, U32>>:
-  ex.sp.go(xs, s, Nil{}, Nil{}, 0n, 0, False{})
+  ex.sp.go(xs, s, ExSp{Nil{}, Nil{}}, 0, 0, False{})
 
 def ex.trims(xs: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
   match xs:
@@ -495,4 +523,16 @@ law ex.with.field14:
   {T.field(T.split(ex.with(ex.fs.of(U.b("def f() -> Nat:\n")), U.b("\nlaw f.ex1:\n"), [U.b("m"), U.b("1")]), 30), 14n) == U.b("\nlaw f.ex1:\n") : List<&2, U32>}
 
 def ex.with.field14():
+  {==}
+
+law ex.sp.nested:
+  {ex.sp(U.b("f(a, [b, c]), d, \"e, f\", ')'"), 44) == [U.b("f(a, [b, c])"), U.b(" d"), U.b(" \"e, f\""), U.b(" ')'")] : List<&2, List<&2, U32>>}
+
+def ex.sp.nested():
+  {==}
+
+law ex.sp.unbalanced:
+  {ex.sp(U.b("a), b"), 44) == [U.b("a)"), U.b(" b")] : List<&2, List<&2, U32>>}
+
+def ex.sp.unbalanced():
   {==}
