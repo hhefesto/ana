@@ -2529,6 +2529,22 @@ def f3.ask.direct(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2
   +sig = Bool.pick(List<&2, U32>, empty(laws), tidy(field(fs, 4n)), cat([tidy(field(fs, 4n)), U.b("\n\n"), f3.stmts(laws)]))
   cat([mg.doc(fs, line), U.b("\n\n"), mg.chomp(fence(field(fs, 0n), sig))])
 
+# Laws in the fill and repair asks (the user, 11-14: "Laws in the request, as
+# the spec.  Most Fill and Add requests should state what the function must
+# do, not just its type"): a Bend unit with laws (field 14) asks as before,
+# then its laws' statements in a block, as a direct ask's are under the
+# signature; the file holds them after the declaration, so the checks stand.
+# Without laws, or another language: the ask as before.
+def f3.ask.laws(+fs: List<&2, List<&2, U32>>, +ask: List<&2, U32>) -> List<&2, U32>:
+  +laws = f3.laws(fs)
+  Bool.pick(List<&2, U32>, empty(laws), ask, cat([ask, U.b("\n\n"), mg.chomp(fence(field(fs, 0n), f3.stmts(laws)))]))
+
+def f3.ask.fill(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2, U32>:
+  f3.ask.laws(fs, mg.ask.fill(fs, path))
+
+def f3.ask.repair(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2, U32>:
+  f3.ask.laws(fs, mg.ask.repair(fs, path))
+
 # `a`, `a` and `b`, `a`, `b` and `c`
 def f3.ands(ns: List<&2, List<&2, U32>>) -> List<&2, U32>:
   match ns:
@@ -2709,6 +2725,113 @@ def f3.read.tail(+head: List<&2, U32>, +path: List<&2, U32>) -> List<&2, U32>:
   +from = Bool.pick(Nat, Nat.is_lt(n, 25n), 1n, Nat.sub(n, 23n))
   mg.read(path, head, from, Nat.sub(Nat.add(n, 1n), from))
 
+# Looking before trying again (the user, 11-14: "Look before retrying. After a
+# failed write she reads the error, looks up the name or reads Base, then writes
+# something different").  Between a Bend write the check failed and the next
+# write: one look at the names on the line the check marks (`N>| ...`) and the
+# names the next write uses that the failed one did not, those the head defines
+# (their whole pieces) and Base's defs and laws (their first lines), at most 3,
+# the declaration's own name and the names the next write defines left out; a
+# name the check said is not defined (`- expected : a defined name`, then
+# `- observed : NAME`) that neither the head nor Base has comes first, answered
+# `NAME: not in PATH or Base`.  Nothing to look up: no look (the next write
+# follows at once, as before).  Every echo is the look's on the file as it
+# then is (the head, the failed declaration): no checker runs.
+
+# the check's marked line after its `|` (`12>| 		add_zero(p)`), or none
+def f3.err.line(ls: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> t:
+      Bool.pick(List<&2, U32>, U.infix(l, [62, 124]), mg.after(l, 124), f3.err.line(t))
+
+# the name after `- observed : ` when the line before is `- expected : a defined name`
+def f3.undef.go(ls: List<&2, List<&2, U32>>, +prev: Bool) -> List<&2, U32>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> t:
+      Bool.pick(List<&2, U32>, Bool.and(prev, U.prefix(l, U.b("- observed : "))), List.drop(&2, U32, l, 13n),
+        f3.undef.go(t, U.eq(l, U.b("- expected : a defined name"))))
+
+def f3.undef(+out: List<&2, U32>) -> List<&2, U32>:
+  +u = f3.undef.go(split(out, 10), False{})
+  Bool.pick(List<&2, U32>, f3.namehd(u), u, Nil{})
+
+# the check's `- expected :` and `- observed :` lines
+def f3.err.said(ls: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> t:
+      +said = Bool.or(U.prefix(l, U.b("- expected :")), U.prefix(l, U.b("- observed :")))
+      U.append(Bool.pick(List<&2, U32>, said, U.append(List.drop(&2, U32, l, 12n), [10]), Nil{}), f3.err.said(t))
+
+# the names to look up: the next write's new ones, then those the check's
+# expected/observed lines name, then the marked line's, each once, but the
+# declaration's own and those the next write defines
+def f3.relook.ns(+fs: List<&2, List<&2, U32>>, +bad: List<&2, U32>, +out: List<&2, U32>, +next: List<&2, U32>) -> List<&2, List<&2, U32>>:
+  +own : List<&2, List<&2, U32>> = field(fs, 2n) <> f3.names(f2.decl(fs, next))
+  +ls = split(out, 10)
+  +diff = f3.minus(f3.toks(next), f3.toks(bad))
+  +said = f3.toks(f3.err.said(ls))
+  +line = f3.toks(f3.err.line(ls))
+  f3.minus(f3.dedupe(List.concat(&2, List<&2, U32>, [diff, said, line]), Nil{}), own)
+
+# a type line of the head: `type NAME is`, `type NAME<`, `type NAME:`
+def f3.type.line(+n: List<&2, U32>, +l: List<&2, U32>) -> Bool:
+  +t = U.append(U.b("type "), n)
+  Bool.or(U.prefix(l, U.append(t, U.b(" is"))), Bool.or(U.prefix(l, U.append(t, [60])), U.prefix(l, U.append(t, [58]))))
+
+def f3.type.any(ls: List<&2, List<&2, U32>>, +n: List<&2, U32>) -> Bool:
+  match ls:
+    case Nil{}:
+      False{}
+    case +l <> more:
+      Bool.or(f3.type.line(n, l), f3.type.any(more, n))
+
+# the names the head defines, its types too (want), or those it does not
+def f3.keep.t(ns: List<&2, List<&2, U32>>, +hls: List<&2, List<&2, U32>>, +want: Bool) -> List<&2, List<&2, U32>>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case +n <> more:
+      mg.keep.on(Bool.not(Bool.xor(Bool.or(mg.sig.any(hls, n), f3.type.any(hls, n)), want)), n, f3.keep.t(more, hls, want))
+
+# the not-defined name's entry, when neither the head nor Base has it
+def f3.relook.miss(+u: List<&2, U32>, +hls: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>) -> List<&2, F2e>:
+  +gone = Bool.and(Bool.not(empty(u)), Bool.and(Nat.is_eq(List.length(&2, Bl, mg.based([u], base)), 0n), Bool.not(Bool.or(mg.sig.any(hls, u), f3.type.any(hls, u)))))
+  Bool.pick(List<&2, F2e>, gone, [F2e{u, cat([u, U.b(": not in "), path, U.b(" or Base")])}], Nil{})
+
+# the look between failed write bad (its recorded check c) and the next write's body
+def f3.relook(+fs: List<&2, List<&2, U32>>, +head: List<&2, U32>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>,
+              +bad: List<&2, U32>, +c: List<&2, U32>, +next: List<&2, U32>) -> List<&2, U32>:
+  +out = check.out(check.of(c))
+  +hls = split(head, 10)
+  +u = f3.undef(out)
+  +ns = f3.minus(f3.relook.ns(fs, bad, out, next), [u])
+  +miss = f3.relook.miss(u, hls, path, base)
+  +room = Nat.sub(3n, List.length(&2, F2e, miss))
+  +inf = List.take(&2, List<&2, U32>, f3.keep.t(ns, hls, True{}), room)
+  +hs = f2.heads.if(Bool.not(Nat.is_eq(List.length(&2, List<&2, U32>, inf), 0n)), inf, head)
+  +bs = List.take(&2, Bl, f3.based.fn(f3.keep.t(ns, hls, False{}), base), Nat.sub(room, List.length(&2, F2e, hs)))
+  f2.look.of(path, List.concat(&2, F2e, [miss, hs, f2.bases(bs)]))
+
+# (Bend only: the other languages' sessions are R5g's)
+def f3.relook.if(bend: Bool, +fs: List<&2, List<&2, U32>>, +head: List<&2, U32>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>,
+                 +bad: List<&2, U32>, +c: List<&2, U32>, +next: List<&2, U32>) -> List<&2, U32>:
+  match bend:
+    case True{}:
+      f3.relook(fs, head, path, base, bad, c, next)
+    case False{}:
+      Nil{}
+
+# the body the write after mutant m's gives, q tries left after it: the next
+# mutant's, else the end's (x 0 the original, else the hole)
+def f2.next.body(+x: Nat, +q: Nat, +fs: List<&2, List<&2, U32>>, +m: Nat, +nm: Nat) -> List<&2, U32>:
+  Bool.pick(List<&2, U32>, Nat.is_eq(q, 0n), Bool.pick(List<&2, U32>, Nat.is_eq(x, 0n), field(fs, 7n), field(fs, 10n)), mutant(fs, next.m(m, 1n, nm)))
+
 # Sessions ------------------------------------------------------------------------------
 
 # the last write: x 0 the original, its check; 1 the hole back, its check
@@ -2719,15 +2842,21 @@ def f2.end(x: Nat, +first: Bool, +fs: List<&2, List<&2, U32>>, +path: List<&2, U
     case _:
       f2.write(f2.lab(first), f2.said(first), fs, path, field(fs, 10n), f2.hole.out(fs, path, field(fs, 13n)))
 
-# j wrong writes, the mutants from m on, each with its recorded check, then
-# the end x gives; first: the file has no declaration yet (its first write an add)
-def f2.tries(+x: Nat, j: Nat, +first: Bool, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +m: Nat, +nm: Nat) -> List<&2, U32>:
+# j wrong writes, the mutants from m on, each with its recorded check (Bend's
+# then a look, f3.relook), then the end x gives; first: the file has no
+# declaration yet (its first write an add); head: the file before the declaration
+def f2.tries(+x: Nat, j: Nat, +first: Bool, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +m: Nat, +nm: Nat,
+             +base: Map<&2, List<&2, U32>>, +head: List<&2, U32>) -> List<&2, U32>:
   match j:
     case 0n:
       f2.end(x, first, fs, path)
     case 1n+p:
-      U.append(f2.write(f2.lab(first), f2.said(first), fs, path, mutant(fs, m), f2.out(fs, path, mutant.check(fs, m))),
-        f2.tries(x, p, False{}, fs, path, next.m(m, 1n, nm), nm))
+      +q = p
+      +bad = mutant(fs, m)
+      +c = mutant.check(fs, m)
+      +nb = f2.next.body(x, q, fs, m, nm)
+      cat([f2.write(f2.lab(first), f2.said(first), fs, path, bad, f2.out(fs, path, c)), f3.relook.if(mg.is.bend(fs), fs, head, path, base, bad, c, nb),
+        f2.tries(x, q, False{}, fs, path, next.m(m, 1n, nm), nm, base, head)])
 
 def f2.read.tail(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2, U32>:
   +f0 = mg.head(fs)
@@ -2740,7 +2869,7 @@ def f2.read.tail(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2,
 def f2.direct.other(+x: Nat, +miss: Bool, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>, +j: Nat, +m: Nat, +nm: Nat) -> Mx:
   +ok = Bool.and(mg.tries.ok(j, fs, Nil{}, m, nm), Bool.or(Nat.is_eq(x, 0n), f2.can.give(fs)))
   Mx{ok, cat([mg.user(mg.ask.direct(fs, path)), f2.read.tail(fs, path), f2.looks.new(fs, path, base),
-    Bool.pick(List<&2, U32>, miss, f2.miss.add(fs, path), Nil{}), f2.tries(x, j, True{}, fs, path, m, nm),
+    Bool.pick(List<&2, U32>, miss, f2.miss.add(fs, path), Nil{}), f2.tries(x, j, True{}, fs, path, m, nm, base, field(fs, 5n)),
     f2.reply.x(x, fs, path, j, mg.last.m(m, j, nm), f2.done.direct(fs, path))])}
 
 # Bend's last write and tries as f2.end's and f2.tries's, the first through the
@@ -2752,13 +2881,18 @@ def f3.end(x: Nat, +first: Bool, +v: F3v, +fs: List<&2, List<&2, U32>>, +path: L
     case _:
       f3.write(first, v, fs, path, field(fs, 10n), f2.hole.out(fs, path, field(fs, 13n)))
 
-def f3.tries(+x: Nat, j: Nat, +first: Bool, +v: F3v, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +m: Nat, +nm: Nat) -> List<&2, U32>:
+def f3.tries(+x: Nat, j: Nat, +first: Bool, +v: F3v, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +m: Nat, +nm: Nat,
+             +base: Map<&2, List<&2, U32>>) -> List<&2, U32>:
   match j:
     case 0n:
       f3.end(x, first, v, fs, path)
     case 1n+p:
-      U.append(f3.write(first, v, fs, path, mutant(fs, m), f2.out(fs, path, mutant.check(fs, m))),
-        f3.tries(x, p, False{}, v, fs, path, next.m(m, 1n, nm), nm))
+      +q = p
+      +bad = mutant(fs, m)
+      +c = mutant.check(fs, m)
+      +nb = f2.next.body(x, q, fs, m, nm)
+      cat([f3.write(first, v, fs, path, bad, f2.out(fs, path, c)), f3.relook(fs, F3v.head(v), path, base, bad, c, nb),
+        f3.tries(x, q, False{}, v, fs, path, next.m(m, 1n, nm), nm, base)])
 
 # about 1 in 8 Bend direct asks look up a near name first (none when the add
 # calls no Base definition)
@@ -2779,7 +2913,7 @@ def f3.direct(+x: Nat, +miss: Bool, +fs: List<&2, List<&2, U32>>, +path: List<&2
   +v = f3.view(fs)
   +ok = Bool.and(mg.tries.ok(j, fs, Nil{}, m, nm), Bool.or(Nat.is_eq(x, 0n), f2.can.give(fs)))
   Mx{ok, cat([mg.user(f3.ask.direct(fs, path)), f3.read.tail(F3v.head(v), path), f3.miss.if(f3.near(id), v, fs, id, path, base),
-    f3.looks(v, fs, path, base), Bool.pick(List<&2, U32>, miss, f2.miss.add(fs, path), Nil{}), f3.tries(x, j, True{}, v, fs, path, m, nm),
+    f3.looks(v, fs, path, base), Bool.pick(List<&2, U32>, miss, f2.miss.add(fs, path), Nil{}), f3.tries(x, j, True{}, v, fs, path, m, nm, base),
     f2.reply.x(x, fs, path, j, mg.last.m(m, j, nm), f3.done.direct(v, fs, path))])}
 
 def f2.direct.on(bend: Bool, +x: Nat, +miss: Bool, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +j: Nat, +m: Nat, +nm: Nat) -> Mx:
@@ -2807,8 +2941,8 @@ def f3.tag(+fs: List<&2, List<&2, U32>>, +id: List<&2, U32>, +base: Map<&2, List
 def f2.fill(+x: Nat, +miss: Bool, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>, +j: Nat, +m: Nat, +nm: Nat) -> Mx:
   +ok = Bool.and(mg.tries.ok(j, fs, field(fs, 10n), m, nm), Bool.or(Nat.is_eq(x, 0n), f2.can.give(fs)))
   +r = Bool.pick(Mx, miss, f2.miss.def(fs, path, field(fs, 7n)), Mx{True{}, Nil{}})
-  mx.and(ok, mx.pre(cat([mg.user(mg.ask.fill(fs, path)), f2.check(path, f2.hole.out(fs, path, field(fs, 13n))), f2.looks(fs, path, field(fs, 10n), base)]),
-    mx.post(r, U.append(f2.tries(x, j, False{}, fs, path, m, nm), f2.reply.x(x, fs, path, j, mg.last.m(m, j, nm), f2.done.fill(fs, path))))))
+  mx.and(ok, mx.pre(cat([mg.user(f3.ask.fill(fs, path)), f2.check(path, f2.hole.out(fs, path, field(fs, 13n))), f2.looks(fs, path, field(fs, 10n), base)]),
+    mx.post(r, U.append(f2.tries(x, j, False{}, fs, path, m, nm, base, field(fs, 5n)), f2.reply.x(x, fs, path, j, mg.last.m(m, j, nm), f2.done.fill(fs, path))))))
 
 # repair: mutant m handed over: the ask, its check, a look, [a def refused],
 # j wrong writes from the next mutant on, the right one, the reply
@@ -2816,8 +2950,8 @@ def f2.repair(+miss: Bool, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +
   +mut = mutant(fs, m)
   +ok = mg.tries.ok(j, fs, mut, next.m(m, 1n, nm), nm)
   +r = Bool.pick(Mx, miss, f2.miss.def(fs, path, field(fs, 7n)), Mx{True{}, Nil{}})
-  mx.and(ok, mx.pre(cat([mg.user(mg.ask.repair(fs, path)), f2.check(path, f2.out(fs, path, mutant.check(fs, m))), f2.looks(fs, path, mut, base)]),
-    mx.post(r, U.append(f2.tries(0n, j, False{}, fs, path, next.m(m, 1n, nm), nm), mg.reply(f2.done.repair(fs, path, m))))))
+  mx.and(ok, mx.pre(cat([mg.user(f3.ask.repair(fs, path)), f2.check(path, f2.out(fs, path, mutant.check(fs, m))), f2.looks(fs, path, mut, base)]),
+    mx.post(r, U.append(f2.tries(0n, j, False{}, fs, path, next.m(m, 1n, nm), nm, base, field(fs, 5n)), mg.reply(f2.done.repair(fs, path, m))))))
 
 # Presentations -------------------------------------------------------------------------
 

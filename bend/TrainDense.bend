@@ -658,16 +658,43 @@ def seg.fin(r: Array<F32> & St, +step: Nat) -> Array<F32> & St & Nat:
   (s, st) = r
   {(s, st, step) : Array<F32> & St & Nat}
 
+# VALID_CORPUS (the user, 11-14: "A fixed validation set kept out of the
+# corpus.  R6's readings during training come from whichever shard it's on,
+# so they tell us nothing"): an FTCC corpus of one-context windows, as a
+# shard is (bend-windows), whose text no shard holds; every segment's
+# validation is its first EVALS windows, so each reading is on the same text
+# and new_best means better on it.  Unset: the segment's own held-out windows
+# (Pl.valid), as before.
+def valid.fixed.of(+co: Cc.Corpus, +path: String, +ctx: Nat, +evals: Nat, +tid: String) -> IO(List<&2, List<&2, U32>>):
+  +vw = List.take(&2, List<&2, U32>, D.all.windows(ctx, Cc.Corpus.docs(co)), evals)
+  do IO<List<&2, List<&2, U32>>>:
+    u : Unit <- Dk.fail.if(Cc.Corpus.problem(co, tid))
+    u2 : Unit <- seg.check(Nat.is_lt(0n, List.length(&2, List<&2, U32>, vw)), "VALID_CORPUS has no window")
+    say("validation: " ++ Nat.show(List.length(&2, List<&2, U32>, vw)) ++ " fixed windows of " ++ path)
+    return vw
+
+def valid.fixed.if(none: Bool, +path: String, +ctx: Nat, +evals: Nat, +tid: String, +own: List<&2, List<&2, U32>>) -> IO(List<&2, List<&2, U32>>):
+  match none:
+    case True{}:
+      IO.pure(List<&2, List<&2, U32>>, own)
+    case False{}:
+      do IO<List<&2, List<&2, U32>>>:
+        +xs : List<&2, U32> <- B.Bytes.read_all(path)
+        valid.fixed.of(Cc.corpus(xs), path, ctx, evals, tid)
+
+def valid.fixed(+path: String, +ctx: Nat, +evals: Nat, +tid: String, +own: List<&2, List<&2, U32>>) -> IO(List<&2, List<&2, U32>>):
+  valid.fixed.if(String.is_empty(path), path, ctx, evals, tid, own)
+
 # one segment's shard: its epoch windows, checked against the plan's count
 # as master checks it, then the segment's steps up to the stop
-def seg.train(+seg: Pl.Seg, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, +first: Bool, +co: Cc.Corpus, +step: Nat,
-              r: Array<F32> & St) -> IO(Array<F32> & St & Nat):
+# (vw: the validation windows)
+def seg.train.v(+seg: Pl.Seg, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, +first: Bool, +co: Cc.Corpus, +step: Nat,
+                +vw: List<&2, List<&2, U32>>, r: Array<F32> & St) -> IO(Array<F32> & St & Nat):
   (s, st) = r
   +ctx = Hs.ctx(hs)
   +docs = Cc.Corpus.docs(co)
   +ws = Pl.epoch(ctx, Pl.Seg.offset(seg), docs)
   +nw = List.length(&2, List<&2, U32>, ws)
-  +vw = Pl.valid(ctx, Pl.Seg.offset(seg), Hs.evals(hs), docs)
   +n = Nat.sub(Nat.min(Pl.Seg.end(seg), Hs.stop(hs)), step)
   +scale = bpb.scale(Tr.Tok.b(Hs.tok(hs)), vw)
   do IO<Array<F32> & St & Nat>:
@@ -681,6 +708,15 @@ def seg.train(+seg: Pl.Seg, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, +first: Boo
       batch.next(Hp.batch(hp), List.take(&2, List<&2, U32>, ws, Hp.batch(hp)),
         List.drop(&2, List<&2, U32>, ws, Nat.mod(Nat.mul(Nat.sub(step, Pl.Seg.start(seg)), Hp.batch(hp)), Nat.max(nw, 1n)))), r1)
     return seg.fin(r2, Nat.add(step, n))
+
+def seg.train(+seg: Pl.Seg, +rn: Run, +hp: Hp, +hs: Hs, +muon: Bool, +first: Bool, +co: Cc.Corpus, +step: Nat,
+              r: Array<F32> & St) -> IO(Array<F32> & St & Nat):
+  +ctx = Hs.ctx(hs)
+  +own = Pl.valid(ctx, Pl.Seg.offset(seg), Hs.evals(hs), Cc.Corpus.docs(co))
+  do IO<Array<F32> & St & Nat>:
+    +vp : String <- Tr.env("VALID_CORPUS", "")
+    +vw : List<&2, List<&2, U32>> <- valid.fixed(vp, ctx, Hs.evals(hs), Tr.Tok.id(Hs.tok(hs)), own)
+    seg.train.v(seg, rn, hp, hs, muon, first, co, step, vw, r)
 
 def shard.path(+hs: Hs, +seg: Pl.Seg) -> String:
   Hs.dir(hs) ++ "/shard-" ++ Nat.show(Pl.Seg.index(seg)) ++ "-" ++ Hs.size(hs) ++ ".corpus"
