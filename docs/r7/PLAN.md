@@ -95,3 +95,10 @@ a pass now).
 - The user's calls: the checkpoint r7 starts from (default r5g-step106500, where R6 started; or r6-step115000,
   R6's best chain score), and the credit (R6's plan was 161,627 steps, about $107 at $0.95/h).
 - The sample: run/v9/r7sample.sh writes run/v9/R7sample.md from the Bend mix, each kind's sessions.
+- run7.sh's later stages, tried small (run/v9/r7t.sh, 11-15 15:46): 920 sessions, Bend's 2,981 files x 3 (19 of
+  3,000 held out), 3,000 prose pieces as a language of its own (prose:44 a round), the other four's files: rc=0,
+  1 shard, 411 windows; R7valid 150 sessions and their 19 held-out files x 9, 111 windows. Not the GPU: that is
+  run7go.sh's 20-minute check.
+- Run 10's collect (ana-col10) stopped at keys at 15:38 (run/v2/raw/lean.jsonl, deleted 11-09), as run 10b's
+  had; r7chain2 went on from keys at 15:39 with run/v9/col10fix's bend-corpus-v2 (the files' cached keys).
+  A note: an a2bgh session's key is its path without the repository (`mods/...`), so it is held out by path.
