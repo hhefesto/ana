@@ -9,14 +9,22 @@ cd /home/hhefesto/src/ana || exit 1
 M=${1:-run/v9/mix7/bend}; O=${2:-run/v9/R7sample.md}; K=${K:-2}; CUT=${CUT:-6000}
 PROSE=run/v9/theory/prose/files-hi.nul; VAL=run/v9/R7vsrc/bend/transcripts.train.nul
 [ -s "$M" ] || { echo "no $M" >&2; exit 1; }
+# the prove units' and run 10's ids carry no mark of their own (11-15: /prove/ matched "approved"): their keys from
+# their sources, "P<TAB>unit id" (f7's ids.tsv) and "C<TAB>file id" (collect10's and collect10b's train files)
+KEYS=$(mktemp /tmp/bx/r7keys.XXXXXX)
+{ [ -s run/v9/f7/ids.tsv ] && awk -F'\t' '{print "P\t" $1}' run/v9/f7/ids.tsv
+  for c in collect10 collect10b; do [ -s run/v9/$c/bend/bend.jsonl ] && jq -r '"C\t" + .id' run/v9/$c/bend/bend.jsonl; done; } > $KEYS
 pick() { LC_ALL=C gawk -v K="$K" -v CUT="$CUT" -v only="$1" '
-  BEGIN {RS = "\0"; for (i = 1; i < 256; i++) o[sprintf("%c", i)] = i}
-  function kind(id, x) {
+  BEGIN {for (i = 1; i < 256; i++) o[sprintf("%c", i)] = i}
+  BEGINFILE {RS = (FILENAME ~ /r7keys/) ? "\n" : "\0"; NR = 0}
+  FILENAME ~ /r7keys/ {split($0, a, "\t"); if (a[1] == "P") pu[a[2]]; else cf[a[2]]; next}
+  function kind(id, x,  u, f) {
+    u = id; sub(/\/mugen-.*$/, "", u); f = id; sub(/#.*$/, "", f)
     if (x ~ /which their proofs check/) return "authors-law ask"
-    if (id ~ /authlaw|prove/) return "prove unit"
+    if (u in pu) return "prove unit"
     if (id ~ /sorts\//) return "sorts with fuel"
     if (id ~ /^mugenlog:/) return "mugen chat"
-    if (id ~ /col10/) return "run 10 code"
+    if (f in cf) return "run 10 code"
     if (id ~ /mugen-fix-/) return "fix"
     if (id ~ /mugen-chain-/) return "chain"
     if (id ~ /helper|scratch/) return "helper"
@@ -28,10 +36,11 @@ pick() { LC_ALL=C gawk -v K="$K" -v CUT="$CUT" -v only="$1" '
      for (m = K; m > j; m--) if ((k, m - 1) in H) {H[k, m] = H[k, m - 1]; I[k, m] = I[k, m - 1]; X[k, m] = X[k, m - 1]}
      H[k, j] = v; I[k, j] = id; X[k, j] = substr($0, 1, CUT) (length($0) > CUT ? "\n[... " length($0) - CUT " more bytes]" : ""); break } }
   END {for (k in n) {printf "## %s (%d in this stream)\n\n", k, n[k]
-         for (j = 1; j <= K; j++) if ((k, j) in H) printf "### %s\n\n````\n%s\n````\n\n", I[k, j], X[k, j]}}' "$2"; }
+         for (j = 1; j <= K; j++) if ((k, j) in H) printf "### %s\n\n````\n%s\n````\n\n", I[k, j], X[k, j]}}' $KEYS "$2"; }
 { echo "# R7: a sample ($(date '+%F %T'))"; echo
   echo "From $M ($(tr -cd '\0' < "$M" | wc -c | awk '{print int($1/2)}') sessions); each kind's $K sessions whose ids hash lowest, cut at $CUT bytes."; echo
   pick "" "$M"
   [ -s $PROSE ] && K=1 pick "theory prose (filler)" $PROSE
   [ -s $VAL ] && K=1 pick "validation (R7valid)" $VAL; } > "$O"
+rm -f $KEYS
 echo "$O: $(grep -c '^### ' "$O") sessions, $(wc -c < "$O") bytes"
