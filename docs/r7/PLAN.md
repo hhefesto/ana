@@ -102,3 +102,7 @@ a pass now).
 - Run 10's collect (ana-col10) stopped at keys at 15:38 (run/v2/raw/lean.jsonl, deleted 11-09), as run 10b's
   had; r7chain2 went on from keys at 15:39 with run/v9/col10fix's bend-corpus-v2 (the files' cached keys).
   A note: an a2bgh session's key is its path without the repository (`mods/...`), so it is held out by path.
+- A look at f5's sessions (r7sample.sh on 7 streams, 11-15 16:0x): of 11,087 authors'-law asks, 131 import one
+  alias twice and 85 give one law twice (the same law from two copies of a file, e.g. aivv73__bend-voxel's
+  material_palette_lookup with `./material.bend` and `../../material.bend`): about 1%, left as they are. mugen's
+  chats keep a LAN address (192.168.3.6) in their shell lines: the user's call.
