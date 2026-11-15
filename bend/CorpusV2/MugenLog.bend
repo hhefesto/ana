@@ -20,7 +20,7 @@ import ../Bytes.bend as B
 # of mugen's edit or write calls changed.  P's calls are the reads, edits and writes of P and the shell
 # commands that name P's file; the rest of the turn is left out.  They start at P's first edit or write
 # (the read of P just before it, if there is one, goes in too) and are cut after each check of P that
-# passes (`--check-only`, ALL PROOFS CHECK, no SOME PROOFS FAIL) with an edit or a write before it: each
+# passes (`--check-only` or chk.zsh, ALL PROOFS CHECK, no SOME PROOFS FAIL) with an edit or a write before it: each
 # piece is a session, so every session ends in a passing check, and its edits before the last are tries
 # (Agent/Spec.bend: weight 0).  A piece with no passing check at its end is left out: it would end on a
 # program the checker refused.  A pass with no edit before it starts the next piece afresh.
@@ -162,9 +162,10 @@ def ml.base(+p: List<&2, U32>) -> List<&2, U32>:
 def ml.touches(+p: List<&2, U32>, +base: List<&2, U32>, +c: Ml) -> Bool:
   Bool.pick(Bool, ml.is(c, "shell"), ml.has(ml.f(c, 0n), base), ml.eq(ml.path(c), p))
 
-# a check of p's file
+# a check of p's file: `bend --check-only`, or /tmp/bx/chk.zsh (the same check in its own scope, 11-15)
 def ml.checks(+base: List<&2, U32>, +c: Ml) -> Bool:
-  Bool.and(ml.is(c, "shell"), Bool.and(ml.has(ml.f(c, 0n), ml.b("--check-only")), ml.has(ml.f(c, 0n), base)))
+  +cmd = ml.f(c, 0n)
+  Bool.and(ml.is(c, "shell"), Bool.and(Bool.or(ml.has(cmd, ml.b("--check-only")), ml.has(cmd, ml.b("chk.zsh"))), ml.has(cmd, base)))
 
 def ml.passes(+e: List<&2, U32>) -> Bool:
   Bool.and(ml.has(e, ml.b("ALL PROOFS CHECK")), Bool.not(ml.has(e, ml.b("SOME PROOFS FAIL"))))

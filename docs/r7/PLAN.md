@@ -77,3 +77,21 @@ a pass now).
    of bend code)"; 11-15: "Add laws where you can"). They aren't built yet. mugen's main chat has 1,238 turns,
    and 538 of them write, edit or check Bend (7,313 tool calls). The agents' chats are more.
 4. A sample for the user, then the user's call on renting.
+
+## Ready to train (11-15, the user: "be ready to train on my approval")
+
+- The chain: run/v9/r7chain2.sh (ana-r7chain2): run 10's and 10b's collections, their renders (f6.sh), the
+  prove units (f7) and the sorts (f8) waited for, mugen's chats again, the prose, then run7.sh (the mix, the
+  filler, plan-windows, R7valid). It ends at "end: run/v9/R7 is ready" in run/v9/run7.log; it rents nothing.
+- f5's join (15:13): 98 of 98 streams, 286 splits; 2,099,453 Bend sessions for training before the mix's cap,
+  15,666 held out (39 MB) for R7valid.
+- mugen's chats (CorpusV2/MugenLog.bend, run/v9/mlog): 654 turns with Bend calls give only 18 sessions that fit
+  the 2,048-token window (93 too long, 9 private, 7 with another file's edit; 127 pieces end in a passing check).
+  /tmp/bx/chk.zsh now counts as a check (+1). A small stream: the window is the limit.
+- The launcher, run only after the user's approval: `RENT_OK=yes C=CHECKPOINT run/v9/run7go.sh` (as run6go.sh;
+  tools/runs/run7.cfg, run/v9/run7.stages, bend/gpu/r7-box.env). It copies R7valid to the box and starts r7
+  with VALID_CORPUS; TrainDense's fixed validation has never run on a GPU, so it stops (and destroys the box)
+  if r7.log has no "fixed windows of" line within 20 minutes. Without RENT_OK=yes it rents nothing.
+- The user's calls: the checkpoint r7 starts from (default r5g-step106500, where R6 started; or r6-step115000,
+  R6's best chain score), and the credit (R6's plan was 161,627 steps, about $107 at $0.95/h).
+- The sample: run/v9/r7sample.sh writes run/v9/R7sample.md from the Bend mix, each kind's sessions.

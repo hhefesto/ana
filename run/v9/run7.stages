@@ -1,0 +1,3 @@
+# run 7 on R7: r7 is started by run/v9/run7go.sh (after the user's approval) from its checkpoint C; nothing follows it
+r7 traind-next 5000
+end
