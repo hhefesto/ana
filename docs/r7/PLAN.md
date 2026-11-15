@@ -64,5 +64,9 @@ a pass now).
 1. `run/v9/f4.sh law`: exlaw again on f3's 818 exlaw outputs (units with laws pass through). Done 11-14 23:02,
    0 failed. `run/v9/f4.sh authlaw`: the authors' laws (above).
 2. `run/v9/f4.sh work` with the new bend-transcript, `join`.
-3. The mix (Bend only), the filler (≤ 3 copies plus theory prose), the fixed validation set, plan-windows.
+3. The mix, the filler (≤ 3 copies plus theory prose), the fixed validation set, plan-windows. The mix keeps
+   R5g's Haskell, Agda, Lean and Nix sessions, as R6 did (the user, 11-15: "Keep them, as R6 did").
+   mugen's own transcripts go in too (the user, 11-14: "Add mugen's transcripts to the corpus (should have a lot
+   of bend code)"; 11-15: "Add laws where you can"). They aren't built yet. mugen's main chat has 1,238 turns,
+   and 538 of them write, edit or check Bend (7,313 tool calls). The agents' chats are more.
 4. A sample for the user, then the user's call on renting.

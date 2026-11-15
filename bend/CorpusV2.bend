@@ -31,6 +31,7 @@ import ./CorpusV2/Theory.bend as Th
 import ./CorpusV2/Exlaw.bend as Ex
 import ./CorpusV2/AuthLaw.bend as Al
 import ./CorpusV2/Valid.bend as Vd
+import ./CorpusV2/MugenLog.bend as Mlg
 
 # bend-corpus-v2: corpus v2's tools (docs/CORPUS-V2.md), one subcommand each,
 # ported from the Python they replaced, each byte-identical to it on the
@@ -83,6 +84,9 @@ import ./CorpusV2/Valid.bend as Vd
 #   valid split IN TRAIN VALID | valid held ID...   R7's fixed validation set: a held-out file's pairs (by
 #                                   its key's hash, VALID_K of 256) into VALID, the rest into TRAIN
 #                                   (CorpusV2/Valid.bend, ValidText.bend)
+#   mugenlog TOKENIZER IN OUT [WINDOW]   mugen's own chats (run/v9/mlog/export.sh) as mugen-shape sessions:
+#                                   the Bend edits and writes, each to its passing check, scrubbed
+#                                   (CorpusV2/MugenLog.bend)
 #   decl-new UNITS OUT [held=FILE]... [seen=FILE]... [cap=PREFIX:N]...   a new wave's units less the
 #                                   declarations the corpus trains on (seen) or holds out (held: units, or
 #                                   source files by id and content key; and run/v2/holdout's ids and keys),
@@ -332,6 +336,8 @@ def c2.args(xs: List<String>) -> IO(Unit):
       Al.al.main(more)
     case "valid" <> more:
       Vd.vd.main(more)
+    case "mugenlog" <> more:
+      Mlg.ml.main(more)
     case "port" <> more:
       Pt.pt.main(more)
     case "decl-new" <> more:

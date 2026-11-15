@@ -959,6 +959,252 @@ def al.ask.done(a: AlAk) -> List<&2, U32> & Nat & Nat & Nat:
     case AlAk{m, +ks, nl, nh}:
       (al.ask.out.go(List.reverse(&2, List<&2, U32>, ks), m), List.length(&2, List<&2, U32>, ks), nl, nh)
 
+# The prove units -------------------------------------------------------------------------------
+#
+# R7's change 6 (docs/r7/PLAN.md; the user, 11-14: "work on these"): more proofs, and induction
+# with the rewrite step.  A passing law's proof, from its check file, as a unit of Units.bend's
+# shape (a proposition) that bend-check checks and bend-transcript renders as any other: the def
+# that proves it, `ALIAS.NAME` for a LAWS.bend law in its PROOF.bend (Units.bend never cuts those:
+# their law is in another file), `NAME` in the law's own file.  Its fields, as Units.bend's: bend,
+# proposition, the def's name, the law's doc, the law's statement (al.ask.stmt), the file before
+# the def (the head), nothing (the pre: the law is above the def, or in the law file), the def (the
+# body), the file after it (the tail), the names the body uses, the hole (the def's header, then
+# `?goal`), then at most four mutants: a proof's own two first (one `%` rewrite step dropped with
+# the lines under it: an induction one line short, as r6's add_zero; the first rewrite's lemma
+# misspelt: a wrong name, as r5g's), then Units.bend's.  A record gives one only when its check ran
+# once (nothing was taken out of its files) within the ms allowed, its def is in the file and new
+# to it, the def is at most Units.bend's 40 lines and 3,000 bytes, the file at most 2,000 lines,
+# and a trivial proof (neither a rewrite step nor a `match`) is under the cap a check file.
+
+# a line's indentation (its leading blanks)
+def al.pv.ind(+l: List<&2, U32>) -> Nat:
+  Nat.sub(U.len(l), U.len(U.trim.left(l)))
+
+def al.pv.dname.if(go: Bool, +l: List<&2, U32>) -> List<&2, U32>:
+  match go:
+    case True{}:
+      +r = List.drop(&2, U32, l, 4n)
+      +i = U.find(r, [40], 0n)
+      Bool.pick(List<&2, U32>, Nat.is_lt(i, U.len(r)), List.take(&2, U32, r, i), Nil{})
+    case False{}:
+      Nil{}
+
+# the name of the def a line starts (none: it starts none)
+def al.pv.dname(+l: List<&2, U32>) -> List<&2, U32>:
+  al.pv.dname.if(U.prefix(l, U.b("def ")), l)
+
+# whether a def's name is the law's proof: NAME, or (a law file's law) ALIAS.NAME
+def al.pv.is(+dn: List<&2, U32>, +lw: List<&2, U32>, +same: Bool) -> Bool:
+  Bool.and(Bool.not(T.empty(dn)), Bool.or(U.eq(dn, lw), Bool.and(Bool.not(same), U.suffix(dn, T.cat([[46], lw])))))
+
+# the index of the first of the lines (from i) that starts the law's proof (none: the lines' count)
+def al.pv.at(ls: List<&2, List<&2, U32>>, +lw: List<&2, U32>, +same: Bool, +i: Nat) -> Nat:
+  match ls:
+    case Nil{}:
+      i
+    case +l <> t:
+      Bool.pick(Nat, al.pv.is(al.pv.dname(l), lw, same), i, al.pv.at(t, lw, same, 1n+i))
+
+# a line still the def's: blank or indented (none: past the file's end)
+def al.pv.under(+l: List<&2, U32>) -> Bool:
+  Bool.and(Bool.not(T.empty(l)), Bool.or(U.blank(l), Bool.not(U.col0(l))))
+
+# a def's length in lines from its first: the lines under it that are blank or indented, less the
+# blank ones at its end (go: the first of ls is the def's; k: the lines so far; last: through its
+# last line not blank)
+def al.pv.len.go(ls: List<&2, List<&2, U32>>, go: Bool, +k: Nat, +last: Nat) -> Nat:
+  match ls go:
+    case +l <> +t True{}:
+      al.pv.len.go(t, al.pv.under(U.nth(t, 0n)), 1n+k, Bool.pick(Nat, U.blank(l), last, 1n+k))
+    case _ _:
+      last
+
+# the length of the def at line d
+def al.pv.len(+ls: List<&2, List<&2, U32>>, +d: Nat) -> Nat:
+  +r = List.drop(&2, List<&2, U32>, ls, 1n+d)
+  al.pv.len.go(r, al.pv.under(U.nth(r, 0n)), 1n, 1n)
+
+# the def's header: its first line through its first `):` (a law's proof has no return type)
+def al.pv.header(+l: List<&2, U32>) -> List<&2, U32>:
+  List.take(&2, U32, l, Nat.add(U.find(l, U.b("):"), 0n), 2n))
+
+# the hole: the header, then `?goal` under it
+def al.pv.hole(+l: List<&2, U32>) -> List<&2, U32>:
+  T.cat([U.trim.right(al.pv.header(l)), U.b("\n  ?goal\n")])
+
+# a rewrite step's line: `%` its first byte not blank
+def al.pv.rw(+l: List<&2, U32>) -> Bool:
+  U.prefix(U.trim.left(l), [37])
+
+# the indices of the rewrite lines, from i
+def al.pv.rws(ls: List<&2, List<&2, U32>>, +i: Nat) -> List<&2, Nat>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> t:
+      +r = al.pv.rws(t, 1n+i)
+      Bool.pick(List<&2, Nat>, al.pv.rw(l), i <> r, r)
+
+# the lines less line k and the lines right under it indented deeper (ik: line k's indentation;
+# on: the line before was taken out)
+def al.pv.cut(ls: List<&2, List<&2, U32>>, +k: Nat, +ik: Nat, +i: Nat, +on: Bool) -> List<&2, List<&2, U32>>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> t:
+      +out = Bool.or(Nat.is_eq(k, i), Bool.and(on, Bool.and(Bool.not(U.blank(l)), Nat.is_lt(ik, al.pv.ind(l)))))
+      +r = al.pv.cut(t, k, ik, 1n+i, out)
+      Bool.pick(List<&2, List<&2, U32>>, out, r, l <> r)
+
+# the body less its line k, a rewrite step's, and the lines under it
+def al.pv.drop.at(+ls: List<&2, List<&2, U32>>, +k: Nat) -> List<&2, U32>:
+  U.concat(al.pv.cut(ls, k, al.pv.ind(U.nth(ls, k)), 0n, False{}))
+
+# one rewrite step dropped, the one the id picks (none: the body has none).  The pick hashes the
+# id (U.pick.at), which the checker cannot normalize (a U32 as a Nat): the law is al.pv.drop.at's
+def al.pv.mut.drop(+uid: List<&2, U32>, +body: List<&2, U32>) -> List<&2, U32>:
+  +ls = U.lines(body)
+  +rs = al.pv.rws(ls, 0n)
+  +n = List.length(&2, Nat, rs)
+  +k = Maybe.default(&2, Nat, List.get(&2, Nat, rs, U.pick.at(uid, 7n, n)), 0n)
+  Bool.pick(List<&2, U32>, Nat.is_eq(n, 0n), Nil{}, al.pv.drop.at(ls, k))
+
+# a rewrite line with its lemma's name misspelt, its last byte dropped (none: a name under 3 bytes)
+def al.pv.mis(+l: List<&2, U32>) -> List<&2, U32>:
+  +j = Nat.add(1n, al.pv.ind(l))
+  +after = List.drop(&2, U32, l, j)
+  +n = U.len(al.word(after))
+  Bool.pick(List<&2, U32>, Nat.is_lt(n, 3n), Nil{}, T.cat([List.take(&2, U32, l, j), List.take(&2, U32, after, Nat.sub(n, 1n)), List.drop(&2, U32, after, n)]))
+
+# the first rewrite step's lemma misspelt (none: the body has none)
+def al.pv.mut.name(+body: List<&2, U32>) -> List<&2, U32>:
+  +ls = U.lines(body)
+  +rs = al.pv.rws(ls, 0n)
+  +k = Maybe.default(&2, Nat, List.get(&2, Nat, rs, 0n), 0n)
+  +m = al.pv.mis(U.nth(ls, k))
+  Bool.pick(List<&2, U32>, Bool.or(Nat.is_eq(List.length(&2, Nat, rs), 0n), T.empty(m)), Nil{}, U.concat(List.set(&2, List<&2, U32>, ls, k, m)))
+
+# the mutants: the proof's own two, then Units.bend's, not empty, not the body, each once, at most four
+def al.pv.muts(+uid: List<&2, U32>, +body: List<&2, U32>, +nm: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  List.take(&2, List<&2, U32>, U.dedup(body, List.append(&2, List<&2, U32>, [al.pv.mut.drop(uid, body), al.pv.mut.name(body)], U.mutants(3n, uid, body, nm)), Nil{}), 4n)
+
+# a comment line less its marker (`#` and a blank after it)
+def al.pv.unc(+l: List<&2, U32>) -> List<&2, U32>:
+  +x = List.drop(&2, U32, l, 1n)
+  Bool.pick(List<&2, U32>, U.prefix(x, [32]), List.drop(&2, U32, x, 1n), x)
+
+# the comment lines the lines lead with (go: the first is one), markers out
+def al.pv.doc.go(ls: List<&2, List<&2, U32>>, go: Bool) -> List<&2, List<&2, U32>>:
+  match ls go:
+    case +l <> +t True{}:
+      al.pv.unc(l) <> al.pv.doc.go(t, U.prefix(U.nth(t, 0n), [35]))
+    case _ _:
+      Nil{}
+
+# a law's doc: the comment lines its text leads with, markers out
+def al.pv.doc(+t: List<&2, U32>) -> List<&2, U32>:
+  +ls = U.lines(t)
+  U.trim.right(U.concat(al.pv.doc.go(ls, U.prefix(U.nth(ls, 0n), [35]))))
+
+# an id's class (`curated`, `own`, `repo`: before its first `:`)
+def al.pv.cls(+id: List<&2, U32>) -> List<&2, U32>:
+  List.take(&2, U32, id, U.find(id, [58], 0n))
+
+# a record's check file, from its root
+def al.pv.path(+fs: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  T.cat([T.field(fs, 4n), [47], T.field(fs, 9n)])
+
+# a passing record whose check ran once (nothing taken out of its files) in ms, at most maxms
+def al.pv.want(+fs: List<&2, List<&2, U32>>, +maxms: Nat, +ms: Nat) -> Bool:
+  Bool.and(U.eq(T.field(fs, 1n), U.b("pass")), Bool.and(U.infix(T.field(fs, 10n), U.b(", 1 checks,")), Nat.is_le(ms, maxms)))
+
+# the unit (a NUL pair: its id, its record) of the record's law, its proof the k lines of ls from d,
+# the def named nm
+def al.pv.unit(+cls: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +nm: List<&2, U32>, +ls: List<&2, List<&2, U32>>, +d: Nat, +k: Nat) -> List<&2, U32>:
+  +uid = T.cat([cls, [58], T.field(fs, 9n), [35], nm, [64], U.b(Nat.show(1n+d))])
+  +body = U.slice(ls, d, Nat.add(d, k))
+  +names = U.names(3n, nm, body)
+  +fields : List<&2, List<&2, U32>> = [U.b("bend"), U.b("proposition"), nm, al.pv.doc(T.field(fs, 7n)), al.ask.stmt(T.field(fs, 7n)), U.slice(ls, 0n, d), Nil{}, body,
+    U.slice(ls, Nat.add(d, k), List.length(&2, List<&2, U32>, ls)), U.sep.join(names, 32), al.pv.hole(U.nth(ls, d))]
+  T.cat([uid, [0], U.sep.join(List.append(&2, List<&2, U32>, fields, al.pv.muts(uid, body, names)), 30), [0]])
+
+def al.pv.unit.if(go: Bool, +cls: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +nm: List<&2, U32>, +ls: List<&2, List<&2, U32>>, +d: Nat, +k: Nat) -> List<&2, U32>:
+  match go:
+    case True{}:
+      al.pv.unit(cls, fs, nm, ls, d, k)
+    case False{}:
+      Nil{}
+
+# The walk: the check file read (its path, its lines), the defs taken from it, its trivial ones
+# taken; the units out, those with a rewrite step or a match, the records passed over
+type AlPv is Data:
+  AlPv{path: List<&2, U32>, ls: List<&2, List<&2, U32>>, seen: List<&2, List<&2, U32>>, triv: Nat, n: Nat, deep: Nat, skip: Nat}
+
+def AlPv.path(+s: AlPv) -> List<&2, U32>:
+  match s:
+    case AlPv{p, ls, seen, tr, n, dp, sk}:
+      p
+
+def al.pv.new() -> AlPv:
+  AlPv{Nil{}, Nil{}, Nil{}, 0n, 0n, 0n, 0n}
+
+# the check file at p read (its text x): its lines, nothing taken from it yet
+def al.pv.fresh(+p: List<&2, U32>, +x: List<&2, U32>, st: AlPv) -> AlPv:
+  match st:
+    case AlPv{op, ols, os, ot, n, dp, sk}:
+      AlPv{p, U.lines(x), Nil{}, 0n, n, dp, sk}
+
+# a record's unit, and the walk after it
+type AlPvR is Data:
+  AlPvR{out: List<&2, U32>, st: AlPv}
+
+def AlPvR.out(+r: AlPvR) -> List<&2, U32>:
+  match r:
+    case AlPvR{o, s}:
+      o
+
+def AlPvR.st(+r: AlPvR) -> AlPv:
+  match r:
+    case AlPvR{o, s}:
+      s
+
+# a wanted record from the file read: its unit when its proof is there, new to the file, small
+# enough, and not a trivial one over tcap
+def al.pv.take(+id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +tcap: Nat, st: AlPv) -> AlPvR:
+  match st:
+    case AlPv{+p, +ls, +seen, +tr, +n, +dp, +sk}:
+      +same = U.eq(T.field(fs, 3n), U.b("same-file"))
+      +nl = List.length(&2, List<&2, U32>, ls)
+      +d = al.pv.at(ls, T.field(fs, 6n), same, 0n)
+      +dn = al.pv.dname(U.nth(ls, d))
+      +k = al.pv.len(ls, d)
+      +body = U.slice(ls, d, Nat.add(d, k))
+      +deep = Bool.or(U.has(body, 37), U.infix(body, U.b("match ")))
+      +ok = Bool.and(Bool.and(Nat.is_lt(d, nl), Nat.is_le(nl, 2000n)), Bool.and(Bool.not(U.member(seen, dn)), Bool.and(Nat.is_le(k, 40n), Nat.is_le(U.len(body), 3000n))))
+      +go = Bool.and(ok, Bool.or(deep, Nat.is_lt(tr, tcap)))
+      AlPvR{al.pv.unit.if(go, al.pv.cls(id), fs, dn, ls, d, k),
+        AlPv{p, ls, Bool.pick(List<&2, List<&2, U32>>, go, dn <> seen, seen), Bool.pick(Nat, Bool.and(go, Bool.not(deep)), 1n+tr, tr),
+          Bool.pick(Nat, go, 1n+n, n), Bool.pick(Nat, Bool.and(go, deep), 1n+dp, dp), Bool.pick(Nat, go, sk, 1n+sk)}}
+
+def al.pv.skip1(st: AlPv) -> AlPv:
+  match st:
+    case AlPv{p, ls, seen, tr, n, dp, sk}:
+      AlPv{p, ls, seen, tr, n, dp, 1n+sk}
+
+# a record (want: al.pv.want's) into the walk
+def al.pv.rec(want: Bool, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +tcap: Nat, st: AlPv) -> AlPvR:
+  match want:
+    case True{}:
+      al.pv.take(id, fs, tcap, st)
+    case False{}:
+      AlPvR{Nil{}, al.pv.skip1(st)}
+
+# the walk's account
+def al.pv.said(st: AlPv) -> String:
+  match st:
+    case AlPv{p, ls, seen, tr, n, dp, sk}:
+      "authlaw prove: " ++ Nat.show(n) ++ " units (" ++ Nat.show(dp) ++ " with a rewrite step or a match), " ++ Nat.show(sk) ++ " records passed over"
+
 # Laws ------------------------------------------------------------------------------------------
 
 law al.ask.stmt.only:
@@ -1057,4 +1303,41 @@ law al.prep.files:
    == [U.b("a"), U.b("c hole"), U.b("b open"), U.b("dropped (a ?hole): L.c"), U.b("has b: no"), U.b("has L.c: no"), U.b("has L.a: yes")] : List<&2, List<&2, U32>>}
 
 def al.prep.files():
+  {==}
+
+# a LAWS.bend law's proof in its PROOF.bend: the first def ALIAS.NAME, through its last indented
+# line (the blank line and the comment after it are not its); a law of the file itself: NAME only
+def al.pv.ex() -> List<&2, U32>:
+  U.b("import ./LAWS.bend as L\n\ndef L.a(n): {==}\n\ndef L.comm(a, b):\n  match a:\n    case Z{}:\n      %L.zero(b) : {_ == add(b, Z{}) : Nat}\n      {==}\n    case S{a}:\n      %L.succ(b, a) : {S{add(a, b)} == _ : Nat}\n      {==}\n\n# next\ndef L.b(): {==}\n")
+
+law al.pv.at.len:
+  {(al.pv.at(U.lines(al.pv.ex()), U.b("comm"), False{}, 0n), al.pv.len(U.lines(al.pv.ex()), 4n), al.pv.at(U.lines(al.pv.ex()), U.b("comm"), True{}, 0n))
+   == (4n, 8n, 15n) : Nat & Nat & Nat}
+
+def al.pv.at.len():
+  {==}
+
+law al.pv.names:
+  {(al.pv.dname(U.b("def L.a(n): {==}\n")), al.pv.dname(U.b("  def x(n):\n")), al.pv.hole(U.b("def L.a(n): {==}\n")))
+   == (U.b("L.a"), Nil{}, U.b("def L.a(n):\n  ?goal\n")) : List<&2, U32> & List<&2, U32> & List<&2, U32>}
+
+def al.pv.names():
+  {==}
+
+# the proof's own mutants: its rewrite step dropped (with the line under it), its lemma misspelt;
+# a body with no rewrite step gives none
+law al.pv.muts.own:
+  {(al.pv.drop.at(U.lines(U.b("def c(a):\n  match a:\n    case Z{}:\n      {==}\n    case S{p}:\n      %add_zero(p) : {x\n        == y : N}\n      {==}\n")), 5n),
+    al.pv.mut.name(U.b("def c(a):\n  match a:\n    case S{p}:\n      %add_zero(p) : {x == y : N}\n      {==}\n")),
+    al.pv.mut.drop(U.b("id"), U.b("def c(a): {==}\n")))
+   == (U.b("def c(a):\n  match a:\n    case Z{}:\n      {==}\n    case S{p}:\n      {==}\n"),
+       U.b("def c(a):\n  match a:\n    case S{p}:\n      %add_zer(p) : {x == y : N}\n      {==}\n"), Nil{}) : List<&2, U32> & List<&2, U32> & List<&2, U32>}
+
+def al.pv.muts.own():
+  {==}
+
+law al.pv.doc.marks:
+  {(al.pv.doc(U.b("# twice\n#  kept\nlaw d:\n  {x == x : N}")), al.pv.cls(U.b("curated:a/b.bend#f@3"))) == (U.b("twice\n kept"), U.b("curated")) : List<&2, U32> & List<&2, U32>}
+
+def al.pv.doc.marks():
   {==}

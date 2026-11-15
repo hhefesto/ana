@@ -15,6 +15,7 @@
 #   CV: the bend-corpus-v2 to use (CH=1 needs one whose reader knows a chain's try: run/v6/mugen/chain/gcroot-bend-corpus-v2)
 #   FX=1 (11-12, docs/MUGEN-SHAPE.md "Fixes"): with CH=1, each stream's fixes (run/v8/fix6.sh) as the chains, and the nights
 #   again (run/v8/fix/night); CV then run/v8/fix/gcroot-2 (its repair-mix classes a miss by its shape)
+#   EXTRA (11-15): more streams, space-separated paths (R7's col10 and mugen's own chats)
 #   MGR, CHR, FXR (11-12, form 2: run/v9/f2.sh): where the mugen streams, their chains and their fixes are (default
 #   run/v6/mugen, run/v6/mugen/chain, run/v8/fix; form 2's: run/v9/f2/mugen, run/v9/f2/mugen/chain, run/v9/f2/fix)
 cd /home/hhefesto/src/ana || exit 1
@@ -132,6 +133,9 @@ if [ "${R5C:-0}" = 1 ]; then
   for s in $(cat ${A2BLIST:-run/v8/r5c.a2b}); do add in run/v6/transcripts-$s/bend/transcripts.train.nul; done
   add in run/v8/transcripts-col9/bend/transcripts.train.nul
 fi
+# EXTRA (11-15, R7: run/v9/run7.sh): more streams, each as mg() takes it (run/v9/transcripts-col10's in the mugen
+# shape from MGR/col10), before the chains are listed, so a stream's chains and fixes come with it
+for f in ${EXTRA:-}; do add in "$f"; done
 # mutate's repairs (deduced from a correct unit).  MG=1 (11-03): left out.  They are format 2's text
 # (mutate has no mugen render), and the mugen renders hold every check-mutant, 2.4 repairs a unit on
 # own5, already past what the budget takes.
