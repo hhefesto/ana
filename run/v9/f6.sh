@@ -7,6 +7,8 @@
 # valid/...), so run7.sh's mix takes it (mix6.sh EXTRA).  Nothing is rented.  A thin shim: the logic is
 # bend-corpus-v2's and bend-transcript's.
 #   f6.sh          all of it (each step skipped when its output exists)
+#   EXLAW=0, AUTHLAW=0  no exlaw (the units pass through) and no authors' laws: f7.sh's prove units, whose law is
+#                  their statement already
 cd /home/hhefesto/src/ana || exit 1
 export BEND_NO_TELEMETRY=1
 ulimit -s unlimited
@@ -34,14 +36,15 @@ say "$(pairs $R) units, $(ls $F/law/in/*.nul | wc -l) chunks"
 # exlaw, P at a time (a failure passes its units through without laws, as f4's)
 ex() { local c=$1 i=$F/law/in/$1.nul o=$F/law/out/$1.nul
   [ -e $o ] && return
+  [ "${EXLAW:-1}" = 0 ] && { cp $i $o; return; }
   if BEND_SRC=$SRCS TIMEOUT=${TIMEOUT:-30} TRIES=${TRIES:-6} $CV4 exlaw $i $o.tmp > $F/law/out/$c.out 2>&1; then mv $o.tmp $o
   else say "$c: exlaw FAILED ($F/law/out/$c.out): its units pass through without laws"; cp $i $o; touch $F/law/out/$c.failed; fi; }
-export -f ex say; export F SRCS CV4 TIMEOUT TRIES
+export -f ex say; export F SRCS CV4 TIMEOUT TRIES EXLAW
 ls $F/law/in/*.nul | xargs -n1 basename | sed 's/\.nul$//' | xargs -P $P -I{} bash -c 'ex {}'
 say "exlaw: $(ls $F/law/out/*.nul | wc -l) chunks, $(ls $F/law/out/*.failed 2>/dev/null | wc -l) failed"
 # the authors' laws (f4.sh authlaw's steps, AD=run/v9/f6/authlaw, roots collect10's tree)
 AD=$F/authlaw
-if [ ! -e $AD/authlaw.done ]; then
+if [ "${AUTHLAW:-1}" = 1 ] && [ ! -e $AD/authlaw.done ]; then
   export BEND=$B BEND_SRC=$PWD/$SRCS TIMEOUT=${ALTIMEOUT:-240} TOTAL_MAX=${TOTAL_MAX:-3000000}
   [ -e $AD/index.done ] || { $AL authlaw index $AD/index.nul > $AD/index.log 2>&1 && touch $AD/index.done || die "authlaw index ($AD/index.log)"; }
   say "authlaw index: $(tr '\n' ' ' < $AD/index.nul.stats)"
@@ -58,9 +61,11 @@ if [ ! -e $AD/authlaw.done ]; then
   $AL authlaw stats $AD/authlaw.stats $(for k in $(seq 0 $((W - 1))); do echo $AD/c/c$k; done) > $AD/stats.log 2>&1 || die "authlaw stats"
   touch $AD/authlaw.done
 fi
+if [ "${AUTHLAW:-1}" = 1 ]; then
 say "authlaw: $(tr '\n' ' ' < $AD/authlaw.stats)"
 [ -s $F/authlaw.ask ] || { $CV5 authlaw ask $AD/authlaw.pass $F/authlaw.ask.tmp > $F/authlaw.ask.log 2>&1 && mv $F/authlaw.ask.tmp $F/authlaw.ask || die "authlaw ask ($F/authlaw.ask.log)"; }
 say "ask: $(cat $F/authlaw.ask.log)"
+fi
 # BASE: `bend base` of the names the units use and do not define (f2's base.tsv, made here for col10)
 [ -s $F/base.tsv ] || { $T base $R $F/base.tsv.tmp $B > $F/base.log 2>&1 && mv $F/base.tsv.tmp $F/base.tsv || die "base ($F/base.log)"; }
 # the parts: the chunks' outputs in order, cut at about PART bytes
@@ -72,7 +77,7 @@ if [ ! -e $F/q/parts.done ]; then
 rd() { local p=$1 w=$F/q/$1
   [ -e $w/DONE ] && return
   rm -rf $w; mkdir -p $w
-  if env TRANSCRIPT_FORMAT=mugen MUGEN_ONLY=form2-all SIZES=$w/sizes.tsv AUTHLAW=$F/authlaw.ask BASE=$F/base.tsv \
+  if env TRANSCRIPT_FORMAT=mugen MUGEN_ONLY=form2-all SIZES=$w/sizes.tsv $([ -s $F/authlaw.ask ] && echo AUTHLAW=$F/authlaw.ask) BASE=$F/base.tsv \
        $T weights/code32k.bpe $F/q/$p.nul $w/part.nul 2048 > $w/render.log 2>&1; then
     for k in 0 1; do SHARD=$k SHARDS=2 $L weights/code32k.bpe $w/part.nul > $w/laws.$k.log 2>&1 & done; wait
     for k in 0 1; do tail -n 1 $w/laws.$k.log | grep -q ', 0 failed' || { say "$p: laws FAILED ($w/laws.$k.log)"; return 1; }; done

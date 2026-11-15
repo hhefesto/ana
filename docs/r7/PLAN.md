@@ -29,14 +29,14 @@ later." Renting a box still waits for the user's approval.
 
 | # | Change | State |
 |---|---|---|
-| 1 | New sessions, not replays; at most 2-3 copies of a code file | not built. FILLER_COPIES ≤ 3 leaves most windows without a filler file (978k windows, about 65k distinct Bend files), so it needs 7's prose as filler. New code needs new sources (open question) |
+| 1 | New sessions, not replays; at most 2-3 copies of a code file | built, running (11-15): run7.sh's filler takes each Bend file K=3 times (run7.sh), the prose filling the rest (7). New code: run 10's collection (run/v9/col10.sh, ana-col10: run 9's repositories' growth, BendHub, upstream, the 26 licensed new repositories; its gate at 12,500 of 32,096 files at 13:27) and run 10b (run/v9/col10b.sh, ana-col10b: the 16 unlicensed ones, the user, 11-15: "Include them"), each then rendered with laws by f6.sh; the authors'-law asks (f5), the prove units (6), the sorts (5), mugen's chats |
 | 2 | Laws in the request | fill and repair asks state the unit's laws (Transcript.bend `f3.ask.laws`); exlaw now probes the head's own data types and Base's `Maybe` (ExlawText.bend): on own5's first 300 units 179 get laws, against 61 |
 | 3 | Sessions from law mutants | follows 2: 68 law mutants on those 300 units, against 17 |
 | 4 | Look before retrying | built (Transcript.bend `f3.relook`): on own5's first 60 units, 63 of 121 retries after a failed write look first (0 before); every echo is agent-mugen's (f3-roundtrip.zsh) |
-| 5 | Two definitions a session, nearly empty files, sorts with fuel | helpers and scratch exist (above); a fuel sort kind is not built |
-| 6 | More proofs, induction with the rewrite step | not built |
-| 7 | Prose | the source's `#` comment is already in the ask and her add (form 2's kinds); theory filler (run/v9/theory, 5.8 GB downloaded, 850 MB of sources) not cleaned yet |
-| 8 | A fixed validation set | the trainer reads one (TrainDense.bend `VALID_CORPUS`, checked, not run); the set itself not built |
+| 5 | Two definitions a session, nearly empty files, sorts with fuel | helpers and scratch exist (above). Sorts with fuel: built (bend/Sorts.bend, `bend-sorts`; run/v9/f8.sh, ana-f8): small files written from nothing, merge sort (by turns, by halves), quicksort, insertion sort on Nat, U32, a Card, a Task, either order, recursing on fuel where the parts aren't structurally smaller, laws on fixed inputs from a reference sort. 64 files: all check; reversing each file's first law's expected list fails all 64; 406 units, 179 after clean, 1,304 sessions (806 first-time, 141 chains, 357 fixes). The full run: 512 files, 3,243 units |
+| 6 | More proofs, induction with the rewrite step | built, running (run/v9/f7.sh, ana-f7): `bend-corpus-v2 authlaw prove` makes a unit of each authors' law that checks for every input (f4/authlaw.pass), its proof the hole, its mutants the proof's own steps changed; 5,401 units from the 10 roots, 4,379 with a rewrite step (`%`) or a match. Then decl-new, the cap, trim, the check, clean and f6.sh's render (EXLAW=0 AUTHLAW=0: the law is the statement) |
+| 7 | Prose | the source's `#` comment is already in the ask and her add (form 2's kinds); the theory prose cleaned (run/v9/theory/filler.sh, bend-theory-cut, 11-15 11:37): 867,775 pieces, 2.32 GB from 45,737 documents (arXiv, nLab; credits.tsv) |
+| 8 | A fixed validation set | the trainer reads one (TrainDense.bend `VALID_CORPUS`, checked, not run); the split by file key (CorpusV2/Valid.bend, ValidText.bend, VALID_K 2 of 256) in every join; run7.sh writes the set as run/v9/R7valid |
 
 ## The authors' laws (collector A, 11-14/15)
 
@@ -56,8 +56,15 @@ a pass now).
   passes only after other failing laws or helpers were taken out of its proof file counts: "Yes: the law's own
   proof checks, and the record says what was removed"; of the lawres prototype's guessed laws, "No, keep only laws
   proven for every input" (its 18 compared with a reference only at the test inputs are not kept).
-- Not built yet: the ask that shows the law as the spec (Transcript.bend), held-out units' laws kept out of
-  training, the laws' comments filtered.
+- The ask that shows the law as the spec (Transcript.bend's authors'-law ask, the user, 11-15: "Yes"): built; f5
+  re-renders every part with it (run/v9/f5, ana-f5-r*): 6,780 units get 14,515 laws; 148 records left out, a
+  held-out file's (the fixed validation split, by file). The laws' comments: as the source has them.
+- Lost on 11-09, found 11-15: run/v2's raw files (raw, raw-hf, raw-stack, raw-new3) and run/v4/collect were
+  deleted with that day's cleanup. What still needs them: run 10's collection (its corpus files, for the dedup and
+  the contamination check: their keys are in the key cache, and Collect.bend now keeps a gone file's cached keys;
+  the vault lists, their names now from those keys, run/v9/col10fix/vault-v2v4.repos) and decl-new's held list
+  (run/v5/leak/held.args.note: the same records stay held, as units). The big-repository lists of run 3 and run 4
+  are gone for good: a repository they split by directory and no later collection listed is split by its size now.
 
 ## The pipeline (olimpo, CPU)
 

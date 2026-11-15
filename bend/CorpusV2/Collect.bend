@@ -2197,10 +2197,29 @@ def col.stamp(+f: String) -> IO(List<&2, U32>):
 def col.cache.base(+kc: String, +f: String) -> String:
   kc ++ "/c." ++ S.str(S.replace(S.b(f), [47], [95]))
 
+# a corpus file's stamp; a file that is gone but whose keys the cache holds keeps the cached stamp, so its cached
+# keys stand (2026-11-15: run/v2's raw files and run/v4's collection were deleted on 11-09; their keys, made from
+# them before, are what the dedup and the contamination check need); gone and not cached: the stat's error
+def col.kf.stamp(there: Bool, cached: Bool, +f: String, +keys: String) -> IO(List<&2, U32>):
+  match there:
+    case True{}:
+      col.stamp(f)
+    case False{}:
+      match cached:
+        case True{}:
+          do IO<List<&2, U32>>:
+            col.log("keys: " ++ f ++ " is gone; its cached keys (" ++ keys ++ ") stand")
+            +s : List<&2, U32> <- S.read(keys ++ ".stamp")
+            return s
+        case False{}:
+          col.stamp(f)
+
 def col.kf.of(+kc: String, +f: String) -> IO(ColKf):
   +base = col.cache.base(kc, f)
   do IO<ColKf>:
-    +s : List<&2, U32> <- col.stamp(f)
+    there : Bool <- S.exists(f)
+    cached : Bool <- S.exists(base ++ ".keys")
+    +s : List<&2, U32> <- col.kf.stamp(there, cached, f, base ++ ".keys")
     return ColKf{f, base ++ ".keys", base ++ ".piece", col.pieces(S.suffix(S.b(f), S.b(".jsonl")), col.nat(L.v2.before(s, 32))), S.suffix(S.b(f), S.b(".jsonl")), s}
 
 def col.kf.stale(+k: ColKf) -> IO(Bool):

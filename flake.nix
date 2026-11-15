@@ -151,6 +151,8 @@
           bend-transcript = bendBinary pkgs "bend-transcript" "Transcript.bend";
           # R7's theory prose cut into filler pieces (run/v9/theory/filler.sh)
           bend-theory-cut = bendBinary pkgs "bend-theory-cut" "TheoryCut.bend";
+          # R7's sorts with fuel, written out in small checked files (run/v9/f8.sh)
+          bend-sorts = bendBinary pkgs "bend-sorts" "Sorts.bend";
           # the checked units cleaned (exact and near duplicates, units
           # sharing a 10-gram with the eval holdout) and split train/holdout
           bend-clean = bendBinary pkgs "bend-clean" "Clean.bend";

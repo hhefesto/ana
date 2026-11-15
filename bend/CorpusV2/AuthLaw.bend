@@ -1069,6 +1069,78 @@ def al.askf.run(+inp: String, +out: String) -> IO(Unit):
     +k : Nat <- S.env.nat("VALID_K", 2n)
     al.askf.write(out, A.al.ask.done(al.askf.go(U32.from_nat(k), al.ranked(kvs), A.al.ask.new())))
 
+# The prove units -------------------------------------------------------------------------------
+#
+# R7's change 6 (docs/r7/PLAN.md; the user, 11-15: "Yes" to "prove sessions from the authors'
+# laws"): `authlaw prove PASS ROOT OUT`, the passing records of one root (field 4, as the check
+# ran: a unit's path is its root's) walked in order, a check file read once for its run of
+# records (f4's authlaw.pass keeps a file's records together), each record's unit (AuthLawText.bend
+# al.pv.take) added to OUT, in Units.bend's shape for bend-check.  MAXMS (20000): the most ms its
+# one check may have taken; TCAP (2): the trivial proofs (no `%` step, no `match`) a check file
+# gives at most.
+
+# the ms a record's check took (its account's ", 1 checks, N ms"; none: 0)
+def al.pv.ms(+a: List<&2, U32>) -> Nat:
+  +k = U.b(" checks, ")
+  +r = List.drop(&2, U32, a, Nat.add(U.find(a, k, 0n), U.len(k)))
+  Maybe.default(&2, Nat, Nat.read(S.str(List.take(&2, U32, r, U.find(r, [32], 0n)))), 0n)
+
+# the walk at a record of the root: its check file read when the walk is not on it already
+def al.pv.file(go: Bool, +p: List<&2, U32>, +st: A.AlPv) -> IO(A.AlPv):
+  match go:
+    case True{}:
+      do IO<A.AlPv>:
+        x : List<&2, U32> <- S.read(S.str(p))
+        return A.al.pv.fresh(p, x, st)
+    case False{}:
+      IO.pure(A.AlPv, st)
+
+# a record's unit added to OUT, the walk after it
+def al.pv.put(+out: String, +r: A.AlPvR) -> IO(A.AlPv):
+  do IO<A.AlPv>:
+    S.add(out, A.AlPvR.out(r))
+    return A.AlPvR.st(r)
+
+def al.pv.one(+id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +maxms: Nat, +tcap: Nat, +out: String, +st: A.AlPv) -> IO(A.AlPv):
+  +want = A.al.pv.want(fs, maxms, al.pv.ms(T.field(fs, 10n)))
+  +p = A.al.pv.path(fs)
+  do IO<A.AlPv>:
+    st1 : A.AlPv <- al.pv.file(Bool.and(want, Bool.not(U.eq(p, A.AlPv.path(st)))), p, st)
+    al.pv.put(out, A.al.pv.rec(want, id, fs, tcap, st1))
+
+# the records in order: another root's passed by, not counted
+def al.pv.mine(mine: Bool, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +maxms: Nat, +tcap: Nat, +out: String, +st: A.AlPv) -> IO(A.AlPv):
+  match mine:
+    case True{}:
+      al.pv.one(id, fs, maxms, tcap, out, st)
+    case False{}:
+      IO.pure(A.AlPv, st)
+
+def al.pv.go(kvs: List<&2, Ev.EvKv>, +root: List<&2, U32>, +maxms: Nat, +tcap: Nat, +out: String, +st: A.AlPv) -> IO(A.AlPv):
+  match kvs:
+    case Nil{}:
+      IO.pure(A.AlPv, st)
+    case Ev.EvKv{+id, +v} <> t:
+      +fs = Ev.ev.split(v, 30)
+      do IO<A.AlPv>:
+        st1 : A.AlPv <- al.pv.mine(U.eq(T.field(fs, 4n), root), id, fs, maxms, tcap, out, st)
+        al.pv.go(t, root, maxms, tcap, out, st1)
+
+def al.pv.run(+inp: String, +root: String, +out: String) -> IO(Unit):
+  do IO<Unit>:
+    kvs : List<&2, Ev.EvKv> <- Ev.ev.nul(inp)
+    +maxms : Nat <- S.env.nat("MAXMS", 20000n)
+    +tcap : Nat <- S.env.nat("TCAP", 2n)
+    S.write(out, Nil{})
+    st : A.AlPv <- al.pv.go(kvs, S.b(root), maxms, tcap, out, A.al.pv.new())
+    IO.print(A.al.pv.said(st))
+
+law al.pv.ms.reads:
+  {al.pv.ms(U.b("x (1 files), 1 checks, 577 ms; last")) == 577n : Nat}
+
+def al.pv.ms.reads():
+  {==}
+
 # Main ------------------------------------------------------------------------------------------
 
 def al.nat(+s: String) -> Nat:
@@ -1098,5 +1170,7 @@ def al.main(xs: List<String>) -> IO(Unit):
       al.render(inp, al.nat(n), out)
     case "ask" <> +inp <> +out <> Nil{}:
       al.askf.run(inp, out)
+    case "prove" <> +inp <> +root <> +out <> Nil{}:
+      al.pv.run(inp, root, out)
     case _:
-      IO.die(Unit, 2, "usage: authlaw index OUT | match INDEX OUT PART.. | plan W OUT JOBS.. | pick N OUT JOBS.. | repos R,R.. OUT JOBS.. | check JOBS OUT | stats OUT PFX.. | render PASS N OUT | ask PASS OUT")
+      IO.die(Unit, 2, "usage: authlaw index OUT | match INDEX OUT PART.. | plan W OUT JOBS.. | pick N OUT JOBS.. | repos R,R.. OUT JOBS.. | check JOBS OUT | stats OUT PFX.. | render PASS N OUT | ask PASS OUT | prove PASS ROOT OUT")

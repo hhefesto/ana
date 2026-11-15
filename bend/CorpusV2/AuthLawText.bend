@@ -1118,15 +1118,112 @@ def al.pv.path(+fs: List<&2, List<&2, U32>>) -> List<&2, U32>:
 def al.pv.want(+fs: List<&2, List<&2, U32>>, +maxms: Nat, +ms: Nat) -> Bool:
   Bool.and(U.eq(T.field(fs, 1n), U.b("pass")), Bool.and(U.infix(T.field(fs, 10n), U.b(", 1 checks,")), Nat.is_le(ms, maxms)))
 
+# The tail moved up.  bend-check writes a variant as the head, the pre and the variant, and leaves
+# the tail out (a def calls only the defs above it); but a PROOF.bend proves every law of the
+# LAWS.bend it imports, so a proof with others under it fails there ("3 TODOs found": hanw__cpp-bend
+# example/PROOF.bend#Laws.umax_is_an_input, 11-15).  So the tail's blocks that do not reach the def
+# go up into the head, in order: a block (a def, law or type line at column 0 with the `#` lines
+# right above it) stays under the def when it names the def or a name an earlier kept block
+# declares (a def calls only the defs above it, so one pass in order is the closure).  A name
+# matches as text, so a block kept by a longer name sharing its start only costs a unit.
+
+# a line at column 0 opening a def, law or type
+def al.pv.decl(+l: List<&2, U32>) -> Bool:
+  Bool.or(U.prefix(l, U.b("def ")), Bool.or(U.prefix(l, U.b("law ")), U.prefix(l, U.b("type "))))
+
+# whether line l, after line p, opens a block: a declaration not under a `#` line, or a `#` line under a
+# blank one
+def al.pv.bstart(+p: List<&2, U32>, +l: List<&2, U32>) -> Bool:
+  Bool.or(Bool.and(al.pv.decl(l), Bool.not(U.prefix(p, [35]))), Bool.and(U.prefix(l, [35]), U.blank(p)))
+
+# the lines in blocks (p: the line before; cur: the block so far, reversed)
+def al.pv.blocks(ls: List<&2, List<&2, U32>>, +p: List<&2, U32>, +cur: List<&2, List<&2, U32>>) -> List<&2, List<&2, List<&2, U32>>>:
+  match ls:
+    case Nil{}:
+      [List.reverse(&2, List<&2, U32>, cur)]
+    case +l <> t:
+      +s = Bool.and(al.pv.bstart(p, l), Nat.is_lt(0n, List.length(&2, List<&2, U32>, cur)))
+      +r = al.pv.blocks(t, l, Bool.pick(List<&2, List<&2, U32>>, s, [l], l <> cur))
+      Bool.pick(List<&2, List<&2, List<&2, U32>>>, s, List.reverse(&2, List<&2, U32>, cur) <> r, r)
+
+# the length of the name at the start of r
+def al.pv.nlen(+r: List<&2, U32>) -> Nat:
+  match r:
+    case Nil{}:
+      0n
+    case +c <> t:
+      Bool.pick(Nat, al.namech(c), 1n+al.pv.nlen(t), 0n)
+
+# the name a declaration line declares (none: not one)
+def al.pv.dnm(+l: List<&2, U32>) -> List<&2, U32>:
+  +r = List.drop(&2, U32, l, Bool.pick(Nat, U.prefix(l, U.b("type ")), 5n, 4n))
+  Bool.pick(List<&2, U32>, al.pv.decl(l), List.take(&2, U32, r, al.pv.nlen(r)), Nil{})
+
+# the names a block declares
+def al.pv.bnames(b: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match b:
+    case Nil{}:
+      Nil{}
+    case +l <> t:
+      +r = al.pv.bnames(t)
+      +n = al.pv.dnm(l)
+      Bool.pick(List<&2, List<&2, U32>>, T.empty(n), r, n <> r)
+
+# whether a line of the block holds n
+def al.pv.bhas(b: List<&2, List<&2, U32>>, +n: List<&2, U32>) -> Bool:
+  match b:
+    case Nil{}:
+      False{}
+    case +l <> t:
+      Bool.or(U.infix(l, n), al.pv.bhas(t, n))
+
+# whether the block holds one of the names
+def al.pv.uses(+b: List<&2, List<&2, U32>>, ns: List<&2, List<&2, U32>>) -> Bool:
+  match ns:
+    case Nil{}:
+      False{}
+    case +n <> t:
+      Bool.or(al.pv.bhas(b, n), al.pv.uses(b, t))
+
+# the blocks apart: those that go up (their lines), those kept under the def (their lines); ns: the
+# names kept so far
+def al.pv.part.put(+k: Bool, +b: List<&2, List<&2, U32>>, r: List<&2, List<&2, U32>> & List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>> & List<&2, List<&2, U32>>:
+  match r:
+    case (+up, +kept):
+      Bool.pick(List<&2, List<&2, U32>> & List<&2, List<&2, U32>>, k, (up, List.append(&2, List<&2, U32>, b, kept)), (List.append(&2, List<&2, U32>, b, up), kept))
+
+def al.pv.part(bs: List<&2, List<&2, List<&2, U32>>>, +ns: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>> & List<&2, List<&2, U32>>:
+  match bs:
+    case Nil{}:
+      (Nil{}, Nil{})
+    case +b <> t:
+      +k = al.pv.uses(b, ns)
+      al.pv.part.put(k, b, al.pv.part(t, Bool.pick(List<&2, List<&2, U32>>, k, List.append(&2, List<&2, U32>, al.pv.bnames(b), ns), ns)))
+
+# the head with the tail's free blocks under it (a blank line after them), and the tail left
+def al.pv.lift.of(+head: List<&2, List<&2, U32>>, r: List<&2, List<&2, U32>> & List<&2, List<&2, U32>>) -> List<&2, U32> & List<&2, U32>:
+  match r:
+    case (+up, +kept):
+      +gap = Bool.pick(List<&2, List<&2, U32>>, Nat.is_lt(0n, List.length(&2, List<&2, U32>, up)), [[10]], Nil{})
+      (U.concat(List.append(&2, List<&2, U32>, head, List.append(&2, List<&2, U32>, up, gap))), U.concat(kept))
+
+def al.pv.lift(+head: List<&2, List<&2, U32>>, +tail: List<&2, List<&2, U32>>, +nm: List<&2, U32>) -> List<&2, U32> & List<&2, U32>:
+  al.pv.lift.of(head, al.pv.part(al.pv.blocks(tail, Nil{}, Nil{}), [nm]))
+
+def al.pv.unit.with(+uid: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +nm: List<&2, U32>, +body: List<&2, U32>, +names: List<&2, List<&2, U32>>, +hole: List<&2, U32>, ht: List<&2, U32> & List<&2, U32>) -> List<&2, U32>:
+  match ht:
+    case (+hd, +tl):
+      +fields : List<&2, List<&2, U32>> = [U.b("bend"), U.b("proposition"), nm, al.pv.doc(T.field(fs, 7n)), al.ask.stmt(T.field(fs, 7n)), hd, Nil{}, body,
+        tl, U.sep.join(names, 32), hole]
+      T.cat([uid, [0], U.sep.join(List.append(&2, List<&2, U32>, fields, al.pv.muts(uid, body, names)), 30), [0]])
+
 # the unit (a NUL pair: its id, its record) of the record's law, its proof the k lines of ls from d,
 # the def named nm
 def al.pv.unit(+cls: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +nm: List<&2, U32>, +ls: List<&2, List<&2, U32>>, +d: Nat, +k: Nat) -> List<&2, U32>:
   +uid = T.cat([cls, [58], T.field(fs, 9n), [35], nm, [64], U.b(Nat.show(1n+d))])
   +body = U.slice(ls, d, Nat.add(d, k))
   +names = U.names(3n, nm, body)
-  +fields : List<&2, List<&2, U32>> = [U.b("bend"), U.b("proposition"), nm, al.pv.doc(T.field(fs, 7n)), al.ask.stmt(T.field(fs, 7n)), U.slice(ls, 0n, d), Nil{}, body,
-    U.slice(ls, Nat.add(d, k), List.length(&2, List<&2, U32>, ls)), U.sep.join(names, 32), al.pv.hole(U.nth(ls, d))]
-  T.cat([uid, [0], U.sep.join(List.append(&2, List<&2, U32>, fields, al.pv.muts(uid, body, names)), 30), [0]])
+  al.pv.unit.with(uid, fs, nm, body, names, al.pv.hole(U.nth(ls, d)), al.pv.lift(List.take(&2, List<&2, U32>, ls, d), List.drop(&2, List<&2, U32>, ls, Nat.add(d, k)), nm))
 
 def al.pv.unit.if(go: Bool, +cls: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +nm: List<&2, U32>, +ls: List<&2, List<&2, U32>>, +d: Nat, +k: Nat) -> List<&2, U32>:
   match go:
@@ -1340,4 +1437,12 @@ law al.pv.doc.marks:
   {(al.pv.doc(U.b("# twice\n#  kept\nlaw d:\n  {x == x : N}")), al.pv.cls(U.b("curated:a/b.bend#f@3"))) == (U.b("twice\n kept"), U.b("curated")) : List<&2, U32> & List<&2, U32>}
 
 def al.pv.doc.marks():
+  {==}
+
+# a PROOF.bend's tail: the blocks that do not name the def go up above it, the one that names it (and
+# what names that one) stays under it
+law al.pv.lift.moves:
+  {al.pv.lift([U.b("H\n")], [U.b("def a():\n"), U.b("  x\n"), U.b("\n"), U.b("# uses it\n"), U.b("def q():\n"), U.b("  nm()\n"), U.b("\n"), U.b("def r():\n"), U.b("  q()\n"), U.b("\n"), U.b("def c():\n"), U.b("  y\n")], U.b("nm")) == (U.b("H\ndef a():\n  x\n\ndef c():\n  y\n\n"), U.b("# uses it\ndef q():\n  nm()\n\ndef r():\n  q()\n\n")) : List<&2, U32> & List<&2, U32>}
+
+def al.pv.lift.moves():
   {==}

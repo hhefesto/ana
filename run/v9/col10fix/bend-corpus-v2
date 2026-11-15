@@ -1,0 +1,6 @@
+#!/bin/sh
+# run/v9/col10fix/bend-corpus-v2 (2026-11-15): today's bend-corpus-v2 (gcroot-cv2: Collect.bend keeps a gone corpus
+# file's cached keys; run/v2's raw files and run/v4/collect were deleted on 11-09), with run/v5/clean/bend-corpus-v2's
+# timeouts (180 s; the user, 2026-10-29 17:40 UTC-6: "raise the timeout for future checks").  A value set is kept.
+: "${TIMEOUT:=180}"; : "${BEND_TIMEOUT:=180}"; export TIMEOUT BEND_TIMEOUT
+exec "$(dirname "$0")/gcroot-cv2/bin/bend-corpus-v2" "$@"

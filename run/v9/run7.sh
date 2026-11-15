@@ -56,7 +56,12 @@ if [ -s $ML/mlog.nul ] && [ ! -e $ML/split.done ]; then
   $CV valid split $ML/mlog.nul $ML/train.nul $ML/valid.nul > $ML/split.log 2>&1 && touch $ML/split.done || die "mlog split ($ML/split.log)"
 fi
 EXTRA=; [ -e run/v9/f6/col10.joined ] && EXTRA="run/v9/transcripts-col10/bend/transcripts.train.nul" || say "col10: not joined yet (run/v9/f6.sh): left out"
+# run 10b: the 16 unlicensed repositories (the user, 11-15: "Include them"; run/v9/col10b.sh, f6.sh into run/v9/f6b)
+[ -e run/v9/f6b/col10b.joined ] && EXTRA="$EXTRA run/v9/transcripts-col10b/bend/transcripts.train.nul" || say "col10b: not joined yet (run/v9/f6.sh N=col10b): left out"
 [ -s $ML/train.nul ] && EXTRA="$EXTRA $PWD/$ML/train.nul"
+# change 6, the authors' laws' prove units (run/v9/f7.sh), and change 5, the sorts with fuel (run/v9/f8.sh)
+[ -e run/v9/f7/rd/prove.joined ] && EXTRA="$EXTRA run/v9/transcripts-prove/bend/transcripts.train.nul" || say "prove: not joined yet (run/v9/f7.sh): left out"
+[ -e run/v9/f8/rd/sorts.joined ] && EXTRA="$EXTRA run/v9/transcripts-sorts/bend/transcripts.train.nul" || say "sorts: not joined yet (run/v9/f8.sh): left out"
 
 say "Bend"
 if [ ! -e $N/bend.done ]; then
