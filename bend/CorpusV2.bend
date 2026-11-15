@@ -30,6 +30,7 @@ import ./CorpusV2/HistDrop.bend as Hd
 import ./CorpusV2/Theory.bend as Th
 import ./CorpusV2/Exlaw.bend as Ex
 import ./CorpusV2/AuthLaw.bend as Al
+import ./CorpusV2/Valid.bend as Vd
 
 # bend-corpus-v2: corpus v2's tools (docs/CORPUS-V2.md), one subcommand each,
 # ported from the Python they replaced, each byte-identical to it on the
@@ -79,6 +80,9 @@ import ./CorpusV2/AuthLaw.bend as Al
 #                                   units (a repository's LAWS.bend proven by its PROOF.bend, or a law later in
 #                                   the unit's own file proven there), each checked with `--check-only` in a
 #                                   copy of its repository   (CorpusV2/AuthLaw.bend; the step: run/v9/f4.sh authlaw)
+#   valid split IN TRAIN VALID | valid held ID...   R7's fixed validation set: a held-out file's pairs (by
+#                                   its key's hash, VALID_K of 256) into VALID, the rest into TRAIN
+#                                   (CorpusV2/Valid.bend, ValidText.bend)
 #   decl-new UNITS OUT [held=FILE]... [seen=FILE]... [cap=PREFIX:N]...   a new wave's units less the
 #                                   declarations the corpus trains on (seen) or holds out (held: units, or
 #                                   source files by id and content key; and run/v2/holdout's ids and keys),
@@ -326,6 +330,8 @@ def c2.args(xs: List<String>) -> IO(Unit):
       Ex.ex.main(more)
     case "authlaw" <> more:
       Al.al.main(more)
+    case "valid" <> more:
+      Vd.vd.main(more)
     case "port" <> more:
       Pt.pt.main(more)
     case "decl-new" <> more:

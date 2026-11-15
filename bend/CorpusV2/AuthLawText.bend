@@ -2,6 +2,7 @@ import Base
 import ../Units.bend as U
 import ../Transcript.bend as T
 import ./ExlawText.bend as X
+import ./ValidText.bend as V
 
 # authlaw's texts (collector A: built 2026-11-14 in /tmp/bx/lawres, moved into
 # ana 11-15; the user, 11-14: build "the authors'-law collector": the laws a repository's
@@ -836,7 +837,160 @@ def al.for.every(+t: List<&2, U32>) -> Bool:
 def al.rank(+t: List<&2, U32>) -> Nat:
   Bool.pick(Nat, al.for.every(t), 0n, 1n)
 
+# The ask ---------------------------------------------------------------------------------------
+#
+# The user, 11-15: "Yes" to the authors'-law ask in Transcript.bend.  Every passing record's law as
+# the fill, repair and direct asks state it (Transcript.bend f3.alaw.block): its statement only
+# (T.f3.stmts: the `law` line and the lines under it, its doc comment and its proof left out) less
+# any comment line in it, so no author's note or tool's comment is trained on as the spec; at most
+# al.ask.max() laws a unit, in al.ranked's order (every input first), none longer than al.ask.long()
+# bytes, each once.  A law whose unit is in a held-out file, or that names one (ValidText.bend, R7's
+# change 8), is left out, so a held-out unit's laws are never trained on.  The ask's map is keyed
+# PATH#NAME: Transcript's mg.path of the unit's id and the unit's name.
+
+def al.ask.max() -> Nat:
+  4n
+
+def al.ask.long() -> Nat:
+  800n
+
+# a comment line: `#` after its indent
+def al.ask.cmt(+l: List<&2, U32>) -> Bool:
+  U.prefix(U.trim.left(l), U.b("#"))
+
+def al.ask.keep(ls: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> t:
+      +r = al.ask.keep(t)
+      Bool.pick(List<&2, List<&2, U32>>, al.ask.cmt(l), r, l <> r)
+
+# a record's law (field 7: its doc comment, then the law) as the ask states it
+def al.ask.stmt(+t: List<&2, U32>) -> List<&2, U32>:
+  al.unlines(al.ask.keep(al.lines(T.f3.stmts(t))))
+
+# a record's law as the ask's map holds it: the law file's import lines the law uses (field 8; a
+# name as `C.f` reads by them; Transcript.bend states each once), a blank line, the statement (none
+# when there is no statement)
+def al.ask.stmt.of(+fs: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  +im = X.ex.trim(T.field(fs, 8n))
+  +s = al.ask.stmt(T.field(fs, 7n))
+  Bool.pick(List<&2, U32>, Bool.or(T.empty(s), T.empty(im)), s, T.cat([im, U.b("\n\n"), s]))
+
+# a unit's key: PATH#NAME
+def al.ask.key(+id: List<&2, U32>) -> List<&2, U32>:
+  T.cat([T.mg.path(id), [35], T.mg.upto(T.mg.after(id, 35), 64)])
+
+def al.ask.names.held(+k: U32, ws: List<&2, List<&2, U32>>) -> Bool:
+  match ws:
+    case Nil{}:
+      False{}
+    case +w <> t:
+      Bool.or(Bool.and(Bool.not(T.empty(w)), V.vd.held(k, w)), al.ask.names.held(k, t))
+
+# the record's unit is in a held-out file, or its law names one (field 11: FILE#NAME, a space between)
+def al.ask.held(+k: U32, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>) -> Bool:
+  Bool.or(V.vd.held(k, id), al.ask.names.held(k, T.split(T.field(fs, 11n), 32)))
+
+# the laws in a unit's value (0x1F between)
+def al.ask.n(xs: List<&2, U32>, +n: Nat) -> Nat:
+  match xs:
+    case Nil{}:
+      n
+    case +c <> t:
+      al.ask.n(t, Bool.pick(Nat, U32.is_eq(c, 31), Nat.add(n, 1n), n))
+
+# The map: each unit's laws, 0x1F between; the units, newest first; the laws kept, the records held out
+type AlAk is Type:
+  AlAk{m: Map<&2, List<&2, U32>>, ks: List<&2, List<&2, U32>>, laws: Nat, held: Nat}
+
+def al.ask.new() -> AlAk:
+  AlAk{Map.new(&2, List<&2, U32>), Nil{}, 0n, 0n}
+
+def al.ask.got(+key: List<&2, U32>, +s: List<&2, U32>, +ks: List<&2, List<&2, U32>>, +nl: Nat, +nh: Nat, r: Map<&2, List<&2, U32>> & List<&2, U32>) -> AlAk:
+  match r:
+    case (m2, +cur):
+      +fresh = T.empty(cur)
+      +n = Bool.pick(Nat, fresh, 0n, al.ask.n(cur, 1n))
+      +keep = Bool.and(Bool.not(T.empty(s)), Bool.and(Bool.not(U.infix(cur, s)), Bool.and(Nat.is_lt(n, al.ask.max()), Bool.not(Nat.is_lt(al.ask.long(), U.len(s))))))
+      +v = Bool.pick(List<&2, U32>, fresh, s, T.cat([cur, [31], s]))
+      AlAk{Map.set(&2, List<&2, U32>, m2, T.mg.str(key), Bool.pick(List<&2, U32>, keep, v, cur)),
+        Bool.pick(List<&2, List<&2, U32>>, Bool.and(keep, fresh), key <> ks, ks), Bool.pick(Nat, keep, Nat.add(nl, 1n), nl), nh}
+
+# a law for the unit KEY, kept when it is new to it, under the cap and not too long
+def al.ask.put(a: AlAk, +key: List<&2, U32>, +s: List<&2, U32>) -> AlAk:
+  match a:
+    case AlAk{m, ks, nl, nh}:
+      al.ask.got(key, s, ks, nl, nh, Map.get(List<&2, U32>, Nil{}, m, T.mg.str(key)))
+
+def al.ask.held.one(a: AlAk) -> AlAk:
+  match a:
+    case AlAk{m, ks, nl, nh}:
+      AlAk{m, ks, nl, Nat.add(nh, 1n)}
+
+def al.ask.rec.on(held: Bool, +key: List<&2, U32>, +s: List<&2, U32>, a: AlAk) -> AlAk:
+  match held:
+    case True{}:
+      al.ask.held.one(a)
+    case False{}:
+      al.ask.put(a, key, s)
+
+# a passing record (its id, its fields) into the map
+def al.ask.rec(+k: U32, +id: List<&2, U32>, +fs: List<&2, List<&2, U32>>, a: AlAk) -> AlAk:
+  al.ask.rec.on(al.ask.held(k, id, fs), al.ask.key(id), al.ask.stmt.of(fs), a)
+
+def al.ask.out.go(ks: List<&2, List<&2, U32>>, +m: Map<&2, List<&2, U32>>) -> List<&2, U32>:
+  match ks:
+    case Nil{}:
+      Nil{}
+    case +key <> t:
+      T.cat([key, [0], T.mg.got(Map.get(List<&2, U32>, Nil{}, m, T.mg.str(key))), [0], al.ask.out.go(t, m)])
+
+# the ask's file: a pair a unit, oldest first (KEY, its laws)
+def al.ask.out(a: AlAk) -> List<&2, U32>:
+  match a:
+    case AlAk{m, ks, nl, nh}:
+      al.ask.out.go(List.reverse(&2, List<&2, U32>, ks), m)
+
+# the file and its counts: units, laws, records held out
+def al.ask.done(a: AlAk) -> List<&2, U32> & Nat & Nat & Nat:
+  match a:
+    case AlAk{m, +ks, nl, nh}:
+      (al.ask.out.go(List.reverse(&2, List<&2, U32>, ks), m), List.length(&2, List<&2, U32>, ks), nl, nh)
+
 # Laws ------------------------------------------------------------------------------------------
+
+law al.ask.stmt.only:
+  {al.ask.stmt(U.b("# the identity\nlaw a_id:\n  for x: U32\n  # a note\n  {a(x) == x : U32}\n\ndef a_id(x):\n  {==}\n"))
+   == U.b("law a_id:\n  for x: U32\n  {a(x) == x : U32}") : List<&2, U32>}
+
+def al.ask.stmt.only():
+  {==}
+
+law al.ask.key.unit:
+  {al.ask.key(U.b("curated:ab__cd/src/f.bend#g.h@31")) == U.b("ab__cd/src/f.bend#g.h") : List<&2, U32>}
+
+def al.ask.key.unit():
+  {==}
+
+# the import lines the law uses come first; a record without a statement gives none
+law al.ask.stmt.imports:
+  {(al.ask.stmt.of([Nil{}, Nil{}, Nil{}, Nil{}, Nil{}, Nil{}, Nil{}, U.b("law l:\n  {C.f(0n) == 0n : Nat}"), U.b("import ./c.bend as C")]),
+    al.ask.stmt.of([Nil{}, Nil{}, Nil{}, Nil{}, Nil{}, Nil{}, Nil{}, U.b("# no law here"), U.b("import ./c.bend as C")]))
+   == (U.b("import ./c.bend as C\n\nlaw l:\n  {C.f(0n) == 0n : Nat}"), Nil{}) : List<&2, U32> & List<&2, U32>}
+
+def al.ask.stmt.imports():
+  {==}
+
+# a unit's laws: each once, at most al.ask.max(), the unit once, in the order put
+law al.ask.cap:
+  {al.ask.out(al.ask.put(al.ask.put(al.ask.put(al.ask.put(al.ask.put(al.ask.put(al.ask.put(al.ask.new(), U.b("p#f"), U.b("law a")), U.b("p#f"), U.b("law a")),
+     U.b("p#g"), U.b("law z")), U.b("p#f"), U.b("law b")), U.b("p#f"), U.b("law c")), U.b("p#f"), U.b("law d")), U.b("p#f"), U.b("law e")))
+   == U.b("p#f\0law a\u{1F}law b\u{1F}law c\u{1F}law d\0p#g\0law z\0") : List<&2, U32>}
+
+def al.ask.cap():
+  {==}
 
 law al.rank.every:
   {(al.rank(U.b("# f is the identity\nlaw f_id:\n  for x: U32\n  {f(x) == x : U32}")), al.rank(U.b("law f_two:\n  {f(2) == 2 : U32}"))) == (0n, 1n) : Nat & Nat}

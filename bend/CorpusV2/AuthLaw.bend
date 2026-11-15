@@ -43,6 +43,11 @@ import ./AuthLawText.bend as A
 #                                   the answer) from passing records, one a
 #                                   repository, its laws for every input first
 #                                   (al.ranked)
+#   authlaw ask PASS OUT            the authors'-law ask (the user, 11-15: "Yes"):
+#                                   a pair a unit, PATH#NAME then its laws as
+#                                   the ask states them (0x1F between), for
+#                                   bend-transcript's AUTHLAW; a held-out file's
+#                                   laws left out (VALID_K, CorpusV2/ValidText.bend)
 #
 # A job's record (0x1E between): root, repository, kind (laws-file or
 # same-file), law file, law, check file, the units the law names, the unit's
@@ -1041,6 +1046,29 @@ def al.render(+inp: String, +n: Nat, +out: String) -> IO(Unit):
     kvs : List<&2, Ev.EvKv> <- Ev.ev.nul(inp)
     S.write(out, T.cat(al.pick(al.ranked(kvs), n, Nil{})))
 
+# The ask ---------------------------------------------------------------------------------------
+
+# every passing record, ranked, into the ask's map (AuthLawText.bend "The ask")
+def al.askf.go(+k: U32, kvs: List<&2, Ev.EvKv>, a: A.AlAk) -> A.AlAk:
+  match kvs:
+    case Nil{}:
+      a
+    case Ev.EvKv{+id, +v} <> t:
+      al.askf.go(k, t, A.al.ask.rec(k, id, Ev.ev.split(v, 30), a))
+
+def al.askf.write(+out: String, r: List<&2, U32> & Nat & Nat & Nat) -> IO(Unit):
+  match r:
+    case (xs, nu, nl, nh):
+      do IO<Unit>:
+        S.write(out, xs)
+        IO.print("authlaw ask: " ++ Nat.show(nu) ++ " units, " ++ Nat.show(nl) ++ " laws; " ++ Nat.show(nh) ++ " records left out (a held-out file's)")
+
+def al.askf.run(+inp: String, +out: String) -> IO(Unit):
+  do IO<Unit>:
+    kvs : List<&2, Ev.EvKv> <- Ev.ev.nul(inp)
+    +k : Nat <- S.env.nat("VALID_K", 2n)
+    al.askf.write(out, A.al.ask.done(al.askf.go(U32.from_nat(k), al.ranked(kvs), A.al.ask.new())))
+
 # Main ------------------------------------------------------------------------------------------
 
 def al.nat(+s: String) -> Nat:
@@ -1068,5 +1096,7 @@ def al.main(xs: List<String>) -> IO(Unit):
       al.stats(out, ps)
     case "render" <> +inp <> +n <> +out <> Nil{}:
       al.render(inp, al.nat(n), out)
+    case "ask" <> +inp <> +out <> Nil{}:
+      al.askf.run(inp, out)
     case _:
-      IO.die(Unit, 2, "usage: authlaw index OUT | match INDEX OUT PART.. | plan W OUT JOBS.. | pick N OUT JOBS.. | repos R,R.. OUT JOBS.. | check JOBS OUT | stats OUT PFX.. | render PASS N OUT")
+      IO.die(Unit, 2, "usage: authlaw index OUT | match INDEX OUT PART.. | plan W OUT JOBS.. | pick N OUT JOBS.. | repos R,R.. OUT JOBS.. | check JOBS OUT | stats OUT PFX.. | render PASS N OUT | ask PASS OUT")

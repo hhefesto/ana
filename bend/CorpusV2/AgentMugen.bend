@@ -1133,7 +1133,7 @@ def am.live(xs: List<String>) -> IO(Unit):
 
 def am.ask(+sh: List<&2, U32>, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2, U32>:
   Bool.pick(List<&2, U32>, S.eq(sh, S.b("direct")), T.mg.ask.direct(fs, path),
-    Bool.pick(List<&2, U32>, S.eq(sh, S.b("direct-cut")), T.f3.ask.direct(fs, path),
+    Bool.pick(List<&2, U32>, S.eq(sh, S.b("direct-cut")), T.f3.ask.direct(fs, path, Map.new(&2, List<&2, U32>)),
     Bool.pick(List<&2, U32>, S.eq(sh, S.b("fill")), T.mg.ask.fill(fs, path), T.mg.ask.repair(fs, path))))
 
 def am.prompt(+t: AmT) -> List<&2, U32>:

@@ -2521,13 +2521,96 @@ def f3.stmts.go(ls: List<&2, List<&2, U32>>, +inside: Bool, +first: Bool) -> Lis
 def f3.stmts(+laws: List<&2, U32>) -> List<&2, U32>:
   mg.chomp(f3.stmts.go(U.lines(laws), False{}, True{}))
 
-# a direct ask: as mg.ask.direct's, the laws' statements under the signature
-def f3.ask.direct(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2, U32>:
+# The authors' laws in the asks (bend-corpus-v2 authlaw ask, CorpusV2/AuthLaw.bend;
+# the user, 11-15: "Yes" to the authors'-law ask): the laws its repository's
+# authors wrote about the unit and their proofs check (a LAWS.bend proven by its
+# PROOF.bend, or a law later in its own file), stated only, as the spec: the
+# answer's file never holds them, so its checks are the unit's own.  AUTHLAW's
+# pairs (PATH#NAME, the laws as the ask states them, 0x1F between) are in the
+# base under 0x01 PATH#NAME (mg.cfg.alaw); a law the unit's own laws (field 14)
+# already state is not said twice.  None for a held-out file's unit (VALID_K,
+# CorpusV2/ValidText.bend): authlaw ask leaves its laws out.
+def mg.alaw.key(+path: List<&2, U32>, +name: List<&2, U32>) -> String:
+  mg.str(cat([[1], path, [35], name]))
+
+# A law as authlaw ask gives it: the import lines it uses (a name as `C.f`
+# reads by them), a blank line, the law.
+def f3.alaw.drop(ls: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> t:
+      +r = f3.alaw.drop(t)
+      Bool.pick(List<&2, List<&2, U32>>, Bool.or(U.prefix(l, U.b("import ")), U.blank(l)), r, l <> r)
+
+# the law without its import lines
+def f3.alaw.law(+l: List<&2, U32>) -> List<&2, U32>:
+  mg.join(f3.alaw.drop(split(l, 10)), [10])
+
+def f3.alaw.im.add(ls: List<&2, List<&2, U32>>, +acc: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match ls:
+    case Nil{}:
+      acc
+    case +l <> t:
+      f3.alaw.im.add(t, Bool.pick(List<&2, List<&2, U32>>, Bool.and(U.prefix(l, U.b("import ")), Bool.not(f3.in(acc, l))), List.append(&2, List<&2, U32>, acc, [l]), acc))
+
+# the laws' import lines, each once, in order
+def f3.alaw.ims(ls: List<&2, List<&2, U32>>, +acc: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match ls:
+    case Nil{}:
+      acc
+    case +l <> t:
+      f3.alaw.ims(t, f3.alaw.im.add(split(l, 10), acc))
+
+def f3.alaw.laws(ls: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> t:
+      f3.alaw.law(l) <> f3.alaw.laws(t)
+
+def f3.alaws.new(ls: List<&2, List<&2, U32>>, +own: List<&2, U32>) -> List<&2, List<&2, U32>>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> t:
+      +r = f3.alaws.new(t, own)
+      Bool.pick(List<&2, List<&2, U32>>, Bool.or(empty(f3.alaw.law(l)), U.infix(own, mg.upto(f3.alaw.law(l), 10))), r, l <> r)
+
+# the unit's authors' laws its own do not state
+def f3.alaws(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  f3.alaws.new(split(mg.got(Map.get(List<&2, U32>, Nil{}, base, mg.alaw.key(path, field(fs, 2n)))), 31), f3.laws(fs))
+
+# the laws' import lines once, then the laws
+def f3.alaw.text(+ls: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  +ims = f3.alaw.ims(ls, Nil{})
+  cat([Bool.pick(List<&2, U32>, List.is_empty(&2, List<&2, U32>, ims), Nil{}, cat([mg.join(ims, [10]), U.b("\n\n")])), mg.join(f3.alaw.laws(ls), U.b("\n\n"))])
+
+def f3.alaw.block.of(+fs: List<&2, List<&2, U32>>, +ls: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  Bool.pick(List<&2, U32>, List.is_empty(&2, List<&2, U32>, ls), Nil{},
+    cat([U.b("\n\nIts repository's laws for it, which their proofs check:\n\n"), mg.chomp(fence(field(fs, 0n), f3.alaw.text(ls)))]))
+
+def f3.alaw.block(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>) -> List<&2, U32>:
+  f3.alaw.block.of(fs, f3.alaws(fs, path, base))
+
+# the laws' import lines once, before the laws; a law the unit's own laws state is not said again
+law f3.alaw.text.once:
+  {(f3.alaw.text([U.b("import ./c.bend as C\n\nlaw a:\n  {C.f(0n) == 0n : Nat}"), U.b("import ./c.bend as C\n\nlaw b:\n  {C.f(1n) == 1n : Nat}"), U.b("law c:\n  {g == g : Nat}")]),
+    f3.alaws.new([U.b("import ./c.bend as C\n\nlaw a:\n  {C.f(0n) == 0n : Nat}"), U.b("law z:\n  {h == h : Nat}")], U.b("\nlaw a:\n  {C.f(0n) == 0n : Nat}\n")))
+   == (U.b("import ./c.bend as C\n\nlaw a:\n  {C.f(0n) == 0n : Nat}\n\nlaw b:\n  {C.f(1n) == 1n : Nat}\n\nlaw c:\n  {g == g : Nat}"), [U.b("law z:\n  {h == h : Nat}")])
+   : List<&2, U32> & List<&2, List<&2, U32>>}
+
+def f3.alaw.text.once():
+  {==}
+
+# a direct ask: as mg.ask.direct's, the laws' statements under the signature,
+# then the authors' laws (f3.alaw.block)
+def f3.ask.direct(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>) -> List<&2, U32>:
   +laws = f3.laws(fs)
   +name = code(field(fs, 2n))
   +line = Bool.pick(List<&2, U32>, mg.prop(fs), cat([U.b("Prove "), name, U.b(" in "), path, U.b(".")]), cat([U.b("Add "), name, U.b(" to "), path, U.b(".")]))
   +sig = Bool.pick(List<&2, U32>, empty(laws), tidy(field(fs, 4n)), cat([tidy(field(fs, 4n)), U.b("\n\n"), f3.stmts(laws)]))
-  cat([mg.doc(fs, line), U.b("\n\n"), mg.chomp(fence(field(fs, 0n), sig))])
+  cat([mg.doc(fs, line), U.b("\n\n"), mg.chomp(fence(field(fs, 0n), sig)), f3.alaw.block(fs, path, base)])
 
 # Laws in the fill and repair asks (the user, 11-14: "Laws in the request, as
 # the spec.  Most Fill and Add requests should state what the function must
@@ -2535,15 +2618,15 @@ def f3.ask.direct(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2
 # then its laws' statements in a block, as a direct ask's are under the
 # signature; the file holds them after the declaration, so the checks stand.
 # Without laws, or another language: the ask as before.
-def f3.ask.laws(+fs: List<&2, List<&2, U32>>, +ask: List<&2, U32>) -> List<&2, U32>:
+def f3.ask.laws(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>, +ask: List<&2, U32>) -> List<&2, U32>:
   +laws = f3.laws(fs)
-  Bool.pick(List<&2, U32>, empty(laws), ask, cat([ask, U.b("\n\n"), mg.chomp(fence(field(fs, 0n), f3.stmts(laws)))]))
+  cat([Bool.pick(List<&2, U32>, empty(laws), ask, cat([ask, U.b("\n\n"), mg.chomp(fence(field(fs, 0n), f3.stmts(laws)))])), f3.alaw.block(fs, path, base)])
 
-def f3.ask.fill(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2, U32>:
-  f3.ask.laws(fs, mg.ask.fill(fs, path))
+def f3.ask.fill(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>) -> List<&2, U32>:
+  f3.ask.laws(fs, path, base, mg.ask.fill(fs, path))
 
-def f3.ask.repair(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>) -> List<&2, U32>:
-  f3.ask.laws(fs, mg.ask.repair(fs, path))
+def f3.ask.repair(+fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>) -> List<&2, U32>:
+  f3.ask.laws(fs, path, base, mg.ask.repair(fs, path))
 
 # `a`, `a` and `b`, `a`, `b` and `c`
 def f3.ands(ns: List<&2, List<&2, U32>>) -> List<&2, U32>:
@@ -2912,7 +2995,7 @@ def f3.miss.if(near: Bool, +v: F3v, +fs: List<&2, List<&2, U32>>, +id: List<&2, 
 def f3.direct(+x: Nat, +miss: Bool, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>, +id: List<&2, U32>, +j: Nat, +m: Nat, +nm: Nat) -> Mx:
   +v = f3.view(fs)
   +ok = Bool.and(mg.tries.ok(j, fs, Nil{}, m, nm), Bool.or(Nat.is_eq(x, 0n), f2.can.give(fs)))
-  Mx{ok, cat([mg.user(f3.ask.direct(fs, path)), f3.read.tail(F3v.head(v), path), f3.miss.if(f3.near(id), v, fs, id, path, base),
+  Mx{ok, cat([mg.user(f3.ask.direct(fs, path, base)), f3.read.tail(F3v.head(v), path), f3.miss.if(f3.near(id), v, fs, id, path, base),
     f3.looks(v, fs, path, base), Bool.pick(List<&2, U32>, miss, f2.miss.add(fs, path), Nil{}), f3.tries(x, j, True{}, v, fs, path, m, nm, base),
     f2.reply.x(x, fs, path, j, mg.last.m(m, j, nm), f3.done.direct(v, fs, path))])}
 
@@ -2941,7 +3024,7 @@ def f3.tag(+fs: List<&2, List<&2, U32>>, +id: List<&2, U32>, +base: Map<&2, List
 def f2.fill(+x: Nat, +miss: Bool, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +base: Map<&2, List<&2, U32>>, +j: Nat, +m: Nat, +nm: Nat) -> Mx:
   +ok = Bool.and(mg.tries.ok(j, fs, field(fs, 10n), m, nm), Bool.or(Nat.is_eq(x, 0n), f2.can.give(fs)))
   +r = Bool.pick(Mx, miss, f2.miss.def(fs, path, field(fs, 7n)), Mx{True{}, Nil{}})
-  mx.and(ok, mx.pre(cat([mg.user(f3.ask.fill(fs, path)), f2.check(path, f2.hole.out(fs, path, field(fs, 13n))), f2.looks(fs, path, field(fs, 10n), base)]),
+  mx.and(ok, mx.pre(cat([mg.user(f3.ask.fill(fs, path, base)), f2.check(path, f2.hole.out(fs, path, field(fs, 13n))), f2.looks(fs, path, field(fs, 10n), base)]),
     mx.post(r, U.append(f2.tries(x, j, False{}, fs, path, m, nm, base, field(fs, 5n)), f2.reply.x(x, fs, path, j, mg.last.m(m, j, nm), f2.done.fill(fs, path))))))
 
 # repair: mutant m handed over: the ask, its check, a look, [a def refused],
@@ -2950,7 +3033,7 @@ def f2.repair(+miss: Bool, +fs: List<&2, List<&2, U32>>, +path: List<&2, U32>, +
   +mut = mutant(fs, m)
   +ok = mg.tries.ok(j, fs, mut, next.m(m, 1n, nm), nm)
   +r = Bool.pick(Mx, miss, f2.miss.def(fs, path, field(fs, 7n)), Mx{True{}, Nil{}})
-  mx.and(ok, mx.pre(cat([mg.user(f3.ask.repair(fs, path)), f2.check(path, f2.out(fs, path, mutant.check(fs, m))), f2.looks(fs, path, mut, base)]),
+  mx.and(ok, mx.pre(cat([mg.user(f3.ask.repair(fs, path, base)), f2.check(path, f2.out(fs, path, mutant.check(fs, m))), f2.looks(fs, path, mut, base)]),
     mx.post(r, U.append(f2.tries(0n, j, False{}, fs, path, next.m(m, 1n, nm), nm, base, field(fs, 5n)), mg.reply(f2.done.repair(fs, path, m))))))
 
 # Presentations -------------------------------------------------------------------------
@@ -3248,6 +3331,19 @@ def mg.night.of(xs: List<&2, List<&2, U32>>, m: Map<&2, List<&2, U32>>) -> Map<&
 def mg.cfg.night(+bx: List<&2, U32>, +sizes: String, +only: String, +nx: List<&2, U32>) -> Mgc:
   Mgc{mg.base.of(split(bx, 10), Map.new(&2, List<&2, U32>)), sizes, only, mg.night.of(split(nx, 0), Map.new(&2, List<&2, U32>))}
 
+# AUTHLAW's pairs (PATH#NAME, the unit's authors' laws) into the base, under 0x01 PATH#NAME
+def mg.alaw.of(xs: List<&2, List<&2, U32>>, m: Map<&2, List<&2, U32>>) -> Map<&2, List<&2, U32>>:
+  match xs:
+    case +k <> +v <> more:
+      mg.alaw.of(more, Map.set(&2, List<&2, U32>, m, mg.str(1 <> k), v))
+    case _:
+      m
+
+def mg.cfg.alaw(c: Mgc, +ax: List<&2, U32>) -> Mgc:
+  match c:
+    case Mgc{b, s, o, n}:
+      Mgc{mg.alaw.of(split(ax, 0), b), s, o, n}
+
 # Main ---------------------------------------------------------------------------
 
 # The input streams a unit at a time (Sys.Rd: memory is a chunk plus the
@@ -3481,9 +3577,11 @@ def run(tok: String, inp: String, +out: String, +window: Nat) -> IO(Unit):
     +sz : String <- S.env("SIZES", "/dev/null")
     +on : String <- S.env("MUGEN_ONLY", "")
     +np : String <- S.env("NIGHT", "")
+    +ap : String <- S.env("AUTHLAW", "")
     bx : List<&2, U32> <- mg.base.read.on(String.eq(bp, ""), bp)
     nx : List<&2, U32> <- mg.base.read.on(String.eq(np, ""), np)
-    tokenizer(fmt.of(f, k), inp, out, Nat.sub(window, 64n), mg.cfg.night(bx, sz, on, nx), Tk.Bpe.parse(tx))
+    ax : List<&2, U32> <- mg.base.read.on(String.eq(ap, ""), ap)
+    tokenizer(fmt.of(f, k), inp, out, Nat.sub(window, 64n), mg.cfg.alaw(mg.cfg.night(bx, sz, on, nx), ax), Tk.Bpe.parse(tx))
 
 def window.of(xs: List<String>) -> Nat:
   match xs:
