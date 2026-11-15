@@ -29,6 +29,7 @@ import ./CorpusV2/Trim.bend as Tm
 import ./CorpusV2/HistDrop.bend as Hd
 import ./CorpusV2/Theory.bend as Th
 import ./CorpusV2/Exlaw.bend as Ex
+import ./CorpusV2/AuthLaw.bend as Al
 
 # bend-corpus-v2: corpus v2's tools (docs/CORPUS-V2.md), one subcommand each,
 # ported from the Python they replaced, each byte-identical to it on the
@@ -74,6 +75,10 @@ import ./CorpusV2/Exlaw.bend as Ex
 #   exlaw UNITS OUT                 Bend units' laws from running the original (example laws, the file's own
 #                                   laws) in field 14, and their law mutants; every pair of UNITS into OUT, in
 #                                   order   (CorpusV2/Exlaw.bend; parts in parallel: run/v9/f3.sh)
+#   authlaw index|match|plan|pick|repos|except|check|count|stats|render ...   the authors' laws of the
+#                                   units (a repository's LAWS.bend proven by its PROOF.bend, or a law later in
+#                                   the unit's own file proven there), each checked with `--check-only` in a
+#                                   copy of its repository   (CorpusV2/AuthLaw.bend; the step: run/v9/f4.sh authlaw)
 #   decl-new UNITS OUT [held=FILE]... [seen=FILE]... [cap=PREFIX:N]...   a new wave's units less the
 #                                   declarations the corpus trains on (seen) or holds out (held: units, or
 #                                   source files by id and content key; and run/v2/holdout's ids and keys),
@@ -319,6 +324,8 @@ def c2.args(xs: List<String>) -> IO(Unit):
       Mu.mtt.part.main(more)
     case "exlaw" <> more:
       Ex.ex.main(more)
+    case "authlaw" <> more:
+      Al.al.main(more)
     case "port" <> more:
       Pt.pt.main(more)
     case "decl-new" <> more:

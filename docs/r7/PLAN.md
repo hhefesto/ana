@@ -38,9 +38,31 @@ later." Renting a box still waits for the user's approval.
 | 7 | Prose | the source's `#` comment is already in the ask and her add (form 2's kinds); theory filler (run/v9/theory, 5.8 GB downloaded, 850 MB of sources) not cleaned yet |
 | 8 | A fixed validation set | the trainer reads one (TrainDense.bend `VALID_CORPUS`, checked, not run); the set itself not built |
 
+## The authors' laws (collector A, 11-14/15)
+
+`bend-corpus-v2 authlaw` (`bend/CorpusV2/AuthLaw.bend`, `AuthLawText.bend`), the step `run/v9/f4.sh authlaw`,
+its output in `run/v9/f4/authlaw`. The run there is the one made on 11-14 in /tmp/bx/authlaw with the same code
+before it moved here (the unit ids are f3's), reused. The moved code gives the same records on the 254 jobs of 3
+repositories, and on 90 of the 92 jobs of 3 of f3's parts run through `f4.sh authlaw` (the other 2: a timeout then,
+a pass now).
+
+- 97,057 laws in 5,647 LAWS.bend files; 26,550 (unit, law) jobs on 9,692 units.
+- 19,105 pass `--check-only`: 13,888 laws stated for every input, 5,217 that check fixed inputs; 6,939 units have
+  a passing law, 5,517 one for every input. None is a `--verdict`: Lean isn't on olimpo.
+- The rest: error 4,062 (the repository's check file rejected before any law), too-big 1,868, timeout 481, and
+  1,034 others (no proof, open, undecided, failing, holes, `@unsafe`, missing, not run).
+- The user, 11-15: a law that names several functions goes to "Every function it names, as now"; the laws that
+  check fixed inputs: "Yes, ranked below laws that hold for every input" (`al.ranked`, `al.rank`); a law that
+  passes only after other failing laws or helpers were taken out of its proof file counts: "Yes: the law's own
+  proof checks, and the record says what was removed"; of the lawres prototype's guessed laws, "No, keep only laws
+  proven for every input" (its 18 compared with a reference only at the test inputs are not kept).
+- Not built yet: the ask that shows the law as the spec (Transcript.bend), held-out units' laws kept out of
+  training, the laws' comments filtered.
+
 ## The pipeline (olimpo, CPU)
 
-1. `run/v9/f4.sh law`: exlaw again on f3's 818 exlaw outputs (units with laws pass through).
+1. `run/v9/f4.sh law`: exlaw again on f3's 818 exlaw outputs (units with laws pass through). Done 11-14 23:02,
+   0 failed. `run/v9/f4.sh authlaw`: the authors' laws (above).
 2. `run/v9/f4.sh work` with the new bend-transcript, `join`.
 3. The mix (Bend only), the filler (≤ 3 copies plus theory prose), the fixed validation set, plan-windows.
 4. A sample for the user, then the user's call on renting.

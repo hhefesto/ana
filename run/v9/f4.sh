@@ -11,6 +11,8 @@
 #   f4.sh work    a worker: renders the jobs whose chunks are all DONE (no exlaw: at once), largest first
 #   f4.sh retry   the claims not DONE dropped (law and render), then law and work again in this process
 #   f4.sh join    each job's stream whose parts are all DONE, as f3.sh's join; the linked streams
+#   f4.sh authlaw the authors' laws of f3's units, each checked by its repository's own proof (bend-corpus-v2
+#                 authlaw), into run/v9/f4/authlaw
 cd /home/hhefesto/src/ana || exit 1
 export BEND_NO_TELEMETRY=1
 ulimit -s unlimited
@@ -66,7 +68,8 @@ input() { local n=$1 k=$2 r=$3 kd=$4 m c
   [ -s $F/law/$n.$k.nul ] && { echo $F/law/$n.$k.nul; return; }
   m=$(awk -v n=$n -v k=$k '$1 == n && $2 == k {print $3}' $Q/nchunks)
   for c in $(seq 0 $((m - 1))); do [ -e $F/law/out/$n.$k.$c.nul ] || return 0; done
-  for c in $(seq 0 $((m - 1))); do cat $F/law/out/$n.$k.$c.nul; done > $F/law/$n.$k.nul.tmp && mv $F/law/$n.$k.nul.tmp $F/law/$n.$k.nul
+  # each process its own .tmp (11-15: twelve workers' next_job wrote one shared .tmp at once, `mv: cannot stat`)
+  for c in $(seq 0 $((m - 1))); do cat $F/law/out/$n.$k.$c.nul; done > $F/law/$n.$k.nul.tmp.$$ && mv $F/law/$n.$k.nul.tmp.$$ $F/law/$n.$k.nul
   echo $F/law/$n.$k.nul; }
 next_job() { local n k r b o kd
   while read -r n k r b o kd; do
@@ -116,6 +119,54 @@ retry() { local c n k r b o kd x=0
   while read -r n k r b o kd; do [ -e $Q/$n.$k/DONE ] || { [ -d $Q/claim-$n.$k ] && rmdir $Q/claim-$n.$k && x=$((x + 1)); }; done < $Q/jobs
   say "retry: $x claims dropped"
   law; work; }
+# the authors' laws ---------------------------------------------------------------------------------------------
+# bend-corpus-v2 authlaw (CorpusV2/AuthLaw.bend).  The user, 11-14: "Yes" to the authors'-law collector in Bend;
+# 11-15: "Yes" to moving it here as this step, and no limit on its CPUs (P: every CPU; run it under a slice with a
+# memory cap, as the render's ana-render.slice).  Every LAWS.bend of the roots (index); the units of f3's law/in that
+# a law names (match, B parts a process); the jobs in W shards, a repository's in one (plan); each shard checked
+# with the repository's own proof file in a copy of it, `--check-only`, Lean not here (check); then the records, their
+# counts (stats) and one session a repository (render).  A part done (its .done) is not run again.  AD: where (else
+# run/v9/f4/authlaw), ALIN: the units' parts (else f3's law/in).  Thin: the logic is Bend's.
+AL=$F/gcroot-al/bin/bend-corpus-v2
+AD=${AD:-$F/authlaw}
+ALIN=${ALIN:-$F3/law/in}
+# the roots, absolute (a check runs in a copy of its repository)
+absrc() { local s o=; for s in ${SRCS//:/ }; do o=$o${o:+:}$PWD/$s; done; echo $o; }
+# F X: F on each X, P at a time
+par() { local f=$1 x; shift
+  for x in "$@"; do
+    while [ "$(jobs -rp | wc -l)" -ge "$P" ]; do wait -n; done
+    $f "$x" &
+  done
+  wait; }
+al_match() { local b=$1
+  [ -e $b.done ] && return
+  if $AL authlaw match $AD/index.nul $b.nul $(cat $b) > $b.log 2>&1; then touch $b.done; else say "authlaw match FAILED ($b.log)"; fi; }
+al_check() { local j=$1 c=$AD/c/c${1##*.}
+  [ -e $c.done ] && return
+  if $AL authlaw check $j $c > $c.log 2>&1; then touch $c.done; else say "authlaw check FAILED ($c.log)"; fi; }
+authlaw() { local P=${P:-$(nproc)} W=${W:-$((4 * $(nproc)))} B=${B:-40} b k ok=1
+  [ -x $AL ] || { say "no $AL (nix build .#bend-corpus-v2 -o $F/gcroot-al)"; return 1; }
+  [ -e $AD/authlaw.done ] && { say "authlaw: done ($AD/authlaw.stats)"; return 0; }
+  export BEND=$PWD/run/v5/gcroot-bend-2.0.39/bin/bend BEND_SRC=$(absrc) TIMEOUT=${TIMEOUT:-240} TOTAL_MAX=${TOTAL_MAX:-3000000}
+  mkdir -p $AD/m $AD/c
+  if [ ! -e $AD/index.done ]; then
+    $AL authlaw index $AD/index.nul > $AD/index.log 2>&1 || { say "authlaw index FAILED ($AD/index.log)"; return 1; }
+    touch $AD/index.done; say "authlaw index: $(tr '\n' ' ' < $AD/index.nul.stats)"; fi
+  ls $ALIN/*.nul | split -l $B -d -a 3 - $AD/m/b
+  par al_match $AD/m/b[0-9][0-9][0-9]
+  for b in $AD/m/b[0-9][0-9][0-9]; do [ -e $b.done ] || ok=; done
+  [ -n "$ok" ] || { say "authlaw: a match FAILED"; return 1; }
+  if [ ! -e $AD/plan.done ]; then
+    $AL authlaw plan $W $AD/jobs $AD/m/b[0-9][0-9][0-9].nul > $AD/plan.log 2>&1 || { say "authlaw plan FAILED ($AD/plan.log)"; return 1; }
+    touch $AD/plan.done; fi
+  par al_check $(for k in $(seq 0 $((W - 1))); do echo $AD/jobs.$k; done)
+  for k in $(seq 0 $((W - 1))); do [ -e $AD/c/c$k.done ] || ok=; done
+  [ -n "$ok" ] || { say "authlaw: a check FAILED"; return 1; }
+  for x in pass fail time files; do cat $(for k in $(seq 0 $((W - 1))); do echo $AD/c/c$k.$x; done) > $AD/authlaw.$x; done
+  $AL authlaw stats $AD/authlaw.stats $(for k in $(seq 0 $((W - 1))); do echo $AD/c/c$k; done) > $AD/stats.log 2>&1 \
+    && $AL authlaw render $AD/authlaw.pass 40 $AD/sessions.md > $AD/render.log 2>&1 || { say "authlaw stats/render FAILED"; return 1; }
+  touch $AD/authlaw.done; say "authlaw: $(tr '\n' ' ' < $AD/authlaw.stats)"; }
 # join ----------------------------------------------------------------------------------------------------------
 shapes() { local i=$1 o=$2
   LC_ALL=C gawk -v RS='\0' -v ORS='\0' -v m="$o.main" -v c="$o.chain" -v x="$o.fix" \
@@ -163,5 +214,6 @@ case "${1:-}" in
   work) work ;;
   retry) retry ;;
   join) join ;;
-  *) echo "usage: f4.sh plan|law|work|retry|join" >&2; exit 2 ;;
+  authlaw) authlaw ;;
+  *) echo "usage: f4.sh plan|law|work|retry|join|authlaw" >&2; exit 2 ;;
 esac
