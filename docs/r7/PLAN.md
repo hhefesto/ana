@@ -166,7 +166,7 @@ a pass now).
   $0.561 to $0.601/h in ten minutes; credit $22.44, 0 instances): less the credit watch's $1.00 floor and about an
   hour of setup and gate, the credit covers about 45,000-49,000 steps, 73-79% of R7, and the credit watch ends it
   there (saves every 5,000 steps), before the plan's end (its learning rate's decay).  About $8 more covers all
-  of it; $10 leaves a margin for a slower box.  run/v9/run7go.sh (ignored by git, as run/ is) now prints this from
+  of it; $10 leaves a margin for a slower box.  run/v9/run7go.sh (in git, added with -f: run/ is ignored) now prints this from
   the plan's real count (2.75 s a step, the cheapest offer then, the share the credit covers) before it rents.
   The user's call, 11-16 00:2x: "Add about $10 to Vast before renting, so R7 can run to the end".  The user adds
   it (Vast's billing page; mugen can't pay); renting still waits for the user's OK in the morning (RENT_OK=yes).
