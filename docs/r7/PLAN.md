@@ -83,6 +83,11 @@ a pass now).
 - The chain: run/v9/r7chain2.sh (ana-r7chain2): run 10's and 10b's collections, their renders (f6.sh), the
   prove units (f7) and the sorts (f8) waited for, mugen's chats again, the prose, then run7.sh (the mix, the
   filler, plan-windows, R7valid). It ends at "end: run/v9/R7 is ready" in run/v9/run7.log; it rents nothing.
+  Since 11-15 20:5x (336e3f8) col10's clean and render (f6.sh) go first, while col10b's decl-new (from 20:21) and
+  check go on: col10b's decl-new has seen col10's units, so col10 no longer waits behind it.  The time, from R6's
+  run6.log (join 22:53, mix to 01:04, plan-windows to 02:38) and f4's authors' laws (about 3 h for 26,550 jobs):
+  run7.sh alone is about 3.5-4 h; with col10's f6 (exlaw, authors' laws, render) before it, R7 is ready some
+  6-8 h after run 10's check ends, not 1-2 h as said at 20:47.
 - Run 10's check, rebalanced (11-15 20:01, run/v9/col10tail.sh, ana-col10tail; as run/v8/col9-finish2.sh): its 6
   processes shard by file, and shard 1 held the slow files (gildrb-site's lexer, about a minute a unit): 1,234 of its
   3,612 decided in 2 h against 1,864-2,492 for the others, so it would have ended 2-3 h after them. The chain was
