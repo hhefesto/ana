@@ -3,7 +3,7 @@
 # 04:50: 102 of 17,164 sessions, 9 of 400 filler files; run/v9/R7valid-drop.ids lists their ids, one a line).
 # Held-out files are chosen by path (CorpusV2/ValidText.bend), so a renamed copy (a2bgh5 n2LTT_C/ for n2LTT/, a
 # fork's references/ for tasks/) lands in training.  Only the validation side changes; training (R7) stays as it is.
-# Run after run7.sh says R7 is ready, and only on the user's OK.  A thin shim: the drop is bend-corpus-v2's
+# Runs after run7.sh says R7 is ready (r7drop-wait.sh starts it then; validation only, nothing deleted).  A thin shim: the drop is bend-corpus-v2's
 # `valid drop` (CorpusV2/Valid.bend), the windows bend-plan-windows', the check validfixed's, as run7.sh and
 # r7vf-wait.sh run them.  Nothing is deleted: the inputs move to R7vsrc.full/bend/, the old R7valid to R7valid.full
 # (out of R7vsrc, so plan-windows sees only the kept ones).

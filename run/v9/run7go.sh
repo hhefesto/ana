@@ -41,6 +41,10 @@ while systemctl --user is-active -q ana-r7chain2; do
   say "waiting for R7 (ana-r7chain2, run/v9/r7chain2.log)"; sleep 300
 done
 grep -q "end: $P is ready" run/v9/run7.log 2>/dev/null || die "run7 ended without R7 ($(tail -n 1 run/v9/run7.log 2>/dev/null)); nothing rented"
+# R7valid is being rebuilt without the copies (r7drop-wait.sh, 2026-11-16): not while it moves
+while systemctl --user is-active -q ana-r7drop-wait; do say "waiting for r7valid-drop (run/v9/r7drop-wait.log)"; sleep 60; done
+[ -e run/v9/r7drop-wait.log ] && ! grep -q 'end: run/v9/R7valid without the copies' run/v9/r7drop-wait.log \
+  && die "r7valid-drop did not end (run/v9/r7drop-wait.log): R7valid may be the old one or half moved; nothing rented"
 [ -s $PL ] || die "no $PL"
 [ -s $VC ] || die "no $VC (R7's validation set)"
 [ -n "$CF" ] || die "no checkpoint $C in run/v9/run5g/out or run/v9/run6/out"
