@@ -275,3 +275,18 @@ a pass now).
   R7vsrc.full, the old R7valid in R7valid.full (nothing deleted). What is left is the user's: about $10 on Vast
   (run7go.sh's need at $0.535/h, South Korea: 61,237 x 2.75 s = 46.8 h, $25.03 + $1 floor + an hour = $26.56,
   against $22.44), then `RENT_OK=yes bash run/v9/run7go.sh` on their approval.
+
+## El cubo de Edgar into the corpus (11-16)
+
+- The user, 11-16: "after everything has been deployed and laws added, add the edgar repo to ana's training corpus".
+  Edgar (hhefesto/elcubodeedgar, public) at 72a0a8d: deployed, its laws in (LAWS.bend, PROOF.bend --verdict ALL
+  PROOFS CHECK; FIT.bend, the checker's only).
+- Run 10c (tools/corpus-v2/collect/bend-run10c.cfg, run/v9/col10c.sh, unit ana-col10c): run 10b's settings, no
+  vault (the user's own: all of it to train), col10fix's bend-corpus-v2 (the corpus files gone since 11-09 have
+  their cached keys stand, as col10b's); decl-new against every earlier stream, col10's and col10b's too.  The
+  collection: 39 files, 38 kept (0.4 MB); the gate's 60 s check: 24 pass, 12 checked (@unsafe or foreign), PROOF.bend
+  and FIT.bend past 60 s, web/App.bend not loaded (its ../bend-frp is the flake's, not in the tree; bend-frp is in
+  own9).
+- Then run/v9/col10c-f6.sh (unit ana-col10c-f6): f6.sh with F6=run/v9/f6c N=col10c, as col10b's (exlaw, LAWS.bend's
+  authors' laws, the render, the join with R7's validation split).  R7 as built does not have it: the next mix takes
+  it (run7.sh's EXTRA, as col10b's), unless R7 is mixed again.
