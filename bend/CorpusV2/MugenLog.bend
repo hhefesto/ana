@@ -484,11 +484,11 @@ def ml.caps(ls: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
     case +l <> t:
       ml.line.cap(l) <> ml.caps(t)
 
-# 40 lines at most, then how many more
-def ml.body.cap(+ls: List<&2, List<&2, U32>>) -> List<&2, U32>:
+# k lines at most (40, or 12 for a session that does not fit with 40), then how many more
+def ml.body.cap(+ls: List<&2, List<&2, U32>>, +k: Nat) -> List<&2, U32>:
   +n = List.length(&2, List<&2, U32>, ls)
-  +more = Bool.pick(List<&2, U32>, Nat.is_le(n, 40n), Nil{}, ml.b("\n[" ++ Nat.show(Nat.sub(n, 40n)) ++ " more lines]"))
-  U.append(S.join(ml.caps(List.take(&2, List<&2, U32>, ls, 40n)), 10), more)
+  +more = Bool.pick(List<&2, U32>, Nat.is_le(n, k), Nil{}, ml.b("\n[" ++ Nat.show(Nat.sub(n, k)) ++ " more lines]"))
+  U.append(S.join(ml.caps(List.take(&2, List<&2, U32>, ls, k)), 10), more)
 
 # `(exit N in T s)` as `(exit N)`
 def ml.exit.of(+l: List<&2, U32>) -> List<&2, U32>:
@@ -498,42 +498,42 @@ def ml.is.exit(+l: List<&2, U32>) -> Bool:
   S.prefix(l, ml.b("(exit "))
 
 # a shell's echo: its output, capped, then its exit line without the time
-def ml.shell.echo.at(ex: Bool, +last: List<&2, U32>, +rest: List<&2, List<&2, U32>>) -> List<&2, U32>:
+def ml.shell.echo.at(ex: Bool, +last: List<&2, U32>, +rest: List<&2, List<&2, U32>>, +k: Nat) -> List<&2, U32>:
   match ex:
     case True{}:
-      +body = ml.chomp(ml.body.cap(List.reverse(&2, List<&2, U32>, rest)))
+      +body = ml.chomp(ml.body.cap(List.reverse(&2, List<&2, U32>, rest), k))
       ml.cat([body, Bool.pick(List<&2, U32>, ml.empty(body), Nil{}, [10]), ml.exit.of(last)])
     case False{}:
-      ml.body.cap(List.reverse(&2, List<&2, U32>, last <> rest))
+      ml.body.cap(List.reverse(&2, List<&2, U32>, last <> rest), k)
 
-def ml.shell.echo.rev(+ls: List<&2, List<&2, U32>>) -> List<&2, U32>:
+def ml.shell.echo.rev(+ls: List<&2, List<&2, U32>>, +k: Nat) -> List<&2, U32>:
   match ls:
     case +last <> +rest:
-      ml.shell.echo.at(ml.is.exit(last), last, rest)
+      ml.shell.echo.at(ml.is.exit(last), last, rest, k)
     case Nil{}:
       Nil{}
 
-def ml.shell.echo(+e: List<&2, U32>) -> List<&2, U32>:
-  ml.shell.echo.rev(List.reverse(&2, List<&2, U32>, S.split.lines(ml.chomp(e))))
+def ml.shell.echo(+e: List<&2, U32>, +k: Nat) -> List<&2, U32>:
+  ml.shell.echo.rev(List.reverse(&2, List<&2, U32>, S.split.lines(ml.chomp(e))), k)
 
 def ml.echo.turn(+e: List<&2, U32>) -> List<&2, U32>:
   ml.turn("echo", ml.cat([ml.b("```\n"), e, ml.b("\n```\n")]))
 
-def ml.call.text(+c: Ml) -> List<&2, U32>:
+def ml.call.text(+c: Ml, +k: Nat) -> List<&2, U32>:
   Bool.pick(List<&2, U32>, ml.is(c, "shell"),
-    U.append(ml.turn("shell", ml.end.nl(ml.f(c, 0n))), ml.echo.turn(ml.shell.echo(ml.echo(c)))),
+    U.append(ml.turn("shell", ml.end.nl(ml.f(c, 0n))), ml.echo.turn(ml.shell.echo(ml.echo(c), k))),
     Bool.pick(List<&2, U32>, ml.is(c, "read"),
-      U.append(ml.turn("read", ml.cat([ml.f(c, 0n), [32], ml.f(c, 1n), [32], ml.f(c, 2n), [10]])), ml.echo.turn(ml.body.cap(S.split.lines(ml.chomp(ml.echo(c)))))),
+      U.append(ml.turn("read", ml.cat([ml.f(c, 0n), [32], ml.f(c, 1n), [32], ml.f(c, 2n), [10]])), ml.echo.turn(ml.body.cap(S.split.lines(ml.chomp(ml.echo(c))), k))),
       Bool.pick(List<&2, U32>, ml.is(c, "write"),
-        U.append(ml.turn("write", ml.cat([ml.f(c, 0n), [10], ml.end.nl(ml.f(c, 1n))])), ml.echo.turn(ml.body.cap(S.split.lines(ml.chomp(ml.echo(c)))))),
-        U.append(ml.turn("edit", ml.cat([ml.path(c), [10], ml.groups(ml.eds(ml.fs(c)))])), ml.echo.turn(ml.body.cap(S.split.lines(ml.chomp(ml.echo(c)))))))))
+        U.append(ml.turn("write", ml.cat([ml.f(c, 0n), [10], ml.end.nl(ml.f(c, 1n))])), ml.echo.turn(ml.body.cap(S.split.lines(ml.chomp(ml.echo(c))), k))),
+        U.append(ml.turn("edit", ml.cat([ml.path(c), [10], ml.groups(ml.eds(ml.fs(c)))])), ml.echo.turn(ml.body.cap(S.split.lines(ml.chomp(ml.echo(c))), k))))))
 
-def ml.calls.text(+cs: List<&2, Ml>) -> List<&2, U32>:
+def ml.calls.text(+cs: List<&2, Ml>, +k: Nat) -> List<&2, U32>:
   match cs:
     case Nil{}:
       Nil{}
     case +c <> +t:
-      U.append(ml.call.text(c), ml.calls.text(t))
+      U.append(ml.call.text(c, k), ml.calls.text(t, k))
 
 # every edit in the piece is on p alone
 def ml.one.file(+cs: List<&2, Ml>, +p: List<&2, U32>) -> Bool:
@@ -647,9 +647,28 @@ def ml.id(+p: List<&2, U32>, +d: Did, +at: List<&2, U32>) -> List<&2, U32>:
 
 # A piece as a session ------------------------------------------------------------------------------------
 
-# 0 kept, 1 private, 2 too long, 3 an edit of another file in it
+# 0 kept, 1 private, 2 too long, 3 an edit of another file in it, 4 kept with its echoes cut to 12 lines,
+# 5 kept as its last try alone (its last edit or write on, echoes cut to 12 lines)
 type MlD is Data:
   MlD{code: Nat, id: List<&2, U32>, text: List<&2, U32>}
+
+# a code that keeps its session
+def ml.kept(+k: Nat) -> Bool:
+  Bool.or(Nat.is_eq(k, 0n), Bool.or(Nat.is_eq(k, 4n), Nat.is_eq(k, 5n)))
+
+# the piece from its last edit or write on (the tries before it left out; the read before them too, as the
+# file it showed is not the one the last edit changes)
+def ml.last.go(cs: List<&2, Ml>, +cur: List<&2, Ml>, at: Bool) -> List<&2, Ml>:
+  match cs at:
+    case Nil{} _:
+      cur
+    case +c <> +t True{}:
+      ml.last.go(t, c <> t, ml.changes.any(t))
+    case +c <> +t False{}:
+      ml.last.go(t, cur, ml.changes.any(t))
+
+def ml.last.from(+cs: List<&2, Ml>) -> List<&2, Ml>:
+  ml.last.go(cs, cs, ml.changes.any(cs))
 
 def ml.start.at(+cs: List<&2, Ml>) -> List<&2, U32>:
   match cs:
@@ -661,14 +680,30 @@ def ml.start.at(+cs: List<&2, Ml>) -> List<&2, U32>:
 def ml.fits(+b: Tk.Bpe, +limit: Nat, +text: List<&2, U32>) -> Bool:
   Nat.is_le(Nat.add(List.length(&2, U32, Tk.Bpe.encode(b, text)), 2n), limit)
 
+# a piece's session text, its echoes cut to k lines
+def ml.text.of(+d: Did, +p: List<&2, U32>, +cs: List<&2, Ml>, +k: Nat) -> List<&2, U32>:
+  ml.home(ml.cat([ml.turn("user", ml.end.nl(ml.ask(d, p))), ml.calls.text(cs, k), ml.turn("mugen", ml.end.nl(ml.reply(d, p)))]))
+
+# a piece too long for the window, shorter: its echoes cut to 12 lines, else its last try alone (the user,
+# 11-14: "should have a lot of bend code"; 88 of 122 pieces were too long with 40-line echoes).  Each
+# shorter text is scrubbed again.
+def ml.shorter(+b: Tk.Bpe, +limit: Nat, +p: List<&2, U32>, +cs: List<&2, Ml>, +d: Did, +id: List<&2, U32>) -> MlD:
+  +t12 = ml.text.of(d, p, cs, 12n)
+  +ls = ml.last.from(cs)
+  +dl = ml.first.change(ls)
+  +tl = ml.text.of(dl, p, ls, 12n)
+  Bool.pick(MlD, Bool.and(ml.fits(b, limit, t12), Bool.not(ml.private(t12))), MlD{4n, id, t12},
+    Bool.pick(MlD, Bool.and(ml.fits(b, limit, tl), Bool.not(ml.private(tl))), MlD{5n, ml.id(p, dl, ml.start.at(ls)), tl},
+      MlD{2n, id, Nil{}}))
+
 def ml.session(+b: Tk.Bpe, +limit: Nat, +p0: List<&2, U32>, +cs: List<&2, Ml>) -> MlD:
   +d = ml.first.change(cs)
   +p = ml.home(p0)
-  +text = ml.home(ml.cat([ml.turn("user", ml.end.nl(ml.ask(d, p))), ml.calls.text(cs), ml.turn("mugen", ml.end.nl(ml.reply(d, p)))]))
+  +text = ml.text.of(d, p, cs, 40n)
   +id = ml.id(p, d, ml.start.at(cs))
   Bool.pick(MlD, Bool.not(ml.one.file(cs, p0)), MlD{3n, id, Nil{}},
     Bool.pick(MlD, ml.private(text), MlD{1n, id, Nil{}},
-      Bool.pick(MlD, ml.fits(b, limit, text), MlD{0n, id, text}, MlD{2n, id, Nil{}})))
+      Bool.pick(MlD, ml.fits(b, limit, text), MlD{0n, id, text}, ml.shorter(b, limit, p, cs, d, id))))
 
 def ml.sessions(+b: Tk.Bpe, +limit: Nat, +p: List<&2, U32>, ps: List<&2, List<&2, Ml>>) -> List<&2, MlD>:
   match ps:
@@ -690,27 +725,30 @@ def ml.turn.sessions(+b: Tk.Bpe, +limit: Nat, +cs: List<&2, Ml>) -> List<&2, MlD
 
 # The stream -------------------------------------------------------------------------------------------
 
-# counts: turns, sessions kept, private, too long, another file's edit, pieces with no pass at the end
+# counts: turns, sessions kept, private, too long, another file's edit, calls; of the kept, how many with
+# their echoes cut to 12 lines (s) and how many as their last try alone (r)
 type MlC is Data:
-  MlC{turns: Nat, kept: Nat, priv: Nat, long: Nat, other: Nat, calls: Nat}
+  MlC{turns: Nat, kept: Nat, priv: Nat, long: Nat, other: Nat, calls: Nat, short: Nat, last: Nat}
 
 def ml.count(+c: MlC, +k: Nat) -> MlC:
   match c:
-    case MlC{t, a, p, l, o, n}:
-      Bool.pick(MlC, Nat.is_eq(k, 0n), MlC{t, 1n+a, p, l, o, n},
-        Bool.pick(MlC, Nat.is_eq(k, 1n), MlC{t, a, 1n+p, l, o, n},
-          Bool.pick(MlC, Nat.is_eq(k, 2n), MlC{t, a, p, 1n+l, o, n}, MlC{t, a, p, l, 1n+o, n})))
+    case MlC{t, a, p, l, o, n, s, r}:
+      Bool.pick(MlC, Nat.is_eq(k, 0n), MlC{t, 1n+a, p, l, o, n, s, r},
+        Bool.pick(MlC, Nat.is_eq(k, 1n), MlC{t, a, 1n+p, l, o, n, s, r},
+          Bool.pick(MlC, Nat.is_eq(k, 2n), MlC{t, a, p, 1n+l, o, n, s, r},
+            Bool.pick(MlC, Nat.is_eq(k, 4n), MlC{t, 1n+a, p, l, o, n, 1n+s, r},
+              Bool.pick(MlC, Nat.is_eq(k, 5n), MlC{t, 1n+a, p, l, o, n, s, 1n+r}, MlC{t, a, p, l, 1n+o, n, s, r})))))
 
 # a turn with n calls kept (none: not counted)
 def ml.count.turn(+c: MlC, +n: Nat) -> MlC:
   match c:
-    case MlC{+t, a, p, l, o, k}:
-      MlC{Bool.pick(Nat, Nat.is_eq(n, 0n), t, 1n+t), a, p, l, o, Nat.add(k, n)}
+    case MlC{+t, a, p, l, o, k, s, r}:
+      MlC{Bool.pick(Nat, Nat.is_eq(n, 0n), t, 1n+t), a, p, l, o, Nat.add(k, n), s, r}
 
 def ml.show(+c: MlC) -> String:
   match c:
-    case MlC{t, a, p, l, o, n}:
-      "mugenlog: " ++ Nat.show(t) ++ " turns with Bend calls (" ++ Nat.show(n) ++ " calls); " ++ Nat.show(a) ++ " sessions kept; left out: " ++ Nat.show(p) ++ " private, " ++ Nat.show(l) ++ " too long, " ++ Nat.show(o) ++ " with another file's edit"
+    case MlC{t, a, p, l, o, n, s, r}:
+      "mugenlog: " ++ Nat.show(t) ++ " turns with Bend calls (" ++ Nat.show(n) ++ " calls); " ++ Nat.show(a) ++ " sessions kept (" ++ Nat.show(s) ++ " with echoes cut to 12 lines, " ++ Nat.show(r) ++ " as their last try alone); left out: " ++ Nat.show(p) ++ " private, " ++ Nat.show(l) ++ " too long, " ++ Nat.show(o) ++ " with another file's edit"
 
 type MlS is Type:
   MlS{rd: S.Rd, out: File, b: Tk.Bpe, lim: Nat, turn: List<&2, Ml>, pend: List<&2, Ml>, c: MlC, go: Bool}
@@ -730,7 +768,7 @@ def ml.emit(ds: List<&2, MlD>, out: File, +c: MlC) -> IO(File & MlC):
     case +d <> t:
       match d:
         case MlD{+k, +i, +x}:
-          IO.bind(File, File & MlC, ml.emit.one(out, k, i, x), o2 => ml.emit(t, o2, ml.count(c, k)))
+          IO.bind(File, File & MlC, ml.emit.one(out, Bool.pick(Nat, ml.kept(k), 0n, 1n), i, x), o2 => ml.emit(t, o2, ml.count(c, k)))
 
 def ml.flush.got(rd: S.Rd, +b: Tk.Bpe, +lim: Nat, +go: Bool, +n: Nat, r: File & MlC) -> IO(MlS):
   (out, c) = r
@@ -833,7 +871,7 @@ def ml.run.with(m: Maybe<&2, Tk.Bpe>, +inp: String, +outp: String, +window: Nat)
       do IO<Unit>:
         rd : S.Rd <- S.Rd.open(inp)
         out : File <- IO.try(File, File.open(outp, "w"))
-        s : MlS <- ml.go(ml.fuel(), MlS{rd, out, b, Nat.sub(window, 64n), Nil{}, Nil{}, MlC{0n, 0n, 0n, 0n, 0n, 0n}, True{}})
+        s : MlS <- ml.go(ml.fuel(), MlS{rd, out, b, Nat.sub(window, 64n), Nil{}, Nil{}, MlC{0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n}, True{}})
         ml.fin(s)
 
 def ml.run(+tok: String, +inp: String, +outp: String, +window: Nat) -> IO(Unit):
