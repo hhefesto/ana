@@ -5,7 +5,8 @@ import ./Sys.bend as S
 # per shard already decided, so a restart checks only the rest. PART is each
 # shard's part.0 from its work directory, in shard order (SHARD of as many
 # SHARDS as there are parts); its fields are (position, id, record), in position
-# order. Writes:
+# order; `=` for a shard that finished (all its units decided, its kept results
+# in its own results.K.nul, not repeated here). Writes:
 #
 #   OUT.nul   the kept results as RESULTS pairs, shard order: results.prev.nul
 #   OUT.ids   the ids at or before each shard's last kept unit, for DONE
@@ -108,12 +109,25 @@ def ps.part(+x: String, f: File, +lasts: List<&2, Nat>, +kept: Nat) -> IO(Ps):
     p : Pt <- pt.go(cs.big(), Pt{rd, f, 0n, 0n, True{}})
     ps.got(p, lasts, kept)
 
+# a finished shard (`=`): every one of its units decided, none of its results here
+def ps.fin(f: File, +lasts: List<&2, Nat>, +kept: Nat) -> IO(Ps):
+  do IO<Ps>:
+    IO.print("finished: all its units decided")
+    return Ps{f, List.append(&2, Nat, lasts, [cs.big()]), kept}
+
+def ps.one(fin: Bool, +x: String, f: File, +lasts: List<&2, Nat>, +kept: Nat) -> IO(Ps):
+  match fin:
+    case True{}:
+      ps.fin(f, lasts, kept)
+    case False{}:
+      ps.part(x, f, lasts, kept)
+
 def ps.go(xs: List<String>, p: Ps) -> IO(Ps):
   match xs p:
     case Nil{} d:
       IO.pure(Ps, d)
-    case x <> more Ps{f, +lasts, +kept}:
-      IO.bind(Ps, Ps, ps.part(x, f, lasts, kept), ps.go(more))
+    case +x <> more Ps{f, +lasts, +kept}:
+      IO.bind(Ps, Ps, ps.one(String.eq(x, "="), x, f, lasts, kept), ps.go(more))
 
 # The units: the ids their shard got past
 type Un is Type:

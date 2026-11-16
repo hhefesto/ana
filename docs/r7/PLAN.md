@@ -98,6 +98,15 @@ a pass now).
   fields as pairs: they are triples (position, id, record), so "11,273 done at 19:39" was half again too many.
   Its freeze then stop failed ("Cannot perform operation on frozen unit"): thawed and stopped by hand at 20:01; a
   next use thaws first.
+- Rebalanced again (11-15 21:29, run/v9/col10tail2.sh, ana-col10tail2): of col10tail's 7 shards, 0, 1 and 6 ended
+  by 21:20 (about 4 s a unit), and shard 2 held bendJVM's big files (runtime/scheduler, runtime/binary64,
+  java/threads, java/strings): about 80 s a unit and up to 12.7 GB a check (so one at a time on olimpo), about 5 h
+  alone. A part.0 holds only the kept units: "3,994/8,450 at 21:04" (11-15 notes) counted kept units, not decided
+  ones. bendJVM so far: 67 of 254 decided units kept, 64 of them runtime/threads.bend; java/natives 0 of 48. Its 290
+  undecided units are held back from R7 (run/v9/col10tail2/e/deferred.ids, for a later check, R8), not dropped
+  from the collection. check-salvage now takes `=` for a shard that finished (bend/CheckSalvage.bend; the 20:01
+  salvage made again gives the same files; with `=` its decided ids match the hash's shard). Kept so far 14,434
+  (9,374 + the finished shards' 2,610 + 2,450 salvaged); the other 1,827 on 8 processes, then ana-r7chain2.
 - f5's join (15:13): 98 of 98 streams, 286 splits; 2,099,453 Bend sessions for training before the mix's cap,
   15,666 held out (39 MB) for R7valid.
 - mugen's chats (CorpusV2/MugenLog.bend, run/v9/mlog): 654 turns with Bend calls give only 18 sessions that fit
