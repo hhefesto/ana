@@ -205,7 +205,11 @@ a pass now).
   (export.sh then ml, into /tmp/bx/mlogtest): rc=0 both, 75 s; 688 turns with Bend calls, 66 sessions kept (16 with
   echoes cut, 30 as their last try; 9 private, 61 too long, 7 another file's edit left out). Its scan: no LAN
   address, email, password, sudo, netsem, /home/hhefesto, API key or private key; "hhefesto" only as a file's owner
-  in `ls -l` lines, and the long strings are test hashes and /nix/store names.
+  in `ls -l` lines, and the long strings are test hashes and /nix/store names.  The host name `delfos` and the
+  public repository's name `elcubodeedgar` are in its ssh/scp commands (35 and 11 lines).  11-16 00:3x: run7.sh
+  looks again at whatever mlog.nul r7chain2 remakes (an email, a private key, a GitHub or API token, netsem, a
+  password, "secret"): any hit leaves mugen's chats out of R7, train and valid, and only the count is logged
+  (9da2b59); the test export and the 10:51 mlog.nul both have 0.
 - The launcher, run only after the user's approval: `RENT_OK=yes C=CHECKPOINT run/v9/run7go.sh` (as run6go.sh;
   tools/runs/run7.cfg, run/v9/run7.stages, bend/gpu/r7-box.env). It copies R7valid to the box and starts r7
   with VALID_CORPUS; TrainDense's fixed validation has never run on a GPU, so it stops (and destroys the box)
