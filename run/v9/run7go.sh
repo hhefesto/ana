@@ -59,6 +59,11 @@ credit=$($V show user --raw | jq -r .credit)
 low=$($V search offers "$Q" -o dph --raw | jq -r '.[] | select(((.geolocation // "") | test("China|CN")) | not) | .dph_total' | head -n 1 | awk '{printf "%.3f", $1}')
 say "R7 ready: $steps steps, about $((steps * 275 / 360000)) h at 2.75 s a step (R6's pace), about \$$(awk -v s=$steps -v d=$MAXDPH 'BEGIN {printf "%.0f", s*2.75/3600*d}') at most at \$$MAXDPH/h, \$$(awk -v s=$steps -v d=${low:-$MAXDPH} 'BEGIN {printf "%.1f", s*2.75/3600*d}') at the cheapest offer now (\$${low:-?}/h); credit \$$credit covers about $(awk -v c=$credit -v s=$steps -v d=${low:-$MAXDPH} 'BEGIN {n=int((c-1-d)/d*3600/2.75); if (n<0) n=0; printf "%d steps, %d%%", n, (n>s?100:100*n/s)}') of it; from $CF"
 awk -v c="$credit" 'BEGIN {exit !(c >= 5)}' || die "credit \$$credit is under \$5; nothing rented"
+# the user, 11-16: "Add about $10 to Vast before renting, so R7 can run to the end": a credit short of the whole plan
+# at the cheapest offer (with the floor and the setup hour) rents nothing, unless SHORT_OK=yes (run what it covers)
+need=$(awk -v s=$steps -v d=${low:-$MAXDPH} 'BEGIN {printf "%.2f", s*2.75/3600*d + 1 + d}')
+awk -v c="$credit" -v n="$need" 'BEGIN {exit !(c >= n)}' || [ "${SHORT_OK:-}" = yes ] \
+  || die "credit \$$credit is under the \$$need R7 needs to its end at \$${low:-?}/h: add it on Vast (the user's call, 11-16), or SHORT_OK=yes to run what it covers; nothing rented"
 ln -f $CF $D/out/   # the chain holds every checkpoint on the box to a copy here; without this one it never destroys
 
 attempt() {
