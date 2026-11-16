@@ -51,14 +51,21 @@ for s in v2 collect5 own5; do
     && mv $F/mugen/hist-$s/$s.train.nul.tmp $F/mugen/hist-$s/$s.train.nul && say "hist-$s: $(tail -n 3 $F/mugen/hist-$s/drop.log | tr '\n' ' ')" \
     || die "hist-$s: drop ($F/mugen/hist-$s/drop.log)"
 done
-# mugen's own chats, split as the streams are
-if [ -s $ML/mlog.nul ] && [ ! -e $ML/split.done ]; then
+# mugen's own chats, split as the streams are; the user, 11-15: "secrets, emails and netsem out".  MugenLog.bend
+# leaves out the private sessions; this looks again at what it kept, and if any line looks private (an email, a key,
+# a token, netsem, a password) the chats are all left out of R7 and the lines counted, none shown.
+MLOK=1
+if [ -s $ML/mlog.nul ]; then
+  n=$(tr '\0' '\n' < $ML/mlog.nul | grep -c -i -E '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}|BEGIN [A-Z ]*PRIVATE KEY|ghp_[A-Za-z0-9]{20}|github_pat_|sk-[A-Za-z0-9]{20}|netsem|password|passwd|secret')
+  [ "$n" = 0 ] && say "mlog: no line looks private" || { MLOK=; say "mlog: $n lines look private ($ML/mlog.nul): mugen's chats left out"; }
+fi
+if [ -n "$MLOK" ] && [ -s $ML/mlog.nul ] && [ ! -e $ML/split.done ]; then
   $CV valid split $ML/mlog.nul $ML/train.nul $ML/valid.nul > $ML/split.log 2>&1 && touch $ML/split.done || die "mlog split ($ML/split.log)"
 fi
 EXTRA=; [ -e run/v9/f6/col10.joined ] && EXTRA="run/v9/transcripts-col10/bend/transcripts.train.nul" || say "col10: not joined yet (run/v9/f6.sh): left out"
 # run 10b: the 16 unlicensed repositories (the user, 11-15: "Include them"; run/v9/col10b.sh, f6.sh into run/v9/f6b)
 [ -e run/v9/f6b/col10b.joined ] && EXTRA="$EXTRA run/v9/transcripts-col10b/bend/transcripts.train.nul" || say "col10b: not joined yet (run/v9/f6.sh N=col10b): left out"
-[ -s $ML/train.nul ] && EXTRA="$EXTRA $PWD/$ML/train.nul"
+[ -n "$MLOK" ] && [ -s $ML/train.nul ] && EXTRA="$EXTRA $PWD/$ML/train.nul"
 # change 6, the authors' laws' prove units (run/v9/f7.sh), and change 5, the sorts with fuel (run/v9/f8.sh)
 [ -e run/v9/f7/rd/prove.joined ] && EXTRA="$EXTRA run/v9/transcripts-prove/bend/transcripts.train.nul" || say "prove: not joined yet (run/v9/f7.sh): left out"
 [ -e run/v9/f8/rd/sorts.joined ] && EXTRA="$EXTRA run/v9/transcripts-sorts/bend/transcripts.train.nul" || say "sorts: not joined yet (run/v9/f8.sh): left out"
@@ -134,7 +141,7 @@ head -n 1 $P/plan-fp100m-b16-windows.tsv | cut -c1-80
 # language, in the order of a hash of its id (the trainer reads the first EVALS windows: every stream in them, not
 # the first stream's); its filler the held-out files (copies are fine here: nothing trains on it)
 if [ ! -e $VS/bend/transcripts.done ]; then
-  { find $F/valid -name transcripts.train.nul | LC_ALL=C sort | xargs cat; [ -s $ML/valid.nul ] && cat $ML/valid.nul; } \
+  { find $F/valid -name transcripts.train.nul | LC_ALL=C sort | xargs cat; [ -n "$MLOK" ] && [ -s $ML/valid.nul ] && cat $ML/valid.nul; } \
     | LC_ALL=C gawk 'BEGIN {RS = "\0"; ORS = "\0"; for (i = 1; i < 256; i++) o[sprintf("%c", i)] = i}
         NR % 2 == 1 {id = $0; next}
         !(id in seen) {seen[id]; n++; I[n] = id; X[n] = $0; h = 7; for (j = 1; j <= length(id); j++) h = (h * 31 + o[substr(id, j, 1)]) % 1000000007; H[n] = h * 100000 + n % 100000}
