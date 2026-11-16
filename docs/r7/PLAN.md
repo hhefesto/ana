@@ -156,6 +156,18 @@ a pass now).
   offers that fit run7go.sh's query, not in China, from $0.575/h (Taiwan), then $0.66 (Japan), $0.73 (Texas).
   Again 11-15 23:3x: credit $22.44, 0 instances; from $0.537/h (California), $0.575 (Taiwan), $0.60 (South Korea).
   At R6's 55,127 steps and 2.5 s a step (38 h) that is about $20.6 at the cheapest, only $2 under the credit.
+- The credit, again 11-16 00:1x: 2.5 s a step was too low, and R7 is bigger than R6.  R6's own log (run/v9/run6/r6.log,
+  11-14 05:36-15:28): 13,000 steps in 9 h 52 min, 2.73 s a step with its validations (2.54 s in its first 2,000,
+  2.97 s at the slowest).  R7's mix is R6's plus col10 and col10b: Bend's dry mix 3,270 MB out (R6's 3,160 MB), the
+  other four 945 MB (the same), col10's render 249 MB (f6 joined 00:09: 69,289 main, 9,519 chains, 26,287 fixes;
+  374 held out), col10b's about 150 MB (its 9,977 units at col10's 16.5 KB a trained unit; a guess until f6b):
+  about 4,610 MB against R6's 4,105 MB, so about 62,000 steps if steps go as bytes (the plan's first line is the
+  real count).  At 2.75 s a step that is about 47 h, $26.4-28.5 at the cheapest offers now (they moved from
+  $0.561 to $0.601/h in ten minutes; credit $22.44, 0 instances): less the credit watch's $1.00 floor and about an
+  hour of setup and gate, the credit covers about 45,000-49,000 steps, 73-79% of R7, and the credit watch ends it
+  there (saves every 5,000 steps), before the plan's end (its learning rate's decay).  About $8 more covers all
+  of it; $10 leaves a margin for a slower box.  run/v9/run7go.sh (ignored by git, as run/ is) now prints this from
+  the plan's real count (2.75 s a step, the cheapest offer then, the share the credit covers) before it rents.
 - f5's join (15:13): 98 of 98 streams, 286 splits; 2,099,453 Bend sessions for training before the mix's cap,
   15,666 held out (39 MB) for R7valid.
 - mugen's chats (CorpusV2/MugenLog.bend, run/v9/mlog): 654 turns with Bend calls give only 18 sessions that fit

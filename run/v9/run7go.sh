@@ -53,7 +53,11 @@ grep -q 'fixed windows of' run/v9/vf/r7valid.log || die "TrainDense does not rea
 say "$(grep 'fixed windows of' run/v9/vf/r7valid.log | sed 's/^\[[^]]*\] //') (the CPU)"
 steps=$(head -n 1 $PL | cut -d' ' -f3)
 credit=$($V show user --raw | jq -r .credit)
-say "R7 ready: $steps steps, about $((steps * 25 / 36000)) h at 2.5 s a step, about \$$(awk -v s=$steps -v d=$MAXDPH 'BEGIN {printf "%.0f", s*2.5/3600*d}') at most at \$$MAXDPH/h; credit \$$credit; from $CF"
+# R6's measured pace (run/v9/run6/r6.log, 11-14 05:36-15:28): 13,000 steps in 9 h 52 min, 2.73 s a step with its
+# validations (2.54 s at the start, 2.97 s at the slowest); 2.75 s here, not the 2.5 s this said before 11-16.  What
+# the credit covers: less the credit watch's $1.00 floor (bend/gpu/credit-watch.sh) and about an hour of setup and gate
+low=$($V search offers "$Q" -o dph --raw | jq -r '.[] | select(((.geolocation // "") | test("China|CN")) | not) | .dph_total' | head -n 1 | awk '{printf "%.3f", $1}')
+say "R7 ready: $steps steps, about $((steps * 275 / 360000)) h at 2.75 s a step (R6's pace), about \$$(awk -v s=$steps -v d=$MAXDPH 'BEGIN {printf "%.0f", s*2.75/3600*d}') at most at \$$MAXDPH/h, \$$(awk -v s=$steps -v d=${low:-$MAXDPH} 'BEGIN {printf "%.1f", s*2.75/3600*d}') at the cheapest offer now (\$${low:-?}/h); credit \$$credit covers about $(awk -v c=$credit -v s=$steps -v d=${low:-$MAXDPH} 'BEGIN {n=int((c-1-d)/d*3600/2.75); if (n<0) n=0; printf "%d steps, %d%%", n, (n>s?100:100*n/s)}') of it; from $CF"
 awk -v c="$credit" 'BEGIN {exit !(c >= 5)}' || die "credit \$$credit is under \$5; nothing rented"
 ln -f $CF $D/out/   # the chain holds every checkpoint on the box to a copy here; without this one it never destroys
 
