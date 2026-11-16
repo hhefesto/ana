@@ -110,14 +110,18 @@ a pass now).
   (9,374 + the finished shards' 2,610 + 2,450 salvaged); the other 1,827 on 8 processes, then ana-r7chain2.
   It ended 22:01: 15,971 of 16,261 kept (290 deferred); clean 22:06: train 15,120 (near_dup 850, contaminated 1);
   f6 (col10's render) from 22:06, 51 chunks (25 by 22:47: 2,512 laws verified, 5 failed, 0 chunk failures).
-- col10b's check on 12 processes, not 6 (11-15 22:5x, run/v9/col10bfast.sh, ana-col10bfast): col10b's decl-new
+- col10b's check on 8 processes, not 6 (11-15 22:5x, 12 at first; run/v9/col10bfast.sh, ana-col10bfast): col10b's decl-new
   (from 20:21, 1 CPU, half col10's speed under a load of 25) is the chain's longest wait, then its check; by the
   time the check starts f6, the dry mix and decl-new are done and olimpo (8 cores, 16 threads) idle but for it.
   col10b.sh (ana-col10b) is held (SIGSTOP) at its decl-new, which goes on; when decl-new ends (status 0 and
-  units.decl.nul there) col10bfast runs col10b.sh again with CHECK_PROCS=12 (MemoryMax 20G; each step skips what
+  units.decl.nul there) col10bfast runs col10b.sh again with CHECK_PROCS=8 (MemoryMax 24G; each step skips what
   is done: the cap, trim, check, clean), then col10b.sh goes on, finds them done and says "col10b DONE" for
   ana-r7chain2. If anything fails, col10b.sh goes on anyway and redoes what is missing (col10bfast's outputs are
-  moved aside, none deleted; ana-col10b's MemoryMax raised 8 to 14 GB for that). About 45 min sooner.
+  moved aside, none deleted; ana-col10b's MemoryMax raised 8 to 14, then 20 GB for that). About 30 min sooner.
+  11-15 23:22, 12 -> 8: the check's memory grows with its processes (each runs UNIT_JOBS=4 bend checks): col10tail2's
+  8 peaked at 19.1 GB with 2.6 GB swapped, col10tail's at its 20 GB cap with 9.4 GB swapped (journal), so 12 would
+  need ~30 GB of olimpo's 31 and swap, and 8 x 4 = 32 jobs already fill its 16 threads. ana-col10bfast restarted
+  (before decl-new ended: nothing of col10b's made yet, nothing moved), env CHECK_PROCS=8, MemoryMax 24G.
 - The filler would have run out in a shard (found 11-15 23:2x, fixed in run7.sh before it ran): bend-windows fills
   each window's gap with the end of the shortest unused filler file long enough (bend/Windows.bend) and refuses a
   shard it can't serve. run7.sh's prose PER (787) made the prose run dry with Bend's 3 copies, after ~1,100 rounds;
@@ -127,6 +131,12 @@ a pass now).
   (shard 198, 87 gaps), 5 with 35% fewer tokens a file. Now the prose runs dry with the last code language (PER 54
   for these counts): 0 refused, also at 35% fewer tokens and 228 shards. Same 867,775 prose pieces, spread over
   every slice; the sessions, K=3 and the code files unchanged. tools/fillsim/run.sh redoes it (40 s).
+  R7valid's filler, the same way: the 400 held-out Bend files (valid split K 2 of 256 of the filler's 57,693) x41
+  against 8,540 gaps (R6's shards 0-1, for ~15,750 held-out sessions): 0 unserved, also at 35% fewer tokens.
+- The dry mix (ana-mix7dry, mix6.sh dry with run7.sh's settings, f5's streams, prove and sorts; 20:18-23:12): rc 0,
+  out-copy 0 (run7.sh dies on a copy), 1,404,698 Bend sessions (first 387,253, other 387,090, repairs 626,043, free
+  4,312; drop-cap 176,915, ids twice dropped 7,878), as mix7t's 1,398,254 at 17:57, with today's streams. f5's
+  retry in run7.sh has nothing to do (its 142 law jobs all DONE, no claims to drop) and the join 98 of 98.
 - The sample in the morning: run/v9/r7sample-wait.sh (ana-r7sample) runs r7sample.sh once run7.sh has the mix
   (run/v9/mix7/bend), into run/v9/R7sample.md, and counts lines that look private (want 0).
 - Ready to rent, checked 11-15 22:5x (nothing rented): the checkpoint run/v9/run6/out/r6-step115000.checkpoint is
