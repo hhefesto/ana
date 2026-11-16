@@ -12,7 +12,9 @@ export BEND_NO_TELEMETRY=1
 say() { echo "$(date '+%F %T') $*"; }
 die() { say "FAILED: $*"; exit 1; }
 count() { tr -cd '\0' < "$1" | wc -c | awk '{print int($1/2)}'; }
-L=run/v9/run7.log; P=run/v9/R7; VS=run/v9/R7vsrc; VP=run/v9/R7valid; LIST=run/v9/R7valid-drop.ids
+# L, VS, VP and VFLOG can be set for a trial on copies (a sandbox under /tmp); the defaults are R7's.
+L=${L:-run/v9/run7.log}; P=run/v9/R7; VS=${VS:-run/v9/R7vsrc}; VP=${VP:-run/v9/R7valid}; LIST=run/v9/R7valid-drop.ids
+VFLOG=${VFLOG:-run/v9/vf/r7valid-drop.log}
 CV=${CV:-$PWD/run/v9/gcroot-cv3/bin/bend-corpus-v2}
 VF=run/v9/vf/validfixed
 tools() { echo TOKENIZER=weights/code32k.bpe BEND_PREPARE=run/v6/gcroot-bend-prepare/bin/bend-prepare BEND_WINDOWS=run/v6/gcroot-bend-windows/bin/bend-windows BEND_PLAN_SEGMENT=run/v6/gcroot-bend-plan-segment/bin/bend-plan-segment BEND_MIX=run/v6/gcroot-bend-mix/bin/bend-mix; }
@@ -32,9 +34,10 @@ vk=$(awk -v n=$vn -v f=$vf 'BEGIN {k=(f>0)?int(n/f)+2:1; print k}')
 say "validation: $vn sessions, $vf held-out files (x$vk in its filler)"
 mv $VP $VP.full; [ -e $VP.log ] && mv $VP.log $VP.full.log
 env FILLER_COPIES=bend:$vk OUT=$VS SHARD=$((vn + 1)) JOBS=1 $(tools) run/v6/gcroot-bend-plan-windows/bin/bend-plan-windows $VP fp100m 16 bend:1 >> $VP.log 2>&1 || die "validation plan-windows ($VP.log)"
-ls -la $VP/shard-0-fp100m.corpus
-VALID_CORPUS=$PWD/$VP/shard-0-fp100m.corpus TOKENIZER_FILE=weights/code32k.bpe timeout 1800 $VF > run/v9/vf/r7valid-drop.log 2>&1
-grep -q 'fixed windows of' run/v9/vf/r7valid-drop.log \
-  && say "CPU: $(grep 'fixed windows of' run/v9/vf/r7valid-drop.log | sed 's/^\[[^]]*\] //')" \
-  || die "TrainDense does not read $VP on the CPU (run/v9/vf/r7valid-drop.log)"
-say "end: $VP without the copies, VALID_CORPUS=$PWD/$VP/shard-0-fp100m.corpus; nothing rented (the user's approval first)"
+ls -la $VP/shard-0-fp100m.corpus || die "no $VP/shard-0-fp100m.corpus ($VP.log)"
+case $VP in /*) VC=$VP/shard-0-fp100m.corpus ;; *) VC=$PWD/$VP/shard-0-fp100m.corpus ;; esac
+VALID_CORPUS=$VC TOKENIZER_FILE=weights/code32k.bpe timeout 1800 $VF > $VFLOG 2>&1
+grep -q 'fixed windows of' $VFLOG \
+  && say "CPU: $(grep 'fixed windows of' $VFLOG | sed 's/^\[[^]]*\] //')" \
+  || die "TrainDense does not read $VP on the CPU ($VFLOG)"
+say "end: $VP without the copies, VALID_CORPUS=$VC; nothing rented (the user's approval first)"
