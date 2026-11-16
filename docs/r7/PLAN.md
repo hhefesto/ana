@@ -265,3 +265,13 @@ a pass now).
 - Vast credit, 11-15 19:40: $22.44, no box: under an R6-sized run ($25-36, above).  The credit watch stops the
   trainer when the credit runs low (bend/gpu/credit-watch.sh), and the chain has pulled a save every 5,000 steps:
   a short credit ends r7 early; the saves are kept.
+- R7 built (11-16): run7.sh ended 06:05:37 ("end: run/v9/R7 is ready"): 240 shards (05:09-05:56, none refused
+  for want of filler: 240 slices of 5,114 of 1,227,181), 1,086,240 windows, 61,237 global steps. r7vf (06:10):
+  TrainDense reads the old R7valid on the CPU (64 fixed windows), checkpoint r6-step115000's sum ok, credit
+  $22.44. ana-cv3-wait built bend-corpus-v2 at 4cab214 (06:11-06:17, /nix/store/8hjj15z1954p2csqrav01czpwig0xd79,
+  run/v9/gcroot-cv3); r7drop-wait then ran r7valid-drop.sh: kept 16,995 sessions (dropped 102), 391 held-out
+  files (dropped 9); the new R7valid (06:23) reads on the CPU (64 fixed windows) and is byte for byte the
+  sandbox's (/tmp/bx/r7drop-sbx4). None of the 111 ids is left in run/v9/R7vsrc; the old inputs are in
+  R7vsrc.full, the old R7valid in R7valid.full (nothing deleted). What is left is the user's: about $10 on Vast
+  (run7go.sh's need at $0.535/h, South Korea: 61,237 x 2.75 s = 46.8 h, $25.03 + $1 floor + an hour = $26.56,
+  against $22.44), then `RENT_OK=yes bash run/v9/run7go.sh` on their approval.
