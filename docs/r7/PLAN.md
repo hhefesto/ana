@@ -92,8 +92,13 @@ a pass now).
   tools/runs/run7.cfg, run/v9/run7.stages, bend/gpu/r7-box.env). It copies R7valid to the box and starts r7
   with VALID_CORPUS; TrainDense's fixed validation has never run on a GPU, so it stops (and destroys the box)
   if r7.log has no "fixed windows of" line within 20 minutes. Without RENT_OK=yes it rents nothing.
-- The user's calls: the checkpoint r7 starts from (default r5g-step106500, where R6 started; or r6-step115000,
-  R6's best chain score), and the credit (R6's plan was 161,627 steps, about $107 at $0.95/h).
+- The checkpoint, the user, 11-15: "R6's step 115,000, its best chain score": r6-step115000 (run/v9/run6/out,
+  sha256 17a110101bc04e71..., the box's sum), run7go.sh's default now.  Before that answer: the user's calls: the
+  checkpoint r7 starts from (default r5g-step106500, where R6 started; or r6-step115000,
+  R6's best chain score), and the credit.  R6's plan was 55,127 steps (R6/plan-fp100m-b16-windows.tsv: from
+  106,500 to 161,627; the 11-15 note's "161,627 steps, about $107" counted the start's steps too): about 38 h at
+  2.5 s a step, $36 at most at $0.95/h, $25 at R5g's $0.656/h.  R7's count is its plan's first line, known when
+  run7.sh ends; run7go.sh prints the hours and the most it costs before it rents.
 - The sample: run/v9/r7sample.sh writes run/v9/R7sample.md from the Bend mix, each kind's sessions.
 - run7.sh's later stages, tried small (run/v9/r7t.sh, 11-15 15:46): 920 sessions, Bend's 2,981 files x 3 (19 of
   3,000 held out), 3,000 prose pieces as a language of its own (prose:44 a round), the other four's files: rc=0,
@@ -108,4 +113,6 @@ a pass now).
   chats had a LAN address (192.168.3.6) in their shell lines; the user, 11-15: "Yes" (remove it): MugenLog.bend
   writes it as `delfos` (8aeaa53, pushed); the remade run/v9/mlog/mlog.nul has 0 hits, and r7chain2's mlog step
   uses the same bend-corpus-v2 (col10fix/gcroot-cv2).
-- Vast credit, 11-15 19:40: $22.44, no box. R6's plan was about $107, so R7 needs credit added before run7go.sh.
+- Vast credit, 11-15 19:40: $22.44, no box: under an R6-sized run ($25-36, above).  The credit watch stops the
+  trainer when the credit runs low (bend/gpu/credit-watch.sh), and the chain has pulled a save every 5,000 steps:
+  a short credit ends r7 early; the saves are kept.

@@ -10,14 +10,15 @@
 #      validation, 71a9d9b; never run on a GPU before: the script waits for r7.log's "fixed windows" line), and the
 #      guard (tools/runs/run7.cfg: chain + credit watch), which pulls a save every 5,000 steps and destroys the box
 #      when r7 is done.
-# C: the checkpoint r7 starts from (the user's choice; default R5g's last, r5g-step106500, as R6 started).
+# C: the checkpoint r7 starts from.  The user, 11-15: "R6's step 115,000, its best chain score": r6-step115000
+# (run/v9/run6/out, sha256 17a110101bc04e71..., as the box had it).  C=r5g-step106500 would start where R6 did.
 # Until r7 trains, a failure destroys the box (it holds only copies) and the next offer is tried, two boxes at most.
 # Once the guard runs, the box is the chain's.  Log: run/v9/run7go.log; the box's outputs in run/v9/run7/.
 A=/home/hhefesto/src/ana
 cd $A || exit 1
 D=run/v9/run7 P=run/v9/R7 CFG=tools/runs/run7.cfg E=bend/gpu/r7-box.env
 VC=run/v9/R7valid/shard-0-fp100m.corpus
-C=${C:-r5g-step106500}
+C=${C:-r6-step115000}
 CF=; for d in run/v9/run5g/out run/v9/run6/out; do [ -s $d/$C.checkpoint ] && { CF=$d/$C.checkpoint; break; }; done
 PL=$P/plan-fp100m-b16-windows.tsv
 V=$HOME/.local/share/vastai-venv/bin/vastai
