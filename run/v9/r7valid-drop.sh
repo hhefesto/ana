@@ -32,7 +32,10 @@ done
 vn=$(count $VS/bend/transcripts.train.nul); vf=$(count $VS/bend/files-hi.nul)
 vk=$(awk -v n=$vn -v f=$vf 'BEGIN {k=(f>0)?int(n/f)+2:1; print k}')
 say "validation: $vn sessions, $vf held-out files (x$vk in its filler)"
-mv $VP $VP.full; [ -e $VP.log ] && mv $VP.log $VP.full.log
+# plan-windows keeps what exists (a rerun resumes), so the old R7valid must be out of the way, or its shard is kept.
+if [ -e $VP ]; then mv $VP $VP.full || die "mv $VP $VP.full"; fi
+[ -e $VP ] && die "$VP is still there"
+if [ -e $VP.log ]; then mv $VP.log $VP.full.log || die "mv $VP.log"; fi
 env FILLER_COPIES=bend:$vk OUT=$VS SHARD=$((vn + 1)) JOBS=1 $(tools) run/v6/gcroot-bend-plan-windows/bin/bend-plan-windows $VP fp100m 16 bend:1 >> $VP.log 2>&1 || die "validation plan-windows ($VP.log)"
 ls -la $VP/shard-0-fp100m.corpus || die "no $VP/shard-0-fp100m.corpus ($VP.log)"
 case $VP in /*) VC=$VP/shard-0-fp100m.corpus ;; *) VC=$PWD/$VP/shard-0-fp100m.corpus ;; esac
