@@ -97,7 +97,12 @@ a pass now).
   15,666 held out (39 MB) for R7valid.
 - mugen's chats (CorpusV2/MugenLog.bend, run/v9/mlog): 654 turns with Bend calls give only 18 sessions that fit
   the 2,048-token window (93 too long, 9 private, 7 with another file's edit; 127 pieces end in a passing check).
-  /tmp/bx/chk.zsh now counts as a check (+1). A small stream: the window is the limit.
+  /tmp/bx/chk.zsh now counts as a check (+1). A small stream: the window is the limit.  11-15 20:4x (17ddb64): a
+  piece too long for the window is kept shorter instead of dropped (its echoes cut to 12 lines, else its last try
+  alone): 57 sessions on the 10:51 raw.nul (12 cut, 27 last try; 49 still too long, 9 private, 7 another file's
+  edit); a scan of the output finds no LAN address, email, password, sudo, netsem or /home/hhefesto.
+  r7chain2's mlog step runs run/v9/mlog/ml, built from bend/tests/mugenlog.bend (the mugenlog step alone: 16 s,
+  213 MB, against the full bend-corpus-v2's 15 min, 17 GB).
 - The launcher, run only after the user's approval: `RENT_OK=yes C=CHECKPOINT run/v9/run7go.sh` (as run6go.sh;
   tools/runs/run7.cfg, run/v9/run7.stages, bend/gpu/r7-box.env). It copies R7valid to the box and starts r7
   with VALID_CORPUS; TrainDense's fixed validation has never run on a GPU, so it stops (and destroys the box)

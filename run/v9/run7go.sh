@@ -44,6 +44,13 @@ grep -q "end: $P is ready" run/v9/run7.log 2>/dev/null || die "run7 ended withou
 [ -s $PL ] || die "no $PL"
 [ -s $VC ] || die "no $VC (R7's validation set)"
 [ -n "$CF" ] || die "no checkpoint $C in run/v9/run5g/out or run/v9/run6/out"
+# TrainDense's own reading of R7valid (its valid.fixed), on the CPU, before anything is rented (bend/tests/validfixed.bend)
+VF=run/v9/vf/validfixed
+[ -x $VF ] || { mkdir -p run/v9/vf && run/v5/gcroot-bend-2.0.39/bin/bend bend/tests/validfixed.bend -o $VF > run/v9/vf/build.log 2>&1; } \
+  || die "bend/tests/validfixed.bend did not build (run/v9/vf/build.log); nothing rented"
+VALID_CORPUS=$VC TOKENIZER_FILE=weights/code32k.bpe timeout 1800 $VF > run/v9/vf/r7valid.log 2>&1
+grep -q 'fixed windows of' run/v9/vf/r7valid.log || die "TrainDense does not read $VC on the CPU (run/v9/vf/r7valid.log); nothing rented"
+say "$(grep 'fixed windows of' run/v9/vf/r7valid.log | sed 's/^\[[^]]*\] //') (the CPU)"
 steps=$(head -n 1 $PL | cut -d' ' -f3)
 credit=$($V show user --raw | jq -r .credit)
 say "R7 ready: $steps steps, about $((steps * 25 / 36000)) h at 2.5 s a step, about \$$(awk -v s=$steps -v d=$MAXDPH 'BEGIN {printf "%.0f", s*2.5/3600*d}') at most at \$$MAXDPH/h; credit \$$credit; from $CF"

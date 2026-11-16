@@ -52,7 +52,7 @@ while active ana-f8; do sleep 60; done
 grep -q 'f8: DONE' $V/f8/f8.log && say "f8: $(grep 'joined:' $V/f8/f8.log | tail -n 1)" || say "f8 did not finish ($V/f8/f8.log): R7 goes on without the sorts"
 # mugen's chats, today's turns too
 ML=$V/mlog
-if bash $ML/export.sh $ML/raw.nul > $ML/export.log 2>&1 && $V/col10fix/gcroot-cv2/bin/bend-corpus-v2 mugenlog weights/code32k.bpe $ML/raw.nul $ML/mlog.tmp 2048 > $ML/mlog.log 2>&1; then
+if bash $ML/export.sh $ML/raw.nul > $ML/export.log 2>&1 && $ML/ml weights/code32k.bpe $ML/raw.nul $ML/mlog.tmp 2048 > $ML/mlog.log 2>&1; then
   mv $ML/mlog.tmp $ML/mlog.nul; rm -f $ML/split.done; say "mlog: $(head -n 1 $ML/mlog.log)"
 else say "mlog again FAILED ($ML/export.log, $ML/mlog.log): the 10:51 one stays"; fi
 while active ana-prose; do sleep 60; done
