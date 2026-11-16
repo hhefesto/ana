@@ -108,6 +108,21 @@ a pass now).
   from the collection. check-salvage now takes `=` for a shard that finished (bend/CheckSalvage.bend; the 20:01
   salvage made again gives the same files; with `=` its decided ids match the hash's shard). Kept so far 14,434
   (9,374 + the finished shards' 2,610 + 2,450 salvaged); the other 1,827 on 8 processes, then ana-r7chain2.
+  It ended 22:01: 15,971 of 16,261 kept (290 deferred); clean 22:06: train 15,120 (near_dup 850, contaminated 1);
+  f6 (col10's render) from 22:06, 51 chunks (25 by 22:47: 2,512 laws verified, 5 failed, 0 chunk failures).
+- col10b's check on 12 processes, not 6 (11-15 22:5x, run/v9/col10bfast.sh, ana-col10bfast): col10b's decl-new
+  (from 20:21, 1 CPU, half col10's speed under a load of 25) is the chain's longest wait, then its check; by the
+  time the check starts f6, the dry mix and decl-new are done and olimpo (8 cores, 16 threads) idle but for it.
+  col10b.sh (ana-col10b) is held (SIGSTOP) at its decl-new, which goes on; when decl-new ends (status 0 and
+  units.decl.nul there) col10bfast runs col10b.sh again with CHECK_PROCS=12 (MemoryMax 20G; each step skips what
+  is done: the cap, trim, check, clean), then col10b.sh goes on, finds them done and says "col10b DONE" for
+  ana-r7chain2. If anything fails, col10b.sh goes on anyway and redoes what is missing (col10bfast's outputs are
+  moved aside, none deleted; ana-col10b's MemoryMax raised 8 to 14 GB for that). About 45 min sooner.
+- The sample in the morning: run/v9/r7sample-wait.sh (ana-r7sample) runs r7sample.sh once run7.sh has the mix
+  (run/v9/mix7/bend), into run/v9/R7sample.md, and counts lines that look private (want 0).
+- Ready to rent, checked 11-15 22:5x (nothing rented): the checkpoint run/v9/run6/out/r6-step115000.checkpoint is
+  there (sha256 17a110101bc04e71...); run/v9/vf/validfixed built; Vast: credit $22.44, 0 instances; RTX 5090
+  offers that fit run7go.sh's query, not in China, from $0.575/h (Taiwan), then $0.66 (Japan), $0.73 (Texas).
 - f5's join (15:13): 98 of 98 streams, 286 splits; 2,099,453 Bend sessions for training before the mix's cap,
   15,666 held out (39 MB) for R7valid.
 - mugen's chats (CorpusV2/MugenLog.bend, run/v9/mlog): 654 turns with Bend calls give only 18 sessions that fit
