@@ -105,4 +105,7 @@ a pass now).
 - A look at f5's sessions (r7sample.sh on 7 streams, 11-15 16:0x): of 11,087 authors'-law asks, 131 import one
   alias twice and 85 give one law twice (the same law from two copies of a file, e.g. aivv73__bend-voxel's
   material_palette_lookup with `./material.bend` and `../../material.bend`): about 1%, left as they are. mugen's
-  chats keep a LAN address (192.168.3.6) in their shell lines: the user's call.
+  chats had a LAN address (192.168.3.6) in their shell lines; the user, 11-15: "Yes" (remove it): MugenLog.bend
+  writes it as `delfos` (8aeaa53, pushed); the remade run/v9/mlog/mlog.nul has 0 hits, and r7chain2's mlog step
+  uses the same bend-corpus-v2 (col10fix/gcroot-cv2).
+- Vast credit, 11-15 19:40: $22.44, no box. R6's plan was about $107, so R7 needs credit added before run7go.sh.
