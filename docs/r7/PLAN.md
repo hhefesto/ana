@@ -168,6 +168,12 @@ a pass now).
   there (saves every 5,000 steps), before the plan's end (its learning rate's decay).  About $8 more covers all
   of it; $10 leaves a margin for a slower box.  run/v9/run7go.sh (ignored by git, as run/ is) now prints this from
   the plan's real count (2.75 s a step, the cheapest offer then, the share the credit covers) before it rents.
+- The filler at R7's size, 11-16 00:1x (tools/fillsim, /tmp/bx/fillsim): R7's ~1,962,000 sessions (Bend's dry mix
+  1,404,698, col10's 105,095, col10b's ~65,000 guessed, the other four's 386,841) are ~246 shards of 8,000; run7.sh's
+  PERs then (bend 161, haskell 8, lean 5, agda 21, nix 5, prose 48): 0 of 246 refused, also at 35% more bytes a
+  token; 0 of 260 measured, 2 of 260 (174 gaps) only at 260 shards and 35% more.  run7.sh's count check (filler
+  1,228,381 pieces under 80% of the sessions, ~1,570,000) will print its WARNING: that rule counts pieces, and the
+  prose's are long (2.7 KB a piece); the token replay is the test, and it passes.
 - f5's join (15:13): 98 of 98 streams, 286 splits; 2,099,453 Bend sessions for training before the mix's cap,
   15,666 held out (39 MB) for R7valid.
 - mugen's chats (CorpusV2/MugenLog.bend, run/v9/mlog): 654 turns with Bend calls give only 18 sessions that fit
