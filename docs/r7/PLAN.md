@@ -2,7 +2,8 @@
 
 The user, 11-14: "stop the training, pull the latest weights and work on these" (the eight changes below, from
 mugen's assessment of R6), and "We'll only concentrate in bend at the time being, we'll add the other languages
-later." Renting a box still waits for the user's approval.
+later." Renting a box still waits for the user's approval. The user, 11-15 21:40, on what happens when R7 is ready
+(about 05:00): "Wait for your OK in the morning": nothing is rented, nothing starts, until the user's OK.
 
 ## R6 stopped
 
