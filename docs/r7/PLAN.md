@@ -144,6 +144,10 @@ a pass now).
   out-copy 0 (run7.sh dies on a copy), 1,404,698 Bend sessions (first 387,253, other 387,090, repairs 626,043, free
   4,312; drop-cap 176,915, ids twice dropped 7,878), as mix7t's 1,398,254 at 17:57, with today's streams. f5's
   retry in run7.sh has nothing to do (its 142 law jobs all DONE, no claims to drop) and the join 98 of 98.
+  Its 11 "mix6: not there" streams (11-16 00:1x): the same 10 run/v6 ones R6's mix (run/v9/mixh/bend.log) went
+  without (upg5, ff-upg5 never made; a2baa2, a2baa3, a2bhs, a2bm8, a2bplfa4, a2bpre empty dirs; ff-gav6, ff-gen5
+  0 units), so R7 loses nothing R6 had; the 11th, f5's a2bgh51, has its transcripts.train.nul since the repair, so
+  run7.sh's mix takes it.
 - The sample in the morning: run/v9/r7sample-wait.sh (ana-r7sample) runs r7sample.sh once run7.sh has the mix
   (run/v9/mix7/bend), into run/v9/R7sample.md, and counts lines that look private (want 0).
 - Ready to rent, checked 11-15 22:5x (nothing rented): the checkpoint run/v9/run6/out/r6-step115000.checkpoint is
