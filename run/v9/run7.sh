@@ -103,8 +103,17 @@ ln -sfn $PWD/$PROSE $S/prose/files-hi.nul; : > $S/prose/files-lo.nul; : > $S/pro
 per() { awk -v n=$1 -v t=$((bend + oth)) 'BEGIN {p=int(200*n/t+0.5); if (p<1) p=1; print p}'; }
 bf=$(count $S/bend/files-hi.nul); pf=$(count $PROSE); pb=$(per $bend)
 code=$((bf * K)); for l in haskell agda lean nix; do code=$((code + $(count run/v2/transcripts/$l/files-hi.nul) + $(count run/v2/transcripts/$l/files-lo.nul))); done
-# the prose's PER: as many prose files a round, against Bend's, as there are prose files against Bend's K copies
-pp=$(awk -v b=$pb -v p=$pf -v f=$((bf * K)) 'BEGIN {x=int(b*p/f+0.5); if (x<1) x=1; print x}')
+# the prose's PER: the prose runs dry with the last code language (each language's files, Bend's K times, at its PER a
+# round), so every slice of the filler has prose in it.  11-15 23:2x: at Bend's pace (dry with Bend's copies, PER ~787)
+# the last ~30 slices are only Haskell's, Lean's and Nix's files, and bend-windows' best fit replayed on R6's real gaps
+# (tools/fillsim/FillSim.hs, bytes per token measured with code32k.bpe) refused 1-2 shards there; spread over every
+# round (PER ~53), none, also with 35% fewer tokens a file
+pr=$(( (bf * K + pb - 1) / pb ))
+for l in haskell lean agda nix; do
+  lf=$(( $(count run/v2/transcripts/$l/files-hi.nul) + $(count run/v2/transcripts/$l/files-lo.nul) )); lp=$(per $(count $N/$l))
+  [ $(( (lf + lp - 1) / lp )) -gt $pr ] && pr=$(( (lf + lp - 1) / lp ))
+done
+pp=$(( (pf + pr - 1) / pr ))
 specs="bend:$pb"; for l in haskell lean agda nix; do specs="$specs $l:$(per $(count $N/$l))"; done; specs="$specs prose:$pp"
 need=$(( (bend + oth) * 80 / 100 ))
 say "filler: Bend $bf files x $K, the other four's and Bend's $code, prose $pf pieces; sessions $((bend + oth)) (R6's filler was 88% of its sessions: about $need wanted)"

@@ -118,6 +118,15 @@ a pass now).
   is done: the cap, trim, check, clean), then col10b.sh goes on, finds them done and says "col10b DONE" for
   ana-r7chain2. If anything fails, col10b.sh goes on anyway and redoes what is missing (col10bfast's outputs are
   moved aside, none deleted; ana-col10b's MemoryMax raised 8 to 14 GB for that). About 45 min sooner.
+- The filler would have run out in a shard (found 11-15 23:2x, fixed in run7.sh before it ran): bend-windows fills
+  each window's gap with the end of the shortest unused filler file long enough (bend/Windows.bend) and refuses a
+  shard it can't serve. run7.sh's prose PER (787) made the prose run dry with Bend's 3 copies, after ~1,100 rounds;
+  the last ~30 of 224 slices were then only Haskell's, Lean's and Nix's files. tools/fillsim/FillSim.hs (Haskell)
+  replays the best fit on R6's real gaps (run/v9/R6/parts/*.plan) with bytes per token measured by bend-prepare
+  (Bend 2.55, prose 2.73, Haskell 3.6-4.0): R6's own filler 0 of 224 refused (control); R7's with PER 787, 1 refused
+  (shard 198, 87 gaps), 5 with 35% fewer tokens a file. Now the prose runs dry with the last code language (PER 54
+  for these counts): 0 refused, also at 35% fewer tokens and 228 shards. Same 867,775 prose pieces, spread over
+  every slice; the sessions, K=3 and the code files unchanged. tools/fillsim/run.sh redoes it (40 s).
 - The sample in the morning: run/v9/r7sample-wait.sh (ana-r7sample) runs r7sample.sh once run7.sh has the mix
   (run/v9/mix7/bend), into run/v9/R7sample.md, and counts lines that look private (want 0).
 - Ready to rent, checked 11-15 22:5x (nothing rented): the checkpoint run/v9/run6/out/r6-step115000.checkpoint is
