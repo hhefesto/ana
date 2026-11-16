@@ -151,6 +151,10 @@ a pass now).
   f5's mugen stream (24 transcripts) and its fixes (8), per the dry mix's log.  (822842a said it had been repaired and would be taken: wrong, corrected here.)
 - The sample in the morning: run/v9/r7sample-wait.sh (ana-r7sample) runs r7sample.sh once run7.sh has the mix
   (run/v9/mix7/bend), into run/v9/R7sample.md, and counts lines that look private (want 0).
+- The CPU gate before the morning: run/v9/r7vf-wait.sh (ana-r7vf, 11-16 03:5x) waits for run7.sh's "R7 is ready",
+  then runs validfixed on the real R7valid (as run7go.sh does before it rents), and checks R7's plan, the
+  checkpoint's sum and the credit; log run/v9/r7vf.log.  Nothing rented; run7go.sh runs the check again.
+  Checked 11-16 03:5x: run/v9/run6/out/r6-step115000.checkpoint sha256 17a110101bc04e71... (as the box had it).
 - Ready to rent, checked 11-15 22:5x (nothing rented): the checkpoint run/v9/run6/out/r6-step115000.checkpoint is
   there (sha256 17a110101bc04e71...); run/v9/vf/validfixed built; Vast: credit $22.44, 0 instances; RTX 5090
   offers that fit run7go.sh's query, not in China, from $0.575/h (Taiwan), then $0.66 (Japan), $0.73 (Texas).
