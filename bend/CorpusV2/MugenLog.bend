@@ -36,7 +36,7 @@ import ../Bytes.bend as B
 #
 # Taken out (the user's "secrets, emails and netsem"): a session whose text names netsem, a password,
 # sudo, a secret, an API key or token, a private key, agenix, a calendar or a message app, the user's
-# family, or holds an email address, is left out whole; /home/hhefesto is written ~.  An edit call
+# family, or holds an email address, is left out whole; /home/hhefesto is written ~, delfos's LAN address delfos.  An edit call
 # that also edits another file is left out with its session (its echo is both files' diff).
 #
 # KEY is the file's validation key (CorpusV2/ValidText.bend): ~/src/REPO/PATH as REPO/PATH (as own:'s
@@ -619,8 +619,10 @@ def ml.private(+xs: List<&2, U32>) -> Bool:
   +lo = ml.lower(xs)
   Bool.or(ml.any.word(lo, ml.private.words()), ml.email.go(lo, False{}))
 
+# /home/hhefesto as ~, and the LAN address of delfos as its name (the user, 11-15: "remove the LAN
+# address 192.168.3.6 from mugen's chats in the training data")
 def ml.home(+xs: List<&2, U32>) -> List<&2, U32>:
-  S.replace(xs, ml.b("/home/hhefesto"), ml.b("~"))
+  S.replace(S.replace(xs, ml.b("/home/hhefesto"), ml.b("~")), ml.b("192.168.3.6"), ml.b("delfos"))
 
 # Keys and ids -----------------------------------------------------------------------------------------
 
