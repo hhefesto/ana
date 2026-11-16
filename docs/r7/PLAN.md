@@ -142,6 +142,8 @@ a pass now).
 - Ready to rent, checked 11-15 22:5x (nothing rented): the checkpoint run/v9/run6/out/r6-step115000.checkpoint is
   there (sha256 17a110101bc04e71...); run/v9/vf/validfixed built; Vast: credit $22.44, 0 instances; RTX 5090
   offers that fit run7go.sh's query, not in China, from $0.575/h (Taiwan), then $0.66 (Japan), $0.73 (Texas).
+  Again 11-15 23:3x: credit $22.44, 0 instances; from $0.537/h (California), $0.575 (Taiwan), $0.60 (South Korea).
+  At R6's 55,127 steps and 2.5 s a step (38 h) that is about $20.6 at the cheapest, only $2 under the credit.
 - f5's join (15:13): 98 of 98 streams, 286 splits; 2,099,453 Bend sessions for training before the mix's cap,
   15,666 held out (39 MB) for R7valid.
 - mugen's chats (CorpusV2/MugenLog.bend, run/v9/mlog): 654 turns with Bend calls give only 18 sessions that fit
@@ -151,7 +153,11 @@ a pass now).
   alone): 57 sessions on the 10:51 raw.nul (12 cut, 27 last try; 49 still too long, 9 private, 7 another file's
   edit); a scan of the output finds no LAN address, email, password, sudo, netsem or /home/hhefesto.
   r7chain2's mlog step runs run/v9/mlog/ml, built from bend/tests/mugenlog.bend (the mugenlog step alone: 16 s,
-  213 MB, against the full bend-corpus-v2's 15 min, 17 GB).
+  213 MB, against the full bend-corpus-v2's 15 min, 17 GB).  Tried ahead, 11-15 23:26, as r7chain2 will run it
+  (export.sh then ml, into /tmp/bx/mlogtest): rc=0 both, 75 s; 688 turns with Bend calls, 66 sessions kept (16 with
+  echoes cut, 30 as their last try; 9 private, 61 too long, 7 another file's edit left out). Its scan: no LAN
+  address, email, password, sudo, netsem, /home/hhefesto, API key or private key; "hhefesto" only as a file's owner
+  in `ls -l` lines, and the long strings are test hashes and /nix/store names.
 - The launcher, run only after the user's approval: `RENT_OK=yes C=CHECKPOINT run/v9/run7go.sh` (as run6go.sh;
   tools/runs/run7.cfg, run/v9/run7.stages, bend/gpu/r7-box.env). It copies R7valid to the box and starts r7
   with VALID_CORPUS; TrainDense's fixed validation has never run on a GPU, so it stops (and destroys the box)
