@@ -168,6 +168,24 @@ a pass now).
   there (saves every 5,000 steps), before the plan's end (its learning rate's decay).  About $8 more covers all
   of it; $10 leaves a margin for a slower box.  run/v9/run7go.sh (ignored by git, as run/ is) now prints this from
   the plan's real count (2.75 s a step, the cheapest offer then, the share the credit covers) before it rents.
+  The user's call, 11-16 00:2x: "Add about $10 to Vast before renting, so R7 can run to the end".  The user adds
+  it (Vast's billing page; mugen can't pay); renting still waits for the user's OK in the morning (RENT_OK=yes).
+  run7go.sh now rents nothing when the credit is short of the whole plan at the cheapest offer, plus the $1.00
+  floor and the setup hour (at ~62,000 steps and $0.601/h: $30.07; $22.44 + $10 = $32.44 passes), and says how
+  much is missing; SHORT_OK=yes runs what the credit covers instead.
+- Checked 11-16 00:1x-00:2x, while col10b's check runs (nothing changed, nothing rented):
+  - run7.sh's EXTRA names run/v9/transcripts-{col10,col10b,prove,sorts}/bend/transcripts.train.nul, which don't
+    exist: by design, mix6.sh's mg() (MG=1) takes a run/v*/transcripts-NAME path as f5's mugen/NAME when
+    mugen/NAME/DONE is there (col10's: 143 MB, its chains 29 MB, its fixes 76 MB, joined 00:09; prove and sorts
+    are in the dry mix's log that way).  The mix drops an id seen twice itself (the dry mix: 7,878), so run7.sh's
+    "ids twice" check after it should read 0.
+  - f6.sh for col10b (r7chain2: F6=run/v9/f6b N=col10b R=transcripts-col10b's results.train.nul
+    SRCS=collect10b/src/bend) names every output by F6 and N: col10's f6 and f5/mugen/col10 are not touched.
+  - col10's sessions (r7sample.sh on f5/mugen/col10, /tmp/bx/r7s-col10.md): 67,387 new-code fills and helpers,
+    1,902 authors'-law asks; the four sampled read right (the hole, the check, the look, the def, ALL PROOFS CHECK).
+  - r7chain2 waits on ana-col10b (col10b.sh, held, goes on when col10bfast's check ends and finds every step
+    done); col10b's check at ~79 units a minute: ~1,821 of 9,977 at 00:14, so done ~02:00.
+  - Disk: 91 GB free on /; R6's run dir is 40 GB (mix 4.2, filler 14.7, 224 shards), R7's about 10% more.
 - The filler at R7's size, 11-16 00:1x (tools/fillsim, /tmp/bx/fillsim): R7's ~1,962,000 sessions (Bend's dry mix
   1,404,698, col10's 105,095, col10b's ~65,000 guessed, the other four's 386,841) are ~246 shards of 8,000; run7.sh's
   PERs then (bend 161, haskell 8, lean 5, agda 21, nix 5, prose 48): 0 of 246 refused, also at 35% more bytes a
