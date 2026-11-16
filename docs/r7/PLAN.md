@@ -97,6 +97,7 @@ a pass now).
   its stack). On r7t's R7valid it prints "validation: 64 fixed windows of ...", as on R6's shard 0; with the byte
   tokenizer it refuses ("corpus tokenizer identity does not match"). A file that isn't a corpus (mix.nul) crashes
   it (memory fault) before the FTCC message: run7go.sh's 20-minute check catches that. The GPU part is the run's.
+  run7go.sh now runs it (run/v9/vf/validfixed) on the real R7valid before it rents: no line, nothing rented.
 - The checkpoint, the user, 11-15: "R6's step 115,000, its best chain score": r6-step115000 (run/v9/run6/out,
   sha256 17a110101bc04e71..., the box's sum), run7go.sh's default now.  Before that answer: the user's calls: the
   checkpoint r7 starts from (default r5g-step106500, where R6 started; or r6-step115000,
