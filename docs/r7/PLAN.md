@@ -83,6 +83,16 @@ a pass now).
 - The chain: run/v9/r7chain2.sh (ana-r7chain2): run 10's and 10b's collections, their renders (f6.sh), the
   prove units (f7) and the sorts (f8) waited for, mugen's chats again, the prose, then run7.sh (the mix, the
   filler, plan-windows, R7valid). It ends at "end: run/v9/R7 is ready" in run/v9/run7.log; it rents nothing.
+- Run 10's check, rebalanced (11-15 20:01, run/v9/col10tail.sh, ana-col10tail; as run/v8/col9-finish2.sh): its 6
+  processes shard by file, and shard 1 held the slow files (gildrb-site's lexer, about a minute a unit): 1,234 of its
+  3,612 decided in 2 h against 1,864-2,492 for the others, so it would have ended 2-3 h after them. The chain was
+  frozen, the six part.0 copied, the chain stopped; check-salvage: 9,374 kept, 12,588 of 21,038 decided; the other
+  8,450 on 7 processes (prime to 6, so shard 1's files spread), TIMEOUT 180 as before, the salvaged results in
+  front; then ana-r7chain2 again (col10.sh goes on from clean). The stopped shards' stats are lost ("kept" and
+  "recovered-from-killed-shards" stand for them), as col9's were. A count of mine before this read a part.0's NUL
+  fields as pairs: they are triples (position, id, record), so "11,273 done at 19:39" was half again too many.
+  Its freeze then stop failed ("Cannot perform operation on frozen unit"): thawed and stopped by hand at 20:01; a
+  next use thaws first.
 - f5's join (15:13): 98 of 98 streams, 286 splits; 2,099,453 Bend sessions for training before the mix's cap,
   15,666 held out (39 MB) for R7valid.
 - mugen's chats (CorpusV2/MugenLog.bend, run/v9/mlog): 654 turns with Bend calls give only 18 sessions that fit
