@@ -27,20 +27,22 @@ resume() { local n=$1 d=$2 cfg=$3 l=$V/$2/collect.log last
   { $CVX collect $cfg keys pre gate split check; echo "EXIT $?"; } >> $l 2>&1
   grep -q '^EXIT 0' $l || { say "$n: collect FAILED again ($l)"; return 1; }
   say "$n: collect done"; }
-while active ana-col10b; do sleep 60; done
-b10=; grep -q 'col10b DONE' $V/col10b.log || { resume col10b collect10b tools/corpus-v2/collect/bend-run10b.cfg && b10=1; }
+# run 10 first, its render too, while run 10b's decl-new and check go on (11-15 20:5x: col10b's decl-new has seen
+# col10's units already, so col10 need not wait for col10b; before, col10's clean and render waited behind col10b)
 while active ana-col10; do sleep 120; done
 if ! grep -q 'col10 DONE' $V/col10.log; then
   resume col10 collect10 tools/corpus-v2/collect/bend-run10.cfg && { say "col10.sh"; bash $V/col10.sh >> $V/col10.log 2>&1; }
 fi
 grep -q 'col10 DONE' $V/col10.log && say "col10: $(grep 'col10 clean:' $V/col10.log | tail -n 1)" || say "col10 did not finish ($V/col10.log): R7 goes on without it"
+if grep -q 'col10 DONE' $V/col10.log; then
+  say "f6 (col10's render)"; P=${P:-8} bash $V/f6.sh > $V/f6.log 2>&1 || say "f6 FAILED ($V/f6.log): R7 goes on without col10"
+fi
+while active ana-col10b; do sleep 60; done
+b10=; grep -q 'col10b DONE' $V/col10b.log || { resume col10b collect10b tools/corpus-v2/collect/bend-run10b.cfg && b10=1; }
 if [ -n "$b10" ] || grep -q '^EXIT 0' $V/collect10b/collect.log 2>/dev/null; then
   grep -q 'col10b DONE' $V/col10b.log || { say "col10b.sh"; bash $V/col10b.sh >> $V/col10b.log 2>&1; }
 fi
 grep -q 'col10b DONE' $V/col10b.log && say "col10b: $(grep 'col10b clean:' $V/col10b.log | tail -n 1)" || say "col10b did not finish ($V/col10b.log): R7 goes on without it"
-if grep -q 'col10 DONE' $V/col10.log; then
-  say "f6 (col10's render)"; P=${P:-8} bash $V/f6.sh > $V/f6.log 2>&1 || say "f6 FAILED ($V/f6.log): R7 goes on without col10"
-fi
 if grep -q 'col10b DONE' $V/col10b.log; then
   say "f6 (col10b's render)"
   F6=$V/f6b N=col10b R=$V/transcripts-col10b/bend/results.train.nul SRCS=$V/collect10b/src/bend P=${P:-8} bash $V/f6.sh > $V/f6b.log 2>&1 \
