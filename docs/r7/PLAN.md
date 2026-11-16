@@ -155,6 +155,23 @@ a pass now).
   then runs validfixed on the real R7valid (as run7go.sh does before it rents), and checks R7's plan, the
   checkpoint's sum and the credit; log run/v9/r7vf.log.  Nothing rented; run7go.sh runs the check again.
   Checked 11-16 03:5x: run/v9/run6/out/r6-step115000.checkpoint sha256 17a110101bc04e71... (as the box had it).
+- Copies across the split, found 11-16 04:50: held-out files are chosen by path (CorpusV2/ValidText.bend's key), so a
+  file renamed in another repository or fork (a2bgh5's n2LTT_C/ for n2LTT/, a2bgh53's Nat/mod.bend, elpis's
+  mlp_m16_defer.bend, a fork's references/ for tasks/) is in training while its original is held out: 102 of R7valid's
+  17,097 sessions (0.6%) and 9 of its 400 filler files (the same answer, modulo the module prefix, in training).
+  Only validation changes: `bend-corpus-v2 valid drop LIST IN OUT` (CorpusV2/Valid.bend, 33a5ed8, --verdict ALL
+  PROOFS CHECK) keeps IN's records whose id isn't in run/v9/R7valid-drop.ids (111 ids; none of mugen's chats).
+  run/v9/r7valid-drop.sh moves the inputs to R7vsrc.full and the old R7valid to R7valid.full (nothing deleted),
+  rebuilds R7valid with plan-windows and runs validfixed on it.  Tried on copies (/tmp/bx/r7drop-sbx4, 05:20-05:27):
+  16,995 sessions and 391 files kept, 1 shard, 9,738 windows, "64 fixed windows" read on the CPU; the same shard
+  byte for byte as the first trial.  run/v9/r7drop-wait.sh (ana-r7drop-wait) runs it once ana-cv3-wait is done (R7
+  ready, r7vf's check, the nix build of 33a5ed8's bend-corpus-v2 into run/v9/gcroot-cv3; without it, the binary of
+  the trials, built from the same source); run7go.sh waits for it and rents nothing if it did not end.
+- R7's windows, 11-16 05:09: 1,916,913 sessions in 240 shards of 8,000, filler 5,114 files a shard (run7.sh's
+  WARNING, 1,227,181 under ~1,533,530, is the piece count above; shards 0-47 built without a refusal by 05:24).
+  Shards 0-7: 35,673 windows, ~4,459 a shard, so ~1.07 M windows, ~60,000 steps at R6's ratio (55,127 for
+  978,145): ~46 h at 2.75 s a step, ~$26.2 with the floor and setup hour at the cheapest offer then ($0.535/h,
+  South Korea; $0.575 Taiwan).  Credit $22.44, 0 instances: still short until the user's ~$10.
 - Ready to rent, checked 11-15 22:5x (nothing rented): the checkpoint run/v9/run6/out/r6-step115000.checkpoint is
   there (sha256 17a110101bc04e71...); run/v9/vf/validfixed built; Vast: credit $22.44, 0 instances; RTX 5090
   offers that fit run7go.sh's query, not in China, from $0.575/h (Taiwan), then $0.66 (Japan), $0.73 (Texas).
