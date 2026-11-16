@@ -122,6 +122,13 @@ a pass now).
   8 peaked at 19.1 GB with 2.6 GB swapped, col10tail's at its 20 GB cap with 9.4 GB swapped (journal), so 12 would
   need ~30 GB of olimpo's 31 and swap, and 8 x 4 = 32 jobs already fill its 16 threads. ana-col10bfast restarted
   (before decl-new ended: nothing of col10b's made yet, nothing moved), env CHECK_PROCS=8, MemoryMax 24G.
+  11-15 23:4x, the handoff as planned: decl-new ended 23:44 (12,059 of 12,544 kept: dup 288, seen 177, held 20);
+  col10bfast's col10b.sh: cap 2,082 out, 9,977 units, trim 0 (27,598 mutants), check from 23:49:45 on 8 processes
+  (held col10b.sh still stopped, its decl-new reaped when it goes on). Rate 70 units a minute while f6's render
+  shares olimpo (load 26-30): the check ends about 01:50-02:15. Then f6b (col10b's render; col10's f6 took 2 h for
+  15,120 units: exlaw 76 min, authors' laws 3, base 8, render ~37), about 1.3 h, then mugen's chats and run7.sh
+  (3.5-4 h): R7 ready about 07:00-07:30 (06:45-08:00), not 06:30. f6's render: 4 parts at a time, ~1 GB in all,
+  its laws ~0.1 GB: no memory risk next to the check.
 - The filler would have run out in a shard (found 11-15 23:2x, fixed in run7.sh before it ran): bend-windows fills
   each window's gap with the end of the shortest unused filler file long enough (bend/Windows.bend) and refuses a
   shard it can't serve. run7.sh's prose PER (787) made the prose run dry with Bend's 3 copies, after ~1,100 rounds;
