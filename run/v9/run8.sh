@@ -117,27 +117,28 @@ if [ ! -e $S/bend/files.done ]; then
   $CV valid split run/v8/R5dsrc/bend/files-hi.nul $S/bend/files-hi.nul $VS/bend/files-hi.nul > $S/bend/split.log 2>&1 || die "filler split ($S/bend/split.log)"
   : > $S/bend/files-lo.nul; touch $S/bend/files.done
 fi
+# (fcut, not cut: a function named cut took run8.sh's later `cut -c1-80`, 11-17)
 # the packing's fix (the user, 11-17: "Fix"): every filler text cut into pieces of at most FILL_MAXB bytes (4096),
 # the private ones out (bend/NulFilter.bend): best fit takes a piece, not a whole file, for a gap.  The whole
 # texts stay as they were (Bend's: $S/bend/files-whole.nul)
 NF=run/v9/gcroot-nf/bin/bend-nul-filter; MAXB=${FILL_MAXB:-4096}
 [ -x $NF ] || die "no $NF"
-cut() { [ -e "$2.done" ] && return 0
+fcut() { [ -e "$2.done" ] && return 0
   NF_MAXB=${3:-$MAXB} NF_PRIVATE=$HOME/.config/ana/private-needles $NF "$1" "$2.tmp" > "$2.log" 2>&1 && mv "$2.tmp.stats" "$2.stats" \
     && { [ ! -L "$2" ] || rm "$2"; } && mv "$2.tmp" "$2" && touch "$2.done" && say "cut $2: $(tr '\n' ' ' < "$2.stats")" || say "FAILED: cut $1 ($2.log)"; }
 [ -e $S/bend/files-whole.nul ] || [ -L $S/bend/files-hi.nul ] || mv $S/bend/files-hi.nul $S/bend/files-whole.nul
 ln -sfn $PWD/$N/bend.r8p $S/bend/transcripts.train.nul
 ln -sfn $PWD/run/v2/results/bend.holdout.nul $S/bend/results.holdout.nul
-cut $S/bend/files-whole.nul $S/bend/files-hi.nul &
+fcut $S/bend/files-whole.nul $S/bend/files-hi.nul &
 for l in haskell agda lean nix; do mkdir -p $S/$l
   ln -sfn $PWD/$N/$l.r8p $S/$l/transcripts.train.nul
-  cut run/v2/transcripts/$l/files-hi.nul $S/$l/files-hi.nul &
-  cut run/v2/transcripts/$l/files-lo.nul $S/$l/files-lo.nul &
+  fcut run/v2/transcripts/$l/files-hi.nul $S/$l/files-hi.nul &
+  fcut run/v2/transcripts/$l/files-lo.nul $S/$l/files-lo.nul &
   ln -sfn $PWD/run/v2/results/$l.holdout.nul $S/$l/results.holdout.nul
 done
 # the prose finer (PROSE_MAXB, 1024 bytes, about a mean gap): R8's first try gave it 11 of 212 files a round and 5% of
 # shard 0's filler tokens; the user, 11-16: "fillers shouldn't be latex, it should be regular English prose"
-cut $PROSE $S/prose/files-hi.nul ${PROSE_MAXB:-1024} &
+fcut $PROSE $S/prose/files-hi.nul ${PROSE_MAXB:-1024} &
 wait
 for f in bend/files-hi haskell/files-hi haskell/files-lo agda/files-hi agda/files-lo lean/files-hi lean/files-lo nix/files-hi nix/files-lo prose/files-hi; do
   [ -e $S/$f.nul.done ] || die "filler cut $f ($S/$f.nul.log)"; done
@@ -207,7 +208,7 @@ if [ ! -e $VS/bend/transcripts.done ]; then
 fi
 # its filler cut too, as the training filler (the packing)
 [ -e $VS/bend/files-whole.nul ] || [ -L $VS/bend/files-hi.nul ] || mv $VS/bend/files-hi.nul $VS/bend/files-whole.nul
-cut $VS/bend/files-whole.nul $VS/bend/files-hi.nul; [ -e $VS/bend/files-hi.nul.done ] || die "validation filler cut ($VS/bend/files-hi.nul.log)"
+fcut $VS/bend/files-whole.nul $VS/bend/files-hi.nul; [ -e $VS/bend/files-hi.nul.done ] || die "validation filler cut ($VS/bend/files-hi.nul.log)"
 vn=$(count $VS/bend/transcripts.train.nul); vf=$(count $VS/bend/files-hi.nul)
 vk=$(awk -v n=$vn -v f=$vf 'BEGIN {k=(f>0)?int(n/f)+2:1; print k}')
 say "validation: $vn sessions, $vf held-out files (x$vk in its filler)"

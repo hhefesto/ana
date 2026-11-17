@@ -114,3 +114,16 @@ Barak's Introduction to TCS (no derivatives).
 The prose with the fixes: 635 MB (was 435 MB), 308,867 pieces; cut at 1 KB, 730,895. The CTFP and HoTT book test:
 0.98 MB out of 2.37 MB (was 0.37 MB). Shard 0 on the first try's filler cut at 4 KB (/tmp/r8fix): 11,045
 documents, WINDOW_FILL 950 packs it: 3,905 windows, filler 12.0%.
+
+**R8 as built (11-17 07:17, run/v9/R8):** 548,813 windows of 2,046 tokens (1.12 B tokens; R7 1,086,240 and 2.22 B),
+30,933 steps at batch 16 (R7 61,237), 140 shards, every one packed at WINDOW_FILL 950: 1,114,861 sessions, 2.03 a
+window, filler 11.9% of the tokens (R7 24%). The filler's tokens: prose 37.4% (of it the eleven books 0.2%,
+304,214 tokens), Haskell 31.1%, Bend 24.4%, Nix 3.7%, Lean 2.0%, Agda 1.4%. By shard: Bend's files last to about
+shard 56 (shards 0-20: Bend 54-66%, prose 15-16%), then prose and Haskell (shards 60 and 100: prose 50-53%); the
+last shard's filler is all Haskell. The user's needles: none in R8's mix, filler or validation set. R8valid: 16,629
+sessions (468 give-ups out), 1,017 held-out files; TrainDense reads it on the CPU: "validation: 64 fixed windows of
+run/v9/R8valid/shard-0-fp100m.corpus". El cubo de Edgar: 2,433 sessions in.
+
+Renting waits for the user: run/v9/run8go.sh (RENT_OK=yes; from r6-step115000; tools/runs/run8.cfg,
+bend/gpu/r8-box.env, run/v9/run8.stages), as run7go.sh. At R6's pace (2.75 s a step) 30,933 steps are about 23.6 h:
+about $13 at the cheapest offer of 11-17 07:20 ($0.535/h), within the $22.44 credit.
