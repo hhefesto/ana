@@ -89,7 +89,7 @@ Haskell, Agda, Lean and Nix, and above all in Bend itself, in the turn shape of
 <a href="https://github.com/hhefesto/mugen">mugen</a>, the agent it is meant to work in.</p>
 
 <div class="stats">
-  <div class="stat"><b>~106,000</b><span>lines of Bend, 232 files: spec, model, trainer, data, ops</span></div>
+  <div class="stat"><b>~106,000</b><span>lines of Bend, 234 files: spec, model, trainer, data, ops</span></div>
   <div class="stat"><b>109 laws</b><span>in the spec's 25 modules, all passing Bend's checker; the gate takes about a second</span></div>
   <div class="stat"><b>$24</b><span>to train the best model so far from scratch: ~36 h on one rented RTX 5090</span></div>
   <div class="stat"><b>7.6&times;</b><span>on 16 threads, from plain recursion with no thread code</span></div>
@@ -154,7 +154,8 @@ p &lt; 0.01 on both). On Bend itself, 4 of 6 held-out tasks pass on the first tr
 writes a correct Haskell quicksort, shown <a href="#quicksort">below</a>.</p>
 <p>The later signs are mixed, and <a href="#since">reported as they are</a>: runs 5 and 6 trained ana inside
 mugen's loop, and on a new test of 176 Bend tasks the number she gets <i>right</i> stayed between 36 and 46 while
-the loss kept falling. So the next run is a better corpus, not more steps: R8 is being built now.</p>
+the loss kept falling. So the next run is a better corpus, not more steps: that corpus, R8, is built (17 November)
+and not trained yet.</p>
 
 <h2 id="bend">Why Bend</h2>
 <p><b>Proofs and speed in one language.</b> Bend 2 is a dependently typed language with a fast proof checker
@@ -215,7 +216,7 @@ it was ported to Bend 2, and the old code left the repo; the last commit that ha
   <tr><td>backprop</td><td>hand-written pullbacks in Futhark</td><td>derived from the forward step by a program transformation; its transpose law is proven</td></tr>
   <tr><td>training, 115M, RTX 3090</td><td>4,110 ms/step, 3,985 tok/s</td><td>1,702 ms/step, 9,626 tok/s (2.4&times;)</td></tr>
   <tr><td>decoding, 115M, CPU</td><td>~150 ms/token</td><td>~21 ms/token; the prompt at 1.5 ms/token</td></tr>
-  <tr><td>to build</td><td>GHC, Agda, Futhark and a CUDA shim; <code>flake.nix</code> 1,530 lines</td><td>Bend 2 (a fork that adds bulk ops); <code>flake.nix</code> 275 lines</td></tr>
+  <tr><td>to build</td><td>GHC, Agda, Futhark and a CUDA shim; <code>flake.nix</code> 1,530 lines</td><td>upstream Bend 2, with ana's own bulk ops; <code>flake.nix</code> 275 lines</td></tr>
 </table>
 <p class="note">The training figures are each stack's own runs on different rented 3090s, not a same-box test; on
 the card the Bend run continued on, Bend was 1.8&times; faster. The old decoder's figure is one core; the Bend
@@ -246,9 +247,11 @@ output byte-identical to the Haskell tools'.</p>
 per token on 16 threads) until the dense decoder arrived in early October. Floats are assumed, not proven: Bend's F32
 has no algebraic laws, so the semiring laws at F32 and the derivatives of exp and rsqrt are named assumptions, as they
 were in Agda, and the gradients are tested against finite differences, not proven. Agda's coinductive tries became
-depth-indexed ones. Multi-GPU training (DiLoCo) and the Haskell diagnostics were not ported. And ana's Bend is a
-fork, <a href="https://github.com/hhefesto/bend2/tree/ft-kernels">hhefesto/bend2</a>, that adds the bulk ops
-(<code>gemm</code>, <code>einsum</code>) and their CPU and CUDA kernels.</p>
+depth-indexed ones. Multi-GPU training (DiLoCo) and the Haskell diagnostics were not ported. And until 22 October ana's Bend was a
+fork, <a href="https://github.com/hhefesto/bend2/tree/ft-kernels">hhefesto/bend2</a>, that added the bulk ops
+(<code>gemm</code>, <code>einsum</code>) and their CPU and CUDA kernels. Since then ana runs upstream Bend
+(<a href="https://github.com/bendlang/bend">bendlang/bend</a>), and the bulk ops are ana's own: their meaning is
+<code>bend/Bulk.bend</code>, and their CPU and CUDA code runs as foreign effects (<code>bend/effs/bulk.c</code>).</p>
 
 <h2 id="elliott">The meaning first: Conal Elliott's work in ana</h2>
 <h3>Denotational design</h3>
@@ -294,10 +297,13 @@ marginal, with (max, +) the best labelling. It is the convolution semiring of El
 convolution and efficient language recognition</i>, and Goodman's semiring parsing. The spec enumerates every
 labelling; the fast forward pass is its memoized derivative, and the two agree in the tests.</p>
 <h3>What's next from Elliott</h3>
-<p>His language operations (sums, scaling, and concatenation with its Leibniz rule for &delta;) would let ana state
-model mixtures, and a prompt followed by a completion as a concatenation of languages. Running the spec's model with
-dual numbers would turn the specification itself into a gradient check for the GPU trainer, and a proof that the
-symbolic derivative in <code>bend/Dense/Ex.bend</code> is the derivative would move the backprop's numbers from
+<p>His language operations are now in the spec: <code>bend/Spec/Operations.bend</code> (10 November) states sum,
+scaling, product and concatenation over a semiring with their &nu;/&delta; laws (concatenation's &delta; is his
+Leibniz rule), proves that decoding a mixture of two models after a prefix is each model's continuation weighted by
+its posterior, and states the decoder's retry after a failed check as the model times <i>avoid(T)</i>.</p>
+<p>Next: a prompt followed by its completion as a concatenation of languages; running the spec's model with dual
+numbers, so the specification itself becomes a gradient check for the GPU trainer; and a proof that the symbolic
+derivative in <code>bend/Dense/Ex.bend</code> is the derivative, which would move the backprop's numbers from
 tested to proven.</p>
 
 <h2 id="bradley">Tai-Danae Bradley's category of texts in ana</h2>
@@ -392,10 +398,12 @@ never training targets, and a rejected attempt weighs zero: she never trains on 
     first.</li>
   <li>On-policy rounds: ana's own episodes, run against the real compilers, become new training data: her
     successes, and her rejected terms followed by the known fix.</li>
-  <li>The latest corpus built, R7 (Nov 16, not trained): 1,916,913 sessions, 2.22 billion tokens in 1,086,240
-    windows of 2,048 tokens, a fixed validation set of 16,995 held-out sessions. A session is never cut; the
-    room it leaves in a window is filled with the end of a code file or with theory prose (category theory, type
-    theory, nLab, the HoTT book, PLFA, Conal Elliott and Tai-Danae Bradley).</li>
+  <li>The latest corpus built, R8 (Nov 17, not trained): 1,114,861 sessions, 1.12 billion tokens in 548,813
+    windows of 2,046 tokens, a fixed validation set of 16,629 held-out sessions. (R7, the day before, had
+    1,916,913 sessions in 1,086,240 windows; R8 keeps at most three sessions a declaration.) A session is never
+    cut; the room it leaves in a window is filled with a piece of a code file or of theory prose (category theory,
+    type theory, nLab, the HoTT book, PLFA, Conal Elliott and Tai-Danae Bradley): 11.9% of R8's tokens, against
+    R7's 24%.</li>
 </ul>
 
 <h2 id="translate">More Bend to learn from: hs2bend, agda2bend, lean2bend</h2>
@@ -512,11 +520,12 @@ nix run .#ana -- --checkpoint PATH "quicksort"   <span class="c"># generate from
 
 <h2 id="next">Next</h2>
 <ul>
-  <li><b>R8, being built now</b> on one CPU box, the corpus fixed before any more is spent on GPUs: the theory
-    prose de-LaTeX-ed into plain English, less filler (sessions packed by best fit instead of in order: on a test
-    shard 12% of a window instead of 24%, 2.07 sessions a window instead of 1.80), at most three sessions a
-    declaration, no trained give-ups, and the Bend of <a href="https://github.com/hhefesto/elcubodeedgar">El cubo
-    de Edgar</a>, a Rubik's cube app written in Bend with its laws. Then a run on it.</li>
+  <li><b>A run on R8.</b> R8 was built on one CPU box (17 November) and passed the CPU gate; it hasn't been
+    trained yet. The corpus was fixed before any more is spent on GPUs: the theory prose de-LaTeX-ed into plain
+    English, less filler (sessions packed by best fit instead of in order: 11.9% of the tokens instead of R7's 24%,
+    2.03 sessions a window instead of 1.76), at most three sessions a declaration, no trained give-ups, and 2,433
+    sessions from the Bend of <a href="https://github.com/hhefesto/elcubodeedgar">El cubo de Edgar</a>, a Rubik's
+    cube app written in Bend with its laws.</li>
   <li>More checked Bend from hs2bend, agda2bend and lean2bend.</li>
   <li>Teaching ana to read the compiler's answer instead of resubmitting, with more on-policy data.</li>
   <li>The weights on Hugging Face, and instruction tuning, so it can be talked to.</li>
