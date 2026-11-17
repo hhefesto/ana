@@ -61,6 +61,14 @@ def dt.checks() -> List<&2, DtCk>:
    dt.doc("shortmath", "a map $f \\colon A \\to B$ here", ["a map f : A → B here"]),
    dt.doc("html", "<div class=\"x\">Some <b>bold</b> words</div>", ["Some bold words"]),
    dt.doc("bibliography", "Last words.\n\\begin{thebibliography}{9}\n\\bibitem{a} A. Author.\n\\end{thebibliography}\nNot this.", ["Last words.", "#", "#", "#", "#"]),
+   dt.doc("references", "## Idea\nA monad is a monoid.\n\n## References\n\nSaunders Mac Lane, Categories (1971)\nMore.", ["Idea", "A monad is a monoid.", "", "#", "#", "#", "#"]),
+   dt.doc("quotes", "a ``lax'' functor &amp; a &lbrack;strict&rbrack; one", ["a \"lax\" functor & a [strict] one"]),
+   dt.doc("newterm", "A category has \\newterm{objects} and \\newterm[x]{arrows}.", ["A category has objects and arrows."]),
+   dt.doc("mathmacro", "the set $\\Hom(A, B)$ of maps", ["the set Hom(A, B) of maps"]),
+   dt.doc("catarg", "a category $\\cat{C}$ here", ["a category C here"]),
+   dt.doc("snip", "Text.\n\\begin{snip}{haskell}\nf x = x\n\\end{snip}\nMore.", ["Text.", "#", "#", "#", "More."]),
+   dt.doc("accent", "by Andr\\'{e} Joyal and G\\\"odel", ["by Andre Joyal and Godel"]),
+   dt.doc("pandoc", "::: warning\nWords of warning here.\n:::\ncategory: people", ["Words of warning here."]),
    dt.score("score-prose", "A functor maps objects to objects, and arrows to arrows.", 1000n, 1000n),
    dt.score("score-latex", "\\begin{align} x &= \\sum_{i} y_i \\end{align}", 0n, 700n)]
 

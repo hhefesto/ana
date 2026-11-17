@@ -101,8 +101,12 @@ for l in bend haskell agda lean nix; do
   R8_CAP=${R8_CAP:-3} $R8 $N/$l $N/$l.r8.tmp > $N/$l.r8.log 2>&1 && mv $N/$l.r8.tmp.stats $N/$l.r8.stats && mv $N/$l.r8.tmp $N/$l.r8 && touch $N/$l.r8.done || die "r8 $l ($N/$l.r8.log)"
   say "r8 $l: $(tr "\n" " " < $N/$l.r8.stats)"
 done
-bend=$(count $N/bend.r8); oth=0
-for l in haskell agda lean nix; do oth=$((oth + $(count $N/$l.r8))); done
+# the private pairs out (the user, 11-15: "secrets, emails and netsem out"; 11-17's assessment found 10 of the
+# user's own sessions holding an address or a key's comment): $N/LANG.r8p (run/v9/r8priv.sh, bend/NulFilter.bend)
+bash run/v9/r8priv.sh
+for l in bend haskell agda lean nix; do [ -e $N/$l.r8p.done ] || die "r8p $l ($N/$l.r8p.log)"; done
+bend=$(count $N/bend.r8p); oth=0
+for l in haskell agda lean nix; do oth=$((oth + $(count $N/$l.r8p))); done
 say "sessions after R8's pass: bend $bend, the other four $oth"
 
 # the filler: Bend's files split (change 8) and K times (change 1), the prose (change 7)
@@ -113,18 +117,49 @@ if [ ! -e $S/bend/files.done ]; then
   $CV valid split run/v8/R5dsrc/bend/files-hi.nul $S/bend/files-hi.nul $VS/bend/files-hi.nul > $S/bend/split.log 2>&1 || die "filler split ($S/bend/split.log)"
   : > $S/bend/files-lo.nul; touch $S/bend/files.done
 fi
-ln -sfn $PWD/$N/bend.r8 $S/bend/transcripts.train.nul
+# the packing's fix (the user, 11-17: "Fix"): every filler text cut into pieces of at most FILL_MAXB bytes (4096),
+# the private ones out (bend/NulFilter.bend): best fit takes a piece, not a whole file, for a gap.  The whole
+# texts stay as they were (Bend's: $S/bend/files-whole.nul)
+NF=run/v9/gcroot-nf/bin/bend-nul-filter; MAXB=${FILL_MAXB:-4096}
+[ -x $NF ] || die "no $NF"
+cut() { [ -e "$2.done" ] && return 0
+  NF_MAXB=${3:-$MAXB} NF_PRIVATE=$HOME/.config/ana/private-needles $NF "$1" "$2.tmp" > "$2.log" 2>&1 && mv "$2.tmp.stats" "$2.stats" \
+    && { [ ! -L "$2" ] || rm "$2"; } && mv "$2.tmp" "$2" && touch "$2.done" && say "cut $2: $(tr '\n' ' ' < "$2.stats")" || say "FAILED: cut $1 ($2.log)"; }
+[ -e $S/bend/files-whole.nul ] || [ -L $S/bend/files-hi.nul ] || mv $S/bend/files-hi.nul $S/bend/files-whole.nul
+ln -sfn $PWD/$N/bend.r8p $S/bend/transcripts.train.nul
 ln -sfn $PWD/run/v2/results/bend.holdout.nul $S/bend/results.holdout.nul
+cut $S/bend/files-whole.nul $S/bend/files-hi.nul &
 for l in haskell agda lean nix; do mkdir -p $S/$l
-  ln -sfn $PWD/$N/$l.r8 $S/$l/transcripts.train.nul
-  ln -sfn $PWD/run/v2/transcripts/$l/files-hi.nul $S/$l/files-hi.nul
-  ln -sfn $PWD/run/v2/transcripts/$l/files-lo.nul $S/$l/files-lo.nul
+  ln -sfn $PWD/$N/$l.r8p $S/$l/transcripts.train.nul
+  cut run/v2/transcripts/$l/files-hi.nul $S/$l/files-hi.nul &
+  cut run/v2/transcripts/$l/files-lo.nul $S/$l/files-lo.nul &
   ln -sfn $PWD/run/v2/results/$l.holdout.nul $S/$l/results.holdout.nul
 done
-ln -sfn $PWD/$PROSE $S/prose/files-hi.nul; : > $S/prose/files-lo.nul; : > $S/prose/transcripts.train.nul; : > $S/prose/results.holdout.nul
+# the prose finer (PROSE_MAXB, 1024 bytes, about a mean gap): R8's first try gave it 11 of 212 files a round and 5% of
+# shard 0's filler tokens; the user, 11-16: "fillers shouldn't be latex, it should be regular English prose"
+cut $PROSE $S/prose/files-hi.nul ${PROSE_MAXB:-1024} &
+wait
+for f in bend/files-hi haskell/files-hi haskell/files-lo agda/files-hi agda/files-lo lean/files-hi lean/files-lo nix/files-hi nix/files-lo prose/files-hi; do
+  [ -e $S/$f.nul.done ] || die "filler cut $f ($S/$f.nul.log)"; done
+# each filler list in the order of a hash of its ids (as the validation set's below): plan-windows gives shard k the
+# k-th slice, and in file order shard 1's prose was all the Stacks project's, shard 7's all the 1lab's, the books
+# of dl/books8 in a shard or two (11-17, R8's second try); the hash multiplies at each byte (48271, mod 2^31 - 1): the
+# validation set's (31, mod 10^9 + 7) keeps ids that share a long prefix in their own order
+shuf1() { [ -e "$1.shuf" ] && return 0
+  LC_ALL=C gawk 'BEGIN {RS = "\0"; ORS = "\0"; for (i = 1; i < 256; i++) o[sprintf("%c", i)] = i}
+      NR % 2 == 1 {id = $0; next}
+      {n++; I[n] = id; X[n] = $0; h = 7; for (j = 1; j <= length(id); j++) h = ((h * 31 + o[substr(id, j, 1)]) * 48271) % 2147483647; H[n] = h * 1000000 + n % 1000000}
+      END {PROCINFO["sorted_in"] = "@val_num_asc"; for (k in H) {print I[k]; print X[k]}}' "$1" > "$1.tmp" \
+    && [ "$(count "$1.tmp")" = "$(count "$1")" ] && mv "$1.tmp" "$1" && touch "$1.shuf" && say "shuffled $1" || say "FAILED: shuffle $1"; }
+for f in bend/files-hi haskell/files-hi haskell/files-lo agda/files-hi agda/files-lo lean/files-hi lean/files-lo nix/files-hi nix/files-lo prose/files-hi; do
+  shuf1 $S/$f.nul & done
+wait
+for f in bend/files-hi haskell/files-hi haskell/files-lo agda/files-hi agda/files-lo lean/files-hi lean/files-lo nix/files-hi nix/files-lo prose/files-hi; do
+  [ -e $S/$f.nul.shuf ] || die "filler shuffle $f"; done
+: > $S/prose/files-lo.nul; : > $S/prose/transcripts.train.nul; : > $S/prose/results.holdout.nul
 per() { awk -v n=$1 -v t=$((bend + oth)) 'BEGIN {p=int(200*n/t+0.5); if (p<1) p=1; print p}'; }
-bf=$(count $S/bend/files-hi.nul); pf=$(count $PROSE); pb=$(per $bend)
-code=$((bf * K)); for l in haskell agda lean nix; do code=$((code + $(count run/v2/transcripts/$l/files-hi.nul) + $(count run/v2/transcripts/$l/files-lo.nul))); done
+bf=$(count $S/bend/files-hi.nul); pf=$(count $S/prose/files-hi.nul); pb=$(per $bend)
+code=$((bf * K)); for l in haskell agda lean nix; do code=$((code + $(count $S/$l/files-hi.nul) + $(count $S/$l/files-lo.nul))); done
 # the prose's PER: the prose runs dry with the last code language (each language's files, Bend's K times, at its PER a
 # round), so every slice of the filler has prose in it.  11-15 23:2x: at Bend's pace (dry with Bend's copies, PER ~787)
 # the last ~30 slices are only Haskell's, Lean's and Nix's files, and bend-windows' best fit replayed on R6's real gaps
@@ -132,11 +167,11 @@ code=$((bf * K)); for l in haskell agda lean nix; do code=$((code + $(count run/
 # round (PER ~53), none, also with 35% fewer tokens a file
 pr=$(( (bf * K + pb - 1) / pb ))
 for l in haskell lean agda nix; do
-  lf=$(( $(count run/v2/transcripts/$l/files-hi.nul) + $(count run/v2/transcripts/$l/files-lo.nul) )); lp=$(per $(count $N/$l.r8))
+  lf=$(( $(count $S/$l/files-hi.nul) + $(count $S/$l/files-lo.nul) )); lp=$(per $(count $N/$l.r8p))
   [ $(( (lf + lp - 1) / lp )) -gt $pr ] && pr=$(( (lf + lp - 1) / lp ))
 done
 pp=$(( (pf + pr - 1) / pr ))
-specs="bend:$pb"; for l in haskell lean agda nix; do specs="$specs $l:$(per $(count $N/$l.r8))"; done; specs="$specs prose:$pp"
+specs="bend:$pb"; for l in haskell lean agda nix; do specs="$specs $l:$(per $(count $N/$l.r8p))"; done; specs="$specs prose:$pp"
 need=$(( (bend + oth) * 80 / 100 ))
 say "filler: Bend $bf files x $K, the other four's and Bend's $code, prose $pf pieces; sessions $((bend + oth)) (R6's filler was 88% of its sessions: about $need wanted)"
 [ $((code + pf)) -ge $need ] || say "WARNING: filler $((code + pf)) under $need: a shard may run out (plan-windows refuses it)"
@@ -164,8 +199,15 @@ if [ ! -e $VS/bend/transcripts.done ]; then
   # R8's pass on them too: the give-up endings out, no cap (a fixed set)
   R8_CAP=1000000 $R8 $VS/bend/transcripts.train.nul $VS/bend/r8.nul > $VS/bend/r8.log 2>&1 && mv $VS/bend/r8.nul $VS/bend/transcripts.train.nul && mv $VS/bend/r8.nul.stats $VS/bend/r8.stats || die "r8 validation ($VS/bend/r8.log)"
   say "r8 validation: $(tr "\n" " " < $VS/bend/r8.stats)"
+  # the private ones out, as the training sessions'
+  NF_MAXB=0 NF_PRIVATE=$HOME/.config/ana/private-needles $NF $VS/bend/transcripts.train.nul $VS/bend/r8p.nul > $VS/bend/r8p.log 2>&1 \
+    && mv $VS/bend/r8p.nul $VS/bend/transcripts.train.nul && mv $VS/bend/r8p.nul.stats $VS/bend/r8p.stats || die "r8p validation ($VS/bend/r8p.log)"
+  say "r8p validation: $(tr "\n" " " < $VS/bend/r8p.stats)"
   : > $VS/bend/files-lo.nul; : > $VS/bend/results.holdout.nul; touch $VS/bend/files.done $VS/bend/transcripts.done
 fi
+# its filler cut too, as the training filler (the packing)
+[ -e $VS/bend/files-whole.nul ] || [ -L $VS/bend/files-hi.nul ] || mv $VS/bend/files-hi.nul $VS/bend/files-whole.nul
+cut $VS/bend/files-whole.nul $VS/bend/files-hi.nul; [ -e $VS/bend/files-hi.nul.done ] || die "validation filler cut ($VS/bend/files-hi.nul.log)"
 vn=$(count $VS/bend/transcripts.train.nul); vf=$(count $VS/bend/files-hi.nul)
 vk=$(awk -v n=$vn -v f=$vf 'BEGIN {k=(f>0)?int(n/f)+2:1; print k}')
 say "validation: $vn sessions, $vf held-out files (x$vk in its filler)"

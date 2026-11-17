@@ -70,7 +70,9 @@ def dl.drops() -> List<&2, String>:
    "hyperlink", "hypertarget", "phantom", "vphantom", "hphantom", "nameref", "todo", "vskip", "hskip",
    "setlength", "addtocounter", "setcounter", "newcommand", "renewcommand", "providecommand", "def",
    "DeclareMathOperator", "newtheorem", "theoremstyle", "usepackage", "documentclass", "bibliographystyle",
-   "bibliography", "addcontentsline", "tableofcontents", "printbibliography", "arxiv", "doi", "email"]
+   "bibliography", "addcontentsline", "tableofcontents", "printbibliography", "arxiv", "doi", "email",
+   "src", "srcsnippet", "javaimport", "cppimport", "pcodeimport", "codeimport", "indexsee", "caption",
+   "index", "hline", "cline", "newpage", "pagebreak", "linebreak", "nopagebreak", "enlargethispage"]
 
 def dl.bads() -> List<&2, String>:
   ["frac", "dfrac", "tfrac", "binom", "sqrt", "overline", "hat", "widehat", "tilde", "widetilde", "bar",
@@ -113,7 +115,7 @@ def dl.table() -> List<&2, DlE>:
   List.append(&2, DlE, dl.ks(2n, dl.drops()),
   List.append(&2, DlE, dl.ks(4n, dl.bads()),
   List.append(&2, DlE, dl.ks(5n, ["mathbb", "mathds", "bbold"]),
-  List.append(&2, DlE, dl.ks(6n, ["begin", "end", "href"]),
+  List.append(&2, DlE, dl.ks(6n, ["begin", "end", "href", "textcolor", "colorbox", "color"]),
   dl.rs(dl.syms()))))))
 
 # (Bend checks a def against the defs above it, and a match takes a parameter, not a local binder:
@@ -291,12 +293,13 @@ def dl.mark(+c: U32) -> Bool:
   Bool.or(U32.is_eq(c, 42), Bool.or(U32.is_eq(c, 95), Bool.or(U32.is_eq(c, 96), Bool.or(U32.is_eq(c, 91), U32.is_eq(c, 93)))))
 
 # a byte's class outside math: 0 itself, 6 nothing, 7 `[[` a wiki link, 8 `](` a markdown link's
-# target, 9 an HTML tag
+# target, 9 an HTML tag, 40 LaTeX's opening quote ``
 def dl.tcls(+c: U32, +t: List<&2, U32>) -> Nat:
+  Bool.pick(Nat, Bool.and(U32.is_eq(c, 96), S.head.is(t, 96)), 40n,
   Bool.pick(Nat, Bool.and(U32.is_eq(c, 91), S.head.is(t, 91)), 7n,
   Bool.pick(Nat, Bool.and(U32.is_eq(c, 93), S.head.is(t, 40)), 8n,
   Bool.pick(Nat, Bool.and(U32.is_eq(c, 60), dl.tag(t)), 9n,
-  Bool.pick(Nat, dl.mark(c), 6n, 0n))))
+  Bool.pick(Nat, dl.mark(c), 6n, 0n)))))
 
 # a byte's class: 0 itself, 1 `\`, 2 `$`, 3 a space (`~`, a tab), 4 nothing (a brace), 5 the line's
 # end (`%`, a comment), else dl.tcls's outside math
@@ -307,6 +310,10 @@ def dl.cls(+c: U32, +t: List<&2, U32>, +m: Bool) -> Nat:
   Bool.pick(Nat, Bool.or(U32.is_eq(c, 123), U32.is_eq(c, 125)), 4n,
   Bool.pick(Nat, U32.is_eq(c, 37), 5n,
   Bool.pick(Nat, m, 0n, dl.tcls(c, t)))))))
+
+# an accent's mark after `\` (R8, 11-17: `Andr\'{e}` spoilt its paragraph): ' ` " ^ ~ = .
+def dl.accent(+c: U32) -> Bool:
+  Bool.or(U32.is_eq(c, 39), Bool.or(U32.is_eq(c, 96), Bool.or(U32.is_eq(c, 34), Bool.or(U32.is_eq(c, 94), Bool.or(U32.is_eq(c, 126), Bool.or(U32.is_eq(c, 61), U32.is_eq(c, 46)))))))
 
 # after `\`: 10 nothing, 11 a command (a letter), 12 `\\` (a line break), 13 an escaped byte
 # (% $ & # _ { }), 14 a space (, ; : ! or a blank), 15 `\(`, 16 `\)`, 17 `\-` (a hyphenation),
@@ -322,13 +329,30 @@ def dl.bcls(+t: List<&2, U32>) -> Nat:
       Bool.pick(Nat, Bool.or(U32.is_eq(c, 44), Bool.or(U32.is_eq(c, 59), Bool.or(U32.is_eq(c, 58), Bool.or(U32.is_eq(c, 33), U32.is_eq(c, 32))))), 14n,
       Bool.pick(Nat, U32.is_eq(c, 40), 15n,
       Bool.pick(Nat, U32.is_eq(c, 41), 16n,
-      Bool.pick(Nat, U32.is_eq(c, 45), 17n, 18n)))))))
+      Bool.pick(Nat, U32.is_eq(c, 45), 17n,
+      Bool.pick(Nat, dl.accent(c), 19n, 18n))))))))
 
-# a backslash's class: dl.bcls's, a command's 20 + its kind (dl.find)
-def dl.hc.b(+t: List<&2, U32>, +tbl: List<&2, DlE>, b: Nat) -> Nat:
+# xs after a command's name and its `*`
+def dl.r1(+t: List<&2, U32>) -> List<&2, U32>:
+  +r0 = dl.after(t)
+  Bool.pick(List<&2, U32>, S.head.is(r0, 42), List.drop(&2, U32, r0, 1n), r0)
+
+# does xs open an argument (`{` or `[`)
+def dl.harg(+xs: List<&2, U32>) -> Bool:
+  Bool.or(S.head.is(xs, 123), S.head.is(xs, 91))
+
+# a command's class from its kind k (t: from its name on): 20 + k for a known one; an unknown one
+# (R8, 11-17, the user: "Category theory and algorithm text books": a book's own macros, `\newterm{..}`,
+# `\cat{C}`, `\Hom`, spoilt most of its paragraphs) is 28 with an argument (the name and an optional
+# argument go, the argument stays), 27 in math without one (it reads as its name), else 20 (it spoils)
+def dl.unk(+t: List<&2, U32>, +m: Bool, +k: Nat) -> Nat:
+  Bool.pick(Nat, Nat.is_eq(k, 0n), Bool.pick(Nat, dl.harg(dl.r1(t)), 28n, Bool.pick(Nat, m, 27n, 20n)), Nat.add(20n, k))
+
+# a backslash's class: dl.bcls's, a command's dl.unk
+def dl.hc.b(+t: List<&2, U32>, +tbl: List<&2, DlE>, +m: Bool, b: Nat) -> Nat:
   match b:
     case 11n:
-      Nat.add(20n, dl.kof(dl.find(dl.name(t), tbl)))
+      dl.unk(t, m, dl.kof(dl.find(dl.name(t), tbl)))
     case 10n:
       10n
     case 12n:
@@ -343,6 +367,8 @@ def dl.hc.b(+t: List<&2, U32>, +tbl: List<&2, DlE>, b: Nat) -> Nat:
       16n
     case 17n:
       17n
+    case 19n:
+      19n
     case _:
       18n
 
@@ -357,7 +383,7 @@ def dl.hc.s(+m: Bool, dd: Bool) -> Nat:
 def dl.hc.c(+t: List<&2, U32>, +tbl: List<&2, DlE>, +m: Bool, +k: Nat, is1: Bool, is2: Bool) -> Nat:
   match is1 is2:
     case True{} _:
-      dl.hc.b(t, tbl, dl.bcls(t))
+      dl.hc.b(t, tbl, m, dl.bcls(t))
     case False{} True{}:
       dl.hc.s(m, S.head.is(t, 36))
     case False{} False{}:
@@ -378,11 +404,6 @@ def dl.inc(+m: Bool, +n: Nat) -> Nat:
 # the end of inline math read n bytes: a NUL (the line goes) when the formula is too long to read as prose
 def dl.long(+n: Nat) -> List<&2, U32>:
   Bool.pick(List<&2, U32>, Nat.is_lt(40n, n), [0], Nil{})
-
-# xs after a command's name and its `*`
-def dl.r1(+t: List<&2, U32>) -> List<&2, U32>:
-  +r0 = dl.after(t)
-  Bool.pick(List<&2, U32>, S.head.is(r0, 42), List.drop(&2, U32, r0, 1n), r0)
 
 # a line read (m: inside inline math, n: its bytes so far, k: the head's class, dl.hc); a NUL in the
 # output marks what is not prose
@@ -412,6 +433,9 @@ def dl.go(fuel: Nat, xs: List<&2, U32>, +tbl: List<&2, DlE>, +m: Bool, +n: Nat, 
     case 1n+f c <> +t 9n:
       +r = dl.past(t, 62)
       dl.go(f, r, tbl, m, n, dl.hc(r, tbl, m))
+    case 1n+f c <> +t 40n:
+      +r = List.drop(&2, U32, t, 1n)
+      34 <> dl.go(f, r, tbl, m, n, dl.hc(r, tbl, m))
     case 1n+f c <> t 10n:
       Nil{}
     case 1n+f c <> +t 12n:
@@ -430,6 +454,9 @@ def dl.go(fuel: Nat, xs: List<&2, U32>, +tbl: List<&2, DlE>, +m: Bool, +n: Nat, 
       +r = List.drop(&2, U32, t, 1n)
       S.append(dl.long(n), dl.go(f, r, tbl, False{}, 0n, dl.hc(r, tbl, False{})))
     case 1n+f c <> +t 17n:
+      +r = List.drop(&2, U32, t, 1n)
+      dl.go(f, r, tbl, m, n, dl.hc(r, tbl, m))
+    case 1n+f c <> +t 19n:
       +r = List.drop(&2, U32, t, 1n)
       dl.go(f, r, tbl, m, n, dl.hc(r, tbl, m))
     case 1n+f c <> +t 21n:
@@ -455,6 +482,12 @@ def dl.go(fuel: Nat, xs: List<&2, U32>, +tbl: List<&2, DlE>, +m: Bool, +n: Nat, 
       S.append(dl.long(n), dl.go(f, t, tbl, False{}, 0n, dl.hc(t, tbl, False{})))
     case 1n+f c <> +t 32n:
       dl.go(f, t, tbl, True{}, 0n, dl.hc(t, tbl, True{}))
+    case 1n+f c <> +t 27n:
+      +r = dl.r1(t)
+      S.append(dl.name(t), dl.go(f, r, tbl, m, dl.inc(m, n), dl.hc(r, tbl, m)))
+    case 1n+f c <> +t 28n:
+      +r = dl.opt(dl.r1(t))
+      dl.go(f, r, tbl, m, dl.inc(m, n), dl.hc(r, tbl, m))
     case 1n+f c <> +t 20n:
       +r = dl.r1(t)
       0 <> dl.go(f, r, tbl, m, n, dl.hc(r, tbl, m))
@@ -484,9 +517,13 @@ def dl.squash(xs: List<&2, U32>, +sp: Bool, +any: Bool, bl: Bool) -> List<&2, U3
     case +c <> +t False{}:
       S.append(Bool.pick(List<&2, U32>, sp, [32], Nil{}), c <> dl.squash(t, False{}, True{}, dl.hsp(t)))
 
+# LaTeX's closing quote '' and the HTML entities nLab writes
+def dl.ent(+xs: List<&2, U32>) -> List<&2, U32>:
+  S.replace(S.replace(S.replace(S.replace(S.replace(S.replace(S.replace(S.replace(xs, S.b("&lbrack;"), S.b("[")), S.b("&rbrack;"), S.b("]")), S.b("&amp;"), S.b("&")), S.b("&lt;"), S.b("<")), S.b("&gt;"), S.b(">")), S.b("&quot;"), [34]), S.b("&nbsp;"), S.b(" ")), [39, 39], [34])
+
 # the spaces a dropped citation or label leaves before punctuation
 def dl.tidy(+xs: List<&2, U32>) -> List<&2, U32>:
-  S.replace(S.replace(S.replace(S.replace(S.replace(dl.squash(xs, False{}, False{}, dl.hsp(xs)), S.b(" ."), S.b(".")), S.b(" ,"), S.b(",")), S.b(" )"), S.b(")")), S.b("( "), S.b("(")), S.b("()"), Nil{})
+  dl.ent(S.replace(S.replace(S.replace(S.replace(S.replace(dl.squash(xs, False{}, False{}, dl.hsp(xs)), S.b(" ."), S.b(".")), S.b(" ,"), S.b(",")), S.b(" )"), S.b(")")), S.b("( "), S.b("(")), S.b("()"), Nil{}))
 
 # a line's lead (blanks, markdown's heading `#`s and quote `>`s)
 def dl.hlead(+xs: List<&2, U32>) -> Bool:
@@ -535,14 +572,16 @@ def dl.any(+l: List<&2, U32>, ps: List<&2, String>) -> Bool:
 
 # a line that goes whole without breaking its paragraph (x: the line from its first non-blank byte)
 def dl.skip(+x: List<&2, U32>, +l: List<&2, U32>) -> Bool:
-  Bool.or(dl.any(x, ["%", "+--", "=--", "[[!", "{:", "{#", "* table of contents", "#Contents#", "###Context###", "|"]), Nat.is_lt(4096n, S.len(l)))
+  Bool.or(dl.any(x, ["%", "+--", "=--", "[[!", "{:", "{#", "* table of contents", "#Contents#", "###Context###", "|", ":::", "category:"]), Bool.or(S.infix(x, S.b(".html#")), Nat.is_lt(4096n, S.len(l))))
 
 def dl.envs() -> List<&2, String>:
   ["equation", "align", "alignat", "eqnarray", "gather", "multline", "flalign", "displaymath", "math",
    "figure", "table", "tabular", "tabularx", "longtable", "tikzpicture", "tikzcd", "xy", "xymatrix", "diagram",
    "CD", "array", "matrix", "pmatrix", "bmatrix", "cases", "thebibliography", "verbatim", "lstlisting",
    "minted", "code", "spec", "hscode", "comment", "algorithm", "algorithmic", "subequations", "picture",
-   "prooftree", "mathpar", "bprooftree", "dmath", "split", "aligned", "gathered", "Verbatim", "quiver"]
+   "prooftree", "mathpar", "bprooftree", "dmath", "split", "aligned", "gathered", "Verbatim", "quiver",
+   "snip", "snipv", "Haskell", "haskell", "scope", "pgfonlayer", "algorithm2e", "lstinputlisting", "tabbing",
+   "alltt", "Code", "java", "cpp", "pcode"]
 
 def dl.henv(+xs: List<&2, U32>) -> Bool:
   Bool.not(Bool.or(S.head.is(xs, 125), Bool.or(S.head.is(xs, 42), Nat.is_eq(S.len(List.take(&2, U32, xs, 1n)), 0n))))
@@ -565,12 +604,29 @@ def dl.anyeq(+x: List<&2, U32>, ps: List<&2, String>) -> Bool:
     case +p <> t:
       Bool.or(S.eq(x, S.b(p)), dl.anyeq(x, t))
 
+# a heading (markdown `#`s, or `\section{..}`) that opens a document's references or links: the rest of the
+# document goes (11-17: not acknowledgments, a book's come in its preface: Spivak's went whole)
+def dl.refs() -> List<&2, String>:
+  ["References", "Bibliography", "Related concepts", "Related entries", "Related nLab entries", "Related pages",
+   "See also", "Literature", "Selected writings", "Further reading"]
+
+def dl.anyhead(+h: List<&2, U32>, ps: List<&2, String>) -> Bool:
+  match ps:
+    case Nil{}:
+      False{}
+    case +p <> t:
+      Bool.or(Bool.and(S.prefix(h, S.b(p)), Nat.is_le(S.len(h), Nat.add(S.len(S.b(p)), 3n))), dl.anyhead(h, t))
+
+def dl.refhead(+x: List<&2, U32>) -> Bool:
+  Bool.or(Bool.and(S.head.is(x, 35), dl.anyhead(dl.lead(x), dl.refs())),
+    Bool.and(S.prefix(x, S.b("\\section")), Bool.or(S.infix(x, S.b("{References}")), S.infix(x, S.b("{Bibliography}")))))
+
 # what ends a block a line opens (x from its first non-blank byte): Nil when it opens none; [0] for
 # the rest of the document
 def dl.opens(+x: List<&2, U32>) -> List<&2, U32>:
   +env = dl.envname(List.drop(&2, U32, x, 7n))
   +fin = S.append(S.b("\\end{"), env)
-  Bool.pick(List<&2, U32>, Bool.or(S.prefix(x, S.b("\\end{document}")), Bool.or(S.prefix(x, S.b("\\begin{thebibliography}")), S.prefix(x, S.b("\\bibliography{")))), [0],
+  Bool.pick(List<&2, U32>, Bool.or(dl.refhead(x), Bool.or(S.prefix(x, S.b("\\end{document}")), Bool.or(S.prefix(x, S.b("\\begin{thebibliography}")), S.prefix(x, S.b("\\bibliography{"))))), [0],
   Bool.pick(List<&2, U32>, Bool.and(S.prefix(x, S.b("\\begin{")), dl.anyeq(env, dl.envs())),
     Bool.pick(List<&2, U32>, S.infix(List.drop(&2, U32, x, 7n), fin), Nil{}, fin),
   Bool.pick(List<&2, U32>, S.prefix(x, S.b("$$")), Bool.pick(List<&2, U32>, S.infix(List.drop(&2, U32, x, 2n), S.b("$$")), Nil{}, S.b("$$")),

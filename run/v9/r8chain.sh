@@ -7,7 +7,7 @@
 cd /home/hhefesto/src/ana || exit 1
 say() { echo "$(date '+%F %T') $*"; }
 active() { local u; for u in "$@"; do systemctl --user is-active -q $u && return 0; done; return 1; }
-while active ana-r8mix ana-r8prose; do sleep 60; done
+while active ana-r8mix ana-r8prose ana-r8prose2; do sleep 60; done
 grep -q '^rc=0' run/v9/theory8/prose.log || { say "FAILED: the prose (run/v9/theory8/prose.log)"; exit 1; }
 [ -e run/v9/mix8/bend.done ] || { say "FAILED: the mix (run/v9/run8mix.log)"; exit 1; }
 say "the mix and the prose are done: run8.sh"

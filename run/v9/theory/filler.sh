@@ -59,6 +59,22 @@ done
     files mil "$T/src/mathematics_in_lean" -name '*.lean'
     files tpil4 "$T/src/theorem_proving_in_lean4" -name '*.lean' -o -name '*.md'; } > "$P/in/books.nul.tmp"
   mv "$P/in/books.nul.tmp" "$P/in/books.nul"; }
+# R8 (11-17), the user: "Get more filler text if needed", "Category theory and algorithm text books": dl/books8,
+# each in its own directory as fetched (arXiv e-prints' LaTeX, git clones, two PDFs as pdftotext's text)
+B8=$T/dl/books8
+[ -s "$P/in/books8.nul" ] || [ ! -d "$B8" ] || {
+  { files 7sketches "$B8/arxiv-1803.05316/src" -name '*.tex'
+    files leinster-bct "$B8/arxiv-1612.09375/src" -name '*.tex'
+    files perrone-ct "$B8/arxiv-1912.10642/src" -name '*.tex'
+    files spivak-ctfs "$B8/arxiv-1302.6946/src" -name '*.tex'
+    files niu-spivak-poly "$B8/arxiv-2312.00990/src" -name '*.tex'
+    files joyofcats "$B8/pdf-joyofcats" -name '*.plain.txt'
+    files erickson "$B8/pdf-erickson" -name '*.plain.txt'
+    files ods "$B8/git-patmorin_ods/latex" -name '*.tex'
+    files algoxy "$B8/git-liuxinyu95_AlgoXY" -name '*-en.tex'
+    files cphb "$B8/git-pllk_cphb" -name '*.tex'
+    files thinkds "$B8/git-AllenDowney_ThinkDataStructures/book" -name '*.tex'; } > "$P/in/books8.nul.tmp"
+  mv "$P/in/books8.nul.tmp" "$P/in/books8.nul"; }
 say "inputs: $(ls "$P"/in/*.nul | wc -l) parts, $(du -cb "$P"/in/*.nul | tail -1 | cut -f1) bytes"
 # the cuts, JOBS at a time
 ls "$P"/in/*.nul | xargs -n1 basename | sed 's/\.nul$//' | xargs -P "$J" -I{} bash -c 'part {}'
@@ -74,5 +90,17 @@ LC_ALL=C gawk -v RS='\0' 'NR % 2 == 1 && /^arXiv:/ {sub(/^arXiv:/, ""); print}' 
   printf 'nLab\thttps://ncatlab.org\t%s pages\n' "$(tr -cd '\0' < "$P/in/nlab.nul" | wc -c | awk '{print $1/2}')"
   printf 'eb\tConal Elliott; Tai-Danae Bradley; the user'"'"'s notes\t%s\n' "$T/eb/manifest.tsv"
   for d in plfa book stacks-project milewski-ctfp-pdf 1lab mathematics_in_lean theorem_proving_in_lean4; do
-    [ -d "$T/src/$d" ] && printf 'source\t%s\t%s\n' "$d" "$(git -C "$T/src/$d" remote get-url origin 2>/dev/null || echo -)"; done; } > "$P/credits.tsv"
+    [ -d "$T/src/$d" ] && printf 'source\t%s\t%s\n' "$d" "$(git -C "$T/src/$d" remote get-url origin 2>/dev/null || echo -)"; done
+  [ -s "$P/in/books8.nul" ] && printf '%s\n' \
+    'book\t7sketches\tFong, Spivak: Seven Sketches in Compositionality (arXiv:1803.05316)\tCC BY 4.0' \
+    'book\tleinster-bct\tLeinster: Basic Category Theory (arXiv:1612.09375)\tCC BY-NC-SA 4.0' \
+    'book\tperrone-ct\tPerrone: Notes on Category Theory (arXiv:1912.10642)\tarXiv non-exclusive' \
+    'book\tspivak-ctfs\tSpivak: Category theory for scientists (arXiv:1302.6946)\tCC BY 3.0' \
+    'book\tniu-spivak-poly\tNiu, Spivak: Polynomial Functors (arXiv:2312.00990)\tCC BY 4.0' \
+    'book\tjoyofcats\tAdamek, Herrlich, Strecker: Abstract and Concrete Categories (TAC Reprints 17)\tGNU FDL' \
+    'book\terickson\tErickson: Algorithms (jeffe.cs.illinois.edu/teaching/algorithms)\tCC BY 4.0' \
+    'book\tods\tMorin: Open Data Structures (github.com/patmorin/ods)\tCC BY' \
+    'book\talgoxy\tLiu: Elementary Algorithms (github.com/liuxinyu95/AlgoXY)\tGNU FDL 1.3' \
+    'book\tcphb\tLaaksonen: Competitive Programmer'"'"'s Handbook (github.com/pllk/cphb)\tCC BY-NC-SA 4.0' \
+    'book\tthinkds\tDowney: Think Data Structures (github.com/AllenDowney/ThinkDataStructures)\tMIT' | sed 's/\\t/\t/g'; } > "$P/credits.tsv"
 say "prose: $(tr '\n' ' ' < "$P/files-hi.nul.stats")"

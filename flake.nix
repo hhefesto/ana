@@ -152,6 +152,8 @@
           # R7's theory prose cut into filler pieces (run/v9/theory/filler.sh)
           bend-theory-cut = bendBinary pkgs "bend-theory-cut" "TheoryCut.bend";
           bend-r8 = bendBinary pkgs "bend-r8" "R8.bend";
+          # R8: filler texts cut into pieces (the packing) and private pairs left out (bend/NulFilter.bend)
+          bend-nul-filter = bendBinary pkgs "bend-nul-filter" "NulFilter.bend";
           # R7's sorts with fuel, written out in small checked files (run/v9/f8.sh)
           bend-sorts = bendBinary pkgs "bend-sorts" "Sorts.bend";
           # the checked units cleaned (exact and near duplicates, units
