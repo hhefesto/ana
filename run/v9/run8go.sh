@@ -51,6 +51,13 @@ VF=run/v9/vf/validfixed
 VALID_CORPUS=$VC TOKENIZER_FILE=weights/code32k.bpe timeout 1800 $VF > run/v9/vf/r8valid.log 2>&1
 grep -q 'fixed windows of' run/v9/vf/r8valid.log || die "TrainDense does not read $VC on the CPU (run/v9/vf/r8valid.log); nothing rented"
 say "$(grep 'fixed windows of' run/v9/vf/r8valid.log | sed 's/^\[[^]]*\] //') (the CPU)"
+# The dual-number gradient gate (bend/tests/dualgrad.bend; the user, 11-17: "Implement the three Elliott items"): the
+# dense trainer's gradient against forward mode on dual numbers, on the CPU, built fresh, before anything is rented
+run/v5/gcroot-bend-2.0.39/bin/bend bend/tests/dualgrad.bend -o run/v9/vf/dualgrad > run/v9/vf/dualgrad-build.log 2>&1 \
+  || die "bend/tests/dualgrad.bend did not build (run/v9/vf/dualgrad-build.log); nothing rented"
+timeout 1800 run/v9/vf/dualgrad +RTS --threads 4 -RTS > run/v9/vf/dualgrad.log 2>&1 \
+  || die "the dual-number gradient gate failed (run/v9/vf/dualgrad.log); nothing rented"
+say "$(tail -n 1 run/v9/vf/dualgrad.log) (the CPU)"
 steps=$(head -n 1 $PL | cut -d' ' -f3)
 credit=$($V show user --raw | jq -r .credit)
 # R6's measured pace (run/v9/run6/r6.log, 11-14 05:36-15:28): 13,000 steps in 9 h 52 min, 2.73 s a step with its

@@ -25,10 +25,13 @@ def is0(+e: B.Ex) -> Bool:
     case _:
       False{}
 
+# ("and not 0" changes nothing in F32, where 1.0 is not 0.0; it lets
+# Spec/Derivative.bend's proof, which cannot compute with F32, see that a
+# constant this calls 1 is not one is0 calls 0)
 def is1(+e: B.Ex) -> Bool:
   match e:
     case B.EK{c}:
-      F32.is_eq(c, 1.0)
+      Bool.and(F32.is_eq(c, 1.0), Bool.not(F32.is_eq(c, 0.0)))
     case _:
       False{}
 

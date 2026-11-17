@@ -434,6 +434,21 @@
               ${./docs/haskell-era/RUN-2026-07-25-WIKI-FULL.md} ${./bend/tests/dense-identity.sha256}
             touch $out
           '';
+          # the dense trainer's gradient against forward mode on dual numbers
+          # (bend/Dense/Dual.bend: Spec/Derivative.bend's `dual` over F32, 2026-11-17):
+          # the loss's derivative along random-sign directions, over every
+          # parameter and over each group (embedding, each block, the final
+          # norm), within 1e-3 relative plus 1e-5 of Σ|g·v|, and each group's
+          # gradient times 1.01 caught (tests/dualgrad.bend decides);
+          # run/v9/run8go.sh runs it before renting
+          bend-dualgrad = pkgs.runCommand "bend-dualgrad" { nativeBuildInputs = [ (bendFor pkgs) ]; } ''
+            export HOME=$TMPDIR
+            cp -r ${bendSrc}/bend src
+            chmod -R u+w src
+            bend src/tests/dualgrad.bend -o dualgrad
+            ./dualgrad +RTS --threads 4 -RTS
+            touch $out
+          '';
           # the dense decode step (bend/Dense/Decode.bend, ana's engine)
           # against Model.bend's decode, its meaning: every position's logits
           # within 1e-5 relative, before and after the softmax ring wraps,

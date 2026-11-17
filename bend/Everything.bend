@@ -59,3 +59,5 @@ import ./Dense/Plan.bend as DPlan
 import ./Mask.bend as Mask
 import ./Legere/Spec.bend as SLegere
 import ./Agent/Episode.bend as AEpisode
+import ./Spec/Derivative.bend as SDerivative
+import ./Spec/Session.bend as SSession

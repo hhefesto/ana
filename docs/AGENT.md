@@ -46,6 +46,16 @@ given text keep 1 (real asks and real code, the raw corpus's kind of text,
 as plain language modelling); an attempt is 0 (code handed over as wrong:
 never a target). The same rule covers every tool, memo included.
 
+Since 2026-11-17 this argument is a theorem, over any commutative semiring of
+weights (bend/Spec/Session.bend): an episode is its turns concatenated, its
+weight under ana and the tools splits into the model's weight of ana's turns
+times a factor with no model in it (`episode_factors`), and a whole
+transcript's objective is the mask's (whose weights are `ag.weight`'s,
+`weight_kept`) times the dropped turns', every echo among them
+(`full_splits`). Decoding after a prompt is the derivative by the prompt
+(`prompt_derivative`: δ_t(t ⋆ Q) = Q). Keeping user and given text, and
+dropping attempts and tries, stay choices the laws state but do not derive.
+
 The loop is an unfold (`ag.unfold`): ana's turns after the task; while ana's
 last turn is a call, the tool's answer (always an echo: only the tool writes
 one) and ana's next turns.

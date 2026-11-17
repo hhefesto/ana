@@ -14,9 +14,13 @@ import ../Dense/Ex.bend as X
 # The numeric content -- each op's runtime (bend/effs/bulk.c: cuBLAS,
 # generated kernels, the loops) agreeing with its Bulk.bend definition, and
 # each einsum's transpose being its derivative's -- is F32 and so is tested,
-# not proven: the conformance programs (bend/gpu, tests/bulk-cpu.bend) and
+# not proven: the conformance programs (bend/gpu, tests/bulk-cpu.bend),
 # tests/dense.bend (the derived backward against the gradchecked tree
-# pullbacks), as the pullbacks' correctness rests on the gradcheck.
+# pullbacks) and, since 2026-11-17, tests/dualgrad.bend (the backward
+# against forward mode on dual numbers, which needs neither).  What X.d
+# computes is proven, over every carrier with the laws its folding uses:
+# the dual numbers' tangent, for every expression (Spec/Derivative.bend;
+# d.const and d.index below are its two smallest cases).
 
 def back.append(+tg: U32, xs: List<&2, P.Op>, +ys: List<&2, P.Op>, +acc: List<&2, P.Op>) ->
   {P.back(tg, List.append(&2, P.Op, xs, ys), acc) == P.back(tg, ys, P.back(tg, xs, acc)) : List<&2, P.Op>}:
