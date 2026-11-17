@@ -4,6 +4,7 @@ import ./Tokenizer.bend as Tk
 import ./Nul.bend as Ns
 import ./Corpus.bend as Cc
 import ./Ftcc.bend as Fc
+import ./Sys.bend as S
 
 # windows: whole transcripts packed into training documents of exactly one
 # context each, the space they leave filled with the end of a code file.
@@ -358,16 +359,223 @@ def plan.write(st: Pst, +ntr: Nat, +cap: Nat, +out: String) -> IO(Unit):
     case Pgo{ts, bs, acc, fill, n}:
       IO.die(Unit, 1, "windows: the plan did not finish")
 
+# The packing (R8, 2026-11-17, docs/r8/PLAN.md) --------------------------------
+#
+# With WINDOW_FILL = F (permille, 1..1000) the plan is not next fit in order but
+# best fit with a look ahead: a window opens with the first transcript left and
+# then, while one fits, takes the largest of the next WINDOW_LOOK (64)
+# transcripts left that keeps its transcripts (each with its EOS) within
+# F * CAPACITY / 1000 tokens; the gap left is filler as before (best fit).  The
+# transcripts so go out of TRANSCRIPTS' order: `plan` writes PLAN.order (the
+# index of each transcript in the windows' order, a line each) and `build`,
+# under the same WINDOW_FILL, reads TRANSCRIPTS in that order.  R7 (the user,
+# 11-16: "aren't sessions too short?"): next fit in order left 23.9% of a window
+# filler, 1.76 transcripts a window; the order a mix writes is a hash's (repair-mix),
+# so nothing is lost by taking them out of it.  Unset (0): R7's plan, the same bytes.
+
+type Bin is Data:
+  Bin{k: Nat, used: Nat}
+
+type Pkr is Data:
+  Pkr{order: List<&2, Nat>, bins: List<&2, Bin>}
+
+def pk.fds(ts: List<&2, Nat>, +i: Nat) -> List<&2, Fd>:
+  match ts:
+    case Nil{}:
+      Nil{}
+    case +l <> more:
+      Fd{l, i} <> pk.fds(more, 1n+i)
+
+def fd.len(+e: Fd) -> Nat:
+  match e:
+    case Fd{l, i}:
+      l
+
+def fd.i(+e: Fd) -> Nat:
+  match e:
+    case Fd{l, i}:
+      i
+
+# 1 + the place among the first lim transcripts of the largest that fits room
+# (1 + its tokens <= room), the first of equal ones; 0 when none fits
+def pk.best(ws: List<&2, Fd>, +lim: Nat, +room: Nat, +at: Nat, +bl: Nat, +bp: Nat) -> Nat:
+  match ws lim:
+    case Nil{} _:
+      bp
+    case _ 0n:
+      bp
+    case Fd{+l, i} <> more 1n+m:
+      +ok = Bool.and(Nat.is_le(1n+l, room), Nat.is_lt(bl, 1n+l))
+      pk.best(more, m, room, 1n+at, Bool.pick(Nat, ok, 1n+l, bl), Bool.pick(Nat, ok, 1n+at, bp))
+
+def pk.at(ws: List<&2, Fd>, p: Nat) -> Fd:
+  match ws p:
+    case Nil{} _:
+      Fd{0n, 0n}
+    case x <> t 0n:
+      x
+    case x <> t 1n+q:
+      pk.at(t, q)
+
+def pk.without(ws: List<&2, Fd>, p: Nat) -> List<&2, Fd>:
+  match ws p:
+    case Nil{} _:
+      Nil{}
+    case x <> t 0n:
+      t
+    case x <> t 1n+q:
+      x <> pk.without(t, q)
+
+def pk.room(+tgt: Nat, +used: Nat) -> Nat:
+  Nat.sub(tgt, used)
+
+# the walk: ps the transcripts left (in order), the window open (k taken, used
+# tokens) or not, p its next pick (pk.best, computed for it)
+def pk.go(fuel: Nat, ps: List<&2, Fd>, open: Bool, p: Nat, order: List<&2, Nat>, bins: List<&2, Bin>, +k: Nat, +used: Nat, +tgt: Nat, +lim: Nat) -> Pkr:
+  match fuel ps open p:
+    case 0n _ _ _:
+      Pkr{order, bins}
+    case 1n+f Nil{} False{} _:
+      Pkr{order, bins}
+    case 1n+f Nil{} True{} _:
+      Pkr{order, Bin{k, used} <> bins}
+    case 1n+f Fd{+l, +i} <> +t False{} _:
+      pk.go(f, t, True{}, pk.best(t, lim, pk.room(tgt, 1n+l), 0n, 0n, 0n), i <> order, bins, 1n, 1n+l, tgt, lim)
+    case 1n+f +x <> +t True{} 0n:
+      pk.go(f, x <> t, False{}, 0n, order, Bin{k, used} <> bins, 0n, 0n, tgt, lim)
+    case 1n+f +x <> +t True{} 1n+(+q):
+      +e = pk.at(x <> t, q)
+      +u = Nat.add(used, 1n+fd.len(e))
+      +rest = pk.without(x <> t, q)
+      pk.go(f, rest, True{}, pk.best(rest, lim, pk.room(tgt, u), 0n, 0n, 0n), fd.i(e) <> order, bins, 1n+k, u, tgt, lim)
+
+def pk.rev(r: Pkr) -> Pkr:
+  match r:
+    case Pkr{o, b}:
+      Pkr{List.reverse(&2, Nat, o), List.reverse(&2, Bin, b)}
+
+def pk.run(+ts: List<&2, Nat>, +tgt: Nat, +lim: Nat) -> Pkr:
+  +n = List.length(&2, Nat, ts)
+  pk.rev(pk.go(Nat.add(Nat.mul(2n, n), 2n), pk.fds(ts, 0n), False{}, 0n, Nil{}, Nil{}, 0n, 0n, tgt, lim))
+
+# the windows' plan from the bins, the filler as step.fill takes it
+type Qst is Data:
+  Qgo{bins: List<&2, Bin>, bs: List<&2, List<&2, Nat>>, acc: List<&2, Plan>, fill: Nat, n: Nat}
+  Qdone{acc: List<&2, Plan>, fill: Nat, n: Nat}
+  Qerr{why: String}
+
+def qstep.pop(+f: Nat, +k: Nat, rest: List<&2, Bin>, acc: List<&2, Plan>, +fill: Nat, +n: Nat, pre: List<&2, List<&2, Nat>>, p: Pop) -> Qst:
+  match p:
+    case Pop{Some{i}, post}:
+      Qgo{rest, List.append(&2, List<&2, Nat>, pre, post), Plan{f, i, k} <> acc, Nat.add(fill, f), 1n+n}
+    case Pop{None{}, post}:
+      Qerr{"windows: the filler corpus has no unused document of at least " ++ Nat.show(f) ++ " tokens for window " ++ Nat.show(n)}
+
+def qstep.cut(+f: Nat, +k: Nat, rest: List<&2, Bin>, acc: List<&2, Plan>, +fill: Nat, +n: Nat, c: Cut) -> Qst:
+  match c:
+    case Cut{pre, post}:
+      qstep.pop(f, k, rest, acc, fill, n, pre, pop.first(post))
+
+def qstep.fill(f: Nat, +k: Nat, rest: List<&2, Bin>, bs: List<&2, List<&2, Nat>>, acc: List<&2, Plan>, +fill: Nat, +n: Nat) -> Qst:
+  match f:
+    case 0n:
+      Qgo{rest, bs, Plan{0n, 0n, k} <> acc, fill, 1n+n}
+    case 1n+(+g):
+      qstep.cut(1n+g, k, rest, acc, fill, n, cut(1n+g, bs))
+
+def qstep.bin(ok: Bool, +k: Nat, +used: Nat, rest: List<&2, Bin>, bs: List<&2, List<&2, Nat>>, acc: List<&2, Plan>, +fill: Nat, +n: Nat, +cap: Nat) -> Qst:
+  match ok:
+    case False{}:
+      Qerr{"windows: a transcript of " ++ Nat.show(Nat.sub(used, 1n)) ++ " tokens does not fit a window of " ++ Nat.show(cap)}
+    case True{}:
+      qstep.fill(Nat.sub(cap, used), k, rest, bs, acc, fill, n)
+
+def qstep(st: Qst, +cap: Nat) -> Qst:
+  match st:
+    case Qgo{bins, bs, acc, +fill, +n}:
+      match bins:
+        case Nil{}:
+          Qdone{acc, fill, n}
+        case Bin{+k, +used} <> more:
+          qstep.bin(Nat.is_le(used, cap), k, used, more, bs, acc, fill, n, cap)
+    case Qdone{acc, fill, n}:
+      Qdone{acc, fill, n}
+    case Qerr{w}:
+      Qerr{w}
+
+def qplan.go(fuel: Nat, st: Qst, +cap: Nat) -> Qst:
+  match fuel st:
+    case 1n+p Qgo{bins, bs, acc, fill, n}:
+      qplan.go(p, qstep(Qgo{bins, bs, acc, fill, n}, cap), cap)
+    case _ other:
+      other
+
+def order.bytes(os: List<&2, Nat>) -> List<&2, U32>:
+  match os:
+    case Nil{}:
+      Nil{}
+    case +o <> more:
+      List.append(&2, U32, Tk.str.bytes(Nat.show(o) ++ "\n"), order.bytes(more))
+
+def qplan.write(st: Qst, +order: List<&2, Nat>, +ntr: Nat, +cap: Nat, +out: String) -> IO(Unit):
+  match st:
+    case Qdone{acc, +fill, +n}:
+      do IO<Unit>:
+        Ns.write(out ++ ".order", order.bytes(order))
+        Ns.write(out, plan.bytes(List.reverse(&2, Plan, acc)))
+        IO.print("windows: " ++ Nat.show(n) ++ " windows of " ++ Nat.show(cap) ++ " tokens for " ++ Nat.show(ntr) ++ " transcripts (packed, WINDOW_FILL); filler " ++ Nat.show(fill) ++ " tokens of " ++ Nat.show(Nat.mul(n, cap)) ++ " to " ++ out)
+    case Qerr{w}:
+      IO.die(Unit, 1, w)
+    case Qgo{bins, bs, acc, fill, n}:
+      IO.die(Unit, 1, "windows: the plan did not finish")
+
+def qplan.of(r: Pkr, +n: Nat, +fls: List<&2, Nat>, +cap: Nat, +out: String) -> IO(Unit):
+  match r:
+    case Pkr{+o, b}:
+      qplan.write(qplan.go(Nat.add(n, 2n), Qgo{b, buckets(fls, 1n+cap), Nil{}, 0n, 0n}, cap), o, n, cap, out)
+
+def qplan(+ts: List<&2, Nat>, +fls: List<&2, Nat>, +cap: Nat, +fl: Nat, +lim: Nat, +out: String) -> IO(Unit):
+  qplan.of(pk.run(ts, Nat.div(Nat.mul(cap, fl), 1000n), lim), List.length(&2, Nat, ts), fls, cap, out)
+
+# TRANSCRIPTS' documents in PLAN.order's order (y: the map and the document of order's head)
+def perm.next(+os: List<&2, Nat>, m: Map<&2, List<&2, U32>>) -> Map<&2, List<&2, U32>> & List<&2, U32>:
+  match os:
+    case Nil{}:
+      (m, Nil{})
+    case +j <> t:
+      Map.get(List<&2, U32>, Nil{}, m, Nat.show(j))
+
+def perm.go(os: List<&2, Nat>, y: Map<&2, List<&2, U32>> & List<&2, U32>) -> List<&2, List<&2, U32>>:
+  match os:
+    case Nil{}:
+      Nil{}
+    case j <> +t:
+      (m, d) = y
+      d <> perm.go(t, perm.next(t, m))
+
+def perm(+os: List<&2, Nat>, ds: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  perm.go(os, perm.next(os, fmap(ds, 0n, Map.new(&2, List<&2, U32>))))
+
+
 def nums(+xs: List<&2, U32>) -> List<&2, Nat>:
   List.reverse(&2, Nat, nums.go(xs, 0n, False{}, Nil{}))
+
+# R7's next fit in order (WINDOW_FILL unset or 0), else the packing above
+def plan.pick(r7: Bool, +ts: List<&2, Nat>, +fls: List<&2, Nat>, +cap: Nat, +fl: Nat, +lim: Nat, +out: String) -> IO(Unit):
+  match r7:
+    case True{}:
+      +n = List.length(&2, Nat, ts)
+      plan.write(plan.go(1n+n, Pgo{ts, buckets(fls, 1n+cap), Nil{}, 0n, 0n}, cap), n, cap, out)
+    case False{}:
+      qplan(ts, fls, cap, fl, lim, out)
 
 def plan(+tp: String, +fp: String, +cap: Nat, +out: String) -> IO(Unit):
   do IO<Unit>:
     +tx : List<&2, U32> <- Ns.read(tp)
     +fx : List<&2, U32> <- Ns.read(fp)
-    +ts : List<&2, Nat> = nums(tx)
-    +n : Nat = List.length(&2, Nat, ts)
-    plan.write(plan.go(1n+n, Pgo{ts, buckets(nums(fx), 1n+cap), Nil{}, 0n, 0n}, cap), n, cap, out)
+    +fl : Nat <- S.env.nat("WINDOW_FILL", 0n)
+    lim : Nat <- S.env.nat("WINDOW_LOOK", 64n)
+    plan.pick(Nat.is_eq(fl, 0n), nums(tx), nums(fx), cap, fl, lim, out)
 
 def plan.cap(+t: String, +f: String, m: Maybe<&2, Nat>, +o: String) -> IO(Unit):
   match m:
@@ -413,6 +621,21 @@ def write(st: St, +tok: String, +out: String) -> IO(Unit):
     case St{fs, ts, +p, ds}:
       write.if(String.is_empty(p), List.reverse(&2, Fc.Doc, ds), tok, out, p)
 
+# the transcripts as the plan takes them: in order (R7), or in PLAN.order's (WINDOW_FILL)
+def build.order(r7: Bool, +pp: String) -> IO(List<&2, U32>):
+  match r7:
+    case True{}:
+      IO.pure(List<&2, U32>, Nil{})
+    case False{}:
+      Ns.read(pp ++ ".order")
+
+def build.docs(r7: Bool, +os: List<&2, Nat>, ds: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match r7:
+    case True{}:
+      ds
+    case False{}:
+      perm(os, ds)
+
 def build(+tp: String, +fp: String, +pp: String, +out: String, +cap: Nat, +prefix: String) -> IO(Unit):
   do IO<Unit>:
     +tx : List<&2, U32> <- Ns.read(tp)
@@ -420,7 +643,9 @@ def build(+tp: String, +fp: String, +pp: String, +out: String, +cap: Nat, +prefi
     +px : List<&2, U32> <- Ns.read(pp)
     +tc : Cc.Corpus <- IO.pure(Cc.Corpus, Cc.corpus(tx))
     +fc : Cc.Corpus <- IO.pure(Cc.Corpus, Cc.corpus(fx))
-    write(build.go(plan.read(px), St{fmap(Cc.Corpus.docs(fc), 0n, Map.new(&2, List<&2, U32>)), Cc.Corpus.docs(tc), "", Nil{}}, cap, prefix, 0n), tok.of(tc), out)
+    +fl : Nat <- S.env.nat("WINDOW_FILL", 0n)
+    +ox : List<&2, U32> <- build.order(Nat.is_eq(fl, 0n), pp)
+    write(build.go(plan.read(px), St{fmap(Cc.Corpus.docs(fc), 0n, Map.new(&2, List<&2, U32>)), build.docs(Nat.is_eq(fl, 0n), nums(ox), Cc.Corpus.docs(tc)), "", Nil{}}, cap, prefix, 0n), tok.of(tc), out)
 
 def build.cap(+t: String, +f: String, +p: String, +o: String, m: Maybe<&2, Nat>, +pre: String) -> IO(Unit):
   match m:

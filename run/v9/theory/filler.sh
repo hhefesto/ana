@@ -12,10 +12,13 @@
 # Out: prose/files-hi.nul (the pieces), prose/credits.tsv, prose/*.stats.  Resumable: a part
 # with its .nul and .stats is kept.
 #   bash run/v9/theory/filler.sh [JOBS]     (JOBS: 4)
+#   R8 (2026-11-17): PROSE_OUT=run/v9/theory8/prose THC=run/v9/theory8/gcroot-thc/bin/bend-theory-cut, its in/ the
+#   same documents (links to run/v9/theory/prose/in), the cut de-LaTeX-ed (bend/DeLatex.bend; the user: "The filler
+#   should be De-LaTeX-ed")
 set -euo pipefail
 A=$HOME/src/ana
 T=$A/run/v9/theory
-P=$T/prose
+P=${PROSE_OUT:-$T/prose}
 C=${THC:-$T/gcroot-thc/bin/bend-theory-cut}
 J=${1:-4}
 [ -x "$C" ] || { echo "no $C" >&2; exit 1; }
