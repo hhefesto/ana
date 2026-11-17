@@ -81,15 +81,17 @@
 <p class="lead">ana's specification is a set of theorems that Bend's compiler checks. The model, the GPU trainer and
 its backprop, the tokenizer, the decoder and the tools that build the training data are Bend programs too. The
 code is proven to refine the meaning wherever Bend can prove it, and tested bit for bit where it can't (floating
-point). 115M parameters, GPT-2 small's shape, trained as a coding agent for
-Haskell, Agda, Lean, Bend and Nix on a few rented consumer GPUs.</p>
+point). 115M parameters, GPT-2 small's shape, trained on a few rented consumer GPUs as a coding agent: in
+Haskell, Agda, Lean and Nix, and above all in Bend itself, in the turn shape of
+<a href="https://github.com/hhefesto/mugen">mugen</a>, the agent it is meant to work in.</p>
 
 <div class="stats">
-  <div class="stat"><b>~97,000</b><span>lines of Bend, 210 files: spec, model, trainer, data, ops</span></div>
-  <div class="stat"><b>127 laws</b><span>in the spec, all proven; the whole gate checks in 3 s</span></div>
+  <div class="stat"><b>~106,000</b><span>lines of Bend, 232 files: spec, model, trainer, data, ops</span></div>
+  <div class="stat"><b>109 laws</b><span>in the spec's 25 modules, all passing Bend's checker; the gate takes about a second</span></div>
   <div class="stat"><b>$24</b><span>to train the best model so far from scratch: ~36 h on one rented RTX 5090</span></div>
   <div class="stat"><b>7.6&times;</b><span>on 16 threads, from plain recursion with no thread code</span></div>
   <div class="stat"><b>19 &rarr; 32</b><span>of 99 held-out tasks accepted first try, run 2 to run 3</span></div>
+  <div class="stat"><b>57,693</b><span>Bend files in the training data, from 1,667 when run 3 trained</span></div>
 </div>
 
 <ul class="open">
@@ -126,8 +128,9 @@ Haskell, Agda, Lean, Bend and Nix on a few rented consumer GPUs.</p>
     its composition is the chain rule.</li>
   <li><b>It acts; the tools answer.</b> ana is trained as an agent that writes code and calls the real compiler.
     Every compiler message in its data came from the compiler. It never learns to write a tool's answer itself.</li>
-  <li><b>Small, cheap and reproducible.</b> ana's best model so far (run 3) was trained from scratch for $24 of
-    rented GPU time: about 36 hours on one RTX 5090. Every run,
+  <li><b>Small, cheap and reproducible.</b> ana's best model so far on its first test (run 3) was trained from
+    scratch for $24 of rented GPU time: about 36 hours on one RTX 5090. Every run since July, the false starts
+    included, has cost $193 in all. Every run,
     decision, failure and eval is written down in the repo, and every number on this page can be reproduced from it.</li>
 </ul>
 
@@ -146,10 +149,13 @@ the first line:</p>
 real checker accepts on the first try went from 19 to 32, and within four tries from 25 to 37 (paired exact McNemar,
 p &lt; 0.01 on both). On Bend itself, 4 of 6 held-out tasks pass on the first try (a small sample). And it already
 writes a correct Haskell quicksort, shown <a href="#quicksort">below</a>.</p>
+<p>The later signs are mixed, and <a href="#since">reported as they are</a>: runs 5 and 6 trained ana inside
+mugen's loop, and on a new test of 176 Bend tasks the number she gets <i>right</i> stayed between 36 and 46 while
+the loss kept falling. So the next run is a better corpus, not more steps: R8 is being built now.</p>
 
 <h2 id="bend">Why Bend</h2>
 <p><b>Proofs and speed in one language.</b> Bend 2 is a dependently typed language with a fast proof checker
-(ana's whole gate checks in about 3 seconds) that compiles the same code to C, CUDA, Metal or JavaScript.
+(ana's whole gate checks in about a second) that compiles the same code to C, CUDA, Metal or JavaScript.
 That is what lets ana keep one codebase: the theorem about chunked attention and the CUDA step that uses it are
 read by one compiler.</p>
 <p><b>Parallel by structure.</b> ana's reference tensors are balanced binary trees, and every combinator splits at
@@ -201,7 +207,7 @@ it was ported to Bend 2, and the old code left the repo; the last commit that ha
 <a href="https://github.com/hhefesto/ana/tree/0908864"><code>0908864</code></a> (tag <code>haskell-final</code>).</p>
 <table>
   <tr><th></th><th>Agda + Haskell + Futhark</th><th>Bend</th></tr>
-  <tr><td>the spec</td><td>Agda, 19 modules: laws about the model's math, in a different language from the code</td><td>Bend, 22 modules, 127 laws, checked by the same toolchain that compiles the trainer</td></tr>
+  <tr><td>the spec</td><td>Agda, 19 modules: laws about the model's math, in a different language from the code</td><td>Bend, 25 modules, 109 laws, checked by the same toolchain that compiles the trainer</td></tr>
   <tr><td>spec to code</td><td>tested: a conformance oracle compared the Haskell <code>Double</code> reference, the Futhark backends and <code>Numeric.AD</code> within tolerances</td><td>theorems stated over the running code (<code>Spec/Refinement.bend</code>): change the attention step or the prefill wrongly and the proof gate fails</td></tr>
   <tr><td>backprop</td><td>hand-written pullbacks in Futhark</td><td>derived from the forward step by a program transformation; its transpose law is proven</td></tr>
   <tr><td>training, 115M, RTX 3090</td><td>4,110 ms/step, 3,985 tok/s</td><td>1,702 ms/step, 9,626 tok/s (2.4&times;)</td></tr>
@@ -231,7 +237,7 @@ output byte-identical to the Haskell tools'.</p>
     4 min 5 s, and the 99 agent episodes (E5) from ~9 h to 12 min 43 s, fast enough to evaluate every
     checkpoint.</li>
   <li><b>ana is now written in the language it learns.</b> Its spec, trainer, decoder, corpus tools, checkers and
-    GPU-box operations are about 97,000 lines of Bend.</li>
+    GPU-box operations are about 106,000 lines of Bend.</li>
 </ul>
 <p><b>What it cost.</b> The first Bend decoder, on trees, was 2&ndash;3&times; slower than the old one (0.34&ndash;0.47 s
 per token on 16 threads) until the dense decoder arrived in early October. Floats are assumed, not proven: Bend's F32
@@ -245,7 +251,7 @@ fork, <a href="https://github.com/hhefesto/bend2/tree/ft-kernels">hhefesto/bend2
 <h3>Denotational design</h3>
 <p>From <a href="http://conal.net/papers/type-class-morphisms/">Denotational design with type class morphisms</a>
 (&ldquo;the instance's meaning is the meaning's instance&rdquo;): say what a thing <i>means</i>, prove the laws on the
-meaning, and make every implementation a refinement of it. In ana the meanings are <code>bend/Spec/</code> (22 files, 127 laws) and the refinements are proven against the
+meaning, and make every implementation a refinement of it. In ana the meanings are <code>bend/Spec/</code> (25 files, 109 laws) and the refinements are proven against the
 executable code, not copies of it. <code>bend/Spec/Refinement.bend</code> proves that entry (c, j) of
 <code>Model.bend</code>'s attention-state update is exactly the spec's <code>&alpha;<sub>c</sub>&middot;S[c][j] +
 k&#770;<sub>c</sub>&middot;v[j]</code>. <code>bend/Spec/Linear.bend</code> proves the recurrent and the chunked
@@ -356,39 +362,56 @@ from its earlier Haskell trainer to Bend, the Bend run continued the Haskell one
   <tr><th>measured</th><th class="n"></th></tr>
   <tr><td>RTX 5090, batch 16 &times; 2,048 tokens</td><td class="n">1.95 s/step, 16,781 tok/s</td></tr>
   <tr><td>RTX 3090, same batch</td><td class="n">5.18 s/step, 6,317 tok/s</td></tr>
+  <tr><td>RTX 5090, run 6's own log (Nov 14&ndash;15), its validations included</td><td class="n">2.73 s/step</td></tr>
   <tr><td>the best model so far, run 3 (<code>s2-step56725</code>): from scratch, 56,725 steps, ~36 h on rented RTX 5090s at $0.55&ndash;0.67/h; vast.ai's bill, storage and bandwidth included</td><td class="n">$24</td></tr>
 </table>
 <p>No cluster, no grant, no lab: consumer GPUs rented by the hour on vast.ai, from about $0.50/h. The Bend tools
 in <code>bend/Box/</code> stage the data, run the chain of stages, pull and verify the checkpoints, watch the credit,
-and destroy the box when the run ends.</p>
+and destroy the box when the run ends. Every run so far, the Haskell era and the false starts included, has cost
+$193 on vast.ai.</p>
 
 <h2 id="data">The data: ana acts, the compiler answers</h2>
-<p>ana is trained as a coding agent for functional languages. Its episodes are transcripts: a task, ana's
-<code>## Term</code>, then the real tool's answer (<code>ghc</code>, <code>agda</code>, <code>lean</code>,
-<code>bend</code>, <code>nix</code>) and ana again, up to four turns. Every compiler message it reads was produced by
-the compiler. The tool's turns are context, never training targets.</p>
+<p>ana is trained as a coding agent for functional languages. Up to run 4 its episodes were transcripts: a task,
+ana's <code>## Term</code>, then the real tool's answer (<code>ghc</code>, <code>agda</code>, <code>lean</code>,
+<code>bend</code>, <code>nix</code>) and ana again, up to four turns. Since run 5 they have the turn shape of
+mugen, the agent ana is meant to work in: the ask (<code>## user</code>), her reply (<code>## mugen</code>), and the
+calls she makes on the way, <code>## look</code> and <code>## read</code> to read code, <code>## def</code> and
+<code>## add</code> to write it, <code>## check</code> to run Bend's checker, each answered by the tool's real
+<code>## echo</code>. Every compiler message she reads was produced by the compiler. The tool's turns are context,
+never training targets, and a rejected attempt weighs zero: she never trains on writing the wrong program.</p>
 <ul>
-  <li>Raw code in its five languages: 232,923 Haskell, 23,608 Nix, 16,007 Lean, 8,112 Agda and 1,667 Bend files.</li>
-  <li>Transcripts built from that code by the real checkers: direct tasks (write it) and repairs (fix a wrong attempt).</li>
-  <li>On-policy rounds: ana's own episodes, run on the box against the real compilers, become new training data:
-    its successes, and its rejected terms followed by the known fix.</li>
+  <li>Raw code: 232,923 Haskell, 23,608 Nix, 16,007 Lean and 8,112 Agda files, and 57,693 Bend files (23,647 from
+    GitHub repositories, 16,018 curated, 13,967 translated from Agda by agda2bend, 3,163 of ana's own and 898
+    ported). At most three copies of a file go into a run.</li>
+  <li>Sessions built from that code by the real checkers: write a declaration from its comment, fill a hole,
+    repair a wrong attempt (from mutants of the code and of its laws), helpers, sorts that recurse on fuel, and
+    proofs of the authors' own laws. The asks state the declaration's laws, and a retry looks at the code again
+    first.</li>
+  <li>On-policy rounds: ana's own episodes, run against the real compilers, become new training data: her
+    successes, and her rejected terms followed by the known fix.</li>
+  <li>The latest corpus built, R7 (Nov 16, not trained): 1,916,913 sessions, 2.22 billion tokens in 1,086,240
+    windows of 2,048 tokens, a fixed validation set of 16,995 held-out sessions. A session is never cut; the
+    room it leaves in a window is filled with the end of a code file or with theory prose (category theory, type
+    theory, nLab, the HoTT book, PLFA, Conal Elliott and Tai-Danae Bradley).</li>
 </ul>
 
 <h2 id="translate">More Bend to learn from: hs2bend, agda2bend, lean2bend</h2>
-<p>Bend 2 is a young language, so there is little of it in the world: 1,667 Bend files against 232,923 Haskell
-ones. I'm working on translating the languages that have large, checked libraries into Bend, to grow the Bend ana
+<p>Bend 2 is a young language, so there was little of it in the world: 1,667 Bend files when run 3 trained,
+against 232,923 Haskell ones. I'm working on translating the languages that have large, checked libraries into Bend, to grow the Bend ana
 learns from. Each translation is gated by Bend's own checker, so every example that enters the corpus compiles.</p>
 <ul>
   <li><b>agda2bend</b>: a compiler, an Agda backend that emits Bend 2. Agda's category theory library's
-    <code>Categories.Category.Core</code> translates completely, and on the Yoneda lemma's dependency cone more than
-    three quarters of the roughly 2,500 items already check. The rest wait on gaps between the two type theories,
-    among them an eta rule for records that Bend doesn't have yet.</li>
+    <code>Categories.Category.Core</code> translates completely, and on the Yoneda lemma's dependency cone 2,246
+    of its 2,527 items check. The rest wait on gaps between the two type theories, among them an eta rule for
+    records that Bend doesn't have yet. Its output is in the corpus: 13,967 Bend files translated from Agda
+    libraries and repositories.</li>
   <li><b>hs2bend</b>: 1,003 Haskell modules that use only <code>base</code>, translated by coding agents. A
     module counts only if Bend's checker accepts it and a differential test passes: the Haskell original, run by
-    GHC, must print exactly what the Bend version prints. 81 modules (12,094 lines of Bend) are done so far.</li>
+    GHC, must print exactly what the Bend version prints. 361 modules are done so far, and 109 skipped with their
+    reasons written down.</li>
   <li><b>lean2bend</b>: the same idea for Lean and its libraries, being explored now.</li>
-  <li>Alongside them, collection: 2,357 new Bend files from BendHub and GitHub for the next run, about twice all
-    the raw Bend before.</li>
+  <li>Alongside them, collection: 23,647 Bend files from GitHub repositories and BendHub, and 16,018 curated
+    ones. With the translations, ana now learns from 57,693 Bend files, about 35 times what run 3 had.</li>
 </ul>
 
 <h2 id="results">Results, honestly</h2>
@@ -401,6 +424,27 @@ learns from. Each translation is gated by Bend's own checker, so every example t
 </table>
 <p>Run 3 against run 2: p = 0.00 on E1 and 0.01 on E5 (paired, exact McNemar). E1 by language at run 3's end:
 Haskell 15/31, Bend 4/6, Agda 3/7, Lean 9/46, Nix 1/9.</p>
+
+<h3 id="since">Since run 3: runs 4 to 6</h3>
+<p><b>Run 4</b> (Oct 15&ndash;16) continued run 3 with a first on-policy round and a control. E1 29 and E5 36 against
+run 3's 32 and 37: a null on the agent measures, reported as one.</p>
+<p><b>Runs 5 and 6</b> (late October to Nov 15) trained ana in mugen's turn shape, on the Bend sessions above, and are
+measured on a new test: 176 held-out Bend tasks (write a declaration, fill a hole, repair a wrong one), each an
+episode in mugen's loop with the real checker. <b>Solved</b>: Bend's checker passes her final file.
+<b>Right</b>: her answer is the reference's, is proven equal to it, or passes its tests.</p>
+<table>
+  <tr><th>checkpoint</th><th class="n">solved</th><th class="n">right</th></tr>
+  <tr><td>run 5, <code>r5-step90000</code></td><td class="n">76/176</td><td class="n">46/176</td></tr>
+  <tr><td>run 5g, <code>r5g-step100000</code></td><td class="n">60/176</td><td class="n">46/176</td></tr>
+  <tr><td>run 5g, <code>r5g-step106500</code></td><td class="n">70/176</td><td class="n">46/176</td></tr>
+  <tr><td>run 6, <code>r6-step110000</code></td><td class="n">67/176</td><td class="n">45/176</td></tr>
+  <tr><td>run 6, <code>r6-step113000</code></td><td class="n">54/176</td><td class="n">36/176</td></tr>
+</table>
+<p>Repairs are her strongest kind (21&ndash;25 of 42 right), writing from scratch her weakest (3&ndash;13 of 67).
+The count that matters, <i>right</i>, did not move from run 5 to run 6 as training went on, so I
+stopped run 6 at step 119,502 to fix the corpus instead of paying for more steps on it. What a look at it found:
+the filler between sessions was a quarter of every window, and most of it LaTeX; a declaration came back about
+five times; 1.6% of the sessions taught her to give up.</p>
 
 <h3 id="quicksort">What it writes: a quicksort</h3>
 <p>A prompt from ana's probes: the task, the types it may use, and the type to inhabit. Everything after
@@ -437,7 +481,8 @@ with <code>Data.List.sort</code> on every one.</p>
 is the textbook one, word for word the one in <i>Learn You a Haskell</i>, so ana has most likely seen it, and other
 checkpoints sometimes write a version that drops duplicates. When a call fails, ana still resubmits nearly the same
 term most of the time, so it has barely learnt to read errors yet. Run 4, a first on-policy round, didn't move the
-agent measures. There is no instruction tuning. This is a small model, early, and every number here can be
+agent measures, and runs 5 and 6 didn't move the Bend test's <i>right</i> (<a href="#since">above</a>). There is
+no instruction tuning. This is a small model, early, and every number here can be
 reproduced from the repo.</p>
 <p>Earlier versions were trained on English: v1 (10.6M parameters) reached 1.21 bits per byte on held-out
 Wikipedia; the 115M v2 reached 1.37 bpb on enwik8.</p>
@@ -464,16 +509,21 @@ nix run .#ana -- --checkpoint PATH "quicksort"   <span class="c"># generate from
 
 <h2 id="next">Next</h2>
 <ul>
-  <li>More checked Bend from hs2bend, agda2bend and lean2bend, and the next run on it.</li>
+  <li><b>R8, being built now</b> on one CPU box, the corpus fixed before any more is spent on GPUs: the theory
+    prose de-LaTeX-ed into plain English, less filler (sessions packed by best fit instead of in order: on a test
+    shard 12% of a window instead of 24%, 2.07 sessions a window instead of 1.80), at most three sessions a
+    declaration, no trained give-ups, and the Bend of <a href="https://github.com/hhefesto/elcubodeedgar">El cubo
+    de Edgar</a>, a Rubik's cube app written in Bend with its laws. Then a run on it.</li>
+  <li>More checked Bend from hs2bend, agda2bend and lean2bend.</li>
   <li>Teaching ana to read the compiler's answer instead of resubmitting, with more on-policy data.</li>
   <li>The weights on Hugging Face, and instruction tuning, so it can be talked to.</li>
 </ul>
 
 <h2 id="donate">Support ana</h2>
 <p>ana is one person's project: no lab, no grant, no sponsor. Every GPU hour is rented and paid out of pocket.
-Since July 2026, every run, the Haskell era and the false starts included, has cost about <b>$150</b> on vast.ai,
-and the best model so far took $24 of it. Donations go straight into compute: about $25 pays for another run like
-run 3, on more and better Bend data.</p>
+Since July 2026, every run, the Haskell era and the false starts included, has cost <b>$193</b> on vast.ai,
+and the best model so far took $24 of it. Donations go straight into compute: about $25 pays for the next run,
+on more and better Bend data.</p>
 <div class="wallets">
   <div class="wallet">
     <img src="donate/bitcoin.svg" alt="Bitcoin address QR code" width="132" height="132">
