@@ -23,3 +23,28 @@ type TrustedAnalytic<-S: Data> is Type:
     -rsqrt_derivative: has_derivative(rsqrt, rsqrt_d),
     -exp_d_law: @+x:S -> {exp_d(x) == exp(x) : S},
     -rsqrt_d_law: @+x:S -> {rsqrt_d(x) == mul(mul(mul(rsqrt_scale, rsqrt(x)), rsqrt(x)), rsqrt(x)) : S}}
+
+# The log Spec/Distance.bend reads the trainer through (2026-11-17): at the
+# executable carrier, -ln as a Log from probabilities (F32, *, 1) to costs
+# (F32, +, 0), and the trainer head's per-prediction formula as -ln of the
+# softmax: -ln(exp(l_t) / z) = ln z - l_t, with ln z the log-sum-exp the
+# head computes as max + ln sum exp(l - max).  Assumed fields, as above:
+# Bend2 proves nothing about F32, and at F32 these hold only up to rounding
+# (tests/bradley.bend measures how far, on random weights and on a
+# checkpoint).  Spec/Terminating.bend's stochastic law at F32, that the
+# softmax's weights sum to one, is of the same kind.
+type TrustedLog<-S: Data> is Type:
+  TrustedLog{
+    one: S,
+    zero: S,
+    mul: S -> S -> S,
+    add: S -> S -> S,
+    sub: S -> S -> S,
+    div: S -> S -> S,
+    exp: S -> S,
+    ln: S -> S,
+    nl: S -> S,
+    -nl_def: @+x:S -> {nl(x) == sub(zero, ln(x)) : S},
+    -nl_one: {nl(one) == zero : S},
+    -nl_mul: @+x:S -> @+y:S -> {nl(mul(x, y)) == add(nl(x), nl(y)) : S},
+    -nl_softmax: @+l:S -> @+z:S -> {nl(div(exp(l), z)) == sub(ln(z), l) : S}}

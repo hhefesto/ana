@@ -156,6 +156,9 @@
           bend-nul-filter = bendBinary pkgs "bend-nul-filter" "NulFilter.bend";
           # R9's walks: several holes of one file filled in turn, every check a new run (Walk.bend, 2026-11-17)
           bend-walk = bendBinary pkgs "bend-walk" "Walk.bend";
+          # Bradley's homs in log space on a checkpoint (tests/bradley.bend, 2026-11-17):
+          # bend-bradley CKPT CORPUS [N] [W]; with no arguments, the random-weight check
+          bend-bradley = bendBinary pkgs "bend-bradley" "tests/bradley.bend";
           # R7's sorts with fuel, written out in small checked files (run/v9/f8.sh)
           bend-sorts = bendBinary pkgs "bend-sorts" "Sorts.bend";
           # the checked units cleaned (exact and near duplicates, units
@@ -449,6 +452,23 @@
             chmod -R u+w src
             bend src/tests/dualgrad.bend -o dualgrad
             ./dualgrad +RTS --threads 4 -RTS
+            touch $out
+          '';
+          # Bradley's category as a distance, measured on the code (Spec/Distance.bend
+          # proves it for any model and log; tests/bradley.bend, 2026-11-17): the
+          # training forward and the dense decoder charge every prediction the same
+          # -ln softmax (each row within 1e-3 + 1e-4|c|), a window's training loss is
+          # the decoder's cost from its first token, a prompt-masked loss the cost
+          # from the prefilled prompt, a run-masked loss the sum over the kept runs,
+          # costs from a cut reached by the chunked prefill are the one-pass tail,
+          # and every weight 0 sums to 0.0 bit for bit; random weights, v3's arms and
+          # none (`bend-bradley CKPT CORPUS` runs it on a checkpoint)
+          bend-bradley = pkgs.runCommand "bend-bradley" { nativeBuildInputs = [ (bendFor pkgs) ]; } ''
+            export HOME=$TMPDIR
+            cp -r ${bendSrc}/bend src
+            chmod -R u+w src
+            bend src/tests/bradley.bend -o br
+            ./br +RTS --threads 4 -RTS
             touch $out
           '';
           # the dense decode step (bend/Dense/Decode.bend, ana's engine)

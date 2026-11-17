@@ -39,6 +39,9 @@ import ./Spec/Linear.bend as SLinear
 import ./Spec/Sink.bend as SSink
 import ./Spec/LinearTrie.bend as SLinearTrie
 import ./Spec/Bradley.bend as SBradley
+import ./Spec/Distance.bend as SDistance
+import ./Spec/Terminating.bend as STerminating
+import ./Spec/Residual.bend as SResidualLang
 import ./Spec/Reverse.bend as SReverse
 import ./Spec/Batch.bend as SBatch
 import ./Spec/Trusted.bend as STrusted
