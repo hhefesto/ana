@@ -109,8 +109,10 @@ def la.is.mugen(+text: List<&2, U32>) -> Bool:
 # miss one (the refused def), a repeat after J tries J, a give-up J
 def la.fix.tries(+s: List<&2, U32>) -> Nat:
   +j = la.last.num(s, 0n)
+  # a walk (Walk.bend, 2026-11-17): mugen-walk-fill-K-J, mugen-walk-add-K-J, J its tries
+  Bool.pick(Nat, A.ag.prefix(s, A.ag.ascii("mugen-walk-")), j,
   Bool.pick(Nat, A.ag.prefix(s, A.ag.ascii("mugen-fix-miss-")), 1n,
-    Bool.pick(Nat, A.ag.prefix(s, A.ag.ascii("mugen-fix-stale-")), 1n+j, Bool.pick(Nat, Bool.or(A.ag.prefix(s, A.ag.ascii("mugen-fix-giveup-")), A.ag.prefix(s, A.ag.ascii("mugen-fix-repeat-"))), j, 0n)))
+    Bool.pick(Nat, A.ag.prefix(s, A.ag.ascii("mugen-fix-stale-")), 1n+j, Bool.pick(Nat, Bool.or(A.ag.prefix(s, A.ag.ascii("mugen-fix-giveup-")), A.ag.prefix(s, A.ag.ascii("mugen-fix-repeat-"))), j, 0n))))
 
 def la.mugen.ok(+s: List<&2, U32>, +e: List<&2, A.Turn>) -> Bool:
   +acts = Nat.is_eq(A.ag.count(e, 3n), 1n)
@@ -202,16 +204,27 @@ def la.v1.doc(+b: Tk.Bpe, +ids: Ms.Ids, +text: List<&2, U32>) -> List<&2, String
   +toks = la.nats.eq(la.turn.codes(Ms.ms.read(ids, ts)), la.turn.codes(A.ag.read.v1(Ms.ms.nl(ids), Ms.ms.hds(ids), ts)))
   la.if(bytes, "v1-bytes", la.if(toks, "v1-tokens", Nil{}))
 
+# the reader with walks against the reader before them (any later write a
+# try), over bytes and tokens: on every session before the walks the same
+# roles (2026-11-17)
+def la.v2.doc(+b: Tk.Bpe, +ids: Ms.Ids, +text: List<&2, U32>) -> List<&2, String>:
+  +ts = Tk.Bpe.encode(b, text)
+  +bytes = la.nats.eq(la.turn.codes(A.ag.read.bytes(text)), la.turn.codes(A.ag.read.le(10, A.ag.hds.bytes(), text)))
+  +toks = la.nats.eq(la.turn.codes(Ms.ms.read(ids, ts)), la.turn.codes(A.ag.read.le(Ms.ms.nl(ids), Ms.ms.hds(ids), ts)))
+  la.if(bytes, "v2-bytes", la.if(toks, "v2-tokens", Nil{}))
+
 # the laws a document fails under a mode (0 transcripts, 1 checked units,
-# 2 the reader before tries)
+# 2 the reader before tries, 3 the reader before walks)
 def la.fails(+mode: Nat, +b: Tk.Bpe, +ids: Ms.Ids, +id: List<&2, U32>, +text: List<&2, U32>) -> List<&2, String>:
   match mode:
     case 0n:
       la.doc(b, ids, id, text)
     case 1n:
       la.echo.doc(text)
-    case _:
+    case 2n:
       la.v1.doc(b, ids, text)
+    case _:
+      la.v2.doc(b, ids, text)
 
 def la.names(xs: List<&2, String>) -> String:
   match xs:
@@ -323,12 +336,16 @@ def la.args(xs: List<String>) -> IO(Unit):
       do IO<Unit>:
         tx : List<&2, U32> <- B.Bytes.read_all(tok)
         la.run(2n, path, Tk.Bpe.parse(tx))
+    case "v2" <> tok <> path <> Nil{}:
+      do IO<Unit>:
+        tx : List<&2, U32> <- B.Bytes.read_all(tok)
+        la.run(3n, path, Tk.Bpe.parse(tx))
     case tok <> path <> Nil{}:
       do IO<Unit>:
         tx : List<&2, U32> <- B.Bytes.read_all(tok)
         la.run(0n, path, Tk.Bpe.parse(tx))
     case _:
-      IO.die(Unit, 2, "usage: bend-agent-laws [echo|v1] TOKENIZER FILE.nul")
+      IO.die(Unit, 2, "usage: bend-agent-laws [echo|v1|v2] TOKENIZER FILE.nul")
 
 def main() -> IO(Unit):
   do IO<Unit>:

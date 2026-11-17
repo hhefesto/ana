@@ -384,8 +384,166 @@ def ag.pair(bs: List<&2, Blk>) -> Bool:
 # occur."  The sessions the corpus renders have one edit, or are chains and
 # ana's own sessions, whose every edit but the last the checker refused.  Only
 # its turn: its `## echo` heading line stays hers, as a try's `## bend` does.
-def ag.call.tried(+c: Nat, +i: Nat, +le: Nat) -> Bool:
+def ag.call.tried.le(+c: Nat, +i: Nat, +le: Nat) -> Bool:
   Bool.and(Nat.is_eq(c, 9n), Nat.is_lt(1n+i, le))
+
+# Walks (2026-11-17; Walk.bend, R9): a session that writes several definitions
+# in turn, each its own act (the user, 11-17: "one session could fill several
+# holes in the same file in turn, with the file carried along").  So a write
+# is a try when a later write follows it that is about the same thing: always,
+# unless both are form 2's `## def` or `## add`, neither's first line after its
+# path is a line of the other, and the first's echo is not a refusal (a
+# one-line echo: mugen's `refused: ...`, a misspelt name's).  A try and its fix
+# open with the same header (a mutant never touches it), a direct ask's first
+# add holds the header its fix opens with, and a walk's steps open with
+# different ones.  The lines are cut at every symbol in nls, the symbols that
+# hold a newline: over bytes the newline; over code32k's tokens also the
+# newline with the next line's indent (`\n  `, one token), so a column-0 line
+# (a header) is the same token string wherever it stands.  On every session
+# before the walks it is the rule it replaces (any later write):
+# bend-agent-laws v2 holds ag.read to ag.read.le, over bytes and tokens.
+
+# the reader's def and add headings (ag.hds.bytes's 19th and 20th: keep in step)
+def ag.hds.f2(+hs: List<&2, Hd>) -> List<&2, Hd>:
+  List.take(&2, Hd, List.drop(&2, Hd, hs, 18n), 2n)
+
+def ag.in.u32(xs: List<&2, U32>, +c: U32) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case h <> t:
+      Bool.or(U32.is_eq(h, c), ag.in.u32(t, c))
+
+# whether xs opens with a symbol of nls
+def ag.cut.at(+nls: List<&2, U32>, +xs: List<&2, U32>) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case h <> t:
+      ag.in.u32(nls, h)
+
+# xs cut at every symbol of nls (the symbols themselves left out); cut: xs
+# opens with one
+def ag.pieces.go(xs: List<&2, U32>, +nls: List<&2, U32>, cur: List<&2, U32>, acc: List<&2, List<&2, U32>>, cut: Bool) -> List<&2, List<&2, U32>>:
+  match xs cut:
+    case Nil{} _:
+      List.reverse(&2, List<&2, U32>, List.reverse(&2, U32, cur) <> acc)
+    case h <> +t True{}:
+      ag.pieces.go(t, nls, Nil{}, List.reverse(&2, U32, cur) <> acc, ag.cut.at(nls, t))
+    case h <> +t False{}:
+      ag.pieces.go(t, nls, h <> cur, acc, ag.cut.at(nls, t))
+
+# a block's lines after its heading, the empty line and the path
+def ag.code.lines(+nls: List<&2, U32>, +x: List<&2, U32>) -> List<&2, List<&2, U32>>:
+  List.drop(&2, List<&2, U32>, ag.pieces.go(x, nls, Nil{}, Nil{}, ag.cut.at(nls, x)), 3n)
+
+def ag.first.of(ls: List<&2, List<&2, U32>>) -> List<&2, U32>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case l <> t:
+      l
+
+def ag.first.code(+nls: List<&2, U32>, +x: List<&2, U32>) -> List<&2, U32>:
+  ag.first.of(ag.code.lines(nls, x))
+
+def ag.has.line(ls: List<&2, List<&2, U32>>, +l: List<&2, U32>) -> Bool:
+  match ls:
+    case Nil{}:
+      False{}
+    case h <> t:
+      Bool.or(ag.eq(h, l), ag.has.line(t, l))
+
+# how many of as are not lines of bs
+def ag.minus.n(as: List<&2, List<&2, U32>>, +bs: List<&2, List<&2, U32>>) -> Nat:
+  match as:
+    case Nil{}:
+      0n
+    case a <> t:
+      Nat.add(Bool.pick(Nat, ag.has.line(bs, a), 0n, 1n), ag.minus.n(t, bs))
+
+# neither's first line is a line of the other, and each has two lines or more
+# the other lacks (a mutant changes one line: Nix's whole file, Lean's
+# one-line theorem, whose first line it may touch)
+def ag.apart(+nls: List<&2, U32>, +x: List<&2, U32>, +y: List<&2, U32>) -> Bool:
+  +lx = ag.code.lines(nls, x)
+  +ly = ag.code.lines(nls, y)
+  +firsts = Bool.and(Bool.not(ag.has.line(ly, ag.first.of(lx))), Bool.not(ag.has.line(lx, ag.first.of(ly))))
+  Bool.and(firsts, Bool.and(Nat.is_lt(1n, ag.minus.n(lx, ly)), Nat.is_lt(1n, ag.minus.n(ly, lx))))
+
+# a write: its block's index, whether it is a def or add, whether mugen refused
+# it, its text
+type Wr is Data:
+  Wr{i: Nat, f2: Bool, refused: Bool, x: List<&2, U32>}
+
+# the next block is an echo of one line (heading, empty line, fence, the line,
+# fence, empty line)
+def ag.refused(+nl: U32, +t: List<&2, Blk>) -> Bool:
+  match t:
+    case Nil{}:
+      False{}
+    case Blk{+d, +y} <> r:
+      Bool.and(Nat.is_eq(d, 7n), Nat.is_le(List.length(&2, List<&2, U32>, ag.lines(nl, y)), 6n))
+
+def ag.wr.keep(ok: Bool, +w: Wr, rest: List<&2, Wr>) -> List<&2, Wr>:
+  match ok:
+    case True{}:
+      w <> rest
+    case False{}:
+      rest
+
+def ag.writes(bs: List<&2, Blk>, +nl: U32, +f2: List<&2, Hd>, +i: Nat) -> List<&2, Wr>:
+  match bs:
+    case Nil{}:
+      Nil{}
+    case Blk{+c, +x} <> +t:
+      +w = {Wr{i, Nat.is_lt(0n, ag.class(f2, ag.line1(nl, x))), ag.refused(nl, t), x} : Wr}
+      ag.wr.keep(Nat.is_eq(c, 9n), w, ag.writes(t, nl, f2, 1n+i))
+
+def ag.related(+nls: List<&2, U32>, +a: Wr, +b: Wr) -> Bool:
+  match a b:
+    case Wr{ai, af, ar, ax} Wr{bi, bf, br, bx}:
+      Bool.not(Bool.and(Bool.and(af, bf), Bool.and(ag.apart(nls, ax, bx), Bool.not(ar))))
+
+def ag.any.rel(+nls: List<&2, U32>, +a: Wr, ws: List<&2, Wr>) -> Bool:
+  match ws:
+    case Nil{}:
+      False{}
+    case +b <> t:
+      Bool.or(ag.related(nls, a, b), ag.any.rel(nls, a, t))
+
+def Wr.i(+w: Wr) -> Nat:
+  match w:
+    case Wr{i, f, r, x}:
+      i
+
+# the indices of the writes that are tries
+def ag.tries.of(ws: List<&2, Wr>, +nls: List<&2, U32>) -> List<&2, Nat>:
+  match ws:
+    case Nil{}:
+      Nil{}
+    case +a <> +t:
+      +rest = ag.tries.of(t, nls)
+      Bool.pick(List<&2, Nat>, ag.any.rel(nls, a, t), Wr.i(a) <> rest, rest)
+
+# ... before the walks: every write but the last (the indices below le - 1)
+def ag.tries.le(ws: List<&2, Wr>, +le: Nat) -> List<&2, Nat>:
+  match ws:
+    case Nil{}:
+      Nil{}
+    case +a <> t:
+      +rest = ag.tries.le(t, le)
+      Bool.pick(List<&2, Nat>, Nat.is_lt(1n+Wr.i(a), le), Wr.i(a) <> rest, rest)
+
+def ag.nat.in(ns: List<&2, Nat>, +n: Nat) -> Bool:
+  match ns:
+    case Nil{}:
+      False{}
+    case m <> t:
+      Bool.or(Nat.is_eq(m, n), ag.nat.in(t, n))
+
+def ag.call.tried(+c: Nat, +i: Nat, +tm: List<&2, Nat>) -> Bool:
+  Bool.and(Nat.is_eq(c, 9n), ag.nat.in(tm, i))
 
 # A mugen call and the echo after it: the echo's heading line is the call's
 # (ana writes `## echo` and stops; mugen runs the call and writes the rest),
@@ -398,7 +556,7 @@ def ag.turns.pair(tried: Bool, +x: List<&2, U32>, +head: List<&2, U32>, rest: Li
     case False{}:
       Turn{RoCall{}, List.append(&2, U32, x, head)} <> rest
 
-def ag.turns.go(bs: List<&2, Blk>, +nl: U32, +act: Nat, +i: Nat, +le: Nat, pair: Bool) -> List<&2, Turn>:
+def ag.turns.go(bs: List<&2, Blk>, +nl: U32, +act: Nat, +i: Nat, +le: List<&2, Nat>, pair: Bool) -> List<&2, Turn>:
   match bs pair:
     case Nil{} _:
       Nil{}
@@ -407,10 +565,20 @@ def ag.turns.go(bs: List<&2, Blk>, +nl: U32, +act: Nat, +i: Nat, +le: Nat, pair:
     case Blk{+c, +x} <> +t _:
       ag.turns.blk(nl, c, Nat.is_eq(act, 1n+i), ag.tried(nl, x, t), x, ag.turns.go(t, nl, act, 1n+i, le, ag.pair(t)))
 
-# the episode a text denotes, over the alphabet (nl, hs)
-def ag.read(+nl: U32, +hs: List<&2, Hd>, +xs: List<&2, U32>) -> List<&2, Turn>:
+# the episode a text denotes, over the alphabet (nl, hs; nls the symbols that
+# hold a newline)
+def ag.read.n(+nl: U32, +nls: List<&2, U32>, +hs: List<&2, Hd>, +xs: List<&2, U32>) -> List<&2, Turn>:
   +bs = ag.blocks(nl, hs, xs)
-  ag.turns.go(bs, nl, ag.answer(bs, ag.last(bs, 3n, 0n, 0n), 0n, 0n), 0n, ag.last(bs, 9n, 0n, 0n), ag.pair(bs))
+  ag.turns.go(bs, nl, ag.answer(bs, ag.last(bs, 3n, 0n, 0n), 0n, 0n), 0n, ag.tries.of(ag.writes(bs, nl, ag.hds.f2(hs), 0n), nls), ag.pair(bs))
+
+# ... over an alphabet whose only symbol holding a newline is nl (bytes)
+def ag.read(+nl: U32, +hs: List<&2, Hd>, +xs: List<&2, U32>) -> List<&2, Turn>:
+  ag.read.n(nl, [nl], hs, xs)
+
+# the reader before the walks (2026-11-04 to 11-17): a write with any later write is a try
+def ag.read.le(+nl: U32, +hs: List<&2, Hd>, +xs: List<&2, U32>) -> List<&2, Turn>:
+  +bs = ag.blocks(nl, hs, xs)
+  ag.turns.go(bs, nl, ag.answer(bs, ag.last(bs, 3n, 0n, 0n), 0n, 0n), 0n, ag.tries.le(ag.writes(bs, nl, ag.hds.f2(hs), 0n), ag.last(bs, 9n, 0n, 0n)), ag.pair(bs))
 
 # The reader before tries (2026-10-07): every Term or Type but the act is
 # given.  bend-agent-laws v1 holds `ag.read` to it on every transcript of the

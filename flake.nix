@@ -154,6 +154,8 @@
           bend-r8 = bendBinary pkgs "bend-r8" "R8.bend";
           # R8: filler texts cut into pieces (the packing) and private pairs left out (bend/NulFilter.bend)
           bend-nul-filter = bendBinary pkgs "bend-nul-filter" "NulFilter.bend";
+          # R9's walks: several holes of one file filled in turn, every check a new run (Walk.bend, 2026-11-17)
+          bend-walk = bendBinary pkgs "bend-walk" "Walk.bend";
           # R7's sorts with fuel, written out in small checked files (run/v9/f8.sh)
           bend-sorts = bendBinary pkgs "bend-sorts" "Sorts.bend";
           # the checked units cleaned (exact and near duplicates, units

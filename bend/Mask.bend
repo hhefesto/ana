@@ -22,28 +22,44 @@ import ./Agent/Spec.bend as A
 # anything else: both weigh 1.
 
 type Ids is Data:
-  Ids{nl: U32, hds: List<&2, A.Hd>, user: List<&2, U32>, muser: List<&2, U32>}
+  Ids{nl: U32, hds: List<&2, A.Hd>, user: List<&2, U32>, muser: List<&2, U32>, nls: List<&2, U32>}
 
 def ms.nl(+ids: Ids) -> U32:
   match ids:
-    case Ids{n, h, u, m}:
+    case Ids{n, h, u, m, s}:
       n
 
 def ms.hds(+ids: Ids) -> List<&2, A.Hd>:
   match ids:
-    case Ids{n, h, u, m}:
+    case Ids{n, h, u, m, s}:
       h
 
 def ms.user(+ids: Ids) -> List<&2, U32>:
   match ids:
-    case Ids{n, h, u, m}:
+    case Ids{n, h, u, m, s}:
       u
 
 # the mugen shape's user heading
 def ms.muser(+ids: Ids) -> List<&2, U32>:
   match ids:
-    case Ids{n, h, u, m}:
+    case Ids{n, h, u, m, s}:
       m
+
+# the tokens that hold a newline (code32k: the newline, and the newline with the
+# next line's indent), the reader's line cuts in a write (Agent/Spec.bend
+# "Walks", 2026-11-17)
+def ms.nls(+ids: Ids) -> List<&2, U32>:
+  match ids:
+    case Ids{n, h, u, m, s}:
+      s
+
+def ms.nls.go(+b: Tk.Bpe, k: Nat, +t: U32) -> List<&2, U32>:
+  match k:
+    case 0n:
+      Nil{}
+    case 1n+j:
+      +rest = ms.nls.go(b, j, U32.add(t, 1))
+      Bool.pick(List<&2, U32>, A.ag.in.u32(Tk.Bpe.decode(b, t), 10), t <> rest, rest)
 
 def ms.hds.go(+b: Tk.Bpe, hs: List<&2, A.Hd>) -> List<&2, A.Hd>:
   match hs:
@@ -61,7 +77,7 @@ def ms.first(+xs: List<&2, U32>) -> U32:
 
 # the reader's symbols under a tokenizer
 def ms.ids(+b: Tk.Bpe) -> Ids:
-  Ids{ms.first(Tk.Bpe.encode(b, [10])), ms.hds.go(b, A.ag.hds.bytes()), Tk.Bpe.encode(b, A.ag.ascii("## User\n")), Tk.Bpe.encode(b, A.ag.ascii("## user\n"))}
+  Ids{ms.first(Tk.Bpe.encode(b, [10])), ms.hds.go(b, A.ag.hds.bytes()), Tk.Bpe.encode(b, A.ag.ascii("## User\n")), Tk.Bpe.encode(b, A.ag.ascii("## user\n")), ms.nls.go(b, U32.to_nat(Tk.Bpe.vocab(b)), 0)}
 
 # whether the encoded newline is one token (the reader needs it)
 def ms.ids.ok(+b: Tk.Bpe) -> Bool:
@@ -69,7 +85,7 @@ def ms.ids.ok(+b: Tk.Bpe) -> Bool:
 
 # a document's tokens as an episode
 def ms.read(+ids: Ids, +xs: List<&2, U32>) -> List<&2, A.Turn>:
-  A.ag.read(ms.nl(ids), ms.hds(ids), xs)
+  A.ag.read.n(ms.nl(ids), ms.nls(ids), ms.hds(ids), xs)
 
 def ms.is.transcript(+ids: Ids, +seg: List<&2, U32>) -> Bool:
   Bool.or(A.ag.prefix(seg, ms.user(ids)), A.ag.prefix(seg, ms.muser(ids)))
