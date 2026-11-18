@@ -128,6 +128,9 @@
           # TRAIN_CHUNK), the step as programs over one store; a CUDA build
           # (clang and /usr/local/cuda present) runs it on the GPU
           bend-train-dense = bendBinary pkgs "bend-train-dense" "TrainDense.bend";
+          # the census of a training step's programs (bend/Perf.bend, 2026-11-18):
+          # every op's outputs, reduced points, inputs, cells and launches
+          bend-perf = bendBinary pkgs "bend-perf" "Perf.bend";
           # master's `evaluate CKPT CORPUS` (CKPT, CORPUS, EVAL_WINDOWS)
           bend-evaluate = bendBinary pkgs "bend-evaluate" "Evaluate.bend";
           # the corpus tools (deploy/plan-corpus.sh drives them), each
@@ -452,6 +455,19 @@
             chmod -R u+w src
             bend src/tests/dualgrad.bend -o dualgrad
             ./dualgrad +RTS --threads 4 -RTS
+            touch $out
+          '';
+          # the speed work of 2026-11-18 on the CPU, bit for bit (tests/seq.bend):
+          # a Seq (Dense/Op.bend) against the einsums it stands for, forward and
+          # transposes, and the GLA layer as it is (decayed key and query times a
+          # product per head, the state across chunks one Seq) against the layer
+          # as it was, every layer's output and the loss at chunk 16 and 64
+          bend-seq = pkgs.runCommand "bend-seq" { nativeBuildInputs = [ (bendFor pkgs) ]; } ''
+            export HOME=$TMPDIR
+            cp -r ${bendSrc}/bend src
+            chmod -R u+w src
+            bend src/tests/seq.bend -o seq
+            ./seq +RTS --threads 4 -RTS
             touch $out
           '';
           # Bradley's category as a distance, measured on the code (Spec/Distance.bend

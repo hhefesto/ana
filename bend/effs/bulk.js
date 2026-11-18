@@ -57,6 +57,16 @@ function bk_einsum(spec, x) {
 
 io_eff(CID(bk.einsum), bk_einsum);
 
+// queued: in JS every op is done when it returns, so these are the
+// blocking ones and the sync is the identity
+io_eff(CID(bk.mm.q), bk_mm);
+io_eff(CID(bk.einsum.q), bk_einsum);
+io_eff(CID(bk.sync), function bk_sync(x) { return x; });
+// the sequential einsum: declined (0), so Dense/Run.bend runs its slices
+io_eff(CID(bk.einsum.seq.q), function bk_einsum_seq_q(spec, ks, rev, x) {
+  return io_tup(x, 0);
+});
+
 function bk_read_f32be(file, off, n, x, at) {
   const fs = require("fs");
   const k = Number(n);

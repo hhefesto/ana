@@ -165,12 +165,30 @@ def mm(+tg: U32, +ta: U32, +tb: U32, +m: U32, +n: U32, +k: U32, +nb: U32, +al: F
 
 # Programs ---------------------------------------------------------------------
 
+# a Seq's slices (einsums, P.Seq.slices) in order, on dual numbers
+def seq.one(op: P.Op, +tg: U32, s: Array<F32>) -> Array<F32>:
+  match op:
+    case P.Ein{es, spec, g}:
+      einsum(es, tg, s)
+    case _:
+      s
+
+def seq.slices(ops: List<&2, P.Op>, +tg: U32, s: Array<F32>) -> Array<F32>:
+  match ops:
+    case Nil{}:
+      s
+    case op <> t:
+      seq.slices(t, tg, seq.one(op, tg, s))
+
+
 def Op.run(+tg: U32, op: P.Op, s: Array<F32>) -> IO(Array<F32>):
   match op:
     case P.Mm{ta, tb, m, n, k, nb, al, ao, lda, sa, bo, ldb, sb, be, co, ldc, sc}:
       mm(tg, ta, tb, m, n, k, nb, al, ao, lda, sa, bo, ldb, sb, be, co, ldc, sc, s)
     case P.Ein{es, spec, g}:
       IO.pure(Array<F32>, einsum(es, tg, s))
+    case P.Seq{es, k, rev, c, spec, sl, g}:
+      IO.pure(Array<F32>, seq.slices(P.Seq.slices(es, k, rev), tg, s))
 
 # a program on dual numbers: every cell i's tangent at i + tg
 def run(ops: List<&2, P.Op>, +tg: U32, s: Array<F32>) -> IO(Array<F32>):

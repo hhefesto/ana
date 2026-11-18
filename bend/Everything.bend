@@ -64,3 +64,4 @@ import ./Legere/Spec.bend as SLegere
 import ./Agent/Episode.bend as AEpisode
 import ./Spec/Derivative.bend as SDerivative
 import ./Spec/Session.bend as SSession
+import ./Spec/Lanes.bend as SLanes

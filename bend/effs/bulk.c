@@ -1143,9 +1143,14 @@ static bool ft_overlaps(const FtSpec* s) {
 // warp per output, 2 blocks over slices of each output's reduction, then a
 // thread per output over the slices.
 
+// NSZ and OAT are the loop's sizes and the output's cell: read from the
+// arguments, unless the kernel was made for one shape (ft_fixed: its sizes
+// and strides constants, so the divisions and the products fold)
 static const char* FT_KSRC = "typedef unsigned int u32;\n"
+"#ifndef NSZ\n#define NSZ(n, k) n[k]\n#endif\n"
+"#ifndef OAT\n#define OAT(p) at(S, a.o, p, a.m)\n#endif\n"
 "struct V { u32 off; u32 st[6]; u32 ix; u32 ioff; u32 ist[6]; u32 imul; };\n"
-"struct A { u32 n[6]; u32 nout; u32 nred; u32 m; u32 nsplit; V o; V in[NIN > 0 ? NIN : 1]; };\n"
+"struct A { u32 n[6]; u32 nout; u32 nred; u32 m; u32 nsplit; u32 ks; u32 rev; u32 nseq; V o; V in[NIN > 0 ? NIN : 1]; };\n"
 "__device__ __forceinline__ u32 f2u(float v) { return v >= 0.0f && v < 4294967296.0f ? (u32)v : 0u; }\n"
 "__device__ __forceinline__ float fmx(float a, float b) { return a > b ? a : b; }\n"
 "__device__ __forceinline__ float fmn(float a, float b) { return a < b ? a : b; }\n"
@@ -1160,7 +1165,7 @@ static const char* FT_KSRC = "typedef unsigned int u32;\n"
 "  return a & m;\n"
 "}\n"
 "__device__ __forceinline__ void unflat(u32 f, const u32* n, u32 sel, u32* p) {\n"
-"  _Pragma(\"unroll\") for (int k = 5; k >= 0; k--) if (sel >> k & 1) { p[k] = f % n[k]; f /= n[k]; }\n"
+"  _Pragma(\"unroll\") for (int k = 5; k >= 0; k--) if (sel >> k & 1) { p[k] = f % NSZ(n, k); f /= NSZ(n, k); }\n"
 "}\n"
 "__device__ __forceinline__ float comb(float r, float t) { return OP == 0 ? r + t : (t > r ? t : r); }\n"
 "__device__ __forceinline__ float term(const float* S, const A& a, const u32* p) {\n"
@@ -1168,7 +1173,7 @@ static const char* FT_KSRC = "typedef unsigned int u32;\n"
 "}\n"
 "__device__ __forceinline__ void put(float* S, const A& a, u32* p, float r) {\n"
 "  _Pragma(\"unroll\") for (int k = 0; k < 6; k++) if (RED >> k & 1) p[k] = 0;\n"
-"  u32 o = at(S, a.o, p, a.m);\n"
+"  u32 o = OAT(p);\n"
 "  if (ACC && OIX) atomicAdd(&S[o], r); else if (ACC) S[o] = S[o] + r; else S[o] = r;\n"
 "}\n"
 "#define INIT (OP == 0 ? 0.0f : -__int_as_float(0x7f800000))\n"
@@ -1213,16 +1218,33 @@ static const char* FT_KSRC = "typedef unsigned int u32;\n"
 "    for (u32 sl = 0; sl < a.nsplit; sl++) r = comb(r, part[o * a.nsplit + sl]);\n"
 "    put(S, a, p, r);\n"
 "  }\n"
+"}\n"
+// k4: a sequential einsum (bk.einsum.seq.q): a thread per lane (a point
+// over the indices but ks and the reduced ones) runs the slices of ks in
+// order (rev: last first), each one the einsum at that slice; a slice
+// reads only cells its own lane wrote (ft_seq_ok), so the lane's own order
+// is the whole order
+"extern \"C\" __global__ void k4(float* S, A a) {\n"
+"  for (u32 o = blockIdx.x * blockDim.x + threadIdx.x; o < a.nout; o += gridDim.x * blockDim.x) {\n"
+"    for (u32 i = 0; i < a.nseq; i++) {\n"
+"      u32 p[6] = {0, 0, 0, 0, 0, 0}; unflat(o, a.n, 63 & ~RED & ~(1u << a.ks), p);\n"
+"      u32 s = a.rev ? a.nseq - 1 - i : i;\n"
+"      _Pragma(\"unroll\") for (int k = 0; k < 6; k++) if ((u32)k == a.ks) p[k] = s;\n"
+"      float r = INIT;\n"
+"      for (u32 q = 0; q < a.nred; q++) { unflat(q, a.n, RED, p); r = comb(r, term(S, a, p)); }\n"
+"      put(S, a, p, r);\n"
+"    }\n"
+"  }\n"
 "}\n";
 
 typedef struct {
-  u32    n[6], nout, nred, m, nsplit;
+  u32    n[6], nout, nred, m, nsplit, ks, rev, nseq;
   FtView o, in[FT_MAXIN];
 } FtArgs;
 
 typedef struct FtKern {
   u64            key;
-  CUfunction     f[4];
+  CUfunction     f[5];
   struct FtKern* next;
 } FtKern;
 
@@ -1287,6 +1309,36 @@ static u64 ft_fnv(const char* p, u64 n, u64 h) {
   return h;
 }
 
+// Fixed-shape kernels (2026-11-18; BEND_FT_FIXED=0 turns them off): a
+// kernel per loop shape too, its sizes and the direct views' strides
+// constants, so unflat's divisions become multiplies and each read's
+// address a short sum the compiler folds (the generic kernel reads them
+// from its arguments: a division per index per point, six products per
+// read). The offsets stay arguments, so the ops that differ only in where
+// they read (a head, a layer) share one.
+static bool ft_fixed(void) {
+  static int on = -1;
+  if (on < 0) {
+    const char* v = getenv("BEND_FT_FIXED");
+    on = v == NULL || strcmp(v, "0") != 0;
+  }
+  return on != 0;
+}
+
+// a direct view's cell with its strides as constants (the zeros left out)
+static u64 ft_fixed_at(const FtView* v, const char* base, char* buf, u64 cap) {
+  u64 n = (u64)snprintf(buf, cap, "((%s.off", base);
+  for (u32 k = 0; k < 6; k += 1) {
+    if (v->st[k] != 0) {
+      n += (u64)snprintf(buf + (n < cap ? n : cap), n < cap ? cap - n : 0,
+        " + %uu * p[%u]", v->st[k], k);
+    }
+  }
+  n += (u64)snprintf(buf + (n < cap ? n : cap), n < cap ? cap - n : 0,
+    ") & a.m)");
+  return n;
+}
+
 static char* ft_source(const FtSpec* s, u64* len) {
   u64   cap = 1 << 16;
   char* src = malloc(cap);
@@ -1298,15 +1350,36 @@ static char* ft_source(const FtSpec* s, u64* len) {
   if (ne >= cap) {
     err_fail("einsum: expression too large");
   }
-  char loads[FT_MAXIN * 48 + 1] = { 0 };
+  bool fx = ft_fixed();
+  char loads[FT_MAXIN * 200 + 1] = { 0 };
   u64  nl = 0;
   for (u32 i = 0; i < s->nin; i += 1) {
-    nl += (u64)snprintf(loads + nl, sizeof loads - nl,
-      "  float x%u = S[at(S, a.in[%u], p, a.m)];\n", i, i);
+    if (fx && !s->in[i].ix) {
+      char base[24], adr[200];
+      snprintf(base, sizeof base, "a.in[%u]", i);
+      ft_fixed_at(&s->in[i], base, adr, sizeof adr);
+      nl += (u64)snprintf(loads + nl, sizeof loads - nl,
+        "  float x%u = S[%s];\n", i, adr);
+    } else {
+      nl += (u64)snprintf(loads + nl, sizeof loads - nl,
+        "  float x%u = S[at(S, a.in[%u], p, a.m)];\n", i, i);
+    }
   }
-  u64 n = (u64)snprintf(src, cap, "#define NIN %u\n#define RED %uu\n"
+  char fixed[400] = { 0 };
+  if (fx) {
+    u64 nf = (u64)snprintf(fixed, sizeof fixed, "#define FIXED 1\n"
+      "#define NSZ(n, k) ((k) == 0 ? %uu : (k) == 1 ? %uu : (k) == 2 ? %uu"
+      " : (k) == 3 ? %uu : (k) == 4 ? %uu : %uu)\n", s->n[0], s->n[1],
+      s->n[2], s->n[3], s->n[4], s->n[5]);
+    if (!s->out.ix) {
+      char adr[200];
+      ft_fixed_at(&s->out, "a.o", adr, sizeof adr);
+      snprintf(fixed + nf, sizeof fixed - nf, "#define OAT(p) %s\n", adr);
+    }
+  }
+  u64 n = (u64)snprintf(src, cap, "%s#define NIN %u\n#define RED %uu\n"
     "#define OP %u\n#define ACC %u\n#define OIX %u\n#define EXPR %s\n",
-    s->nin, s->red, s->op, s->acc != 0, s->out.ix != 0, ex);
+    fixed, s->nin, s->red, s->op, s->acc != 0, s->out.ix != 0, ex);
   // LOADS goes in literally: splice it where the template names it
   const char* mark = "LOADS";
   const char* t    = strstr(FT_KSRC, mark);
@@ -1343,7 +1416,19 @@ static u64 ft_key(const FtSpec* s) {
   u64 h = ft_fnv(s->extext, strlen(s->extext), base);
   u64 f = ((u64)FT_ARCH << 32) | ((u64)s->nin << 16) | ((u64)s->red << 8)
     | ((u64)(s->op & 1) << 2) | ((u64)(s->acc != 0) << 1) | (s->out.ix != 0);
-  return ft_fnv((const char*)&f, sizeof f, h);
+  h = ft_fnv((const char*)&f, sizeof f, h);
+  if (ft_fixed()) {
+    // a fixed-shape kernel: its sizes, and every view's strides and kind
+    h = ft_fnv("fixed", 5, h);
+    h = ft_fnv((const char*)s->n, sizeof s->n, h);
+    h = ft_fnv((const char*)s->out.st, sizeof s->out.st, h);
+    h = ft_fnv((const char*)&s->out.ix, sizeof s->out.ix, h);
+    for (u32 i = 0; i < s->nin; i += 1) {
+      h = ft_fnv((const char*)s->in[i].st, sizeof s->in[i].st, h);
+      h = ft_fnv((const char*)&s->in[i].ix, sizeof s->in[i].ix, h);
+    }
+  }
+  return h;
 }
 
 static FtKern* ft_kern(const FtSpec* s) {
@@ -1412,8 +1497,8 @@ static FtKern* ft_kern(const FtSpec* s) {
     err_fail("out of memory");
   }
   k->key = key;
-  const char* names[] = { "k0", "k1", "k2", "k3" };
-  for (u32 i = 0; i < 4; i += 1) {
+  const char* names[] = { "k0", "k1", "k2", "k3", "k4" };
+  for (u32 i = 0; i < 5; i += 1) {
     if (cuModuleGetFunction(&k->f[i], mod, names[i]) != CUDA_SUCCESS) {
       err_fail("einsum: a kernel is missing");
     }
@@ -1476,7 +1561,11 @@ static u32 ft_grid(u64 threads) {
   return (u32)(b < 1 ? 1 : b > (1u << 20) ? (1u << 20) : b);
 }
 
-static void ft_einsum_gpu(Env e, const FtSpec* s, Term x) {
+// gk and gt: the spec's kernel and tuning, found once and kept in its cache
+// entry (FtEnt), so a call does not walk FT_KERNS and FT_TUNES (2026-11-18:
+// lists of ~120 and ~800 at run 9's setting, walked on every one of a
+// step's ~7,000 einsums while the GPU waited)
+static void ft_einsum_gpu(Env e, const FtSpec* s, Term x, void** gk, void** gt) {
   if (FT_ARCH == 0) {
     int cc[2] = { 0, 0 };
     cuDeviceGetAttribute(cc, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR,
@@ -1485,7 +1574,8 @@ static void ft_einsum_gpu(Env e, const FtSpec* s, Term x) {
       gpu_dev);
     FT_ARCH = cc[0] * 10 + cc[1];
   }
-  FtKern*  k = ft_kern(s);
+  FtKern*  k = *gk != NULL ? (FtKern*)*gk : ft_kern(s);
+  *gk = k;
   FtArgs   a;
   u32      unr  = 63 & ~s->red;
   u64      nout = ft_count(s->n, unr);
@@ -1493,6 +1583,34 @@ static void ft_einsum_gpu(Env e, const FtSpec* s, Term x) {
   if (nout > 0xFFFFFFFFull || nred > 0xFFFFFFFFull) {
     err_fail("einsum: more than 2^32 points");
   }
+  if (nout == 0) {
+    // no output (an index of size 0: GLA's state across one chunk has no
+    // slices): nothing to write, and a launch of 0 blocks is an error
+    // (an empty reduction, nred 0, still writes its outputs)
+    return;
+  }
+  // a constant written over a run of cells (Op.bend's zero and fill: the
+  // tangents a backward zeroes, 170 ms a step as k0 in run 9's profile):
+  // the driver's memset, at the memory's speed, the same bits
+  if (s->nin == 0 && s->red == 0 && !s->acc && !s->out.ix && s->ex[0].k == 2) {
+    u32 run = 0, one = 0;
+    for (u32 k = 0; k < 6; k += 1) {
+      if (s->n[k] > 1) {
+        run += 1;
+        one = s->out.st[k] == 1;
+      }
+    }
+    u64 m = 1ull << blk_cls(x);
+    if (run == 1 && one && (u64)s->out.off + nout <= m) {
+      CUdeviceptr S0 = (CUdeviceptr)(uintptr_t)ft_cell(e.mem, x, s->out.off);
+      if (cuMemsetD32Async(S0, (u32)f32_rewrap(s->ex[0].c), (size_t)nout, FT.st)
+        != CUDA_SUCCESS || !ft_done()) {
+        err_fail("device fault");
+      }
+      return;
+    }
+  }
+  memset(&a, 0, sizeof a);
   memcpy(a.n, s->n, sizeof a.n);
   a.nout = (u32)nout;
   a.nred = (u32)nred;
@@ -1500,8 +1618,16 @@ static void ft_einsum_gpu(Env e, const FtSpec* s, Term x) {
   a.o    = s->out;
   memcpy(a.in, s->in, sizeof a.in);
   CUdeviceptr S = (CUdeviceptr)(uintptr_t)ft_cell(e.mem, x, 0);
-  const char* st   = getenv("BEND_FT_STRAT");
-  FtTune*     tu   = st != NULL ? NULL : ft_tune(k->key, nout, nred);
+  static int  st_read = 0;
+  static const char* st_env = NULL;
+  if (!st_read) {
+    st_env  = getenv("BEND_FT_STRAT");
+    st_read = 1;
+  }
+  const char* st   = st_env;
+  FtTune*     tu   = st != NULL ? NULL
+    : *gt != NULL ? (FtTune*)*gt : ft_tune(k->key, nout, nred);
+  *gt = tu;
   bool        trial = tu != NULL && tu->best < 0;
   u32 strat = st != NULL ? (u32)atoi(st)
     : trial ? (u32)tu->cand[tu->tried] : (u32)tu->best;
@@ -1556,6 +1682,117 @@ static void ft_einsum_gpu(Env e, const FtSpec* s, Term x) {
   }
 }
 
+// A sequential einsum on the GPU (bk.einsum.seq.q): one launch of k4, a
+// thread per lane running the slices of index ks in order, when no slice
+// reads a cell another lane writes. ft_seq_ok's test: no gathers or
+// scatters; every input either reads no cell inside the output's span, or
+// reads the cells of its own lane, i.e. has the output's strides on every
+// index the output varies with, none on the reduced ones, and its offset
+// differs from the output's by a whole number d of slices; and the output
+// writes distinct cells even over the slices those inputs reach (index ks
+// stretched by the d's), so a read outside the op's own slices meets no
+// cell any lane writes. (The sufficient test: the output's strides,
+// smallest first, each at least the extent of the ones below it.)
+static bool ft_seq_ok(const FtSpec* s, u32 ks) {
+  u32 unr = 63 & ~s->red;
+  if (ks >= 6 || !(unr >> ks & 1) || s->out.ix || s->out.st[ks] == 0) {
+    return false;
+  }
+  u64 olo, ohi;
+  ft_span(&s->out, s->n, unr, &olo, &ohi);
+  long long dmin = 0, dmax = 0;
+  for (u32 i = 0; i < s->nin; i += 1) {
+    const FtView* v = &s->in[i];
+    if (v->ix) {
+      return false;
+    }
+    u64 lo, hi;
+    ft_span(v, s->n, 63, &lo, &hi);
+    if (hi < olo || ohi < lo) {
+      continue;
+    }
+    for (u32 k = 0; k < 6; k += 1) {
+      if (s->n[k] > 1 && v->st[k] != (s->red >> k & 1 ? 0 : s->out.st[k])) {
+        return false;
+      }
+    }
+    long long d = (long long)v->off - (long long)s->out.off;
+    long long q = (long long)s->out.st[ks];
+    if (d % q != 0) {
+      return false;
+    }
+    dmin = d / q < dmin ? d / q : dmin;
+    dmax = d / q > dmax ? d / q : dmax;
+  }
+  u64 st[6], sz[6];
+  u32 m = 0;
+  for (u32 k = 0; k < 6; k += 1) {
+    u64 n = s->n[k] + (k == ks ? (u64)(dmax - dmin) : 0);
+    if (unr >> k & 1 && n > 1) {
+      u32 j = m;
+      while (j > 0 && st[j - 1] > s->out.st[k]) {
+        st[j] = st[j - 1];
+        sz[j] = sz[j - 1];
+        j -= 1;
+      }
+      st[j] = s->out.st[k];
+      sz[j] = n;
+      m += 1;
+    }
+  }
+  u64 ext = 1;
+  for (u32 j = 0; j < m; j += 1) {
+    if (st[j] < ext) {
+      return false;
+    }
+    ext = st[j] * (sz[j] - 1) + ext;
+  }
+  return true;
+}
+
+static bool ft_einsum_seq_gpu(Env e, const FtSpec* s, u32 ks, u32 rev, Term x) {
+  if (!ft_seq_ok(s, ks)) {
+    return false;
+  }
+  if (FT_ARCH == 0) {
+    int cc[2] = { 0, 0 };
+    cuDeviceGetAttribute(cc, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR,
+      gpu_dev);
+    cuDeviceGetAttribute(cc + 1, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR,
+      gpu_dev);
+    FT_ARCH = cc[0] * 10 + cc[1];
+  }
+  FtKern* k    = ft_kern(s);
+  FtArgs  a;
+  u32     lanes = 63 & ~s->red & ~(1u << ks);
+  u64     nout = ft_count(s->n, lanes);
+  u64     nred = ft_count(s->n, s->red);
+  if (nout > 0xFFFFFFFFull || nred > 0xFFFFFFFFull) {
+    return false;
+  }
+  memset(&a, 0, sizeof a);
+  memcpy(a.n, s->n, sizeof a.n);
+  a.nout   = (u32)nout;
+  a.nred   = (u32)nred;
+  a.m      = (u32)((1ull << blk_cls(x)) - 1);
+  a.nsplit = 1;
+  a.ks     = ks;
+  a.rev    = rev != 0;
+  a.nseq   = s->n[ks];
+  a.o      = s->out;
+  memcpy(a.in, s->in, sizeof a.in);
+  CUdeviceptr S    = (CUdeviceptr)(uintptr_t)ft_cell(e.mem, x, 0);
+  void*       a1[] = { &S, &a };
+  CUresult    rc   = cuLaunchKernel(k->f[4], ft_grid(nout), 1, 1, 256, 1, 1, 0,
+    FT.st, a1, NULL);
+  if (rc != CUDA_SUCCESS || !ft_done()) {
+    fprintf(stderr, "bend: einsum.seq kernel failed (%d): %s\n", (int)rc,
+      s->extext);
+    err_fail("device fault");
+  }
+  return true;
+}
+
 #endif
 
 #if !DEVICE
@@ -1586,9 +1823,13 @@ typedef struct {
   f32*    cst;
   u32     nins, ncst, nslot, res, idx, refs, cost;
   bool    dead, ovl; // ovl: ft_overlaps
+  void*   gk;        // its GPU kernel (FtKern), once found
+  void*   gt;        // its GPU tuning (FtTune), once made
 } FtEnt;
 
-#define FT_NCACHE 4096
+// 2^16 slots (2026-11-18; was 2^12): run 9's step has ~800 distinct specs,
+// and two in one slot evict each other on every call, parsing again
+#define FT_NCACHE 65536
 #define FT_TILE   256
 
 static struct {
@@ -2269,7 +2510,7 @@ OUTLINE Term ft_einsum(Env e, Term spec, Term x) {
     pthread_mutex_lock(&FT.mu);
     fast = ft_open() && cuCtxSetCurrent(FT.ctx) == CUDA_SUCCESS;
     if (fast) {
-      ft_einsum_gpu(e, s, x);
+      ft_einsum_gpu(e, s, x, &en->gk, &en->gt);
     }
     pthread_mutex_unlock(&FT.mu);
   }
@@ -2383,6 +2624,109 @@ Term bk_einsum_run(Env e, Term* f, IoWork* w) {
 
 static void __attribute__((constructor)) bk_einsum_use(void) {
   io_eff(CID(bk.einsum), bk_einsum_run);
+}
+
+#endif
+
+// Queued (BulkIo.bend's bk.mm.q, bk.einsum.q, bk.sync): the same ops with
+// no wait at the end. The device runs one stream, in launch order, so a
+// queued op still sees every earlier op's writes; a call that runs on the
+// cores (a CPU build, or one the GPU declines) waits for the stream first
+// (FT_WAIT in ft_gemm and ft_einsum), so it too sees them. Only the host
+// must not touch the store until bk.sync, the one wait, has answered:
+// Dense/Run.bend's run hands its callers bk.sync's array alone. The
+// runtime runs a GPU only with concurrent managed access (gpu_probe), so
+// the host may go on using its other pages of the heap meanwhile.
+
+#ifdef CID(bk.mm.q)
+
+Term bk_mm_q_run(Env e, Term* f, IoWork* w) {
+  return ft_mm(e, f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8],
+    f[9], f[10], f[11], f[12], f[13], f[14], f[15], f[16], f[17]);
+}
+
+static void __attribute__((constructor)) bk_mm_q_use(void) {
+  io_eff(CID(bk.mm.q), bk_mm_q_run);
+}
+
+#endif
+
+#ifdef CID(bk.einsum.q)
+
+Term bk_einsum_q_run(Env e, Term* f, IoWork* w) {
+  return ft_einsum(e, f[0], f[1]);
+}
+
+static void __attribute__((constructor)) bk_einsum_q_use(void) {
+  io_eff(CID(bk.einsum.q), bk_einsum_q_run);
+}
+
+#endif
+
+// bk.einsum.seq.q(spec, ks, rev, x): the sequential einsum in one launch
+// when the GPU takes it (ft_seq_ok), answering 1; else 0, with nothing
+// done: Dense/Run.bend then runs the slices (its meaning) one by one, as
+// it does on every CPU build.
+#ifdef CID(bk.einsum.seq.q)
+
+OUTLINE u32 ft_einsum_seq(Env e, Term spec, u32 ks, u32 rev, Term x) {
+#if DEVICE
+  term_sink(e, spec);
+  return 0;
+#else
+  u64     n  = 0;
+  char*   t  = io_cbuf(e, spec, &n, CID(SCon));
+  FtEnt*  en = ft_spec_get(t, n);
+  free(t);
+  u32     ok = 0;
+#if BEND_CUDA
+  double t0 = ft_gpu && ft_prof() ? ft_now() : 0;
+  if (ft_gpu) {
+    pthread_mutex_lock(&FT.mu);
+    if (ft_open() && cuCtxSetCurrent(FT.ctx) == CUDA_SUCCESS) {
+      ok = ft_einsum_seq_gpu(e, en->s, ks, rev, x) ? 1 : 0;
+    }
+    pthread_mutex_unlock(&FT.mu);
+  }
+  if (ft_gpu && FT.prof > 0) {
+    double ms = ft_now() - t0;
+    FT.ecalls += 1;
+    FT.ems    += ms;
+    if (FT.prof > 1) {
+      fprintf(stderr, "bend profile: einsum %s %.3f ms %.60s\n",
+        ok ? "seq" : "seq-declined", ms, en->s->extext);
+    }
+  }
+#else
+  (void)ks;
+  (void)rev;
+  (void)x;
+#endif
+  ft_spec_put(en);
+  return ok;
+#endif
+}
+
+Term bk_einsum_seq_q_run(Env e, Term* f, IoWork* w) {
+  u32 ok = ft_einsum_seq(e, f[0], (u32)f[1], (u32)f[2], f[3]);
+  return io_tup(e, f[3], (Term)ok);
+}
+
+static void __attribute__((constructor)) bk_einsum_seq_q_use(void) {
+  io_eff(CID(bk.einsum.seq.q), bk_einsum_seq_q_run);
+}
+
+#endif
+
+#ifdef CID(bk.sync)
+
+Term bk_sync_run(Env e, Term* f, IoWork* w) {
+  FT_WAIT();
+  return f[0];
+}
+
+static void __attribute__((constructor)) bk_sync_use(void) {
+  io_eff(CID(bk.sync), bk_sync_run);
 }
 
 #endif

@@ -73,3 +73,52 @@ declarations are whole files (no `@` in their ids), and the limit cut Nix from 3
 
 The validation set stays R8's (run/v9/R8valid), so the losses compare with R8's runs; the held-out walks
 (run/v9/mix9/walk.valid.nul, 311) are for the several-hole eval, still to do.
+
+## 5. The trainer's speed (2026-11-18)
+
+The user, 11-18: "Work on speed without renting, fix the slowest parts in bend (it should all be bend). After fixing,
+you can rent for 30 minutes and confirm your fix really works. Be honest on what's the best speed you can optimize and
+try to reach it. Add bend laws where appropriate."
+
+Run 9's setting (fp100m, batch 16, micro-batch 4, ctx 2048, chunk 16, Muon, tf32), from fresh parameters on R9's
+first windows, steady state over 12-18 steps; rented RTX 5090s, every one capped at 400 W (29.7 min in all, $0.47;
+run/v9/speed, bend/gpu/speed.sh):
+
+| Trainer | ms a step | tok/s | |
+|---|---|---|---|
+| before (2e7c9dc) | 2,352 / 2,421 | 13,900 | two boxes; SM busy 68-70% |
+| + ops queued, one wait a program; state across chunks one Seq; chunk state and cross-chunk read as products | 1,135 | 28,800 | generic kernels |
+| + fixed-shape einsum kernels | 901 | 36,300 | |
+| + memset for fills; B (the running sum of log α) one Seq | 862 | 38,000 | TRAIN_CHUNK=32: 847 |
+| + GLA's products batched over every head (head-major) | 839 | 39,000 | TRAIN_CHUNK=32: 823 |
+| + kernel and tuning found once a spec | 858 | 38,200 | the box where before took 2,421: 2.82 times |
+
+Same binary, another 400 W box: 1,040 ms (`BEND_GEMM_NUMERICS=bf16` there: 1,025). Checks: tests/dense.bend on the
+GPU (every gradient against the tree trainer, the worst 4.4e-7 relative); the first 14 steps' losses before and after
+agree to 1e-6 relative and the gradient norms to 3e-5 (GPU rounding); on the CPU, tests/seq.bend (a Seq and its
+slices, forward and transposes, and the new GLA forward against the old, bit for bit; two mutants fail it),
+tests/dense.bend, tests/dualgrad.bend, decode, prefill and layout as before. Spec/Lanes.bend proves (BendTT
+`--verdict`) that running a Seq lane by lane, as the kernel does, leaves every lane where the slices in order do.
+
+What a step ran (bend-perf, per step): ops 33,543 → 9,747 (each a launch and, before, a wait); einsum terms 259 G →
+93 G; matrix products 33.9 TFLOP either way. Profiled with every op timed alone (step 3): products 507 ms (the big
+ones at about 90 TFLOP/s, near tf32's peak), einsums 358 ms, of which zeroing tangents 44, the softmax layers' t×t
+maps about 70, copies about 50; GPU busy only 51-80% of the time, so the host (Bend's loop issuing ~9,700 effects a
+step) now bounds the step as much as the GPU does.
+
+The dense-identity goldens (bend/tests/dense-identity.sha256, six steps on the CPU) no longer match byte for byte: the
+backward sums some terms in another order (the forward is bit for bit). The old trainer still gives them; the new one
+prints the same losses to the last digit shown.
+
+Honest ceiling at tf32 for this program: products ~0.45-0.5 s and einsums ~0.2 s at the memory's speed, so ~0.65-0.7 s
+a step once the host overhead is gone; bf16 matters only after that. What would get there, by size of the win:
+
+1. One CUDA graph a program (capture the forward and backward once, replay each micro-batch): the host's ~9,700
+   effects a step out of the loop. Likely the largest; bulk.c (C), the program list unchanged.
+2. Muon batched over same-shape matrices: the update is 2,926 of the 9,747 ops (Step.bend, Bend).
+3. Fused softmax attention for the 3 softmax layers (151 GB of t×t traffic a step), and fusing consecutive maps
+   (310 GB of n·d-sized passes): Bend program rewrites with laws, plus kernels.
+4. bf16 products, once 1-3 make the products the bottleneck again.
+
+Run 9 at this pace: 31,949 steps × ~0.86 s ≈ 7.6 h (about 9 h with validations), ~$5-6 at $0.59-0.67/h, against
+~28 h and ~$17-19 before. run/v9/run9go.sh's cost check uses PACE=1.0 s.

@@ -40,6 +40,42 @@ def bk.einsum(spec: String, x: Array<F32>) -> IO(Array<F32>):
 def einsum(+es: B.Es, x: Array<F32>) -> IO(Array<F32>):
   bk.einsum(B.Es.encode(es), x)
 
+# Queued (2026-11-18): bk.mm.q and bk.einsum.q are bk.mm and bk.einsum
+# without the wait. On a GPU build each one returns once its work is on
+# the device's one stream, so the ops after it queue behind it in order and
+# the GPU never idles between them; a CPU build (or an op the GPU declines,
+# which waits for the stream first) runs it on the spot, as before. Until
+# bk.sync answers, the device may still be writing the store, so nothing
+# may read or write its cells on the host: Dense/Run.bend's run queues a
+# whole program and answers bk.sync's array, the only one its callers see.
+# bk.sync is the identity on the array; it returns once the device is done.
+# Each one's meaning is its blocking twin's (B.mm, B.einsum.prim).
+def bk.mm.q(
+  ta: U32, tb: U32, m: U32, n: U32, k: U32, batch: U32, alpha: F32,
+  ao: U32, lda: U32, sa: U32, bo: U32, ldb: U32, sb: U32,
+  beta: F32, co: U32, ldc: U32, sc: U32, x: Array<F32>
+) -> IO(Array<F32>):
+  import "./effs/bulk.c"
+  import "./effs/bulk.js"
+
+def bk.einsum.q(spec: String, x: Array<F32>) -> IO(Array<F32>):
+  import "./effs/bulk.c"
+  import "./effs/bulk.js"
+
+def bk.sync(x: Array<F32>) -> IO(Array<F32>):
+  import "./effs/bulk.c"
+  import "./effs/bulk.js"
+
+# A sequential einsum (Dense/Op.bend's Seq), queued: the einsum's slices
+# along index ks one after the other (rev: the last first), each reading
+# the store the ones before it wrote. The GPU runs it as one kernel when
+# every slice reads only cells its own lane writes (bulk.c's ft_seq_ok)
+# and answers 1; otherwise it does nothing and answers 0, and the caller
+# runs the slices, the op's meaning, one by one (as every CPU build does).
+def bk.einsum.seq.q(spec: String, ks: U32, rev: U32, x: Array<F32>) -> IO(Array<F32> & U32):
+  import "./effs/bulk.c"
+  import "./effs/bulk.js"
+
 # Big-endian F32 file I/O. read_f32be(f, off, n, x, at) is bytes
 # [off, off+4n) of f read as n big-endian F32, set into x at at, at+1, ...
 # (Array.set's wrapping indices); f's position does not move.

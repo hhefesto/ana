@@ -125,25 +125,82 @@ def gla.gate(g: Bool, +m: L.Dm, +bp: L.BP, +w: L.Wg) -> List<&2, P.Op>:
 def gla.key(g: Bool, +w: L.Wg) -> U32:
   Bool.pick(U32, g, L.Wg.kh(w), L.Wg.kh0(w))
 
-# the state entering chunk jj of every window, from the one before
-def gla.scan(n: Nat, +m: L.Dm, +w: L.Wg, +jj: U32) -> List<&2, P.Op>:
-  match n:
-    case 0n:
-      Nil{}
-    case 1n+p:
-      +h = L.Dm.h(m)
-      +hd = L.Dm.hd(m)
-      +d = L.Dm.d(m)
-      +x2 = U32.mul(h, U32.mul(hd, hd))
-      +bx = U32.mul(L.Dm.b(m), x2)
-      +cc = L.Dm.cc(m)
-      +prev = U32.sub(jj, 1)
-      +last = U32.add(L.Wg.bc(w), U32.mul(U32.add(U32.mul(prev, cc), U32.sub(cc, 1)), d))
-      op(B.Es{[L.Dm.b(m), h, hd, hd], 0, 0, 0, v(U32.add(L.Wg.sin(w), U32.mul(jj, bx)), [x2, U32.mul(hd, hd), hd, 1]),
-        [v(last, [U32.mul(L.Dm.t(m), d), hd, 1, 0]),
-         v(U32.add(L.Wg.sin(w), U32.mul(prev, bx)), [x2, U32.mul(hd, hd), hd, 1]),
-         v(U32.add(L.Wg.u(w), U32.mul(prev, bx)), [x2, U32.mul(hd, hd), hd, 1])],
-        X.add(X.mul(X.exp(X.x(0)), X.x(1)), X.x(2))}) <> gla.scan(p, m, w, U32.inc(jj))
+# GLA's products batch over every head and chunk at once (2026-11-18): the
+# values v (a copy, vh), the scores A, the decayed key KE and query QE, the
+# chunk states u (each chunk's own) and sin (the state entering the chunk),
+# and the two halves of the output oi and oe all lie head-major, head h's
+# block of chunk g = b·J + jj at (h·NC + g)·(its size), so one strided
+# batched product covers the H·NC blocks (run 9's profile: 4,700 small
+# products a step as one per head, 101 ms). Before that day u and sin lay
+# chunk-major and the chunk state and the read across chunks were einsums
+# with exp inside the sum, 64 and 16 times per value (40 of a micro-batch's
+# 64 G terms), and the state across chunks one einsum a chunk.
+
+# the values, head-major: vh[h, r, :] = v[r, h, :]
+def gla.vh(+m: L.Dm, +w: L.Wg) -> P.Op:
+  +n = L.Dm.n(m)
+  +d = L.Dm.d(m)
+  +hd = L.Dm.hd(m)
+  op(B.Es{[n, L.Dm.h(m), hd], 0, 0, 0, v(L.Wg.vh(w), [hd, U32.mul(n, hd), 1]),
+    [v(U32.add(L.Wg.qkv(w), U32.mul(2, d)), [U32.mul(3, d), hd, 1])], X.x(0)})
+
+# within the chunk, oi[h, g·cc+τ, :] = Σ_σ A[h, g, τ, σ] vh[h, g·cc+σ, :]
+def gla.mixh(+m: L.Dm, +w: L.Wg) -> P.Op:
+  +cc = L.Dm.cc(m)
+  +hd = L.Dm.hd(m)
+  P.Mm{0, 0, cc, hd, cc, U32.mul(L.Dm.h(m), L.Dm.nc(m)), 1.0,
+    L.Wg.a(w), cc, U32.mul(cc, cc), L.Wg.vh(w), hd, U32.mul(cc, hd), 0.0,
+    L.Wg.oi(w), hd, U32.mul(cc, hd)}
+
+# each chunk's own state: u[h, g, :, :] = KE[h, chunk g]^T vh[h, chunk g]
+def gla.state(+m: L.Dm, +w: L.Wg) -> P.Op:
+  +cc = L.Dm.cc(m)
+  +hd = L.Dm.hd(m)
+  P.Mm{1, 0, hd, hd, cc, U32.mul(L.Dm.h(m), L.Dm.nc(m)), 1.0,
+    L.Wg.ke(w), hd, U32.mul(cc, hd), L.Wg.vh(w), hd, U32.mul(cc, hd), 0.0,
+    L.Wg.u(w), hd, U32.mul(hd, hd)}
+
+# the read across chunks: oe[h, chunk g] = QE[h, chunk g] sin[h, g]
+def gla.ext(+m: L.Dm, +w: L.Wg) -> P.Op:
+  +cc = L.Dm.cc(m)
+  +hd = L.Dm.hd(m)
+  P.Mm{0, 0, cc, hd, hd, U32.mul(L.Dm.h(m), L.Dm.nc(m)), 1.0,
+    L.Wg.qe(w), hd, U32.mul(cc, hd), L.Wg.sin(w), hd, U32.mul(hd, hd), 0.0,
+    L.Wg.oe(w), hd, U32.mul(cc, hd)}
+
+# the state entering chunk jj+1 of every window, from the one entering jj:
+# S_{jj+1} = exp(B_last of jj) ⊙ S_jj + u_jj, for jj from 0 to J-2, one
+# Seq along jj (it was J-1 einsums, one a chunk); the state is carried in
+# input 1, so the backward runs the adjoint recurrence the other way; a
+# window of one chunk has no state to carry, and no op (as before)
+def gla.scan.op(+m: L.Dm, +w: L.Wg) -> P.Op:
+  +h = L.Dm.h(m)
+  +hd = L.Dm.hd(m)
+  +d = L.Dm.d(m)
+  +cc = L.Dm.cc(m)
+  +hh2 = U32.mul(hd, hd)
+  +st = {[hh2, U32.mul(L.Dm.j(m), hh2), U32.mul(L.Dm.nc(m), hh2), hd, 1] : List<&2, U32>}
+  P.seq(B.Es{[U32.sub(L.Dm.j(m), 1), L.Dm.b(m), h, hd, hd], 0, 0, 0, v(U32.add(L.Wg.sin(w), hh2), st),
+    [v(U32.add(L.Wg.bc(w), U32.mul(U32.sub(cc, 1), d)), [U32.mul(cc, d), U32.mul(L.Dm.t(m), d), hd, 1, 0]),
+     v(L.Wg.sin(w), st),
+     v(L.Wg.u(w), st)],
+    X.add(X.mul(X.exp(X.x(0)), X.x(1)), X.x(2))}, 0, 0, 1, True{})
+
+def gla.scan(+m: L.Dm, +w: L.Wg) -> List<&2, P.Op>:
+  Bool.pick(List<&2, P.Op>, U32.is_lt(1, L.Dm.j(m)), [gla.scan.op(m, w)], Nil{})
+
+# B_τ = B_{τ-1} + la_τ for τ from 1 to cc-1 in every chunk, one Seq along τ
+# (it was an einsum over σ ≤ τ, cc terms a cell, the zeros past τ added:
+# the same sums in the same order, the -0.0 aside, which only exp reads);
+# B carried in input 0, so its transpose is the suffix sum of the tangents
+def gla.cum(+m: L.Dm, +w: L.Wg) -> List<&2, P.Op>:
+  +cc = L.Dm.cc(m)
+  +d = L.Dm.d(m)
+  +ccd = U32.mul(cc, d)
+  Bool.pick(List<&2, P.Op>, U32.is_lt(1, cc),
+    [P.seq(B.Es{[U32.sub(cc, 1), L.Dm.nc(m), d], 0, 0, 0, v(U32.add(L.Wg.bc(w), d), [d, ccd, 1]),
+      [v(L.Wg.bc(w), [d, ccd, 1]), v(U32.add(L.Wg.la(w), d), [d, ccd, 1])], X.add(X.x(0), X.x(1))}, 0, 0, 0, True{})],
+    Nil{})
 
 def gla(+m: L.Dm, +bp: L.BP, +x: U32, +xo: U32, +w: L.Wg) -> List<&2, P.Op>:
   +n = L.Dm.n(m)
@@ -151,14 +208,12 @@ def gla(+m: L.Dm, +bp: L.BP, +x: U32, +xo: U32, +w: L.Wg) -> List<&2, P.Op>:
   +h = L.Dm.h(m)
   +hd = L.Dm.hd(m)
   +cc = L.Dm.cc(m)
-  +t = L.Dm.t(m)
   +d3 = U32.mul(3, d)
   +nd = U32.mul(n, d)
   +ccd = U32.mul(cc, d)
-  +td = U32.mul(t, d)
+  +nhd = U32.mul(n, hd)
+  +chd = U32.mul(cc, hd)
   +hh2 = U32.mul(hd, hd)
-  +x2 = U32.mul(h, hh2)
-  +vv = U32.add(L.Wg.qkv(w), U32.mul(2, d))
   +kh = gla.key(L.Dm.rglru(m), w)
   List.concat(&2, P.Op, [
     norm(n, d, x, L.BP.ra(bp), L.Wg.ss(w), L.Wg.nrm(w)),
@@ -167,30 +222,36 @@ def gla(+m: L.Dm, +bp: L.BP, +x: U32, +xo: U32, +w: L.Wg) -> List<&2, P.Op>:
     l2(n, h, hd, L.Wg.qkv(w), d3, L.Wg.sq(w), L.Wg.qh(w)),
     l2(n, h, hd, U32.add(L.Wg.qkv(w), d), d3, L.Wg.sk(w), L.Wg.kh0(w)),
     gla.gate(L.Dm.rglru(m), m, bp, w),
-    # B: the running sum of log α within each chunk
-    [op(B.Es{[L.Dm.nc(m), cc, d, cc], 8, 0, 0, v(L.Wg.bc(w), [ccd, d, 1, 0]), [v(L.Wg.la(w), [ccd, 0, 1, d])],
-       X.sel(X.le(X.ix(3), X.ix(1)), X.x(0), X.k(0.0))}),
-     # A[g,h,τ,σ] = Σ_c q·k·exp(B_τ − B_σ), σ ≤ τ
-     op(B.Es{[L.Dm.nc(m), h, cc, cc, hd], 16, 0, 0, v(L.Wg.a(w), [U32.mul(h, U32.mul(cc, cc)), U32.mul(cc, cc), cc, 1, 0]),
+    # B: the running sum of log α within each chunk, B_0 = 0 + la_0, then
+    # one Seq along τ (gla.cum)
+    [op(B.Es{[L.Dm.nc(m), d], 0, 0, 0, v(L.Wg.bc(w), [ccd, 1]), [v(L.Wg.la(w), [ccd, 1])], X.add(X.k(0.0), X.x(0))})],
+    gla.cum(m, w),
+    # A[h,g,τ,σ] = Σ_c q·k·exp(B_τ − B_σ), σ ≤ τ (head-major)
+    [op(B.Es{[L.Dm.nc(m), h, cc, cc, hd], 16, 0, 0, v(L.Wg.a(w), [U32.mul(cc, cc), U32.mul(L.Dm.nc(m), U32.mul(cc, cc)), cc, 1, 0]),
        [v(L.Wg.qh(w), [ccd, hd, d, 0, 1]), v(kh, [ccd, hd, 0, d, 1]),
         v(L.Wg.bc(w), [ccd, hd, d, 0, 1]), v(L.Wg.bc(w), [ccd, hd, 0, d, 1])],
        X.sel(X.le(X.ix(3), X.ix(2)), X.mul(X.mul(X.x(0), X.x(1)), X.exp(X.sub(X.x(2), X.x(3)))), X.k(0.0))}),
-     # each chunk's own state: Σ_σ k_σ exp(B_last − B_σ) v_σ^T
-     op(B.Es{[L.Dm.b(m), L.Dm.j(m), h, hd, hd, cc], 32, 0, 0,
-       v(L.Wg.u(w), [x2, U32.mul(L.Dm.b(m), x2), hh2, hd, 1, 0]),
-       [v(kh, [td, ccd, hd, 1, 0, d]), v(U32.add(L.Wg.bc(w), U32.mul(U32.sub(cc, 1), d)), [td, ccd, hd, 1, 0, 0]),
-        v(L.Wg.bc(w), [td, ccd, hd, 1, 0, d]), v(vv, [U32.mul(t, d3), U32.mul(cc, d3), hd, 0, 1, d3])],
-       X.mul(X.mul(X.x(0), X.exp(X.sub(X.x(1), X.x(2)))), X.x(3))}),
-     P.zero(U32.mul(L.Dm.b(m), x2), L.Wg.sin(w))],
-    # within the chunk: Σ_σ A v_σ, a product per head batched over chunks
-    gla.mix(U32.to_nat(h), 0, m, w),
-    gla.scan(U32.to_nat(U32.sub(L.Dm.j(m), 1)), m, w, 1),
-    # across chunks: q_τ exp(B_τ) · S (the state entering the chunk)
-    [op(B.Es{[L.Dm.b(m), L.Dm.j(m), cc, h, hd, hd], 32, 0, 0, v(L.Wg.oe(w), [td, ccd, d, hd, 1, 0]),
-       [v(L.Wg.qh(w), [td, ccd, d, hd, 0, 1]), v(L.Wg.bc(w), [td, ccd, d, hd, 0, 1]),
-        v(L.Wg.sin(w), [x2, U32.mul(L.Dm.b(m), x2), 0, hh2, 1, hd])],
-       X.mul(X.mul(X.x(0), X.exp(X.x(1))), X.x(2))}),
-     add2(nd, L.Wg.o(w), L.Wg.oi(w), L.Wg.oe(w))],
+     # each chunk's own state is Σ_σ k_σ exp(B_last − B_σ) v_σ^T: the key
+     # decayed to the chunk's end, KE (each term's first two factors, in
+     # the order the einsum took them), head-major, then one product
+     op(B.Es{[L.Dm.nc(m), cc, h, hd], 0, 0, 0, v(L.Wg.ke(w), [chd, hd, nhd, 1]),
+       [v(kh, [ccd, d, hd, 1]), v(U32.add(L.Wg.bc(w), U32.mul(U32.sub(cc, 1), d)), [ccd, 0, hd, 1]), v(L.Wg.bc(w), [ccd, d, hd, 1])],
+       X.mul(X.x(0), X.exp(X.sub(X.x(1), X.x(2))))}),
+     # the read across chunks is q_τ exp(B_τ) · S: its query QE, head-major,
+     # then one product
+     op(B.Es{[n, h, hd], 0, 0, 0, v(L.Wg.qe(w), [hd, nhd, 1]), [v(L.Wg.qh(w), [d, hd, 1]), v(L.Wg.bc(w), [d, hd, 1])],
+       X.mul(X.x(0), X.exp(X.x(1)))}),
+     # the state entering each window's first chunk: 0
+     P.ein(B.Es{[h, L.Dm.b(m), hh2], 0, 0, 0, v(L.Wg.sin(w), [U32.mul(L.Dm.nc(m), hh2), U32.mul(L.Dm.j(m), hh2), 1]), Nil{}, X.k(0.0)}, False{}),
+     gla.vh(m, w),
+     # within the chunk: Σ_σ A v_σ
+     gla.mixh(m, w),
+     gla.state(m, w)],
+    gla.scan(m, w),
+    [gla.ext(m, w),
+     # the output, row-major again: o = oi + oe
+     op(B.Es{[n, h, hd], 0, 0, 0, v(L.Wg.o(w), [d, hd, 1]), [v(L.Wg.oi(w), [hd, nhd, 1]), v(L.Wg.oe(w), [hd, nhd, 1])],
+       X.add(X.x(0), X.x(1))})],
     tail(m, bp, x, xo, L.Wg.o(w), L.Wg.y1(w), L.Wg.xa(w), L.Wg.ss2(w), L.Wg.nrm2(w), L.Wg.gu(w), L.Wg.hh(w), L.Wg.y2(w))])
 
 # Softmax attention with qk-norm and sinks ------------------------------------

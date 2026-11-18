@@ -306,132 +306,152 @@ def u(n: Nat) -> U32:
   U32.from_nat(n)
 
 type Wg is Data:
-  Wg{ss: U32, nrm: U32, qkv: U32, z: U32, sq: U32, qh: U32, sk: U32, kh0: U32, la: U32, kh: U32, bc: U32, a: U32, oi: U32, u: U32, sin: U32, oe: U32, o: U32, y1: U32, xa: U32, ss2: U32, nrm2: U32, gu: U32, hh: U32, y2: U32, end: U32}
+  Wg{ss: U32, nrm: U32, qkv: U32, z: U32, sq: U32, qh: U32, sk: U32, kh0: U32, la: U32, kh: U32, bc: U32, a: U32, oi: U32, u: U32, sin: U32, oe: U32, o: U32, y1: U32, xa: U32, ss2: U32, nrm2: U32, gu: U32, hh: U32, y2: U32, ke: U32, qe: U32, vh: U32, end: U32}
 
 def Wg.ss(+r: Wg) -> U32:
   match r:
-    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24}:
+    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27}:
       f0
 
 def Wg.nrm(+r: Wg) -> U32:
   match r:
-    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24}:
+    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27}:
       f1
 
 def Wg.qkv(+r: Wg) -> U32:
   match r:
-    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24}:
+    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27}:
       f2
 
 def Wg.z(+r: Wg) -> U32:
   match r:
-    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24}:
+    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27}:
       f3
 
 def Wg.sq(+r: Wg) -> U32:
   match r:
-    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24}:
+    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27}:
       f4
 
 def Wg.qh(+r: Wg) -> U32:
   match r:
-    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24}:
+    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27}:
       f5
 
 def Wg.sk(+r: Wg) -> U32:
   match r:
-    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24}:
+    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27}:
       f6
 
 def Wg.kh0(+r: Wg) -> U32:
   match r:
-    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24}:
+    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27}:
       f7
 
 def Wg.la(+r: Wg) -> U32:
   match r:
-    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24}:
+    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27}:
       f8
 
 def Wg.kh(+r: Wg) -> U32:
   match r:
-    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24}:
+    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27}:
       f9
 
 def Wg.bc(+r: Wg) -> U32:
   match r:
-    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24}:
+    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27}:
       f10
 
 def Wg.a(+r: Wg) -> U32:
   match r:
-    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24}:
+    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27}:
       f11
 
 def Wg.oi(+r: Wg) -> U32:
   match r:
-    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24}:
+    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27}:
       f12
 
 def Wg.u(+r: Wg) -> U32:
   match r:
-    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24}:
+    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27}:
       f13
 
 def Wg.sin(+r: Wg) -> U32:
   match r:
-    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24}:
+    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27}:
       f14
 
 def Wg.oe(+r: Wg) -> U32:
   match r:
-    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24}:
+    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27}:
       f15
 
 def Wg.o(+r: Wg) -> U32:
   match r:
-    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24}:
+    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27}:
       f16
 
 def Wg.y1(+r: Wg) -> U32:
   match r:
-    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24}:
+    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27}:
       f17
 
 def Wg.xa(+r: Wg) -> U32:
   match r:
-    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24}:
+    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27}:
       f18
 
 def Wg.ss2(+r: Wg) -> U32:
   match r:
-    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24}:
+    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27}:
       f19
 
 def Wg.nrm2(+r: Wg) -> U32:
   match r:
-    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24}:
+    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27}:
       f20
 
 def Wg.gu(+r: Wg) -> U32:
   match r:
-    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24}:
+    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27}:
       f21
 
 def Wg.hh(+r: Wg) -> U32:
   match r:
-    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24}:
+    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27}:
       f22
 
 def Wg.y2(+r: Wg) -> U32:
   match r:
-    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24}:
+    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27}:
       f23
 
 def Wg.end(+r: Wg) -> U32:
   match r:
-    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24}:
+    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27}:
+      f27
+
+# GLA's factored products (2026-11-18): k̂ decayed to its chunk's end, the
+# key of the chunk state's product (Model.bend gla.state), and q · exp(B),
+# the query of the read across chunks (gla.ext)
+def Wg.ke(+r: Wg) -> U32:
+  match r:
+    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27}:
       f24
+
+def Wg.qe(+r: Wg) -> U32:
+  match r:
+    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27}:
+      f25
+
+# v, head-major (2026-11-18): head h's values of row r at h·n·hd + r·hd, so
+# GLA's products batch over every head and chunk at once (Model.bend)
+def Wg.vh(+r: Wg) -> U32:
+  match r:
+    case Wg{f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27}:
+      f26
 
 type Ws is Data:
   Ws{ss: U32, nrm: U32, qkv: U32, sq: U32, qa: U32, sk: U32, ka: U32, s: U32, m1: U32, m: U32, e: U32, se: U32, den: U32, mix: U32, att: U32, y1: U32, xa: U32, ss2: U32, nrm2: U32, gu: U32, hh: U32, y2: U32, end: U32}
@@ -697,7 +717,10 @@ def Wg.at(+m: Dm, +o: U32) -> Wg:
   +gu = U32.add(nrm2, nd)
   +hh = U32.add(gu, U32.mul(2, U32.mul(n, Dm.f(m))))
   +y2 = U32.add(hh, U32.mul(n, Dm.f(m)))
-  Wg{ss, nrm, qkv, z, sq, qh, sk, kh0, la, kh, bc, a, oi, uu, sin, oe, oo, y1, xa, ss2, nrm2, gu, hh, y2, U32.add(y2, nd)}
+  +ke = U32.add(y2, nd)
+  +qe = U32.add(ke, nd)
+  +vh = U32.add(qe, nd)
+  Wg{ss, nrm, qkv, z, sq, qh, sk, kh0, la, kh, bc, a, oi, uu, sin, oe, oo, y1, xa, ss2, nrm2, gu, hh, y2, ke, qe, vh, U32.add(vh, nd)}
 
 def Ws.at(+m: Dm, +o: U32) -> Ws:
   +n = Dm.n(m)
@@ -851,7 +874,7 @@ def Lay.floats(+c: C.Config, +mb: Nat, +cc0: Nat) -> Nat:
   +bhtt = Nat.mul(bht, t)
   +r = rows.fit.n(32n, n, v, rows.big.n(n, v))
   +params = Nat.add(Nat.add(Nat.mul(v, d), blocks.n(l, c, 0n)), d)
-  +gla = Nat.add(Nat.add(Nat.mul(17n, nd), Nat.mul(2n, n)), Nat.add(Nat.add(Nat.mul(2n, nh), Nat.mul(nh, cc)), Nat.add(Nat.mul(2n, st), Nat.mul(3n, nf))))
+  +gla = Nat.add(Nat.add(Nat.mul(20n, nd), Nat.mul(2n, n)), Nat.add(Nat.add(Nat.mul(2n, nh), Nat.mul(nh, cc)), Nat.add(Nat.mul(2n, st), Nat.mul(3n, nf))))
   +sm = Nat.add(Nat.add(Nat.mul(12n, nd), Nat.mul(2n, n)), Nat.add(Nat.add(Nat.mul(2n, nh), Nat.mul(2n, bhtt)), Nat.add(Nat.mul(4n, bht), Nat.mul(3n, nf))))
   +x0 = align.n(Nat.add(align.n(params), Nat.mul(3n, n)))
   +ws = Nat.add(x0, Nat.mul(Nat.add(l, 1n), nd))
