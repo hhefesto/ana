@@ -78,7 +78,7 @@
 
 <h1>ana</h1>
 <!-- Update this date (both the datetime attribute and the text) whenever the page's content changes. -->
-<p class="updated">Last edited: <time datetime="2026-11-17">17 November 2026</time></p>
+<p class="updated">Last edited: <time datetime="2026-11-18">18 November 2026</time></p>
 <p class="tag">A language model with a proven meaning, and one language from the proofs to the GPU:
 <a href="https://github.com/bendlang/bend">Bend</a>.</p>
 <p class="lead">ana's specification is a set of theorems that Bend's compiler checks. The model, the GPU trainer and
@@ -346,22 +346,34 @@ multiplies their weights, and that proof <i>is</i> the factorization law of <cod
 rule of probability, read as composition in a category. The theorems are stated for every state algebra, so for
 every autoregressive model of this kind, ana's included. Bend checks them, and runs them on small concrete
 machines.</p>
-<p class="note">What it isn't yet: the laws haven't been applied to a trained checkpoint, the object type with
-its finished flag is declared but not used, and Bend's stricter <code>--verdict</code> kernel can't model these
-template theorems yet (its ordinary checker passes them).</p>
-<h3>What's next from Bradley</h3>
+<h3>What came next from Bradley (done 2026-11-17, ana <code>ae6d51a</code>)</h3>
 <ul>
-  <li>Run the hom on the real decoder: on a checkpoint, check that identities weigh one and that weights compose
-    along prefix chains, within floating-point tolerance.</li>
-  <li>Prove that the probabilities of everything a prefix can become sum to one (the magnitude paper's Prop. 2.9),
-    using the finished flag that is already declared.</li>
-  <li>Take <code>&minus;ln</code> of the homs and the category becomes a metric whose distance from the empty text to
-    a window is exactly the window's total training loss. Prove that link in the trainer's spec.</li>
-  <li>Magnitude as an eval: a sum of Tsallis entropies of the next-token distributions, estimated on a fixed set
-    of prompts.</li>
-  <li>Meaning through Yoneda: prove that two prefixes with the same trie of continuations have the same homs to
-    every extension, which links <code>AutoregressiveTrie.bend</code> to <code>Bradley.bend</code>.</li>
+  <li><b>The training loss as a distance</b> (<code>bend/Spec/Distance.bend</code>). Take <code>&minus;ln</code> of
+    the homs and the category becomes a metric. Proven for every model of this kind: a window's training loss is the
+    distance from the window's <i>first token</i> to the whole window (not from the empty text, since the first token
+    is given, not predicted). With the trainer's 0/1 token weights (<code>Mask.bend</code>), the loss is a sum of
+    distances, one for each run of kept tokens. It is a single distance only when all the weight-0 tokens come
+    first, as a prompt's do.</li>
+  <li><b>The hom on a real checkpoint</b> (<code>tests/bradley.bend</code>, a flake check and the
+    <code>bend-bradley</code> program). It compares the trainer and ana's decoder token by token, in log space. On
+    random weights all 44 checks pass. On the r5g step-106,500 checkpoint (two 512-token windows of R8's
+    validation set) all 22 pass: the largest difference for one token is 3.6&times;10<sup>&minus;5</sup>, and the
+    windows' totals agree to 7.3&times;10<sup>&minus;7</sup>, relative. It catches planted bugs: a wrong target
+    index fails 16 of the 44 checks, a shifted mask 4.</li>
+  <li><b>Everything a prefix can become sums to one</b> (<code>bend/Spec/Terminating.bend</code>, the magnitude
+    paper's Prop. 2.9). For a model whose stop weight and next-token weights add up to one, the texts a prefix can
+    become within any length limit (those that finished, and those cut off at the limit) have total probability
+    one. Its endings carry the same finished flag that <code>Bradley.bend</code>'s prefix objects declare.</li>
+  <li><b>Prefixes with the same continuations</b> (<code>bend/Spec/Residual.bend</code>). Planned as "meaning through
+    Yoneda", what is proven is a Myhill&ndash;Nerode result, and it is named for what it proves: the weight from a
+    prefix to an extension is the total probability of the endings that pass through that extension, so two prefixes
+    whose continuations have the same probabilities have the same weight to every extension. It links
+    <code>AutoregressiveTrie.bend</code> to <code>Bradley.bend</code>.</li>
 </ul>
+<p>Not taken up: magnitude as an eval (a sum of Tsallis entropies of the next-token distributions).</p>
+<p class="note">What it isn't yet: Bend's ordinary checker passes all of these proofs, but its stricter
+<code>--verdict</code> kernel can't validate them yet, as with the rest of the spec. The facts about 32-bit floats
+they rely on are written down as assumptions in <code>bend/Spec/Trusted.bend</code>, not proven.</p>
 
 <h2 id="model">The model: GPT-2 small's shape</h2>
 <div class="two">
