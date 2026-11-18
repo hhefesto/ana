@@ -50,3 +50,26 @@ walk9's first run (12 workers) was killed for memory at 13:00 after 24 of 222 pa
 - agent-mugen-eval: a walk task (several holes, solved when every one is filled and the check passes), so point 2
   is measured, not only trained.
 - Not corpus: the eval loop's repeat avoidance (retry_avoid) on the 28 repeats.
+
+## 4. R9 merged into R8 (2026-11-18)
+
+The user, 11-18: "I want any benefit R9 would have brought to be merged into R8. So when we decide to actually stop
+training it should be with the best possibility of a good result for ana's bend generation."  One corpus, R8's with
+R9's changes, built by `run/v9/run9.sh` (unit ana-r9mix, log run/v9/run9.log) into run/v9/R9; R8 (run/v9/R8) stays as
+it was.
+
+| # | Change | Where | State |
+|---|---|---|---|
+| 1 | At most one repair-kind session a declaration, Bend only | bend/R8.bend `R8_REPAIR` (r8.repair, r8.decide9; unset: R8's pass byte for byte), tests/r8.bend (31 ok) | run9.sh step 1 |
+| 2 | walk9's walks as a stream of their own, `walk` | run9.sh step 2: valid split by file (39,220 in, 38,909 train, 311 held out), private out (1), ids twice out (7), hash order: 38,901 | done |
+| 2b | Only walks the trainer reads as the bytes say | bend-agent-laws on all 38,901 (4 shards): 10 fail `agree` (a token's role differs from one of its bytes'), left out | run9.sh step 2b |
+| 3 | The v2 reader (a write is a try only when a later write names the same definition) | Agent/Spec.bend, Mask.bend (df4cde0): the trainer's, so no corpus change | in master |
+| 4 | Repeat avoidance for form 2's writes: a `## def`/`## add` write is a term, and a look between two writes no longer clears the failed term to avoid | Agent/Loop.bend (al.write.at, al.k.step, al.k.term), tests/agentmugen.bend `avoid` (two mutants fail it) | the 176 tasks with RETRY_AVOID=1 on r5g-step106500: run/v9/ev/r5g-step106500.f2.avoid |
+
+Repair-kind: a tag ending in `repair`, or a chain's or a repeat's (mugen-chain*, mugen-fix-repeat*); a fix's miss
+(-miss-direct, -miss-fill) is not (its one try is an edit mugen refused).  Bend only: the other four languages'
+declarations are whole files (no `@` in their ids), and the limit cut Nix from 32,376 sessions to 12,435 and Lean by
+8,382 on the first try; their sessions stay R8's.
+
+The validation set stays R8's (run/v9/R8valid), so the losses compare with R8's runs; the held-out walks
+(run/v9/mix9/walk.valid.nul, 311) are for the several-hole eval, still to do.

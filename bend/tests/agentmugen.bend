@@ -192,6 +192,27 @@ def fixes() -> String:
   +ok = Bool.and(Bool.and(Bool.and(fence, plain), Bool.and(d, f)), Bool.and(r, Bool.and(loop, distinct)))
   Bool.pick(String, ok, "ok fixes", "MISMATCH fixes")
 
+# RETRY_AVOID on form 2's writes (R9, 2026-11-18): the newline that ends a
+# `## def` or `## add` heading line (after an empty line) starts the term, a
+# `## look`'s does not; a stretch with no term passes on the failed term it was
+# to avoid, and one with a term ends it in order, the call's token last
+def line(+s: String) -> List<&2, U32>:
+  List.reverse(&2, U32, U.b(s))
+
+def avoid() -> String:
+  +k0 = {Lp.AlK{Nil{}, False{}, False{}, Nil{}, [1, 2], Nil{}} : Lp.AlK}
+  +d = Lp.al.k.on(Lp.al.k.step(k0, Lp.AlLine{line("## def"), True{}}, [10], 5))
+  +a = Lp.al.k.on(Lp.al.k.step(k0, Lp.AlLine{line("## add"), True{}}, [10], 5))
+  +lk = Bool.not(Lp.al.k.on(Lp.al.k.step(k0, Lp.AlLine{line("## look"), True{}}, [10], 5)))
+  +mid = Bool.not(Lp.al.k.on(Lp.al.k.step(k0, Lp.AlLine{line("## def"), True{}}, [100, 101], 5)))
+  +np = Bool.not(Lp.al.k.on(Lp.al.k.step(k0, Lp.AlLine{line("## def"), False{}}, [10], 5)))
+  +carry = U.eq(Lp.al.k.term(k0, 9), [1, 2])
+  +term = U.eq(Lp.al.k.term(Lp.AlK{Nil{}, False{}, True{}, [3, 2], [1, 2], Nil{}}, 4), [2, 3, 4])
+  +k1 = Lp.al.k.step(Lp.al.k.step(k0, Lp.AlLine{line("## def"), True{}}, [10], 5), Lp.AlLine{Nil{}, False{}}, [10], 6)
+  +after = U.eq(Lp.al.k.term(k1, 7), [6, 7])
+  +ok = Bool.and(Bool.and(Bool.and(d, a), Bool.and(lk, mid)), Bool.and(Bool.and(np, carry), Bool.and(term, after)))
+  Bool.pick(String, ok, "ok avoid", "MISMATCH avoid")
+
 # The stricter score's pure parts: a def's head read; a type's inputs; the
 # unit's own calls renamed (not another name's, not a field's); the tests
 # appended for two()'s `twice`; no proof there
@@ -215,6 +236,7 @@ def score() -> String:
 def main() -> IO(Unit):
   do IO<Unit>:
     IO.print(fixes())
+    IO.print(avoid())
     IO.print(score())
     IO.print(ask())
     IO.print(clip())

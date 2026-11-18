@@ -26,7 +26,25 @@ def rk.checks() -> List<&2, RkCk>:
    RkCk{"second-same-kind-out", Nat.is_eq(R.r8.decide(3n, True{}, False{}, 1n, 1n), 2n)},
    RkCk{"third-same-kind-capped", Nat.is_eq(R.r8.decide(3n, True{}, False{}, 2n, 2n), 1n)},
    RkCk{"third-new-kind-out", Nat.is_eq(R.r8.decide(3n, True{}, False{}, 2n, 0n), 2n)},
-   RkCk{"fourth-capped", Nat.is_eq(R.r8.decide(3n, True{}, False{}, 3n, 0n), 1n)}]
+   RkCk{"fourth-capped", Nat.is_eq(R.r8.decide(3n, True{}, False{}, 3n, 0n), 1n)},
+   # R9's repair-kind limit (R8_REPAIR, 2026-11-18)
+   RkCk{"repair-mugen", R.r8.repair(S.b("own:x/y.bend#f@3/mugen-repair-2"))},
+   RkCk{"repair-miss", R.r8.repair(S.b("own:x/y.bend#f@3/mugen-fix-miss-repair-0"))},
+   RkCk{"repair-chain", R.r8.repair(S.b("repo:a__b/c.bend#g@9/mugen-chain-1"))},
+   RkCk{"repair-chain-fill", R.r8.repair(S.b("repo:a__b/c.bend#g@9/mugen-chain-fill-1"))},
+   RkCk{"repair-repeat-fill", R.r8.repair(S.b("repo:a__b/c.bend#g@9/mugen-fix-repeat-fill-3"))},
+   RkCk{"repair-plain", R.r8.repair(S.b("port:lib/Data/List.bend/repair"))},
+   RkCk{"not-repair-miss-direct", Bool.not(R.r8.repair(S.b("own:x/y.bend#f@3/mugen-fix-miss-direct")))},
+   RkCk{"not-repair-miss-fill", Bool.not(R.r8.repair(S.b("own:x/y.bend#f@3/mugen-fix-miss-fill-1")))},
+   RkCk{"not-repair-fill", Bool.not(R.r8.repair(S.b("own:x/y.bend#f@3/mugen-fill-0")))},
+   RkCk{"not-repair-direct", Bool.not(R.r8.repair(S.b("own:x/y.bend#f@3/mugen-direct-helper-2-miss")))},
+   RkCk{"not-repair-walk", Bool.not(R.r8.repair(S.b("repo:a__b/c.bend#g@9/mugen-walk-fill-3-1")))},
+   RkCk{"first-repair-out", Nat.is_eq(R.r8.decide9(3n, True{}, False{}, 0n, 0n, 1n, True{}, 0n), 2n)},
+   RkCk{"second-repair-dropped", Nat.is_eq(R.r8.decide9(3n, True{}, False{}, 1n, 0n, 1n, True{}, 1n), 3n)},
+   RkCk{"other-after-repair-out", Nat.is_eq(R.r8.decide9(3n, True{}, False{}, 1n, 0n, 1n, False{}, 1n), 2n)},
+   RkCk{"capped-stays-cap", Nat.is_eq(R.r8.decide9(3n, True{}, False{}, 3n, 0n, 1n, True{}, 1n), 1n)},
+   RkCk{"giveup-stays-giveup", Nat.is_eq(R.r8.decide9(3n, True{}, True{}, 0n, 0n, 1n, True{}, 1n), 0n)},
+   RkCk{"no-limit-as-r8", Nat.is_eq(R.r8.decide9(3n, True{}, False{}, 1n, 0n, 1000n, True{}, 1n), R.r8.decide(3n, True{}, False{}, 1n, 0n))}]
 
 def rk.end(ok: Bool, +bad: Nat, +names: String) -> IO(Unit):
   match ok:

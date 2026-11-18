@@ -133,6 +133,20 @@ def al.fence.turn(+f: Bool, +l: AlLine) -> Bool:
     case AlLine{+line, pe}:
       Bool.pick(Bool, al.ticks(3n, List.reverse(&2, U32, line)), Bool.not(f), f)
 
+# Form 2's writes (R9, 2026-11-18; docs/r9/PLAN.md: "the eval loop's repeat
+# avoidance on the 28 repeats").  A form-2 session opens no fence: her term is
+# a write, from the line after its `## def` or `## add` heading to the call
+# line.  Before this nothing started a term in form 2, so RETRY_AVOID did
+# nothing there, and on the 176 tasks (r5g-step106500) 28 of the 49 unsolved
+# direct tasks wrote the same failing definition again after its error.
+# whether line l (newest byte first) is a form-2 write's heading, after an
+# empty line as every heading is
+def al.write.at(+l: AlLine) -> Bool:
+  match l:
+    case AlLine{+line, +pe}:
+      +x = List.reverse(&2, U32, line)
+      Bool.and(pe, Bool.or(A.ag.eq(x, Tk.utf8.bytes("## def")), A.ag.eq(x, Tk.utf8.bytes("## add"))))
+
 # the fence state after text (bytes), from line l and state f
 def al.fence.of(xs: List<&2, U32>, +l: AlLine, +f: Bool) -> Bool:
   match xs:
@@ -165,21 +179,25 @@ def al.k.forcing(+k: AlK, +xs: List<&2, U32>) -> AlK:
     case AlK{fed, fence, on, tt, av, force}:
       AlK{fed, fence, on, tt, av, xs}
 
-# the term a call line ends, in order: the term's tokens, then the call's
-# (none when no term started)
+# the term a call line ends, in order: the term's tokens, then the call's;
+# when no term started, the failed term this stretch was to avoid, still to
+# be avoided (a look between two writes no longer clears it; empty: none)
 def al.k.term(+k: AlK, +t: U32) -> List<&2, U32>:
   match k:
-    case AlK{fed, fence, +on, +tt, av, force}:
-      Bool.pick(List<&2, U32>, on, List.reverse(&2, U32, t <> tt), Nil{})
+    case AlK{fed, fence, +on, +tt, +av, force}:
+      Bool.pick(List<&2, U32>, on, List.reverse(&2, U32, t <> tt), av)
 
 # the bookkeeping after ana's token t (its bytes tb) on line l: t fed, the
 # fence turned when t ends a fence's line, the term started when that opens
-# one, t one of the term's tokens when the term had started
+# one or when t ends a form-2 write's heading line, t one of the term's
+# tokens when the term had started
 def al.k.step(+k: AlK, +l: AlLine, +tb: List<&2, U32>, +t: U32) -> AlK:
   match k:
     case AlK{+fed, +fence, +on, +tt, +av, +force}:
-      +f2 = Bool.pick(Bool, al.starts.nl(tb), al.fence.turn(fence, l), fence)
-      AlK{t <> fed, f2, Bool.or(on, Bool.and(f2, Bool.not(fence))), Bool.pick(List<&2, U32>, on, t <> tt, tt), av, force}
+      +nl = al.starts.nl(tb)
+      +f2 = Bool.pick(Bool, nl, al.fence.turn(fence, l), fence)
+      +w = Bool.and(nl, al.write.at(l))
+      AlK{t <> fed, f2, Bool.or(on, Bool.or(Bool.and(f2, Bool.not(fence)), w)), Bool.pick(List<&2, U32>, on, t <> tt, tt), av, force}
 
 # The model and its settings, fixed for an episode: dims, the tokenizer,
 # the sampling settings, the vocabulary, the byte headings, the newline
